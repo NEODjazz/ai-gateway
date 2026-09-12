@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.300
+  version: 0.1.301
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -9307,7 +9307,7 @@ components:
     ProviderCapabilityProfile:
       type: object
       additionalProperties: false
-      required: [type, operations, capabilities, auth_types, chat_parameters]
+      required: [type, operations, capabilities, auth_types, chat_parameters, response_parameters]
       properties:
         type: {type: string, enum: [demo, ollama, openai, openai-compatible, openrouter, azure-openai, anthropic, gemini, cohere, mistral, voyage, bedrock, groq, deepseek, xai, opensandbox]}
         operations:
@@ -9327,6 +9327,8 @@ components:
           items: {type: string, enum: [api_key, gcp_adc, entra, bearer, aws_sigv4]}
         chat_parameters:
           $ref: '#/components/schemas/ProviderChatParameterPolicy'
+        response_parameters:
+          $ref: '#/components/schemas/ProviderResponseParameterPolicy'
     ProviderChatParameterPolicy:
       type: object
       additionalProperties: false
@@ -9345,6 +9347,24 @@ components:
           type: array
           uniqueItems: true
           items: {type: string, enum: ['false', 'true']}
+        service_tier:
+          type: array
+          uniqueItems: true
+          items: {type: string, enum: [auto, default, on_demand, flex, performance, scale, priority, fast, ultrafast, standard_only]}
+    ProviderResponseParameterPolicy:
+      type: object
+      additionalProperties: false
+      required: [supported_options, reasoning_effort, service_tier]
+      description: Responses options accepted by the runtime adapter validator. Missing option names and empty value arrays mean the parameter is rejected. Availability can still depend on the upstream model.
+      properties:
+        supported_options:
+          type: array
+          uniqueItems: true
+          items: {type: string, enum: [metadata, top_logprobs, truncation, store, include, parallel_tool_calls, text.verbosity, previous_response_id, user, safety_identifier, prompt_cache_key, max_output_tokens, max_tokens, temperature, top_p, frequency_penalty, presence_penalty, max_tool_calls, reasoning, service_tier]}
+        reasoning_effort:
+          type: array
+          uniqueItems: true
+          items: {type: string, enum: [none, minimal, low, medium, high, xhigh, max, default]}
         service_tier:
           type: array
           uniqueItems: true

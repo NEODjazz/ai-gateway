@@ -27,17 +27,24 @@ type ManagedProvider struct {
 }
 
 type ProviderCapabilityProfile struct {
-	Type           string                      `json:"type"`
-	Operations     []string                    `json:"operations"`
-	Capabilities   []string                    `json:"capabilities"`
-	AuthTypes      []string                    `json:"auth_types"`
-	ChatParameters ProviderChatParameterPolicy `json:"chat_parameters"`
+	Type               string                          `json:"type"`
+	Operations         []string                        `json:"operations"`
+	Capabilities       []string                        `json:"capabilities"`
+	AuthTypes          []string                        `json:"auth_types"`
+	ChatParameters     ProviderChatParameterPolicy     `json:"chat_parameters"`
+	ResponseParameters ProviderResponseParameterPolicy `json:"response_parameters"`
 }
 
 type ProviderChatParameterPolicy struct {
 	SupportedOptions []string `json:"supported_options"`
 	ReasoningEffort  []string `json:"reasoning_effort"`
 	Logprobs         []string `json:"logprobs"`
+	ServiceTier      []string `json:"service_tier"`
+}
+
+type ProviderResponseParameterPolicy struct {
+	SupportedOptions []string `json:"supported_options"`
+	ReasoningEffort  []string `json:"reasoning_effort"`
 	ServiceTier      []string `json:"service_tier"`
 }
 
@@ -287,14 +294,79 @@ func ManagedProviderCapabilityProfiles() []ProviderCapabilityProfile {
 			}
 		}
 		profiles = append(profiles, ProviderCapabilityProfile{
-			Type:           providerType,
-			Operations:     operations,
-			Capabilities:   capabilities,
-			AuthTypes:      managedProviderAuthTypes(providerType),
-			ChatParameters: managedProviderChatParameterPolicy(client, slicesContain(operations, "chat")),
+			Type:               providerType,
+			Operations:         operations,
+			Capabilities:       capabilities,
+			AuthTypes:          managedProviderAuthTypes(providerType),
+			ChatParameters:     managedProviderChatParameterPolicy(client, slicesContain(operations, "chat")),
+			ResponseParameters: managedProviderResponseParameterPolicy(client, slicesContain(operations, "responses")),
 		})
 	}
 	return profiles
+}
+
+func managedProviderResponseParameterPolicy(client Client, supportsResponses bool) ProviderResponseParameterPolicy {
+	policy := ProviderResponseParameterPolicy{SupportedOptions: []string{}, ReasoningEffort: []string{}, ServiceTier: []string{}}
+	if !supportsResponses {
+		return policy
+	}
+	baseline := openai.ResponseRequest{Model: "model", Input: "test"}
+	for _, value := range []string{"none", "minimal", "low", "medium", "high", "xhigh", "max", "default"} {
+		request, effort := baseline, value
+		request.Reasoning = &openai.ResponseReasoning{Effort: &effort}
+		if validateResponseAdapter(client, request) == nil {
+			policy.ReasoningEffort = append(policy.ReasoningEffort, value)
+		}
+	}
+	for _, value := range []string{"auto", "default", "on_demand", "flex", "performance", "scale", "priority", "fast", "ultrafast", "standard_only"} {
+		request := baseline
+		request.ServiceTier = value
+		if validateResponseAdapter(client, request) == nil {
+			policy.ServiceTier = append(policy.ServiceTier, value)
+		}
+	}
+	for _, probe := range managedResponseOptionProbes() {
+		request := baseline
+		probe.apply(&request)
+		if validateResponseAdapter(client, request) == nil {
+			policy.SupportedOptions = append(policy.SupportedOptions, probe.name)
+		}
+	}
+	if len(policy.ReasoningEffort) > 0 {
+		policy.SupportedOptions = append(policy.SupportedOptions, "reasoning")
+	}
+	if len(policy.ServiceTier) > 0 {
+		policy.SupportedOptions = append(policy.SupportedOptions, "service_tier")
+	}
+	return policy
+}
+
+type managedResponseOptionProbe struct {
+	name  string
+	apply func(*openai.ResponseRequest)
+}
+
+func managedResponseOptionProbes() []managedResponseOptionProbe {
+	return []managedResponseOptionProbe{
+		{name: "metadata", apply: func(request *openai.ResponseRequest) { request.Metadata = map[string]string{"trace": "profile-probe"} }},
+		{name: "top_logprobs", apply: func(request *openai.ResponseRequest) { value := 1; request.TopLogprobs = &value }},
+		{name: "truncation", apply: func(request *openai.ResponseRequest) { value := "auto"; request.Truncation = &value }},
+		{name: "store", apply: func(request *openai.ResponseRequest) { value := true; request.Store = &value }},
+		{name: "include", apply: func(request *openai.ResponseRequest) { request.Include = []string{"reasoning.encrypted_content"} }},
+		{name: "parallel_tool_calls", apply: func(request *openai.ResponseRequest) { value := true; request.ParallelToolCalls = &value }},
+		{name: "text.verbosity", apply: func(request *openai.ResponseRequest) { request.Text = map[string]any{"verbosity": "medium"} }},
+		{name: "previous_response_id", apply: func(request *openai.ResponseRequest) { request.PreviousResponse = "resp_profile" }},
+		{name: "user", apply: func(request *openai.ResponseRequest) { request.User = "profile-probe" }},
+		{name: "safety_identifier", apply: func(request *openai.ResponseRequest) { request.SafetyIdentifier = "profile-probe" }},
+		{name: "prompt_cache_key", apply: func(request *openai.ResponseRequest) { request.PromptCacheKey = "profile-probe" }},
+		{name: "max_output_tokens", apply: func(request *openai.ResponseRequest) { value := 16; request.MaxOutputTokens = &value }},
+		{name: "max_tokens", apply: func(request *openai.ResponseRequest) { value := 16; request.MaxTokens = &value }},
+		{name: "temperature", apply: func(request *openai.ResponseRequest) { value := 0.5; request.Temperature = &value }},
+		{name: "top_p", apply: func(request *openai.ResponseRequest) { value := 0.5; request.TopP = &value }},
+		{name: "frequency_penalty", apply: func(request *openai.ResponseRequest) { value := 0.5; request.FrequencyPenalty = &value }},
+		{name: "presence_penalty", apply: func(request *openai.ResponseRequest) { value := 0.5; request.PresencePenalty = &value }},
+		{name: "max_tool_calls", apply: func(request *openai.ResponseRequest) { value := 1; request.MaxToolCalls = &value }},
+	}
 }
 
 func managedProviderChatParameterPolicy(client Client, supportsChat bool) ProviderChatParameterPolicy {

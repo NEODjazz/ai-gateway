@@ -423,6 +423,36 @@ func TestManagedProviderCapabilityProfilesExposeAllValidatedChatOptions(t *testi
 	}
 }
 
+func TestManagedProviderCapabilityProfilesExposeAllValidatedResponseOptions(t *testing.T) {
+	profiles := ManagedProviderCapabilityProfiles()
+	byType := make(map[string]ProviderResponseParameterPolicy, len(profiles))
+	for _, profile := range profiles {
+		byType[profile.Type] = profile.ResponseParameters
+	}
+	allReasoning := []string{"none", "minimal", "low", "medium", "high", "xhigh", "max", "default"}
+	allTiers := []string{"auto", "default", "on_demand", "flex", "performance", "scale", "priority", "fast", "ultrafast", "standard_only"}
+	compatible := []string{"metadata", "top_logprobs", "truncation", "store", "include", "parallel_tool_calls", "text.verbosity", "previous_response_id", "user", "safety_identifier", "prompt_cache_key", "max_output_tokens", "max_tokens", "temperature", "top_p", "frequency_penalty", "presence_penalty", "max_tool_calls", "reasoning"}
+	tiered := append(append([]string(nil), compatible...), "service_tier")
+	expected := map[string]ProviderResponseParameterPolicy{
+		"demo": {}, "gemini": {}, "cohere": {}, "mistral": {}, "voyage": {}, "bedrock": {}, "opensandbox": {},
+		"ollama":            {SupportedOptions: []string{"metadata", "top_logprobs", "truncation", "store", "include", "parallel_tool_calls", "previous_response_id", "max_output_tokens", "max_tokens", "temperature", "top_p", "reasoning"}, ReasoningEffort: allReasoning},
+		"openai":            {SupportedOptions: tiered, ReasoningEffort: allReasoning, ServiceTier: []string{"auto", "default", "flex", "priority"}},
+		"openai-compatible": {SupportedOptions: compatible, ReasoningEffort: allReasoning},
+		"openrouter":        {SupportedOptions: tiered, ReasoningEffort: allReasoning, ServiceTier: allTiers},
+		"azure-openai":      {SupportedOptions: compatible, ReasoningEffort: allReasoning},
+		"anthropic":         {SupportedOptions: []string{"parallel_tool_calls", "max_output_tokens", "max_tokens", "temperature", "top_p"}},
+		"groq":              {SupportedOptions: []string{"metadata", "parallel_tool_calls", "user", "max_output_tokens", "max_tokens", "temperature", "top_p", "reasoning", "service_tier"}, ReasoningEffort: []string{"low", "medium", "high"}, ServiceTier: []string{"auto", "default", "flex"}},
+		"deepseek":          {SupportedOptions: []string{"top_logprobs", "user", "max_output_tokens", "max_tokens", "temperature", "top_p", "reasoning"}, ReasoningEffort: []string{"low", "medium", "high", "xhigh", "max"}},
+		"xai":               {SupportedOptions: []string{"store", "include", "parallel_tool_calls", "previous_response_id", "user", "prompt_cache_key", "max_output_tokens", "max_tokens", "temperature", "top_p", "reasoning", "service_tier"}, ReasoningEffort: []string{"none", "low", "medium", "high", "xhigh"}, ServiceTier: []string{"default", "priority"}},
+	}
+	for providerType, want := range expected {
+		got, found := byType[providerType]
+		if !found || !slices.Equal(got.SupportedOptions, want.SupportedOptions) || !slices.Equal(got.ReasoningEffort, want.ReasoningEffort) || !slices.Equal(got.ServiceTier, want.ServiceTier) {
+			t.Errorf("%s response parameters=%+v want=%+v", providerType, got, want)
+		}
+	}
+}
+
 func TestManagedDeploymentEnablesNativeStreaming(t *testing.T) {
 	var streamRequested atomic.Bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
