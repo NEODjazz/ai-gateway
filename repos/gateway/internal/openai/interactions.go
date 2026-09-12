@@ -3,6 +3,7 @@ package openai
 import (
 	"encoding/json"
 	"math"
+	"mime"
 	"strings"
 	"time"
 )
@@ -15,6 +16,7 @@ type InteractionRequest struct {
 	SystemInstruction     string                      `json:"system_instruction,omitempty"`
 	Tools                 []ResponseTool              `json:"tools,omitempty"`
 	ResponseFormat        any                         `json:"response_format,omitempty"`
+	ResponseMIMEType      string                      `json:"response_mime_type,omitempty"`
 	PreviousInteractionID string                      `json:"previous_interaction_id,omitempty"`
 	Store                 *bool                       `json:"store,omitempty"`
 	Stream                bool                        `json:"stream,omitempty"`
@@ -107,9 +109,13 @@ func (r InteractionRequest) NativeResponseRequest() (ResponseRequest, string) {
 	if r.GenerationConfig.TopP != nil && (*r.GenerationConfig.TopP < 0 || *r.GenerationConfig.TopP > 1) {
 		return ResponseRequest{}, "generation_config.top_p must be between 0 and 1"
 	}
+	responseFormat, message := normalizedInteractionResponseFormat(r.ResponseFormat, r.ResponseMIMEType)
+	if message != "" {
+		return ResponseRequest{}, message
+	}
 	var text any
-	if r.ResponseFormat != nil {
-		text = map[string]any{"format": r.ResponseFormat}
+	if responseFormat != nil {
+		text = map[string]any{"format": responseFormat}
 	}
 	store := r.Store
 	if r.Background && store == nil {
@@ -139,9 +145,41 @@ func (r InteractionRequest) WithResponseRequest(shared ResponseRequest) Interact
 	if text, ok := shared.Text.(map[string]any); ok {
 		r.ResponseFormat = text["format"]
 	}
+	r.ResponseMIMEType = ""
 	r.Store, r.Stream, r.Background = shared.Store, shared.Stream, shared.Background
 	r.GenerationConfig.MaxOutputTokens, r.GenerationConfig.Temperature, r.GenerationConfig.TopP = shared.MaxOutputTokens, shared.Temperature, shared.TopP
 	return r
+}
+
+func normalizedInteractionResponseFormat(format any, rawMIMEType string) (any, string) {
+	rawMIMEType = strings.TrimSpace(rawMIMEType)
+	if rawMIMEType == "" {
+		return format, ""
+	}
+	if len(rawMIMEType) > 128 {
+		return nil, "response_mime_type is too long"
+	}
+	mediaType, _, err := mime.ParseMediaType(rawMIMEType)
+	if err != nil || !(strings.HasPrefix(mediaType, "text/") || mediaType == "application/json" || strings.HasSuffix(mediaType, "+json")) {
+		return nil, "response_mime_type must be text or JSON"
+	}
+	if _, ok := format.([]any); ok {
+		return nil, "response_mime_type cannot be combined with an array response_format"
+	}
+	if entry, ok := format.(map[string]any); ok {
+		if existing, found := entry["mime_type"]; found {
+			value, valid := existing.(string)
+			if !valid || !strings.EqualFold(strings.TrimSpace(value), mediaType) {
+				return nil, "response_mime_type conflicts with response_format.mime_type"
+			}
+			return format, ""
+		}
+	}
+	result := map[string]any{"type": "text", "mime_type": mediaType}
+	if format != nil {
+		result["schema"] = format
+	}
+	return result, ""
 }
 
 type InteractionResponse struct {

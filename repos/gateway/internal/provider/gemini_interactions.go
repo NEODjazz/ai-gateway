@@ -45,6 +45,11 @@ func (g Gemini) doInteraction(ctx context.Context, request openai.InteractionReq
 		Stream                bool                               `json:"stream,omitempty"`
 		GenerationConfig      openai.InteractionGenerationConfig `json:"generation_config,omitempty"`
 	}
+	shared, _ := request.NativeResponseRequest()
+	responseFormat := request.ResponseFormat
+	if text, ok := shared.Text.(map[string]any); ok {
+		responseFormat = text["format"]
+	}
 	agent := strings.TrimSpace(request.Agent)
 	model := request.Model
 	if agent != "" {
@@ -52,7 +57,7 @@ func (g Gemini) doInteraction(ctx context.Context, request openai.InteractionReq
 	}
 	payload, err := json.Marshal(interactionPayload{
 		Model: model, Agent: agent, Input: request.Input, SystemInstruction: request.SystemInstruction,
-		Tools: request.Tools, ResponseFormat: request.ResponseFormat, PreviousInteractionID: request.PreviousInteractionID,
+		Tools: request.Tools, ResponseFormat: responseFormat, PreviousInteractionID: request.PreviousInteractionID,
 		Store: request.Store, Stream: request.Stream, GenerationConfig: request.GenerationConfig,
 	})
 	if err != nil {

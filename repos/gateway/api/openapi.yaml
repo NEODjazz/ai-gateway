@@ -2077,7 +2077,7 @@ paths:
       operationId: createInteraction
       tags: [Inference]
       summary: Create a model interaction
-      description: Uses a native model interaction adapter when the selected deployment declares the interactions capability; otherwise converts the request to the Responses execution pipeline. The native Gemini path supports synchronous and incremental SSE model or agent interactions, optional durable ownership for store=true, owner-isolated continuity through previous_interaction_id, retrieve/cancel/delete lifecycle calls, string or step-array input, system instructions, function tools, structured response formats, and bounded generation settings including seed, stop sequences, and thinking level. Agent requests require the interaction_agents deployment capability and use the configured agent ID as the gateway authorization, quota, routing, and billing model key. Continuations remain pinned to the immutable deployment binding of the previous interaction. The terminal completion event and stored ownership binding are released only after post-processing succeeds. Native background execution remains unsupported. The Responses bridge retains its synchronous, incremental SSE, durable background, continuity, and storage behavior.
+      description: Uses a native model interaction adapter when the selected deployment declares the interactions capability; otherwise converts the request to the Responses execution pipeline. The native Gemini path supports synchronous and incremental SSE model or agent interactions, optional durable ownership for store=true, owner-isolated continuity through previous_interaction_id, retrieve/cancel/delete lifecycle calls, string or step-array input, system instructions, function tools, structured response formats, text and JSON response MIME normalization, and bounded generation settings including seed, stop sequences, and thinking level. Agent requests require the interaction_agents deployment capability and use the configured agent ID as the gateway authorization, quota, routing, and billing model key. Continuations remain pinned to the immutable deployment binding of the previous interaction. The terminal completion event and stored ownership binding are released only after post-processing succeeds. Native background execution remains unsupported. The Responses bridge retains its synchronous, incremental SSE, durable background, continuity, and storage behavior.
       requestBody:
         required: true
         content:
@@ -4306,6 +4306,7 @@ components:
         temperature: {type: [number, 'null'], minimum: 0, maximum: 2}
         top_p: {type: [number, 'null'], minimum: 0, maximum: 1}
         response_format: {}
+        response_mime_type: {type: string, maxLength: 128, description: Text or JSON MIME type. It is normalized into the current response_format representation before policy evaluation and provider execution.}
     AssistantCreateRequest:
       allOf:
         - {$ref: '#/components/schemas/AssistantDefinition'}

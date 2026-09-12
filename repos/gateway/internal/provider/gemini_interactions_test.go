@@ -25,9 +25,10 @@ func TestGeminiInteractionsUsesNativeContract(t *testing.T) {
 		var body struct {
 			Model            string                             `json:"model"`
 			Input            any                                `json:"input"`
+			ResponseFormat   map[string]any                     `json:"response_format"`
 			GenerationConfig openai.InteractionGenerationConfig `json:"generation_config"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Model != "gemini-upstream" || body.Input != "hello" || body.GenerationConfig.Seed == nil || *body.GenerationConfig.Seed != seed || len(body.GenerationConfig.StopSequences) != 1 || body.GenerationConfig.ThinkingLevel != "high" {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Model != "gemini-upstream" || body.Input != "hello" || body.ResponseFormat["type"] != "text" || body.ResponseFormat["mime_type"] != "application/json" || body.ResponseFormat["schema"] == nil || body.GenerationConfig.Seed == nil || *body.GenerationConfig.Seed != seed || len(body.GenerationConfig.StopSequences) != 1 || body.GenerationConfig.ThinkingLevel != "high" {
 			t.Errorf("body=%+v err=%v", body, err)
 		}
 		_, _ = fmt.Fprint(w, `{"id":"interaction_1","object":"interaction","model":"gemini-upstream","status":"completed","steps":[{"id":"step_1","type":"model_output","content":[{"type":"text","text":"hello"}]}],"usage":{"total_input_tokens":3,"total_output_tokens":2,"total_tokens":5}}`)
@@ -36,6 +37,7 @@ func TestGeminiInteractionsUsesNativeContract(t *testing.T) {
 
 	response, err := NewGemini(server.URL, "secret", false).Interactions(t.Context(), openai.InteractionRequest{
 		Model: "gemini-upstream", Input: "hello",
+		ResponseFormat: map[string]any{"type": "object"}, ResponseMIMEType: "application/json",
 		GenerationConfig: openai.InteractionGenerationConfig{Seed: &seed, StopSequences: []string{"END"}, ThinkingLevel: "high"},
 	})
 	if err != nil || response.ID != "interaction_1" || response.Usage.TotalTokens != 5 || len(response.Steps) != 1 || response.Steps[0].Content[0].Text != "hello" {

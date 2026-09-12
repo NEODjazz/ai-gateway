@@ -66,6 +66,34 @@ func TestNativeAgentInteractionUsesAgentAsPolicyModel(t *testing.T) {
 	}
 }
 
+func TestInteractionResponseMIMETypeIsNormalizedBeforePolicy(t *testing.T) {
+	schema := map[string]any{"type": "object"}
+	request := InteractionRequest{Model: "model", Input: "hello", ResponseFormat: schema, ResponseMIMEType: "application/json"}
+	shared, message := request.NativeResponseRequest()
+	if message != "" {
+		t.Fatal(message)
+	}
+	text, ok := shared.Text.(map[string]any)
+	format, okFormat := text["format"].(map[string]any)
+	if !ok || !okFormat || format["type"] != "text" || format["mime_type"] != "application/json" || format["schema"] == nil {
+		t.Fatalf("text=%#v", shared.Text)
+	}
+	mapped := request.WithResponseRequest(shared)
+	if mapped.ResponseMIMEType != "" || mapped.ResponseFormat == nil {
+		t.Fatalf("mapped=%+v", mapped)
+	}
+	for _, invalid := range []InteractionRequest{
+		{Model: "model", Input: "hello", ResponseMIMEType: "image/png"},
+		{Model: "model", Input: "hello", ResponseMIMEType: "not a mime"},
+		{Model: "model", Input: "hello", ResponseMIMEType: "application/json", ResponseFormat: []any{map[string]any{"type": "text"}}},
+		{Model: "model", Input: "hello", ResponseMIMEType: "application/json", ResponseFormat: map[string]any{"mime_type": "text/plain"}},
+	} {
+		if _, message := invalid.NativeResponseRequest(); message == "" {
+			t.Fatalf("invalid MIME contract accepted: %+v", invalid)
+		}
+	}
+}
+
 func TestInteractionRequestRejectsUnsupportedOrInvalidSemantics(t *testing.T) {
 	seed := int64(1)
 	zero := 0
