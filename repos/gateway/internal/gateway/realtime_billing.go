@@ -202,13 +202,15 @@ func (t *realtimeBillingTracker) handleProviderAudioEvent(event realtimeEventEnv
 			tokens = t.pendingAudio[0]
 			t.pendingAudio = t.pendingAudio[1:]
 			t.unnamedItems--
-		} else if t.audioBufferBytes > 0 {
+		} else {
 			if len(t.conversationItems)+t.unnamedItems >= maxRealtimeConversationItems {
 				return errors.New("realtime conversation item limit exceeded")
 			}
-			tokens = realtimeAudioTokens(t.audioBufferBytes, t.audioInputFormat)
-			t.audioBufferBytes = 0
-			t.conversationTokens = saturatedRealtimeTokens(t.conversationTokens, tokens)
+			if t.audioBufferBytes > 0 {
+				tokens = realtimeAudioTokens(t.audioBufferBytes, t.audioInputFormat)
+				t.audioBufferBytes = 0
+				t.conversationTokens = saturatedRealtimeTokens(t.conversationTokens, tokens)
+			}
 		}
 		t.conversationItems[event.ItemID] = tokens
 	case "input_audio_buffer.cleared":

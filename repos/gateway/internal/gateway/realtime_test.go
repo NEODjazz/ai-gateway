@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -493,6 +494,16 @@ func TestRealtimeAudioServerCommitAndLimits(t *testing.T) {
 	tracker.mu.Unlock()
 	if err := tracker.ClientEvent(t.Context(), []byte(`{"type":"input_audio_buffer.append","audio":"YQ=="}`)); err == nil || !strings.Contains(err.Error(), "buffer exceeds") {
 		t.Fatalf("buffer overflow error=%v", err)
+	}
+	tracker.mu.Lock()
+	tracker.audioBufferBytes = 0
+	tracker.conversationItems = make(map[string]int, maxRealtimeConversationItems)
+	for index := 0; index < maxRealtimeConversationItems; index++ {
+		tracker.conversationItems[strconv.Itoa(index)] = 0
+	}
+	tracker.mu.Unlock()
+	if err := tracker.ProviderEvent(t.Context(), []byte(`{"type":"input_audio_buffer.committed","item_id":"overflow"}`)); err == nil || !strings.Contains(err.Error(), "item limit") {
+		t.Fatalf("provider item overflow error=%v", err)
 	}
 }
 
