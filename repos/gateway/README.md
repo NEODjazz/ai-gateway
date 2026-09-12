@@ -216,6 +216,11 @@ shape remains accepted for compatibility. All server-tool definitions contribute
 to TPM reserve.
 Managed code execution preserves the requested 20250825, 20260120 or 20260521
 tool version through generation and native token counting.
+Provider-defined client tools are accepted for memory (`memory_20250818`), bash
+(`bash_20250124`) and the 20250124/20250728 text-editor contracts. The caller
+executes returned operations and sends `tool_result`; the gateway validates
+versions and names, enforces per-tool ACLs and deployment capabilities, counts
+the definitions, and disables response caching for these requests.
 Model catalog updates, deployment management and atomic model onboarding use
 the same capability contract, including moderation, media, retrieval, prompt
 cache and assistant-prefill capabilities.

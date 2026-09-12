@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.342
+  version: 0.1.343
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -7024,6 +7024,67 @@ components:
                 properties:
                   type: {type: string, const: tool_search_tool_bm25_20251119}
                   name: {type: string, const: tool_search_tool_bm25}
+              - type: object
+                additionalProperties: false
+                required: [type, name]
+                properties:
+                  type: {type: string, const: memory_20250818}
+                  name: {type: string, const: memory}
+                  allowed_callers: {type: array, maxItems: 4, uniqueItems: true, items: {type: string, enum: [direct, code_execution_20250825, code_execution_20260120, code_execution_20260521]}}
+                  defer_loading: {type: boolean, default: false, description: Requires a tool-search server tool and cannot be combined with cache_control.}
+                  cache_control:
+                    type: object
+                    additionalProperties: false
+                    required: [type]
+                    properties:
+                      type: {type: string, const: ephemeral}
+                      ttl: {type: string, enum: [5m, 1h]}
+              - type: object
+                additionalProperties: false
+                required: [type, name]
+                properties:
+                  type: {type: string, const: bash_20250124}
+                  name: {type: string, const: bash}
+                  allowed_callers: {type: array, maxItems: 4, uniqueItems: true, items: {type: string, enum: [direct, code_execution_20250825, code_execution_20260120, code_execution_20260521]}}
+                  defer_loading: {type: boolean, default: false, description: Requires a tool-search server tool and cannot be combined with cache_control.}
+                  cache_control:
+                    type: object
+                    additionalProperties: false
+                    required: [type]
+                    properties:
+                      type: {type: string, const: ephemeral}
+                      ttl: {type: string, enum: [5m, 1h]}
+              - type: object
+                additionalProperties: false
+                required: [type, name]
+                properties:
+                  type: {type: string, const: text_editor_20250124}
+                  name: {type: string, const: str_replace_editor}
+                  allowed_callers: {type: array, maxItems: 4, uniqueItems: true, items: {type: string, enum: [direct, code_execution_20250825, code_execution_20260120, code_execution_20260521]}}
+                  defer_loading: {type: boolean, default: false, description: Requires a tool-search server tool and cannot be combined with cache_control.}
+                  cache_control:
+                    type: object
+                    additionalProperties: false
+                    required: [type]
+                    properties:
+                      type: {type: string, const: ephemeral}
+                      ttl: {type: string, enum: [5m, 1h]}
+              - type: object
+                additionalProperties: false
+                required: [type, name]
+                properties:
+                  type: {type: string, const: text_editor_20250728}
+                  name: {type: string, const: str_replace_based_edit_tool}
+                  max_characters: {type: integer, minimum: 1, maximum: 1048576}
+                  allowed_callers: {type: array, maxItems: 4, uniqueItems: true, items: {type: string, enum: [direct, code_execution_20250825, code_execution_20260120, code_execution_20260521]}}
+                  defer_loading: {type: boolean, default: false, description: Requires a tool-search server tool and cannot be combined with cache_control.}
+                  cache_control:
+                    type: object
+                    additionalProperties: false
+                    required: [type]
+                    properties:
+                      type: {type: string, const: ephemeral}
+                      ttl: {type: string, enum: [5m, 1h]}
               - type: object
                 additionalProperties: false
                 required: [type, name]

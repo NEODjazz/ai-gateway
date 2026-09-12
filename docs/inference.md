@@ -762,6 +762,19 @@ The selected version is preserved through generation and native token counting;
 tool authorization, exact provider usage settlement, cache exclusion, bounded
 result validation and skill-container requirements remain identical.
 
+Messages also accepts provider-defined client tools for memory
+(`memory_20250818`), bash (`bash_20250124`) and text editing
+(`text_editor_20250124` or `text_editor_20250728`). The gateway validates the
+version-specific fixed name and forwards only the documented configuration; the
+calling application executes each returned `tool_use` and sends a `tool_result`
+continuation. The gateway does not execute shell, filesystem or memory commands.
+Deployments must advertise the matching `memory_tool`, `bash_tool` or
+`text_editor_tool` capability, and access policy must grant the fixed tool name.
+Definitions contribute to TPM and token-count requests. Exact and semantic
+response caches are disabled so a previously generated action is never replayed.
+The newer text editor accepts `max_characters` from 1 through 1,048,576. Deferred
+loading requires tool search and cannot share a prompt-cache breakpoint.
+
 Regressions cover request/response conversion, native and fallback SSE, stream
 failure, model/tool authorization, TPM, unknown input, response-size bounds and
 reported usage reaching the accounting stage through Router. No live paid
