@@ -553,3 +553,10 @@ completed successfully, and pod `ai-gateway-gateway-69c86f89b-v2lw5` became
 Ready with zero restarts. The live endpoint confirmed Gemini string/step input,
 agent and environment lifecycle controls, streaming/background flags, structured
 output, bounded generation controls and all four accepted thinking levels.
+
+Source `94551d0` adds Rerank to durable JSONL batch execution. Rancher Desktop
+built `ai-gateway-gateway:gaps-94551d0`; Helm revision 417 completed
+successfully, and pod `ai-gateway-gateway-784dcb8fbf-ncckj` became Ready with
+zero restarts. The live OpenAPI 0.1.318 contract lists `/v1/rerank` in the
+accepted batch endpoints; the regression executes it through durable input and
+output files, shared validation, model policy, TPM admission and routing.
