@@ -1124,3 +1124,12 @@ Source `c3ffb67` enforces the provider contract that document citations apply to
 all documents in a request or none. Mixed cited and uncited PDF inputs now fail
 before provider execution. The focused regression test and full Go tests, race
 tests, vet and build passed.
+
+Rancher Desktop built `ai-gateway-gateway:gaps-cf64d6e` with image ID
+`sha256:b797a371b9fa54e1a228381e72a0919badf8506fa85ba27d4c6fee65d9751927`.
+Gateway Helm revision 458 completed successfully, and pod
+`ai-gateway-gateway-78c5f44bdc-t5wb5` became Ready with zero restarts and the
+same digest. Live OpenAPI 0.1.357 documents the all-or-none rule. A request with
+two cited PDFs reached authentication, while a mixed cited and uncited request
+returned 400 before authentication. These smoke checks used no credential and
+performed no external inference.
