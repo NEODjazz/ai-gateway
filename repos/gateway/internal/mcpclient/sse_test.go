@@ -9,10 +9,12 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestLegacySSEInitializationListAndCall(t *testing.T) {
 	events := make(chan string, 8)
+	serverResponses := make(chan string, 2)
 	var posts atomic.Int32
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer server-secret" || r.Header.Get("MCP-Protocol-Version") != LegacyProtocolVersion {
@@ -23,7 +25,7 @@ func TestLegacySSEInitializationListAndCall(t *testing.T) {
 				t.Fatalf("GET %s headers=%v", r.URL.String(), r.Header)
 			}
 			w.Header().Set("Content-Type", "text/event-stream")
-			_, _ = fmt.Fprint(w, "event: endpoint\ndata: /message?session=test\n\n")
+			_, _ = fmt.Fprint(w, "event: endpoint\ndata: /message?session=test\n\nevent: message\ndata: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/tools/list_changed\"}\n\nevent: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":\"server-ping\",\"method\":\"ping\"}\n\nevent: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":\"server-unknown\",\"method\":\"roots/list\"}\n\n")
 			w.(http.Flusher).Flush()
 			for {
 				select {
@@ -43,9 +45,31 @@ func TestLegacySSEInitializationListAndCall(t *testing.T) {
 			ID     json.RawMessage `json:"id"`
 			Method string          `json:"method"`
 			Params json.RawMessage `json:"params"`
+			Result json.RawMessage `json:"result"`
+			Error  *struct {
+				Code int `json:"code"`
+			} `json:"error"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			t.Fatal(err)
+		}
+		if request.Method == "" {
+			switch string(request.ID) {
+			case `"server-ping"`:
+				if string(request.Result) != `{}` || request.Error != nil {
+					t.Fatalf("ping response=%s", request.Result)
+				}
+				serverResponses <- "ping"
+			case `"server-unknown"`:
+				if request.Error == nil || request.Error.Code != -32601 || len(request.Result) != 0 {
+					t.Fatalf("unsupported response error=%+v result=%s", request.Error, request.Result)
+				}
+				serverResponses <- "unsupported"
+			default:
+				t.Fatalf("unexpected server response ID=%s", request.ID)
+			}
+			w.WriteHeader(http.StatusAccepted)
+			return
 		}
 		switch request.Method {
 		case "initialize":
@@ -78,7 +102,14 @@ func TestLegacySSEInitializationListAndCall(t *testing.T) {
 	if err != nil || len(result.Content) != 1 || !strings.Contains(string(result.Content[0]), "sunny") {
 		t.Fatalf("result=%+v err=%v", result, err)
 	}
-	if posts.Load() != 4 {
+	for range 2 {
+		select {
+		case <-serverResponses:
+		case <-time.After(5 * time.Second):
+			t.Fatal("server request response timed out")
+		}
+	}
+	if posts.Load() != 6 {
 		t.Fatalf("posts=%d", posts.Load())
 	}
 }
@@ -142,5 +173,46 @@ func TestLegacySSEBoundsMultilineEvent(t *testing.T) {
 		}
 	default:
 		t.Fatal("missing event size error")
+	}
+}
+
+func TestLegacySSEBoundsPendingServerRequests(t *testing.T) {
+	client, err := NewSSE("https://mcp.example.test/sse", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	endpoint := make(chan string, 1)
+	var stream strings.Builder
+	stream.WriteString("event: endpoint\ndata: /message\n\n")
+	for id := range 9 {
+		_, _ = fmt.Fprintf(&stream, "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":%d,\"method\":\"ping\"}\n\n", id+1)
+	}
+	client.readStream(io.NopCloser(strings.NewReader(stream.String())), endpoint)
+	select {
+	case err := <-client.streamErrors:
+		if !strings.Contains(err.Error(), "too many pending") {
+			t.Fatalf("error=%v", err)
+		}
+	default:
+		t.Fatal("missing pending request bound error")
+	}
+}
+
+func TestLegacySSERejectsInvalidServerRequestID(t *testing.T) {
+	client, err := NewSSE("https://mcp.example.test/sse", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	endpoint := make(chan string, 1)
+	client.readStream(io.NopCloser(strings.NewReader("event: endpoint\ndata: /message\n\nevent: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":[],\"method\":\"ping\"}\n\n")), endpoint)
+	select {
+	case err := <-client.streamErrors:
+		if !strings.Contains(err.Error(), "request ID") {
+			t.Fatalf("error=%v", err)
+		}
+	default:
+		t.Fatal("missing server request ID error")
 	}
 }

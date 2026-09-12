@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"ai-gateway-gateway/internal/publichttp"
 )
@@ -27,6 +28,7 @@ type SSEClient struct {
 	ctx          context.Context
 	cancel       context.CancelFunc
 	responses    chan rpcResponse
+	requests     chan rpcResponse
 	streamErrors chan error
 	mu           sync.Mutex
 	ready        bool
@@ -39,7 +41,7 @@ func NewSSE(endpoint, bearer string) (*SSEClient, error) {
 		return nil, errors.New("MCP SSE endpoint must be an HTTPS URL without credentials, query, or fragment")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &SSEClient{endpoint: parsed, http: publichttp.NewClient(0), bearer: bearer, ctx: ctx, cancel: cancel, responses: make(chan rpcResponse, 1), streamErrors: make(chan error, 1)}, nil
+	return &SSEClient{endpoint: parsed, http: publichttp.NewClient(0), bearer: bearer, ctx: ctx, cancel: cancel, responses: make(chan rpcResponse, 1), requests: make(chan rpcResponse, 8), streamErrors: make(chan error, 1)}, nil
 }
 
 func (c *SSEClient) Close() error {
@@ -119,6 +121,7 @@ func (c *SSEClient) openStreamLocked(ctx context.Context) error {
 			return err
 		}
 		c.postEndpoint = resolved
+		go c.handleServerRequests()
 		return nil
 	}
 }
@@ -173,13 +176,25 @@ func (c *SSEClient) readStream(body io.ReadCloser, endpoint chan<- string) {
 						c.reportStreamError(errors.New("invalid MCP SSE message"))
 						return
 					}
-					if response.Method != "" || len(response.ID) == 0 {
-						continue
-					}
-					select {
-					case c.responses <- response:
-					case <-c.ctx.Done():
-						return
+					if response.Method != "" {
+						if len(response.ID) != 0 {
+							if !validServerRequestID(response.ID) {
+								c.reportStreamError(errors.New("invalid MCP SSE server request ID"))
+								return
+							}
+							select {
+							case c.requests <- response:
+							default:
+								c.reportStreamError(errors.New("too many pending MCP SSE server requests"))
+								return
+							}
+						}
+					} else if len(response.ID) != 0 {
+						select {
+						case c.responses <- response:
+						case <-c.ctx.Done():
+							return
+						}
 					}
 				}
 			}
@@ -210,6 +225,50 @@ func (c *SSEClient) readStream(body io.ReadCloser, endpoint chan<- string) {
 		c.reportStreamError(err)
 	} else if c.ctx.Err() == nil {
 		c.reportStreamError(errors.New("MCP SSE stream ended"))
+	}
+}
+
+func validServerRequestID(raw json.RawMessage) bool {
+	if len(raw) == 0 || len(raw) > 256 || bytes.Equal(raw, []byte("null")) {
+		return false
+	}
+	var value any
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if decoder.Decode(&value) != nil {
+		return false
+	}
+	switch value.(type) {
+	case string, json.Number:
+		return true
+	default:
+		return false
+	}
+}
+
+func (c *SSEClient) handleServerRequests() {
+	for {
+		select {
+		case <-c.ctx.Done():
+			return
+		case request := <-c.requests:
+			payload := map[string]any{"jsonrpc": "2.0", "id": request.ID}
+			if request.Method == "ping" {
+				payload["result"] = map[string]any{}
+			} else {
+				payload["error"] = map[string]any{"code": -32601, "message": "Method not found"}
+			}
+			encoded, err := json.Marshal(payload)
+			if err == nil {
+				ctx, cancel := context.WithTimeout(c.ctx, 30*time.Second)
+				err = c.postLocked(ctx, encoded)
+				cancel()
+			}
+			if err != nil {
+				c.reportStreamError(fmt.Errorf("respond to MCP SSE server request: %w", err))
+				return
+			}
+		}
 	}
 }
 
