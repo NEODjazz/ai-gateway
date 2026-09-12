@@ -244,6 +244,8 @@ type batchProvider struct {
 	speechData []byte
 	audio      modules.RequestContext
 	audioOp    string
+	imageEdit  modules.RequestContext
+	variation  modules.RequestContext
 	compact    modules.RequestContext
 	ocr        modules.RequestContext
 }
@@ -291,6 +293,22 @@ func (p *batchProvider) GenerateImage(_ context.Context, req modules.RequestCont
 	p.executions = append(p.executions, req.RequestID)
 	p.mu.Unlock()
 	return openai.ImageGenerationResponse{Created: 7, Data: []openai.ImageData{{URL: "https://images.example/result.png"}}, Usage: &openai.ImageUsage{InputTokens: 2, OutputTokens: 5, TotalTokens: 7}}, nil
+}
+
+func (p *batchProvider) EditImage(_ context.Context, req modules.RequestContext) (openai.ImageGenerationResponse, error) {
+	p.mu.Lock()
+	p.executions = append(p.executions, req.RequestID)
+	p.imageEdit = req
+	p.mu.Unlock()
+	return openai.ImageGenerationResponse{Created: 8, Data: []openai.ImageData{{URL: "https://images.example/edited.png"}}, Usage: &openai.ImageUsage{InputTokens: 3, OutputTokens: 5, TotalTokens: 8}}, nil
+}
+
+func (p *batchProvider) CreateImageVariation(_ context.Context, req modules.RequestContext) (openai.ImageGenerationResponse, error) {
+	p.mu.Lock()
+	p.executions = append(p.executions, req.RequestID)
+	p.variation = req
+	p.mu.Unlock()
+	return openai.ImageGenerationResponse{Created: 9, Data: []openai.ImageData{{URL: "https://images.example/variation.png"}}, Usage: &openai.ImageUsage{InputTokens: 2, OutputTokens: 5, TotalTokens: 7}}, nil
 }
 
 func (p *batchProvider) GenerateSpeech(_ context.Context, req modules.RequestContext) (openai.AudioSpeechResponse, error) {
@@ -546,6 +564,82 @@ func TestBatchLifecycleExecutesImageGenerationWithTokenSettlement(t *testing.T) 
 	output, err := files.Get(t.Context(), owner, batch.OutputFileID, true)
 	if err != nil || !strings.Contains(string(output.Content), `https://images.example/result.png`) || !strings.Contains(string(output.Content), `"total_tokens":7`) {
 		t.Fatalf("output=%s err=%v", output.Content, err)
+	}
+}
+
+func TestBatchLifecycleExecutesImageEditAndVariation(t *testing.T) {
+	image := openai.ImageAttachment{MediaType: "image/png", Data: base64.StdEncoding.EncodeToString([]byte("\x89PNG\r\n\x1a\n"))}
+	edit := openai.ImageEditRequest{Model: "image-model", Prompt: "remove background", Images: []openai.ImageAttachment{image}, ResponseFormat: "url"}
+	variation := openai.ImageVariationRequest{Model: "image-model", Image: image, ResponseFormat: "url"}
+	for _, test := range []struct {
+		name     string
+		endpoint string
+		body     any
+		wantURL  string
+		reserve  int
+		stored   func(*batchProvider) modules.RequestContext
+	}{
+		{name: "edit", endpoint: "/v1/images/edits", body: edit, wantURL: "edited.png", reserve: openai.ImageEditReserveTokens(edit), stored: func(p *batchProvider) modules.RequestContext { return p.imageEdit }},
+		{name: "variation", endpoint: "/v1/images/variations", body: variation, wantURL: "variation.png", reserve: openai.ImageVariationReserveTokens(variation), stored: func(p *batchProvider) modules.RequestContext { return p.variation }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store := newMemoryBatchStore()
+			files := &memoryFileStore{files: map[string]filestate.File{}}
+			runtime := &batchProvider{models: []string{"image-model"}}
+			rates := &embeddingTokenRateStore{}
+			owner := fileOwnerKey(modules.RequestContext{CredentialID: "credential", UserID: "user"})
+			requestBody, err := json.Marshal(test.body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			line, err := json.Marshal(openai.BatchRequestLine{CustomID: test.name, Method: http.MethodPost, URL: test.endpoint, Body: requestBody})
+			if err != nil {
+				t.Fatal(err)
+			}
+			line = append(line, '\n')
+			files.files["file_image"] = filestate.File{ID: "file_image", OwnerKey: owner, Filename: "input.jsonl", Purpose: "batch", ContentType: "application/jsonl", Bytes: int64(len(line)), Content: line}
+			h := NewHandlerWithRateLimitStore(modules.NewPipeline([]modules.Module{&lifecycleAuthModule{}}), runtime, rates).WithFileStore(files, FileRuntimeConfig{MaxBytes: 4 << 20, OwnerQuotaBytes: 64 << 20}).WithBatchStore(store, store)
+			routes := Routes(h)
+			createBody, _ := json.Marshal(openai.BatchCreateRequest{InputFileID: "file_image", Endpoint: test.endpoint, CompletionWindow: openai.BatchCompletionWindow})
+			create := httptest.NewRequest(http.MethodPost, "/v1/batches", strings.NewReader(string(createBody)))
+			create.Header.Set("Authorization", "Bearer key")
+			createdResponse := httptest.NewRecorder()
+			routes.ServeHTTP(createdResponse, create)
+			var created openai.Batch
+			if err := json.Unmarshal(createdResponse.Body.Bytes(), &created); err != nil || createdResponse.Code != http.StatusOK {
+				t.Fatalf("create status=%d body=%s err=%v", createdResponse.Code, createdResponse.Body.String(), err)
+			}
+			if processed, err := h.ProcessBatchItems(t.Context()); err != nil || processed != 1 {
+				t.Fatalf("processed=%d err=%v", processed, err)
+			}
+			reservedTokens := rates.tokens
+			done := authorizedFileRequest(t, routes, http.MethodGet, "/v1/batches/"+created.ID)
+			var batch openai.Batch
+			if err := json.Unmarshal(done.Body.Bytes(), &batch); err != nil || done.Code != http.StatusOK || batch.RequestCounts.Completed != 1 {
+				t.Fatalf("status=%d batch=%+v err=%v", done.Code, batch, err)
+			}
+			output, err := files.Get(t.Context(), owner, batch.OutputFileID, true)
+			if err != nil || !strings.Contains(string(output.Content), test.wantURL) || !strings.Contains(string(output.Content), `"total_tokens":`) {
+				t.Fatalf("output=%s err=%v", output.Content, err)
+			}
+			runtime.mu.Lock()
+			stored := test.stored(runtime)
+			runtime.mu.Unlock()
+			if stored.RequestID == "" || reservedTokens != test.reserve {
+				t.Fatalf("request=%+v TPM=%d want=%d", stored, reservedTokens, test.reserve)
+			}
+			if test.name == "edit" && stored.ImageEditRequest == nil || test.name == "variation" && stored.ImageVariationRequest == nil {
+				t.Fatalf("typed request missing: %+v", stored)
+			}
+		})
+	}
+}
+
+func TestBatchImageEditRejectsStreaming(t *testing.T) {
+	image := base64.StdEncoding.EncodeToString([]byte("\x89PNG\r\n\x1a\n"))
+	body := []byte(`{"model":"image","prompt":"edit","images":[{"media_type":"image/png","data_base64":"` + image + `"}],"stream":true}`)
+	if _, _, _, err := validateBatchBody("/v1/images/edits", body); err == nil || !strings.Contains(err.Error(), "not supported in batches") {
+		t.Fatalf("err=%v", err)
 	}
 }
 

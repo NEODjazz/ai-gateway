@@ -383,6 +383,29 @@ func validateBatchBody(endpoint string, body []byte) ([]byte, string, []string, 
 		}
 		model = request.Model
 		normalized = request
+	case "/v1/images/edits":
+		var request openai.ImageEditRequest
+		if err := decodeStrictJSON(body, &request); err != nil {
+			return nil, "", nil, err
+		}
+		if message := request.Validate(); message != "" {
+			return nil, "", nil, errors.New(message)
+		}
+		if request.Stream {
+			return nil, "", nil, errors.New("streaming image edits are not supported in batches")
+		}
+		model = request.Model
+		normalized = request
+	case "/v1/images/variations":
+		var request openai.ImageVariationRequest
+		if err := decodeStrictJSON(body, &request); err != nil {
+			return nil, "", nil, err
+		}
+		if message := request.Validate(); message != "" {
+			return nil, "", nil, errors.New(message)
+		}
+		model = request.Model
+		normalized = request
 	case "/v1/audio/speech":
 		var request openai.AudioSpeechRequest
 		if err := decodeStrictJSON(body, &request); err != nil {
@@ -834,6 +857,40 @@ func (h Handler) callBatchProvider(ctx context.Context, req *modules.RequestCont
 			return 0, nil, errors.New("image generation unsupported")
 		}
 		response, err := client.GenerateImage(ctx, *req)
+		payload, _ := json.Marshal(response)
+		return http.StatusOK, payload, err
+	case "/v1/images/edits":
+		var value openai.ImageEditRequest
+		if err := json.Unmarshal(body, &value); err != nil {
+			return 0, nil, err
+		}
+		req.ImageEditRequest = &value
+		req.Request = openai.ChatCompletionRequest{Provider: value.Provider, Model: value.Model}
+		if !h.allowBatchRate(ctx, *req, estimateImageEditTokens(value)) {
+			return 0, nil, errBatchRateLimited
+		}
+		client, ok := h.provider.(provider.ImageEditProvider)
+		if !ok {
+			return 0, nil, errors.New("image edit unsupported")
+		}
+		response, err := client.EditImage(ctx, *req)
+		payload, _ := json.Marshal(response)
+		return http.StatusOK, payload, err
+	case "/v1/images/variations":
+		var value openai.ImageVariationRequest
+		if err := json.Unmarshal(body, &value); err != nil {
+			return 0, nil, err
+		}
+		req.ImageVariationRequest = &value
+		req.Request = openai.ChatCompletionRequest{Provider: value.Provider, Model: value.Model}
+		if !h.allowBatchRate(ctx, *req, estimateImageVariationTokens(value)) {
+			return 0, nil, errBatchRateLimited
+		}
+		client, ok := h.provider.(provider.ImageVariationProvider)
+		if !ok {
+			return 0, nil, errors.New("image variation unsupported")
+		}
+		response, err := client.CreateImageVariation(ctx, *req)
 		payload, _ := json.Marshal(response)
 		return http.StatusOK, payload, err
 	case "/v1/audio/speech":
