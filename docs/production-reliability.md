@@ -462,3 +462,9 @@ Source `15e7e0f` adds Moderation input and option profiles. Rancher Desktop buil
 pod `ai-gateway-gateway-587b4d9bb-gj2dm` became Ready with zero restarts. The
 live endpoint confirmed compatible text, text-array and content-part input and
 the native Mistral text-only profile with metadata support.
+
+Source `3d6b722` adds validator-derived Search query and option profiles.
+Rancher Desktop built `ai-gateway-gateway:gaps-3d6b722`; Helm revision 404
+completed successfully, and pod `ai-gateway-gateway-7c99b7479f-f4f78` became
+Ready with zero restarts. The live endpoint confirmed scalar/batch queries and
+all four bounded Search controls for OpenAI, Azure and compatible adapters.
