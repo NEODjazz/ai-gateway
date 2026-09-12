@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"sort"
 	"strings"
@@ -32,6 +33,19 @@ type DurableGuardrailController interface {
 }
 
 var ErrInvalidGuardrailPolicy = errors.New("invalid guardrail policy")
+
+const EndpointPolicyAttachmentsMetadataKey = "policy.guardrail.endpoint_attachments"
+
+type EndpointPolicyAttachment struct {
+	PolicyName         string   `json:"policy_name"`
+	Providers          []string `json:"providers,omitempty"`
+	Deployments        []string `json:"deployments,omitempty"`
+	DLP                bool     `json:"dlp,omitempty"`
+	OutputDLP          bool     `json:"output_dlp,omitempty"`
+	AV                 bool     `json:"av,omitempty"`
+	Anonymization      string   `json:"anonymization,omitempty"`
+	AnonymizationRules []string `json:"anonymization_rules,omitempty"`
+}
 
 func (r *Router) ListGuardrailPolicies() []GuardrailPolicy {
 	if r == nil || r.guardrails == nil {
@@ -193,4 +207,40 @@ func ResolveAnonymization(settings ...AnonymizationSetting) (mode string, rules,
 		return "custom", rules, profiles
 	}
 	return "disabled", nil, profiles
+}
+
+func endpointPolicySettings(metadata map[string]string, endpoint Endpoint) (dlp, outputDLP, av bool, settings []AnonymizationSetting, names []string) {
+	raw := strings.TrimSpace(metadata[EndpointPolicyAttachmentsMetadataKey])
+	if raw == "" {
+		return false, false, false, nil, nil
+	}
+	var attachments []EndpointPolicyAttachment
+	if json.Unmarshal([]byte(raw), &attachments) != nil {
+		return false, false, false, nil, nil
+	}
+	for _, attachment := range attachments {
+		if len(attachment.Providers) != 0 && !matchesEndpointPolicyPattern(endpoint.ProviderID, attachment.Providers) {
+			continue
+		}
+		if len(attachment.Deployments) != 0 && !matchesEndpointPolicyPattern(endpoint.Name, attachment.Deployments) {
+			continue
+		}
+		dlp = dlp || attachment.DLP
+		outputDLP = outputDLP || attachment.OutputDLP
+		av = av || attachment.AV
+		names = append(names, attachment.PolicyName)
+		if attachment.Anonymization != "" {
+			settings = append(settings, AnonymizationSetting{Profile: attachment.PolicyName, Mode: attachment.Anonymization, Rules: attachment.AnonymizationRules})
+		}
+	}
+	return dlp, outputDLP, av, settings, normalizedAnonymizationRules(names)
+}
+
+func matchesEndpointPolicyPattern(value string, patterns []string) bool {
+	for _, pattern := range patterns {
+		if pattern == "*" || pattern == value || (strings.HasSuffix(pattern, "*") && strings.HasPrefix(value, strings.TrimSuffix(pattern, "*"))) {
+			return true
+		}
+	}
+	return false
 }

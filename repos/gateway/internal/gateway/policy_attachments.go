@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"encoding/json"
 	"net/http"
 	"sort"
 	"strconv"
@@ -11,10 +12,14 @@ import (
 )
 
 type PolicyResolutionRequest struct {
+	OrganizationID  string   `json:"organization_id,omitempty"`
 	TeamID          string   `json:"team_id,omitempty"`
+	UserID          string   `json:"user_id,omitempty"`
 	CredentialID    string   `json:"credential_id,omitempty"`
 	CredentialAlias string   `json:"credential_alias,omitempty"`
 	Model           string   `json:"model,omitempty"`
+	ProviderID      string   `json:"provider_id,omitempty"`
+	DeploymentID    string   `json:"deployment_id,omitempty"`
 	Tags            []string `json:"tags,omitempty"`
 }
 
@@ -62,16 +67,20 @@ func (h Handler) ResolvePolicyAttachments(w http.ResponseWriter, r *http.Request
 	if !decodeAccessJSON(w, r, &input) {
 		return
 	}
+	input.OrganizationID = strings.TrimSpace(input.OrganizationID)
 	input.TeamID = strings.TrimSpace(input.TeamID)
+	input.UserID = strings.TrimSpace(input.UserID)
 	input.CredentialID = strings.TrimSpace(input.CredentialID)
 	input.CredentialAlias = strings.TrimSpace(input.CredentialAlias)
 	input.Model = strings.TrimSpace(input.Model)
+	input.ProviderID = strings.TrimSpace(input.ProviderID)
+	input.DeploymentID = strings.TrimSpace(input.DeploymentID)
 	input.Tags = uniqueStrings(input.Tags)
-	if len(input.TeamID) > 512 || len(input.CredentialID) > 512 || len(input.CredentialAlias) > 512 || len(input.Model) > 512 || !validAccessStrings(input.Tags) {
+	if len(input.OrganizationID) > 512 || len(input.TeamID) > 512 || len(input.UserID) > 512 || len(input.CredentialID) > 512 || len(input.CredentialAlias) > 512 || len(input.Model) > 512 || len(input.ProviderID) > 512 || len(input.DeploymentID) > 512 || !validAccessStrings(input.Tags) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "invalid policy resolution context")
 		return
 	}
-	context := PolicyMatchContext{TeamID: input.TeamID, CredentialID: input.CredentialID, CredentialAlias: input.CredentialAlias, Model: input.Model, Tags: input.Tags}
+	context := PolicyMatchContext{OrganizationID: input.OrganizationID, TeamID: input.TeamID, UserID: input.UserID, CredentialID: input.CredentialID, CredentialAlias: input.CredentialAlias, Model: input.Model, ProviderID: input.ProviderID, DeploymentID: input.DeploymentID, Tags: input.Tags}
 	writeJSON(w, http.StatusOK, h.resolvePolicyAttachmentSet(h.access.MatchingPolicyAttachments(context), context))
 }
 
@@ -140,8 +149,10 @@ func (h Handler) applyPolicyAttachmentsForModels(w http.ResponseWriter, req *mod
 	var attachments []PolicyAttachment
 	seenAttachments := make(map[string]bool)
 	for _, model := range models {
-		for _, attachment := range h.access.MatchingPolicyAttachments(PolicyMatchContext{
+		for _, attachment := range h.access.CandidatePolicyAttachments(PolicyMatchContext{
+			OrganizationID:  req.OrganizationID,
 			TeamID:          req.TeamID,
+			UserID:          req.UserID,
 			CredentialID:    req.CredentialID,
 			CredentialAlias: req.CredentialAlias,
 			Model:           model,
@@ -156,10 +167,10 @@ func (h Handler) applyPolicyAttachmentsForModels(w http.ResponseWriter, req *mod
 	if len(attachments) == 0 {
 		return true
 	}
-	resolution := h.resolvePolicyAttachmentSet(attachments, PolicyMatchContext{})
-	if !resolution.Enforceable {
+	validation := h.resolvePolicyAttachmentSet(attachments, PolicyMatchContext{})
+	if !validation.Enforceable {
 		message := "an attached policy is missing or disabled"
-		for _, issue := range resolution.Issues {
+		for _, issue := range validation.Issues {
 			if issue.Code == "policy_controller_unavailable" {
 				message = "required policy evaluation is unavailable"
 				break
@@ -168,6 +179,16 @@ func (h Handler) applyPolicyAttachmentsForModels(w http.ResponseWriter, req *mod
 		writeError(w, http.StatusServiceUnavailable, "policy_unavailable", message)
 		return false
 	}
+	immediate := make([]PolicyAttachment, 0, len(attachments))
+	deferred := make([]PolicyAttachment, 0, len(attachments))
+	for _, attachment := range attachments {
+		if len(attachment.Providers) != 0 || len(attachment.Deployments) != 0 {
+			deferred = append(deferred, attachment)
+		} else {
+			immediate = append(immediate, attachment)
+		}
+	}
+	resolution := h.resolvePolicyAttachmentSet(immediate, PolicyMatchContext{})
 	if req.Metadata == nil {
 		req.Metadata = map[string]string{}
 	}
@@ -180,6 +201,24 @@ func (h Handler) applyPolicyAttachmentsForModels(w http.ResponseWriter, req *mod
 		req.Metadata["policy.modules.anonymizer.mode"] = resolution.Anonymization
 		req.Metadata["policy.modules.anonymizer.rules"] = strings.Join(resolution.AnonymizationRules, ",")
 		req.Metadata["policy.modules.anonymizer.profiles"] = strings.Join(resolution.AnonymizationProfiles, ",")
+	}
+	if len(deferred) != 0 {
+		controller, _ := h.guardrailController()
+		endpointAttachments := make([]provider.EndpointPolicyAttachment, 0, len(deferred))
+		for _, attachment := range deferred {
+			policy, _ := controller.GetGuardrailPolicy(attachment.PolicyName)
+			endpointAttachments = append(endpointAttachments, provider.EndpointPolicyAttachment{
+				PolicyName: attachment.PolicyName, Providers: attachment.Providers, Deployments: attachment.Deployments,
+				DLP: policy.DLP, OutputDLP: policy.OutputDLP, AV: policy.AV,
+				Anonymization: policy.Anonymization, AnonymizationRules: policy.AnonymizationRules,
+			})
+		}
+		encoded, err := json.Marshal(endpointAttachments)
+		if err != nil {
+			writeError(w, http.StatusServiceUnavailable, "policy_unavailable", "required policy evaluation is unavailable")
+			return false
+		}
+		req.Metadata[provider.EndpointPolicyAttachmentsMetadataKey] = string(encoded)
 	}
 	return true
 }

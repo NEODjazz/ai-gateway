@@ -10710,9 +10710,13 @@ components:
       properties:
         policy_name: {type: string, minLength: 1, maxLength: 128}
         scope: {type: string, enum: ['*', specific, '']}
+        organizations: {type: array, maxItems: 256, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 512}}
         teams: {type: array, maxItems: 256, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 512}}
+        users: {type: array, maxItems: 256, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 512}}
         keys: {type: array, maxItems: 256, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 512}}
         models: {type: array, maxItems: 256, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 512}}
+        providers: {type: array, maxItems: 256, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 512}}
+        deployments: {type: array, maxItems: 256, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 512}}
         tags: {type: array, maxItems: 256, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 512}}
     PolicyAttachment:
       allOf:
@@ -10724,10 +10728,14 @@ components:
       type: object
       additionalProperties: false
       properties:
+        organization_id: {type: string, maxLength: 512}
         team_id: {type: string, maxLength: 512}
+        user_id: {type: string, maxLength: 512}
         credential_id: {type: string, maxLength: 512}
         credential_alias: {type: string, maxLength: 512}
         model: {type: string, maxLength: 512}
+        provider_id: {type: string, maxLength: 512}
+        deployment_id: {type: string, maxLength: 512}
         tags: {type: array, maxItems: 256, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 512}}
     ResolvedPolicyAttachment:
       type: object
@@ -10736,7 +10744,7 @@ components:
         id: {type: string}
         policy_name: {type: string}
         scope: {type: string}
-        matched_via: {type: array, items: {type: string, enum: [global, team, key, key_id, key_alias, model, tag]}}
+        matched_via: {type: array, items: {type: string, enum: [global, organization, team, user, key, key_id, key_alias, model, provider, deployment, tag]}}
         policy_status: {type: string, enum: [enabled, disabled, missing, unavailable]}
         dlp: {type: boolean}
         output_dlp: {type: boolean}

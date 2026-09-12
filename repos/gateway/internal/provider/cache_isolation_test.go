@@ -20,6 +20,9 @@ func TestCacheIsolationIncludesIdentityAndEffectivePolicy(t *testing.T) {
 		{"user", func(r *modules.RequestContext) { r.UserID = "other" }},
 		{"team", func(r *modules.RequestContext) { r.TeamID = "other" }},
 		{"policy", func(r *modules.RequestContext) { r.Metadata = map[string]string{"policy.modules.dlp.enabled": "false"} }},
+		{"anonymization", func(r *modules.RequestContext) {
+			r.Metadata = map[string]string{"provider.modules.anonymizer.mode": "disabled"}
+		}},
 		{"grants", func(r *modules.RequestContext) { r.AllowedTools = []string{"new-tool"} }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

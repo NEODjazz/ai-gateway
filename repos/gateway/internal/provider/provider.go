@@ -2296,24 +2296,41 @@ func providerAttemptContext(req modules.RequestContext, endpoint Endpoint) modul
 	for key, value := range providerMetadata(endpoint) {
 		attemptCtx.Metadata[key] = value
 	}
-	mode, rules, profiles := ResolveAnonymization(
+	endpointDLP, endpointOutputDLP, endpointAV, endpointAnonymization, endpointPolicies := endpointPolicySettings(attemptCtx.Metadata, endpoint)
+	anonymizationSettings := []AnonymizationSetting{
 		AnonymizationSetting{Profile: endpoint.GuardrailPolicy, Mode: endpoint.Anonymization, Rules: endpoint.AnonymizationRules},
 		AnonymizationSetting{Profile: attemptCtx.Metadata["policy.modules.anonymizer.profiles"], Mode: attemptCtx.Metadata["policy.modules.anonymizer.mode"], Rules: splitMetadataList(attemptCtx.Metadata["policy.modules.anonymizer.rules"])},
-	)
+	}
+	anonymizationSettings = append(anonymizationSettings, endpointAnonymization...)
+	mode, rules, profiles := ResolveAnonymization(anonymizationSettings...)
 	attemptCtx.Metadata["provider.modules.anonymizer.mode"] = mode
 	attemptCtx.Metadata["provider.modules.anonymizer.rules"] = strings.Join(rules, ",")
 	attemptCtx.Metadata["provider.modules.anonymizer.profiles"] = strings.Join(profiles, ",")
 	if attemptCtx.Metadata["policy.modules.dlp.enabled"] == "true" {
 		attemptCtx.Metadata["provider.modules.dlp.enabled"] = "true"
 	}
+	if endpointDLP {
+		attemptCtx.Metadata["provider.modules.dlp.enabled"] = "true"
+	}
 	if attemptCtx.Metadata["policy.modules.dlp.output_enabled"] == "true" {
+		attemptCtx.Metadata["provider.modules.dlp.output_enabled"] = "true"
+	}
+	if endpointOutputDLP {
 		attemptCtx.Metadata["provider.modules.dlp.output_enabled"] = "true"
 	}
 	if attemptCtx.Metadata["policy.modules.av.enabled"] == "true" {
 		attemptCtx.Metadata["provider.modules.av.enabled"] = "true"
 	}
+	if endpointAV {
+		attemptCtx.Metadata["provider.modules.av.enabled"] = "true"
+	}
 	if names := attemptCtx.Metadata["policy.guardrail.names"]; names != "" {
 		attemptCtx.Metadata["provider.guardrail.attached_policies"] = names
+		attemptCtx.Metadata["provider.guardrail.policy"] = combinePolicyNames(attemptCtx.Metadata["provider.guardrail.policy"], names)
+	}
+	if len(endpointPolicies) != 0 {
+		names := strings.Join(endpointPolicies, ",")
+		attemptCtx.Metadata["provider.guardrail.attached_policies"] = combinePolicyNames(attemptCtx.Metadata["provider.guardrail.attached_policies"], names)
 		attemptCtx.Metadata["provider.guardrail.policy"] = combinePolicyNames(attemptCtx.Metadata["provider.guardrail.policy"], names)
 	}
 	originalModel := attemptCtx.Request.Model

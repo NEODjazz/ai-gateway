@@ -112,17 +112,23 @@ func TestAssignedAccessGroupsFilterModelDiscovery(t *testing.T) {
 func TestPolicyAttachmentMatchingRequiresEveryConfiguredDimension(t *testing.T) {
 	registry := NewAccessRegistry()
 	_, err := registry.PutPolicyAttachment("healthcare", PolicyAttachment{
-		PolicyName: "strict", Scope: "specific", Teams: []string{"care-*"}, Keys: []string{"clinical-*"}, Models: []string{"gpt-5.*"}, Tags: []string{"hipaa"},
+		PolicyName: "strict", Scope: "specific", Organizations: []string{"org-*"}, Teams: []string{"care-*"}, Users: []string{"doctor-*"}, Keys: []string{"clinical-*"}, Models: []string{"gpt-5.*"}, Providers: []string{"azure-*"}, Deployments: []string{"eu-*"}, Tags: []string{"hipaa"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	matched := registry.MatchingPolicyAttachments(PolicyMatchContext{TeamID: "care-a", CredentialID: "vk-1", CredentialAlias: "clinical-prod", Model: "gpt-5.6", Tags: []string{"hipaa"}})
+	context := PolicyMatchContext{OrganizationID: "org-a", TeamID: "care-a", UserID: "doctor-a", CredentialID: "vk-1", CredentialAlias: "clinical-prod", Model: "gpt-5.6", ProviderID: "azure-openai", DeploymentID: "eu-primary", Tags: []string{"hipaa"}}
+	matched := registry.MatchingPolicyAttachments(context)
 	if len(matched) != 1 || matched[0].PolicyName != "strict" {
 		t.Fatalf("expected attachment match, got %+v", matched)
 	}
 	if got := registry.MatchingPolicyAttachments(PolicyMatchContext{TeamID: "care-a", CredentialAlias: "clinical-prod", Model: "gpt-5.6", Tags: []string{"public"}}); len(got) != 0 {
 		t.Fatalf("attachment matched without the required tag: %+v", got)
+	}
+	candidateContext := context
+	candidateContext.ProviderID, candidateContext.DeploymentID = "", ""
+	if got := registry.CandidatePolicyAttachments(candidateContext); len(got) != 1 {
+		t.Fatalf("endpoint-scoped attachment was not retained for routing: %+v", got)
 	}
 	if _, err := registry.PutPolicyAttachment("invalid-global", PolicyAttachment{PolicyName: "strict", Scope: "*", Teams: []string{"care-a"}}); err == nil {
 		t.Fatal("global attachment with specific selectors was accepted")
@@ -235,6 +241,36 @@ func TestPolicyAttachmentsAdminAPIAndRequestEvaluation(t *testing.T) {
 	router.ServeHTTP(remove, httptest.NewRequest(http.MethodDelete, "/admin/v1/policy-attachments/clinical", nil))
 	if remove.Code != http.StatusNoContent || len(registry.PolicyAttachments()) != 0 {
 		t.Fatalf("delete attachment status=%d body=%s", remove.Code, remove.Body.String())
+	}
+}
+
+func TestEndpointScopedPolicyIsDeferredWithIdentityContext(t *testing.T) {
+	runtime := provider.New(provider.Config{GuardrailPolicies: map[string]config.GuardrailPolicyConfig{
+		"local-clear": {Anonymization: "disabled"},
+	}})
+	registry := NewAccessRegistry()
+	_, err := registry.PutPolicyAttachment("local-clear", PolicyAttachment{
+		PolicyName: "local-clear", Scope: "specific", Organizations: []string{"org-a"}, Users: []string{"user-a"}, Providers: []string{"ollama"}, Deployments: []string{"local-*"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := NewHandler(modulesPipeline("admin"), runtime).WithAccessRegistry(registry)
+	req := modules.RequestContext{OrganizationID: "org-a", UserID: "user-a", CredentialID: "key-a"}
+	if !handler.applyPolicyAttachments(httptest.NewRecorder(), &req, "model") {
+		t.Fatal("endpoint-scoped attachment was rejected")
+	}
+	var deferred []provider.EndpointPolicyAttachment
+	if err := json.Unmarshal([]byte(req.Metadata[provider.EndpointPolicyAttachmentsMetadataKey]), &deferred); err != nil {
+		t.Fatal(err)
+	}
+	if len(deferred) != 1 || deferred[0].PolicyName != "local-clear" || deferred[0].Anonymization != "disabled" || strings.Join(deferred[0].Deployments, ",") != "local-*" {
+		t.Fatalf("unexpected deferred policy: %+v", deferred)
+	}
+
+	nonMatching := modules.RequestContext{OrganizationID: "org-a", UserID: "other", CredentialID: "key-b"}
+	if !handler.applyPolicyAttachments(httptest.NewRecorder(), &nonMatching, "model") || nonMatching.Metadata != nil {
+		t.Fatalf("user-scoped policy leaked: %+v", nonMatching.Metadata)
 	}
 }
 

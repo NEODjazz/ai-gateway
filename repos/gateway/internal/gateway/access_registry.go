@@ -34,13 +34,17 @@ type AccessGroupPolicy struct {
 	AllowedTools  []string
 }
 type PolicyAttachment struct {
-	ID         string   `json:"id"`
-	PolicyName string   `json:"policy_name"`
-	Scope      string   `json:"scope"`
-	Teams      []string `json:"teams,omitempty"`
-	Keys       []string `json:"keys,omitempty"`
-	Models     []string `json:"models,omitempty"`
-	Tags       []string `json:"tags,omitempty"`
+	ID            string   `json:"id"`
+	PolicyName    string   `json:"policy_name"`
+	Scope         string   `json:"scope"`
+	Organizations []string `json:"organizations,omitempty"`
+	Teams         []string `json:"teams,omitempty"`
+	Users         []string `json:"users,omitempty"`
+	Keys          []string `json:"keys,omitempty"`
+	Models        []string `json:"models,omitempty"`
+	Providers     []string `json:"providers,omitempty"`
+	Deployments   []string `json:"deployments,omitempty"`
+	Tags          []string `json:"tags,omitempty"`
 }
 type TagDefinition struct {
 	Name          string   `json:"name"`
@@ -50,10 +54,14 @@ type TagDefinition struct {
 }
 
 type PolicyMatchContext struct {
+	OrganizationID  string
 	TeamID          string
+	UserID          string
 	CredentialID    string
 	CredentialAlias string
 	Model           string
+	ProviderID      string
+	DeploymentID    string
 	Tags            []string
 }
 
@@ -191,11 +199,19 @@ func (r *AccessRegistry) TagModelAllowed(tags []string, model string) (bool, str
 }
 
 func (r *AccessRegistry) MatchingPolicyAttachments(context PolicyMatchContext) []PolicyAttachment {
+	return r.matchingPolicyAttachments(context, false)
+}
+
+func (r *AccessRegistry) CandidatePolicyAttachments(context PolicyMatchContext) []PolicyAttachment {
+	return r.matchingPolicyAttachments(context, true)
+}
+
+func (r *AccessRegistry) matchingPolicyAttachments(context PolicyMatchContext, deferEndpoint bool) []PolicyAttachment {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	result := make([]PolicyAttachment, 0)
 	for _, item := range r.attachments {
-		if policyAttachmentMatches(item, context) {
+		if policyAttachmentMatches(item, context, deferEndpoint) {
 			result = append(result, clonePolicyAttachment(item))
 		}
 	}
@@ -241,20 +257,24 @@ func (r *AccessRegistry) PutPolicyAttachment(id string, item PolicyAttachment) (
 	id = strings.TrimSpace(id)
 	item.PolicyName = strings.TrimSpace(item.PolicyName)
 	item.Scope = strings.TrimSpace(item.Scope)
-	if !validMCPID(id) || item.PolicyName == "" || len(item.PolicyName) > 128 || (item.Scope != "*" && item.Scope != "specific" && item.Scope != "") || !validAccessStrings(item.Teams) || !validAccessStrings(item.Keys) || !validAccessStrings(item.Models) || !validAccessStrings(item.Tags) {
+	if !validMCPID(id) || item.PolicyName == "" || len(item.PolicyName) > 128 || (item.Scope != "*" && item.Scope != "specific" && item.Scope != "") || !validAccessStrings(item.Organizations) || !validAccessStrings(item.Teams) || !validAccessStrings(item.Users) || !validAccessStrings(item.Keys) || !validAccessStrings(item.Models) || !validAccessStrings(item.Providers) || !validAccessStrings(item.Deployments) || !validAccessStrings(item.Tags) {
 		return PolicyAttachment{}, errInvalidAccessEntry
 	}
 	if item.Scope == "*" {
-		if len(item.Teams) != 0 || len(item.Keys) != 0 || len(item.Models) != 0 || len(item.Tags) != 0 {
+		if len(item.Organizations) != 0 || len(item.Teams) != 0 || len(item.Users) != 0 || len(item.Keys) != 0 || len(item.Models) != 0 || len(item.Providers) != 0 || len(item.Deployments) != 0 || len(item.Tags) != 0 {
 			return PolicyAttachment{}, errInvalidAccessEntry
 		}
-	} else if len(item.Teams) == 0 && len(item.Keys) == 0 && len(item.Models) == 0 && len(item.Tags) == 0 {
+	} else if len(item.Organizations) == 0 && len(item.Teams) == 0 && len(item.Users) == 0 && len(item.Keys) == 0 && len(item.Models) == 0 && len(item.Providers) == 0 && len(item.Deployments) == 0 && len(item.Tags) == 0 {
 		return PolicyAttachment{}, errInvalidAccessEntry
 	}
 	item.ID = id
+	item.Organizations = uniqueStrings(item.Organizations)
 	item.Teams = uniqueStrings(item.Teams)
+	item.Users = uniqueStrings(item.Users)
 	item.Keys = uniqueStrings(item.Keys)
 	item.Models = uniqueStrings(item.Models)
+	item.Providers = uniqueStrings(item.Providers)
+	item.Deployments = uniqueStrings(item.Deployments)
 	item.Tags = uniqueStrings(item.Tags)
 	r.mu.Lock()
 	r.attachments[id] = item
@@ -328,24 +348,40 @@ func (r *AccessRegistry) DeleteTag(name string) error {
 }
 
 func clonePolicyAttachment(item PolicyAttachment) PolicyAttachment {
+	item.Organizations = append([]string(nil), item.Organizations...)
 	item.Teams = append([]string(nil), item.Teams...)
+	item.Users = append([]string(nil), item.Users...)
 	item.Keys = append([]string(nil), item.Keys...)
 	item.Models = append([]string(nil), item.Models...)
+	item.Providers = append([]string(nil), item.Providers...)
+	item.Deployments = append([]string(nil), item.Deployments...)
 	item.Tags = append([]string(nil), item.Tags...)
 	return item
 }
 
-func policyAttachmentMatches(item PolicyAttachment, context PolicyMatchContext) bool {
+func policyAttachmentMatches(item PolicyAttachment, context PolicyMatchContext, deferEndpoint bool) bool {
 	if item.Scope == "*" {
 		return true
 	}
+	if len(item.Organizations) != 0 && !matchesPolicyPattern(context.OrganizationID, item.Organizations) {
+		return false
+	}
 	if len(item.Teams) != 0 && !matchesPolicyPattern(context.TeamID, item.Teams) {
+		return false
+	}
+	if len(item.Users) != 0 && !matchesPolicyPattern(context.UserID, item.Users) {
 		return false
 	}
 	if len(item.Keys) != 0 && !matchesPolicyPattern(context.CredentialID, item.Keys) && !matchesPolicyPattern(context.CredentialAlias, item.Keys) {
 		return false
 	}
 	if len(item.Models) != 0 && !matchesPolicyPattern(context.Model, item.Models) {
+		return false
+	}
+	if !deferEndpoint && len(item.Providers) != 0 && !matchesPolicyPattern(context.ProviderID, item.Providers) {
+		return false
+	}
+	if !deferEndpoint && len(item.Deployments) != 0 && !matchesPolicyPattern(context.DeploymentID, item.Deployments) {
 		return false
 	}
 	if len(item.Tags) != 0 {
@@ -363,9 +399,15 @@ func policyAttachmentMatchDimensions(item PolicyAttachment, context PolicyMatchC
 	if item.Scope == "*" {
 		return []string{"global"}
 	}
-	dimensions := make([]string, 0, 4)
+	dimensions := make([]string, 0, 8)
+	if len(item.Organizations) != 0 {
+		dimensions = append(dimensions, "organization")
+	}
 	if len(item.Teams) != 0 {
 		dimensions = append(dimensions, "team")
+	}
+	if len(item.Users) != 0 {
+		dimensions = append(dimensions, "user")
 	}
 	if len(item.Keys) != 0 {
 		dimension := "key"
@@ -378,6 +420,12 @@ func policyAttachmentMatchDimensions(item PolicyAttachment, context PolicyMatchC
 	}
 	if len(item.Models) != 0 {
 		dimensions = append(dimensions, "model")
+	}
+	if len(item.Providers) != 0 {
+		dimensions = append(dimensions, "provider")
+	}
+	if len(item.Deployments) != 0 {
+		dimensions = append(dimensions, "deployment")
 	}
 	if len(item.Tags) != 0 {
 		dimensions = append(dimensions, "tag")
