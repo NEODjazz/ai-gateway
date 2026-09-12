@@ -1222,3 +1222,12 @@ against their declared MIME signature and converted to inline input before
 policy, TPM, cache isolation, routing and billing. Batch creation snapshots the
 resolved bytes. Focused regressions and the full Go tests, race tests, vet and
 build passed.
+
+Rancher Desktop built `ai-gateway-gateway:gaps-8ec020b` with image ID
+`sha256:91b34b1de08d13f3c259f2c614b4ccd27aee1e5ca5802174ce9f27b4bc6721a2`.
+Gateway Helm revision 463 completed successfully, and pod
+`ai-gateway-gateway-569d897479-52m9s` became Ready with zero restarts and the
+same digest. Live OpenAPI 0.1.362 exposes the URL image source and bounds. A
+valid URL image passed structural validation and reached authentication; an
+HTTP loopback URL returned 400 before authentication or network access. These
+smoke checks used no credential and performed no external inference.
