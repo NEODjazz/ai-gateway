@@ -1109,3 +1109,13 @@ routing requires `document_citations`, exact-cache keys isolate it, and semantic
 cache reuse is disabled. Requests with `enabled: false` fail validation instead
 of being silently reinterpreted. Full Go tests, race tests, vet and build passed,
 along with all 166 UI tests, UI type checking and the production UI build.
+
+Rancher Desktop built `ai-gateway-gateway:gaps-eab031b` with image ID
+`sha256:07aa3e219c1cf166786408e020541ad8bc3c4634065d866023901d0964ec0aa4`.
+Gateway Helm revision 457 completed successfully, and pod
+`ai-gateway-gateway-5bf6bf6b5c-j7kv4` became Ready with zero restarts and the
+same digest. Live OpenAPI 0.1.356 exposes the citation request contract and
+capability. With the required protocol-version header, a PDF request using
+`citations.enabled=true` passed structural validation and reached
+authentication; `enabled=false` returned 400 before authentication. These
+smoke checks used no credential and performed no external inference.
