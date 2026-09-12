@@ -1585,3 +1585,26 @@ same image ID. Live liveness and readiness returned 204, OpenAPI reported
 `return_documents`, text documents and object documents. An unauthenticated
 Rerank request returned 401 before deployment selection. No provider credential
 or external inference was used by the smoke checks.
+
+Source `e0145e5` adds bounded Together Text-to-Speech through native
+`/v1/audio/speech`. The adapter preserves model, input, voice and lowercase
+language, maps public PCM to upstream raw audio, sends an explicit MP3 default,
+and normalizes a validated binary response to the requested media type.
+Instructions, speed, unsupported formats and SSE fail before HTTP. The existing
+shared lifecycle records exact Unicode input characters for settlement. Protocol
+regressions cover MP3 and PCM request mapping, bearer propagation, media-type
+normalization and every rejected option. Focused protocol and race tests, the
+full Go suite, full race suite, vet and build passed. Contract commit `363cf3e`
+publishes the operation and parameter matrix in OpenAPI 0.1.377.
+
+Rancher Desktop built `ai-gateway-gateway:together-speech-363cf3e` with image ID
+`sha256:0542807d9f5abe305bb8551c2cf48c85af353610a704f0289612702c284d5155`.
+Gateway Helm revision 483 completed successfully; its manifest differs from
+revision 482 only by the top-level image tag. Pod
+`ai-gateway-gateway-897c4c58b-rj7zh` became Ready with zero restarts and the same
+image ID. Live liveness and readiness returned 204, OpenAPI reported 0.1.377,
+and the Together capability profile exposed Text-to-Speech with lowercase
+language, response format and binary stream-format controls while keeping SSE
+disabled. An unauthenticated speech request returned 401 before deployment
+selection. No provider credential or external inference was used by the smoke
+checks.
