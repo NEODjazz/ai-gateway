@@ -62,6 +62,14 @@ func (n NVIDIANIM) StreamResponses(ctx context.Context, request openai.ResponseR
 	return n.compatible.StreamResponses(ctx, request, write)
 }
 
+func (n NVIDIANIM) RetrieveResponse(ctx context.Context, id string) (openai.ResponseResponse, error) {
+	return n.compatible.RetrieveResponse(ctx, id)
+}
+
+func (n NVIDIANIM) CancelResponse(ctx context.Context, id string) (openai.ResponseResponse, error) {
+	return n.compatible.CancelResponse(ctx, id)
+}
+
 func (n NVIDIANIM) ValidateCompletionParameters(request openai.CompletionRequest) error {
 	return n.compatible.ValidateCompletionParameters(request)
 }

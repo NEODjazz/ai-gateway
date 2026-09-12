@@ -183,3 +183,35 @@ func TestNVIDIANIMRejectsUnsupportedServiceTierBeforeHTTP(t *testing.T) {
 		t.Fatalf("err=%v called=%v", err, called)
 	}
 }
+
+func TestNVIDIANIMResponseLifecycleContracts(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer nim-key" || r.URL.Path != "/v1/responses/resp_123" && r.URL.Path != "/v1/responses/resp_123/cancel" {
+			t.Fatalf("request=%s %s headers=%v", r.Method, r.URL.Path, r.Header)
+		}
+		switch r.Method + " " + r.URL.Path {
+		case "GET /v1/responses/resp_123":
+			_, _ = fmt.Fprint(w, `{"id":"resp_123","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"done"}]}],"usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}`)
+		case "POST /v1/responses/resp_123/cancel":
+			if r.ContentLength > 0 {
+				t.Fatalf("cancel content length=%d", r.ContentLength)
+			}
+			_, _ = fmt.Fprint(w, `{"id":"resp_123","status":"cancelled","output":[],"usage":{"input_tokens":2,"output_tokens":0,"total_tokens":2}}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client := NewNVIDIANIM(server.URL, "nim-key", false)
+	retrieved, err := client.RetrieveResponse(t.Context(), "resp_123")
+	if err != nil || retrieved.OutputText != "done" || retrieved.Usage.TotalTokens != 3 {
+		t.Fatalf("retrieved=%+v err=%v", retrieved, err)
+	}
+	cancelled, err := client.CancelResponse(t.Context(), "resp_123")
+	if err != nil || cancelled.Status != "cancelled" || cancelled.Usage.TotalTokens != 2 {
+		t.Fatalf("cancelled=%+v err=%v", cancelled, err)
+	}
+}
+
+var _ responseRetrieveClient = NVIDIANIM{}
+var _ responseCancelClient = NVIDIANIM{}
