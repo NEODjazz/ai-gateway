@@ -43,6 +43,17 @@ func (p OpenAICompatible) OpenRealtime(ctx context.Context, model string) (Realt
 	if model == "" || len(model) > 256 {
 		return nil, errors.New("realtime model is required and must not exceed 256 bytes")
 	}
+	if p.realtimeURL != nil {
+		endpoint, err := p.realtimeURL(model)
+		if err != nil {
+			return nil, err
+		}
+		header, err := p.realtimeAuth(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return openRealtimeWebSocket(ctx, endpoint, header)
+	}
 	endpoint, err := url.Parse(providerURL(p.baseURL, "realtime"))
 	if err != nil || endpoint.Host == "" || (endpoint.Scheme != "http" && endpoint.Scheme != "https") {
 		return nil, errors.New("invalid realtime provider URL")
@@ -55,6 +66,18 @@ func (p OpenAICompatible) OpenRealtime(ctx context.Context, model string) (Realt
 	query := endpoint.Query()
 	query.Set("model", model)
 	endpoint.RawQuery = query.Encode()
+	header := make(http.Header)
+	if p.apiKey != "" {
+		header.Set("Authorization", "Bearer "+p.apiKey)
+	}
+	header.Set("OpenAI-Beta", "realtime=v1")
+	return openRealtimeWebSocket(ctx, endpoint, header)
+}
+
+func openRealtimeWebSocket(ctx context.Context, endpoint *url.URL, header http.Header) (RealtimeConnection, error) {
+	if endpoint == nil || endpoint.Host == "" || endpoint.User != nil || (endpoint.Scheme != "ws" && endpoint.Scheme != "wss") {
+		return nil, errors.New("invalid realtime provider URL")
+	}
 	origin := *endpoint
 	if origin.Scheme == "wss" {
 		origin.Scheme = "https"
@@ -66,11 +89,7 @@ func (p OpenAICompatible) OpenRealtime(ctx context.Context, model string) (Realt
 	if err != nil {
 		return nil, errors.New("invalid realtime websocket configuration")
 	}
-	config.Header = make(http.Header)
-	if p.apiKey != "" {
-		config.Header.Set("Authorization", "Bearer "+p.apiKey)
-	}
-	config.Header.Set("OpenAI-Beta", "realtime=v1")
+	config.Header = header.Clone()
 	conn, err := config.DialContext(ctx)
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {

@@ -10,7 +10,96 @@ import (
 	"time"
 
 	"ai-gateway-gateway/internal/openai"
+	"golang.org/x/net/websocket"
 )
+
+func TestAzureOpenAIRealtimeUsesNativeURLAndAuthentication(t *testing.T) {
+	for _, test := range []struct {
+		name, basePath, credential, apiVersion, authType string
+		wantPath, wantQuery, wantAPIKey, wantBearer      string
+	}{
+		{name: "GA API key", basePath: "/openai/deployments/legacy", credential: "resource-key", authType: "api_key", wantPath: "/openai/v1/realtime", wantQuery: "model=deployment-a", wantAPIKey: "resource-key"},
+		{name: "preview Entra", basePath: "/openai/deployments/legacy", credential: "entra-token", apiVersion: "2025-04-01-preview", authType: "entra", wantPath: "/openai/realtime", wantQuery: "api-version=2025-04-01-preview&deployment=deployment-a", wantBearer: "Bearer entra-token"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			serverErr := make(chan error, 1)
+			server := httptest.NewServer(websocket.Handler(func(connection *websocket.Conn) {
+				request := connection.Request()
+				if request.URL.Path != test.wantPath || request.URL.RawQuery != test.wantQuery {
+					serverErr <- fmt.Errorf("unexpected realtime URL: %s", request.URL.String())
+					return
+				}
+				if request.Header.Get("api-key") != test.wantAPIKey || request.Header.Get("Authorization") != test.wantBearer {
+					serverErr <- fmt.Errorf("unexpected realtime auth headers: %v", request.Header)
+					return
+				}
+				var event string
+				if err := websocket.Message.Receive(connection, &event); err != nil {
+					serverErr <- err
+					return
+				}
+				if event != `{"type":"session.update"}` {
+					serverErr <- fmt.Errorf("unexpected realtime event: %s", event)
+					return
+				}
+				serverErr <- nil
+			}))
+			t.Cleanup(server.Close)
+			client := NewAzureOpenAI(server.URL+test.basePath, test.credential, false, test.apiVersion, test.authType)
+			connection, err := client.OpenRealtime(t.Context(), "deployment-a")
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = connection.Close() })
+			if err := connection.Send([]byte(`{"type":"session.update"}`)); err != nil {
+				t.Fatal(err)
+			}
+			if err := <-serverErr; err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestAzureOpenAIRealtimeFailsClosedWithoutAPIKey(t *testing.T) {
+	client := NewAzureOpenAI("https://resource.openai.azure.com", "", false, "", "api_key")
+	if _, err := client.OpenRealtime(t.Context(), "deployment-a"); err == nil {
+		t.Fatal("missing Azure Realtime API key was accepted")
+	}
+}
+
+func TestAzureOpenAIRealtimeUsesAmbientManagedIdentity(t *testing.T) {
+	serverErr := make(chan error, 1)
+	mux := http.NewServeMux()
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	mux.HandleFunc("/identity/token", func(w http.ResponseWriter, request *http.Request) {
+		if request.Header.Get("X-IDENTITY-HEADER") != "identity-header" || request.URL.Query().Get("resource") != azureOpenAIResource {
+			http.Error(w, "invalid identity request", http.StatusBadRequest)
+			return
+		}
+		_, _ = fmt.Fprintf(w, `{"access_token":"ambient-token","expires_on":%d,"token_type":"Bearer"}`, time.Now().Add(time.Hour).Unix())
+	})
+	mux.Handle("/openai/v1/realtime", websocket.Handler(func(connection *websocket.Conn) {
+		request := connection.Request()
+		if request.URL.Query().Get("model") != "deployment-a" || request.Header.Get("Authorization") != "Bearer ambient-token" || request.Header.Get("api-key") != "" {
+			serverErr <- fmt.Errorf("unexpected ambient realtime request: %s headers=%v", request.URL.String(), request.Header)
+			return
+		}
+		serverErr <- nil
+	}))
+	t.Setenv("IDENTITY_ENDPOINT", server.URL+"/identity/token")
+	t.Setenv("IDENTITY_HEADER", "identity-header")
+	client := NewAzureOpenAI(server.URL, "", false, "", "entra")
+	connection, err := client.OpenRealtime(t.Context(), "deployment-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = connection.Close() })
+	if err := <-serverErr; err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestAzureOpenAIResourceRootUsesV1AndAPIKey(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

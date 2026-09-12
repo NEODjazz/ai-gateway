@@ -1,6 +1,8 @@
 package provider
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"net/url"
 	"strings"
@@ -52,11 +54,64 @@ func NewAzureOpenAI(baseURL, credential string, upstreamStream bool, apiVersion,
 	client := NewOpenAICompatible(baseURL, "", upstreamStream)
 	client.errorProvider = "azure-openai"
 	transport := client.client.Transport
+	normalizedAuthType := normalizeAzureAuthType(authType)
+	tokenSource := newAzureTokenSource(credential, baseURL)
 	client.client.Transport = azureOpenAITransport{
-		base: transport, credential: credential, tokenSource: newAzureTokenSource(credential, baseURL), authType: normalizeAzureAuthType(authType), apiVersion: strings.TrimSpace(apiVersion), legacyPath: legacyPath,
+		base: transport, credential: credential, tokenSource: tokenSource, authType: normalizedAuthType, apiVersion: strings.TrimSpace(apiVersion), legacyPath: legacyPath,
 	}
 	client.client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	client.realtimeURL = func(model string) (*url.URL, error) {
+		return azureRealtimeEndpoint(baseURL, strings.TrimSpace(apiVersion), model)
+	}
+	client.realtimeAuth = func(ctx context.Context) (http.Header, error) {
+		return azureRealtimeAuth(ctx, credential, normalizedAuthType, tokenSource)
+	}
 	return client
+}
+
+func azureRealtimeAuth(ctx context.Context, credential, authType string, tokenSource *azureTokenSource) (http.Header, error) {
+	header := make(http.Header)
+	if authType == "entra" {
+		token, tokenErr := tokenSource.Token(ctx)
+		if tokenErr != nil {
+			return nil, tokenErr
+		}
+		if strings.TrimSpace(token) == "" {
+			return nil, errors.New("azure realtime Entra token is empty")
+		}
+		header.Set("Authorization", "Bearer "+token)
+	} else {
+		if strings.TrimSpace(credential) == "" {
+			return nil, errors.New("azure realtime API key is required")
+		}
+		header.Set("api-key", credential)
+	}
+	return header, nil
+}
+
+func azureRealtimeEndpoint(baseURL, apiVersion, model string) (*url.URL, error) {
+	endpoint, err := url.Parse(baseURL)
+	if err != nil || endpoint.Host == "" || endpoint.User != nil || (endpoint.Scheme != "http" && endpoint.Scheme != "https") {
+		return nil, errors.New("invalid Azure realtime provider URL")
+	}
+	if endpoint.Scheme == "https" {
+		endpoint.Scheme = "wss"
+	} else {
+		endpoint.Scheme = "ws"
+	}
+	endpoint.RawQuery = ""
+	endpoint.Fragment = ""
+	query := make(url.Values)
+	if apiVersion == "" {
+		endpoint.Path = "/openai/v1/realtime"
+		query.Set("model", model)
+	} else {
+		endpoint.Path = "/openai/realtime"
+		query.Set("api-version", apiVersion)
+		query.Set("deployment", model)
+	}
+	endpoint.RawQuery = query.Encode()
+	return endpoint, nil
 }
 
 func normalizeAzureOpenAIBaseURL(value string) string {

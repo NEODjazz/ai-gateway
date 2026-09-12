@@ -10,6 +10,7 @@ import (
 	"io"
 	"maps"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -143,6 +144,8 @@ type OpenAICompatible struct {
 	supportsSafePrompt    bool
 	supportsPromptMode    bool
 	supportsMessagePrefix bool
+	realtimeURL           func(string) (*url.URL, error)
+	realtimeAuth          func(context.Context) (http.Header, error)
 	client                *http.Client
 }
 
