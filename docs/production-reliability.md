@@ -1037,3 +1037,13 @@ price multiplier before reserve so settlement reuses the same snapshot. The
 token-count contract now also preserves the previously documented top-level
 prompt-cache control. Full Go tests, race tests, vet and build passed; UI tests,
 type checking and the production bundle build passed.
+
+Rancher Desktop built `ai-gateway-gateway:gaps-f191d4b` with image ID
+`sha256:5982aff6450e12158e8c25d0765f9c0fb2eb3b4f2df8947aa85ce68de6acb830`.
+Gateway Helm revision 453 completed successfully, and pod
+`ai-gateway-gateway-67cf68587d-jk2q6` became Ready with zero restarts and the
+same digest. Live OpenAPI 0.1.352 exposes inference geography on Messages,
+token counting and response usage. Valid `us` generation and `global`
+token-count requests passed structural validation and reached authentication;
+an unsupported geography returned 400 on both endpoints. These smoke checks
+used no credential and performed no external inference.
