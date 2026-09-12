@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -149,6 +150,57 @@ func TestMessagesResolvesOwnedFileDocumentBeforePolicy(t *testing.T) {
 	foreign := nativeMessageCall(handler, `{"model":"model","max_tokens":20,"messages":[{"role":"user","content":[{"type":"document","source":{"type":"file","file_id":"file_other"}}]}]}`, "key")
 	if foreign.Code != http.StatusBadRequest || upstream.calls != 2 || billing.calls != 2 || !strings.Contains(foreign.Body.String(), "document file is unavailable") {
 		t.Fatalf("foreign status=%d calls=%d body=%s", foreign.Code, upstream.calls, foreign.Body.String())
+	}
+}
+
+func TestMessagesFetchesURLPDFAfterAuthenticationBeforePolicy(t *testing.T) {
+	upstream := &fallbackChatProvider{response: openai.ChatCompletionResponse{ID: "msg-url", Model: "model", Choices: []openai.Choice{{Message: openai.Message{Role: "assistant", Content: "summary"}, FinishReason: "stop"}}}}
+	billing := &lifecycleBillingModule{}
+	pipeline := modules.NewPipeline([]modules.Module{&fileAuthModule{credential: "credential", user: "user"}, modules.NewAnonymizerModule(true, modules.RuleEmail), billing})
+	h := NewHandler(pipeline, upstream)
+	fetches := 0
+	h.a2aHTTPClient = a2aHTTPDoerFunc(func(request *http.Request) (*http.Response, error) {
+		fetches++
+		if request.URL.String() != "https://documents.example/report.pdf" || request.Header.Get("Accept") != "application/pdf" || request.Header.Get("Authorization") != "" || request.Header.Get("x-api-key") != "" {
+			t.Fatalf("unsafe document request: %+v headers=%v", request.URL, request.Header)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/pdf"}}, Body: io.NopCloser(strings.NewReader("%PDF-1.7\nprivate@example.com"))}, nil
+	})
+	handler := Routes(h)
+	body := `{"model":"model","max_tokens":20,"messages":[{"role":"user","content":[{"type":"document","source":{"type":"url","url":"https://documents.example/report.pdf"},"title":"Report","citations":{"enabled":true}}]}]}`
+	unauthorizedHandler := NewHandler(modules.NewPipeline([]modules.Module{rejectingMessagesAuth{}}), upstream)
+	unauthorizedHandler.a2aHTTPClient = h.a2aHTTPClient
+	unauthorized := nativeMessageCall(Routes(unauthorizedHandler), body, "wrong-key")
+	if unauthorized.Code != http.StatusUnauthorized || fetches != 0 || upstream.calls != 0 || billing.calls != 0 {
+		t.Fatalf("unauthorized status=%d fetches=%d upstream=%d billing=%d body=%s", unauthorized.Code, fetches, upstream.calls, billing.calls, unauthorized.Body.String())
+	}
+	response := nativeMessageCall(handler, body, "gateway-test-key")
+	attachments, err := openai.ChatFileAttachments(upstream.request.Request.Messages)
+	if response.Code != http.StatusOK || fetches != 1 || upstream.calls != 1 || billing.calls != 1 || err != nil || len(attachments) != 1 || attachments[0].MediaType != "application/pdf" {
+		t.Fatalf("status=%d fetches=%d upstream=%d billing=%d attachments=%+v err=%v body=%s", response.Code, fetches, upstream.calls, billing.calls, attachments, err, response.Body.String())
+	}
+}
+
+func TestMessagesRejectsInvalidURLDocumentResponses(t *testing.T) {
+	upstream := &fallbackChatProvider{}
+	h := NewHandler(modules.NewPipeline([]modules.Module{&fileAuthModule{credential: "credential", user: "user"}}), upstream)
+	h.a2aHTTPClient = a2aHTTPDoerFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/plain"}}, Body: io.NopCloser(strings.NewReader("not a PDF"))}, nil
+	})
+	handler := Routes(h)
+	for _, source := range []string{
+		`{"type":"url","url":"http://documents.example/report.pdf"}`,
+		`{"type":"url","url":"https://user:pass@documents.example/report.pdf"}`,
+		`{"type":"url","url":"https://documents.example/report.pdf#fragment"}`,
+	} {
+		response := nativeMessageCall(handler, `{"model":"model","max_tokens":20,"messages":[{"role":"user","content":[{"type":"document","source":`+source+`}]}]}`, "gateway-test-key")
+		if response.Code != http.StatusBadRequest || upstream.calls != 0 {
+			t.Fatalf("source=%s status=%d calls=%d body=%s", source, response.Code, upstream.calls, response.Body.String())
+		}
+	}
+	wrongType := nativeMessageCall(handler, `{"model":"model","max_tokens":20,"messages":[{"role":"user","content":[{"type":"document","source":{"type":"url","url":"https://documents.example/report.pdf"}}]}]}`, "gateway-test-key")
+	if wrongType.Code != http.StatusBadRequest || upstream.calls != 0 {
+		t.Fatalf("wrong type status=%d calls=%d body=%s", wrongType.Code, upstream.calls, wrongType.Body.String())
 	}
 }
 
@@ -524,6 +576,14 @@ func TestMessagesRejectsInvalidNativeProviderBlocks(t *testing.T) {
 }
 
 type messagesAuth struct{ accessPolicyModule }
+
+type rejectingMessagesAuth struct{}
+
+func (rejectingMessagesAuth) Name() string   { return "auth" }
+func (rejectingMessagesAuth) Required() bool { return true }
+func (rejectingMessagesAuth) Handle(context.Context, *modules.RequestContext) error {
+	return modules.ErrUnauthorized
+}
 
 func (m messagesAuth) Handle(ctx context.Context, req *modules.RequestContext) error {
 	if req.APIKey != "gateway-test-key" {

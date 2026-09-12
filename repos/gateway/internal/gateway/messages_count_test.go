@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -172,6 +173,23 @@ func TestCountEndpointResolvesOwnedFileDocumentWithoutBilling(t *testing.T) {
 	response := countEndpointCall(handler, `{"model":"m","messages":[{"role":"user","content":[{"type":"document","source":{"type":"file","file_id":"file_owned"}}]}]}`, "gateway-test-key")
 	if response.Code != http.StatusOK || counter.calls != 1 || billing.calls != 0 || !openai.HasChatTextDocuments(counter.request.Request) || openai.ContentText(counter.request.Request.Messages[0].Content) != string(content) {
 		t.Fatalf("status=%d body=%s calls=%d request=%+v", response.Code, response.Body.String(), counter.calls, counter.request.Request)
+	}
+}
+
+func TestCountEndpointFetchesURLPDFWithoutBilling(t *testing.T) {
+	counter := &countProviderSpy{result: provider.TokenCountResult{InputTokens: 12}}
+	billing := &lifecycleBillingModule{}
+	h := NewHandler(modules.NewPipeline([]modules.Module{&fileAuthModule{credential: "credential", user: "user"}, billing, accessPolicyModule{models: []string{"*"}}}), counter)
+	fetches := 0
+	h.a2aHTTPClient = a2aHTTPDoerFunc(func(request *http.Request) (*http.Response, error) {
+		fetches++
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/pdf"}}, Body: io.NopCloser(strings.NewReader("%PDF-1.7\ncontent"))}, nil
+	})
+	handler := Routes(h)
+	response := countEndpointCall(handler, `{"model":"m","messages":[{"role":"user","content":[{"type":"document","source":{"type":"url","url":"https://documents.example/report.pdf"}}]}]}`, "gateway-test-key")
+	attachments, err := openai.ChatFileAttachments(counter.request.Request.Messages)
+	if response.Code != http.StatusOK || fetches != 1 || counter.calls != 1 || billing.calls != 0 || err != nil || len(attachments) != 1 || !strings.Contains(response.Body.String(), `"input_tokens":12`) {
+		t.Fatalf("status=%d fetches=%d calls=%d billing=%d attachments=%+v err=%v body=%s", response.Code, fetches, counter.calls, billing.calls, attachments, err, response.Body.String())
 	}
 }
 func TestCountEndpointEnforcesToolACLAndSharedRPM(t *testing.T) {

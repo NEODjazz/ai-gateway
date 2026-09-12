@@ -6,6 +6,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"net/http"
 	"strings"
 	"unicode/utf8"
 
@@ -16,8 +18,9 @@ import (
 
 var errMessagesFileUnavailable = errors.New("document file is unavailable")
 var errMessagesFileStorageUnavailable = errors.New("document file storage is unavailable")
+var errMessagesURLUnavailable = errors.New("document URL is unavailable")
 
-func (h Handler) resolveMessagesRequestFileReferences(ctx context.Context, identity modules.RequestContext, request *messagesRequest) error {
+func (h Handler) resolveMessagesRequestDocumentReferences(ctx context.Context, identity modules.RequestContext, request *messagesRequest) error {
 	owner := fileOwnerKey(identity)
 	for messageIndex := range request.Messages {
 		content := bytes.TrimSpace(request.Messages[messageIndex].Content)
@@ -34,6 +37,16 @@ func (h Handler) resolveMessagesRequestFileReferences(ctx context.Context, ident
 				continue
 			}
 			source, _ := block["source"].(map[string]any)
+			if source["type"] == "url" {
+				remoteURL, _ := source["url"].(string)
+				data, err := h.fetchMessagesPDF(ctx, remoteURL)
+				if err != nil {
+					return err
+				}
+				block["source"] = map[string]any{"type": "base64", "media_type": "application/pdf", "data": base64.StdEncoding.EncodeToString(data)}
+				changed = true
+				continue
+			}
 			if source["type"] != "file" {
 				continue
 			}
@@ -67,6 +80,32 @@ func (h Handler) resolveMessagesRequestFileReferences(ctx context.Context, ident
 	return err
 }
 
+func (h Handler) fetchMessagesPDF(ctx context.Context, remoteURL string) ([]byte, error) {
+	if h.a2aHTTPClient == nil {
+		return nil, errMessagesURLUnavailable
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, remoteURL, nil)
+	if err != nil {
+		return nil, errors.New("document URL is invalid")
+	}
+	request.Header.Set("Accept", "application/pdf")
+	response, err := h.a2aHTTPClient.Do(request)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", errMessagesURLUnavailable, err)
+	}
+	data, mediaType, err := readA2ARemoteContent(response, "application/pdf", 0, 0, 0, openai.MaxResponseFileBytes, openai.MaxResponseFileBytes)
+	if err != nil {
+		if errors.Is(err, errA2ARemoteUnavailable) {
+			return nil, fmt.Errorf("%w: %v", errMessagesURLUnavailable, err)
+		}
+		return nil, err
+	}
+	if mediaType != "application/pdf" {
+		return nil, errors.New("document URL must return application/pdf")
+	}
+	return data, nil
+}
+
 func (h Handler) ownedMessagesFile(ctx context.Context, owner, fileID string) (filestate.File, error) {
 	if h.files == nil {
 		return filestate.File{}, errMessagesFileStorageUnavailable
@@ -81,8 +120,8 @@ func (h Handler) ownedMessagesFile(ctx context.Context, owner, fileID string) (f
 	return file, nil
 }
 
-func (h Handler) resolveMessagesFileReferences(ctx context.Context, identity modules.RequestContext, request *openai.ChatCompletionRequest) error {
-	if !openai.HasChatFileReferences(*request) {
+func (h Handler) resolveMessagesDocumentReferences(ctx context.Context, identity modules.RequestContext, request *openai.ChatCompletionRequest) error {
+	if !openai.HasChatDocumentReferences(*request) {
 		return nil
 	}
 	textRunes := 0
@@ -104,7 +143,19 @@ func (h Handler) resolveMessagesFileReferences(ctx context.Context, identity mod
 		}
 		for partIndex := range parts {
 			object, ok := parts[partIndex].(map[string]any)
-			if !ok || object["type"] != "input_file_reference" {
+			if !ok {
+				continue
+			}
+			if object["type"] == "input_url_document" {
+				remoteURL, _ := object["url"].(string)
+				data, err := h.fetchMessagesPDF(ctx, remoteURL)
+				if err != nil {
+					return err
+				}
+				parts[partIndex] = map[string]any{"type": "input_file", "file_data": "data:application/pdf;base64," + base64.StdEncoding.EncodeToString(data), "filename": "input.pdf"}
+				continue
+			}
+			if object["type"] != "input_file_reference" {
 				continue
 			}
 			fileID, _ := object["file_id"].(string)

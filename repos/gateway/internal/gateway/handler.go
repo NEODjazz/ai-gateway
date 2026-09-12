@@ -305,13 +305,15 @@ func (h Handler) serveChatAdapted(w http.ResponseWriter, r *http.Request, reques
 	}
 
 	var pipelineErr error
-	if openai.HasChatFileReferences(request) {
+	if openai.HasChatDocumentReferences(request) {
 		pipelineErr = h.pipeline.RunAuthentication(r.Context(), &reqCtx)
 		if pipelineErr == nil {
 			reqCtx.APIKey = ""
-			if err := h.resolveMessagesFileReferences(r.Context(), reqCtx, &reqCtx.Request); err != nil {
+			if err := h.resolveMessagesDocumentReferences(r.Context(), reqCtx, &reqCtx.Request); err != nil {
 				if errors.Is(err, errMessagesFileStorageUnavailable) {
 					writeError(w, http.StatusServiceUnavailable, "file_storage_unavailable", err.Error())
+				} else if errors.Is(err, errMessagesURLUnavailable) {
+					writeError(w, http.StatusBadGateway, "document_unavailable", err.Error())
 				} else {
 					writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 				}

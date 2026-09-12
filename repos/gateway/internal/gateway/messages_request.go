@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"slices"
 	"strings"
 	"unicode"
@@ -421,6 +422,7 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 						MediaType string `json:"media_type"`
 						Data      string `json:"data"`
 						FileID    string `json:"file_id"`
+						URL       string `json:"url"`
 					} `json:"source"`
 				}
 				if err := decodeMessagesValue(raw, &block); err != nil || message.Role != "user" || block.Citations != nil && !block.Citations.Enabled {
@@ -434,26 +436,32 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 				}
 				var document any
 				switch {
-				case block.Source.Type == "base64" && block.Source.MediaType == "application/pdf":
+				case block.Source.Type == "base64" && block.Source.MediaType == "application/pdf" && block.Source.Data != "" && block.Source.FileID == "" && block.Source.URL == "":
 					file := map[string]any{"type": "input_file", "file_data": "data:application/pdf;base64," + block.Source.Data, "filename": "input.pdf"}
 					if _, err := openai.ResponseFileAttachments([]any{file}); err != nil {
 						return result, err
 					}
 					document = file
-				case block.Source.Type == "text" && block.Source.MediaType == "text/plain":
+				case block.Source.Type == "text" && block.Source.MediaType == "text/plain" && block.Source.FileID == "" && block.Source.URL == "":
 					runes := utf8.RuneCountInString(block.Source.Data)
 					if strings.TrimSpace(block.Source.Data) == "" || runes > 262144 || textDocumentRunes > 1048576-runes {
 						return result, errors.New("text documents must be non-empty, at most 262144 characters each and 1048576 characters in total")
 					}
 					textDocumentRunes += runes
 					document = map[string]any{"type": "input_document", "text": block.Source.Data}
-				case block.Source.Type == "file" && block.Source.FileID != "" && block.Source.MediaType == "" && block.Source.Data == "":
+				case block.Source.Type == "file" && block.Source.FileID != "" && block.Source.MediaType == "" && block.Source.Data == "" && block.Source.URL == "":
 					if !validFileToken(block.Source.FileID, 128) || !strings.HasPrefix(block.Source.FileID, "file_") {
 						return result, errors.New("document file_id is invalid")
 					}
 					document = map[string]any{"type": "input_file_reference", "file_id": block.Source.FileID}
+				case block.Source.Type == "url" && block.Source.URL != "" && block.Source.MediaType == "" && block.Source.Data == "" && block.Source.FileID == "":
+					parsed, err := url.Parse(block.Source.URL)
+					if err != nil || len(block.Source.URL) > 2048 || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" {
+						return result, errors.New("document URL must be a valid public HTTPS URL")
+					}
+					document = map[string]any{"type": "input_url_document", "url": block.Source.URL}
 				default:
-					return result, errors.New("only base64 PDF and inline plain-text user documents are supported")
+					return result, errors.New("only base64, URL or stored PDF and inline or stored plain-text user documents are supported")
 				}
 				parts = append(parts, document)
 				converted.AnthropicDocumentCitations = append(converted.AnthropicDocumentCitations, block.Citations != nil)

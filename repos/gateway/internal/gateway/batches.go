@@ -175,7 +175,7 @@ func (h Handler) decodeBatchItems(w http.ResponseWriter, ctx context.Context, id
 			if json.Unmarshal(normalized, &request) != nil {
 				return nil, fmt.Errorf("line %d: normalized Messages request is invalid", lineNumber)
 			}
-			resolveErr := h.resolveMessagesRequestFileReferences(ctx, identity, &request)
+			resolveErr := h.resolveMessagesRequestDocumentReferences(ctx, identity, &request)
 			if resolveErr != nil {
 				return nil, fmt.Errorf("line %d: %w", lineNumber, resolveErr)
 			}
