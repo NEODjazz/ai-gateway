@@ -561,6 +561,79 @@ func TestResponsesImageGenerationBillingReserveAndSettlement(t *testing.T) {
 	}
 }
 
+func TestResponsesHostedToolBillingReserveAndSettlement(t *testing.T) {
+	maxToolCalls := 4
+	req := &RequestContext{
+		Request: openai.ChatCompletionRequest{Model: "model"},
+		ResponseRequest: &openai.ResponseRequest{
+			Model: "model", Input: "research", MaxToolCalls: &maxToolCalls,
+			Tools: []openai.ResponseTool{
+				{Type: "web_search"},
+				{Type: "file_search", VectorStoreIDs: []string{"vs_1"}},
+				{Type: "code_interpreter"},
+				{Type: "mcp", ServerLabel: "documents", ServerURL: "https://mcp.example.test"},
+				{Type: "function", Name: "client_function"},
+				{Type: "custom", Name: "client_custom"},
+			},
+		},
+	}
+	reserved := billingRequest(req)
+	if reserved.APIType != "responses" || reserved.ToolRequests != 4 || reserved.SearchRequests != 4 || !reserved.SearchRequestsEstimated {
+		t.Fatalf("Responses hosted tool reserve=%+v", reserved)
+	}
+	req.ResponsesResponse = &openai.ResponseResponse{
+		ID: "resp_tools", Model: "model", Status: "completed",
+		Output: []openai.ResponseOutputItem{
+			{Type: "web_search_call", Status: "completed"},
+			{Type: "web_search_call", Status: "failed"},
+			{Type: "file_search_call", Status: "completed"},
+			{Type: "code_interpreter_call", Status: "completed"},
+			{Type: "mcp_call", Status: "failed"},
+			{Type: "mcp_list_tools", Status: "completed"},
+			{Type: "function_call", Status: "completed"},
+			{Type: "custom_tool_call", Status: "completed"},
+			{Type: "image_generation_call", Status: "completed", Result: json.RawMessage(`"aW1hZ2U="`)},
+		},
+		Usage: openai.ResponseUsage{InputTokens: 7, OutputTokens: 11, TotalTokens: 18},
+	}
+	settled := billingRequest(req)
+	if settled.Phase != "commit" || settled.ToolRequests != 3 || settled.SearchRequests != 2 || settled.SearchRequestsEstimated || settled.OutputImages != 1 || settled.TotalTokens != 18 || settled.UsageEstimated {
+		t.Fatalf("Responses hosted tool settlement=%+v", settled)
+	}
+}
+
+func TestResponsesWebSearchBillingUsesConservativeDefaultReserve(t *testing.T) {
+	req := &RequestContext{
+		Request:         openai.ChatCompletionRequest{Model: "model"},
+		ResponseRequest: &openai.ResponseRequest{Model: "model", Input: "search", Tools: []openai.ResponseTool{{Type: "web_search_preview"}}},
+	}
+	reserved := billingRequest(req)
+	if reserved.ToolRequests != 0 || reserved.SearchRequests != openai.WebSearchMaxUses || !reserved.SearchRequestsEstimated {
+		t.Fatalf("Responses web search reserve=%+v", reserved)
+	}
+
+	zero := 0
+	req.ResponseRequest.MaxToolCalls = &zero
+	reserved = billingRequest(req)
+	if reserved.SearchRequests != 0 || !reserved.SearchRequestsEstimated {
+		t.Fatalf("Responses zero-call reserve=%+v", reserved)
+	}
+}
+
+func TestResponsesClientToolsDoNotClaimProviderExecution(t *testing.T) {
+	req := &RequestContext{
+		Request: openai.ChatCompletionRequest{Model: "model"},
+		ResponseRequest: &openai.ResponseRequest{
+			Model: "model", Input: "call", Tools: []openai.ResponseTool{{Type: "function", Name: "function"}, {Type: "custom", Name: "custom"}},
+		},
+		ResponsesResponse: &openai.ResponseResponse{Model: "model", Output: []openai.ResponseOutputItem{{Type: "function_call"}, {Type: "custom_tool_call"}}},
+	}
+	settled := billingRequest(req)
+	if settled.ToolRequests != 0 || settled.SearchRequests != 0 || settled.SearchRequestsEstimated {
+		t.Fatalf("client tools must not be reported as provider-executed: %+v", settled)
+	}
+}
+
 func TestImageEditBillingReserveAndSettlement(t *testing.T) {
 	n := 2
 	attachment := openai.ImageAttachment{MediaType: "image/png", Data: "iVBORw0KGgpmaXh0dXJl"}

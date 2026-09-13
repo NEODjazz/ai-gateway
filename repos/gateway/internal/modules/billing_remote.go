@@ -273,6 +273,7 @@ func billingRequest(req *RequestContext) UsageRequest {
 	if req.ResponseRequest != nil {
 		request.Provider = req.ResponseRequest.Provider
 		request.Model = req.ResponseRequest.Model
+		request.ToolRequests, request.SearchRequests, request.SearchRequestsEstimated = responseToolUsageReserve(*req.ResponseRequest)
 		switch metadataValue(req.Metadata, "gateway.api_type") {
 		case "responses_compact":
 			request.APIType = "responses_compact"
@@ -421,6 +422,8 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.UpstreamModel = req.ResponsesResponse.Model
 		request.ProviderCostUSDTicks = trustedProviderCost(req, req.ResponsesResponse.Usage.ProviderCostUSDTicks)
 		request.OutputImages = responseOutputImageCount(*req.ResponsesResponse)
+		request.ToolRequests, request.SearchRequests = responseOutputToolUsage(*req.ResponsesResponse)
+		request.SearchRequestsEstimated = false
 		request.UsageEstimated = request.TotalTokens == 0
 		if details := req.ResponsesResponse.Usage.InputTokensDetails; details != nil {
 			request.CacheReadInputTokens = nonNegative(details.CachedTokens)
@@ -573,6 +576,44 @@ func responseRequestsImageGeneration(request openai.ResponseRequest) bool {
 		}
 	}
 	return false
+}
+
+func responseToolUsageReserve(request openai.ResponseRequest) (toolRequests, searchRequests int, searchEstimated bool) {
+	var hosted, search bool
+	for _, tool := range request.Tools {
+		switch tool.Type {
+		case "code_interpreter", "file_search", "mcp":
+			hosted = true
+		case "web_search", "web_search_preview":
+			search = true
+		}
+	}
+	if hosted {
+		toolRequests = 1
+		if request.MaxToolCalls != nil {
+			toolRequests = *request.MaxToolCalls
+		}
+	}
+	if search {
+		searchRequests = openai.WebSearchMaxUses
+		if request.MaxToolCalls != nil {
+			searchRequests = *request.MaxToolCalls
+		}
+		searchEstimated = true
+	}
+	return toolRequests, searchRequests, searchEstimated
+}
+
+func responseOutputToolUsage(response openai.ResponseResponse) (toolRequests, searchRequests int) {
+	for _, item := range response.Output {
+		switch item.Type {
+		case "code_interpreter_call", "file_search_call", "mcp_call":
+			toolRequests++
+		case "web_search_call":
+			searchRequests++
+		}
+	}
+	return toolRequests, searchRequests
 }
 
 func responseOutputImageCount(response openai.ResponseResponse) int {
