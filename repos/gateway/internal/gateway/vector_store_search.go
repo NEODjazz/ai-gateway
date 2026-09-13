@@ -145,7 +145,17 @@ func (h Handler) executeVectorStoreSearch(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadGateway, "module_failed", "module removed inference request")
 		return nil, false
 	}
-	if !h.authorizeRateLimit(w, r.Context(), reqCtx, estimateEmbeddingTokens(*reqCtx.EmbeddingRequest)) || !h.prepareModelFallbacks(w, r.Context(), &reqCtx, input.Model) {
+	embeddingRequest = *reqCtx.EmbeddingRequest
+	if message := validateEmbeddingRequest(embeddingRequest); message != "" {
+		writeError(w, http.StatusBadGateway, "module_failed", "module produced an invalid vector search embedding request: "+message)
+		return nil, false
+	}
+	effectiveTexts, textInput := embeddingRequest.Input.([]string)
+	if !textInput || len(effectiveTexts) != len(texts) || embeddingRequest.EncodingFormat != "float" {
+		writeError(w, http.StatusBadGateway, "module_failed", "module produced an invalid vector search embedding request")
+		return nil, false
+	}
+	if !h.authorizeModel(w, reqCtx, embeddingRequest.Model) || !h.authorizeRateLimit(w, r.Context(), reqCtx, estimateEmbeddingTokens(embeddingRequest)) || !h.prepareModelFallbacks(w, r.Context(), &reqCtx, embeddingRequest.Model) {
 		return nil, false
 	}
 	embedder, ok := h.provider.(provider.EmbeddingProvider)

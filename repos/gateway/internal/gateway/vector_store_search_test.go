@@ -49,9 +49,11 @@ func (m *vectorSearchPolicyRecorder) Handle(_ context.Context, req *modules.Requ
 type vectorSearchProvider struct {
 	modelsProvider
 	request modules.RequestContext
+	calls   int
 }
 
 func (p *vectorSearchProvider) Embeddings(_ context.Context, req modules.RequestContext) (openai.EmbeddingResponse, error) {
+	p.calls++
 	p.request = req
 	inputs := req.EmbeddingRequest.Input.([]string)
 	data := make([]openai.Embedding, len(inputs))
@@ -63,6 +65,45 @@ func (p *vectorSearchProvider) Embeddings(_ context.Context, req modules.Request
 		data[index] = openai.Embedding{Object: "embedding", Embedding: vector, Index: index}
 	}
 	return openai.EmbeddingResponse{UsageReported: true, Object: "list", Model: "embed-model", Data: data, Usage: openai.Usage{PromptTokens: len(inputs), TotalTokens: len(inputs)}}, nil
+}
+
+func TestVectorStoreSearchRevalidatesPolicyOutputAndEffectiveModel(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		rewrite func(*modules.RequestContext)
+		status  int
+		code    string
+	}{
+		{name: "invalid dimensions", rewrite: func(req *modules.RequestContext) {
+			dimensions := 0
+			req.EmbeddingRequest.Dimensions = &dimensions
+		}, status: http.StatusBadGateway, code: "module_failed"},
+		{name: "unauthorized effective model", rewrite: func(req *modules.RequestContext) {
+			req.EmbeddingRequest.Model = "forbidden-model"
+		}, status: http.StatusForbidden, code: "model_not_allowed"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			owner := fileOwnerKey(modules.RequestContext{CredentialID: "credential", UserID: "user"})
+			vectors := &memoryVectorStore{
+				stores: map[string]vectorstate.VectorStore{"vs_owned": {ID: "vs_owned", OwnerKey: owner}},
+				files:  map[string]vectorstate.File{"vs_owned/file_text": {VectorStoreID: "vs_owned", FileID: "file_text", OwnerKey: owner, Status: "completed", Bytes: 4}},
+			}
+			files := &memoryFileStore{files: map[string]filestate.File{
+				"file_text": {ID: "file_text", OwnerKey: owner, Filename: "text.txt", Purpose: "assistants", ContentType: "text/plain", Bytes: 4, Content: []byte("text")},
+			}}
+			embedder := &vectorSearchProvider{}
+			handler := NewHandler(modules.NewPipeline([]modules.Module{&vectorSearchAuthModule{}, rewriteContextModule{rewrite: test.rewrite}}), embedder).
+				WithFileStore(files, FileRuntimeConfig{MaxBytes: 1024, OwnerQuotaBytes: 4096}).
+				WithVectorStore(vectors, VectorStoreRuntimeConfig{OwnerQuota: 10, FileQuota: 10, ByteQuota: 4096})
+			request := httptest.NewRequest(http.MethodPost, "/v1/vector_stores/vs_owned/search", strings.NewReader(`{"query":"query","model":"embed-model"}`))
+			request.Header.Set("Authorization", "Bearer key")
+			response := httptest.NewRecorder()
+			Routes(handler).ServeHTTP(response, request)
+			if response.Code != test.status || embedder.calls != 0 || !strings.Contains(response.Body.String(), `"code":"`+test.code+`"`) {
+				t.Fatalf("invalid effective request continued: status=%d calls=%d body=%s", response.Code, embedder.calls, response.Body.String())
+			}
+		})
+	}
 }
 
 func TestVectorStoreSearchUsesOwnedTextPolicyAndEmbeddingBilling(t *testing.T) {
