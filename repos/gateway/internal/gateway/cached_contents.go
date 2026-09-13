@@ -130,7 +130,7 @@ func (h Handler) CreateCachedContent(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	identity, ok := h.authorizeOwnedStorageOperation(w, request, "cached_content")
+	identity, ok := h.authenticateOwnedStorageOperation(w, request, "cached_content")
 	if !ok {
 		return
 	}
@@ -154,7 +154,7 @@ func (h Handler) CreateCachedContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	toolIdentifiers, validTools := cachedContentToolIdentifiers(chat)
-	if !h.authorizeBatchModel(w, identity, model) || !h.authorizeTools(w, identity, toolIdentifiers, validTools) || !h.applyPolicyAttachments(w, &identity, model) {
+	if !h.prepareAccessGroups(w, &identity) || !h.authorizeBatchModel(w, identity, model) || !h.authorizeTools(w, identity, toolIdentifiers, validTools) || !h.applyPolicyAttachments(w, &identity, model) || !h.authorizeRateLimit(w, r.Context(), identity, openai.ChatInputTokens(chat)) {
 		return
 	}
 	pipeline := h.resourceBillingPipeline()

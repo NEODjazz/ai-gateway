@@ -190,7 +190,7 @@ func (h Handler) authorizeFileOperation(w http.ResponseWriter, r *http.Request) 
 	return h.authorizeOwnedStorageOperation(w, r, "files")
 }
 
-func (h Handler) authorizeOwnedStorageOperation(w http.ResponseWriter, r *http.Request, apiType string) (modules.RequestContext, bool) {
+func (h Handler) authenticateOwnedStorageOperation(w http.ResponseWriter, r *http.Request, apiType string) (modules.RequestContext, bool) {
 	req := modules.RequestContext{
 		APIKey:    bearerToken(r.Header.Get("Authorization")),
 		RequestID: executionID(w),
@@ -206,6 +206,14 @@ func (h Handler) authorizeOwnedStorageOperation(w http.ResponseWriter, r *http.R
 		return modules.RequestContext{}, false
 	}
 	req.APIKey = ""
+	return req, true
+}
+
+func (h Handler) authorizeOwnedStorageOperation(w http.ResponseWriter, r *http.Request, apiType string) (modules.RequestContext, bool) {
+	req, ok := h.authenticateOwnedStorageOperation(w, r, apiType)
+	if !ok {
+		return modules.RequestContext{}, false
+	}
 	if !h.prepareAccessGroups(w, &req) || !h.authorizeRateLimit(w, r.Context(), req, 0) {
 		return modules.RequestContext{}, false
 	}

@@ -21,11 +21,14 @@ import (
 	"ai-gateway-gateway/internal/provider"
 )
 
-type cachedContentAuthModule struct{}
+type cachedContentAuthModule struct {
+	rateLimitRPM int
+	rateLimitTPM int
+}
 
 func (cachedContentAuthModule) Name() string   { return "auth" }
 func (cachedContentAuthModule) Required() bool { return true }
-func (cachedContentAuthModule) Handle(_ context.Context, req *modules.RequestContext) error {
+func (m cachedContentAuthModule) Handle(_ context.Context, req *modules.RequestContext) error {
 	if req.APIKey == "" {
 		return modules.ErrUnauthorized
 	}
@@ -33,6 +36,8 @@ func (cachedContentAuthModule) Handle(_ context.Context, req *modules.RequestCon
 	req.UserID = req.APIKey
 	req.AllowedModels = []string{"public-model", "other-model"}
 	req.AllowedTools = []string{"safe"}
+	req.RateLimitRPM = m.rateLimitRPM
+	req.RateLimitTPM = m.rateLimitTPM
 	return nil
 }
 
@@ -65,6 +70,20 @@ type cachedContentBillingModule struct {
 	phases []string
 	usage  openai.Usage
 	api    string
+}
+
+type cachedContentRateStore struct {
+	allowed bool
+	calls   int
+	limit   RateLimit
+	tokens  int
+}
+
+func (s *cachedContentRateStore) Allow(_ context.Context, _ string, limit RateLimit, tokens int) (bool, time.Duration, error) {
+	s.calls++
+	s.limit = limit
+	s.tokens = tokens
+	return s.allowed, time.Minute, nil
 }
 
 func (*cachedContentBillingModule) Name() string   { return "billing" }
@@ -376,6 +395,34 @@ func TestCachedContentRejectsInvalidPolicyMutationBeforeBilling(t *testing.T) {
 			response := cachedContentRequest(handler, http.MethodPost, "/v1beta/cachedContents", `{"model":"models/public-model","ttl":"3600s","contents":[{"parts":[{"text":"hello"}]}]}`, "user-a")
 			if response.Code != http.StatusBadGateway || runtime.createCalls != 1 || len(runtime.createRequests) != 0 || len(store.records) != 0 || len(billing.phases) != 0 {
 				t.Fatalf("status=%d body=%s create_calls=%d provider_requests=%d stored=%d billing=%v", response.Code, response.Body.String(), runtime.createCalls, len(runtime.createRequests), len(store.records), billing.phases)
+			}
+		})
+	}
+}
+
+func TestCachedContentCreateUsesSingleInputTokenRateAdmission(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		allowed   bool
+		status    int
+		wantCalls int
+	}{
+		{name: "allowed", allowed: true, status: http.StatusOK, wantCalls: 1},
+		{name: "limited", allowed: false, status: http.StatusTooManyRequests},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store := &memoryCachedContentStore{records: map[string]cachedstate.Record{}}
+			runtime := &gatewayCachedContentProvider{batchProvider: &batchProvider{models: []string{"public-model"}}, contents: map[string]openai.GeminiCachedContent{}}
+			rates := &cachedContentRateStore{allowed: test.allowed}
+			auth := modules.NewPipeline([]modules.Module{cachedContentAuthModule{rateLimitRPM: 7, rateLimitTPM: 5000}})
+			handler := Routes(NewHandlerWithRateLimitStore(auth, runtime, rates).WithCachedContentStore(store))
+			body := `{"model":"models/public-model","ttl":"3600s","contents":[{"parts":[{"text":"cache this"}]}],"tools":[{"functionDeclarations":[{"name":"safe","description":"` + strings.Repeat("schema", 100) + `","parameters":{"type":"object"}}]}]}`
+			response := cachedContentRequest(handler, http.MethodPost, "/v1beta/cachedContents", body, "user-a")
+			if response.Code != test.status || rates.calls != 1 || rates.limit != (RateLimit{Requests: 7, Tokens: 5000}) || rates.tokens < 100 || runtime.createCalls != test.wantCalls {
+				t.Fatalf("status=%d body=%s rate_calls=%d tokens=%d create_calls=%d", response.Code, response.Body.String(), rates.calls, rates.tokens, runtime.createCalls)
+			}
+			if test.allowed && (len(runtime.createRequests) != 1 || rates.tokens != openai.ChatInputTokens(runtime.createRequests[0])) {
+				t.Fatalf("TPM=%d request=%+v", rates.tokens, runtime.createRequests)
 			}
 		})
 	}
