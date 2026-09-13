@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"ai-gateway-gateway/internal/openai"
@@ -973,6 +974,40 @@ func TestAnthropicMapsStopAndParallelControls(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestAnthropicRejectsUnsupportedResponsesToolsBeforeUpstream(t *testing.T) {
+	var calls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	client := NewAnthropic(server.URL, "", true)
+	for _, toolType := range []string{"mcp", "code_interpreter", "file_search"} {
+		t.Run(toolType, func(t *testing.T) {
+			request := openai.ResponseRequest{Model: "test", Input: "hello", Tools: []openai.ResponseTool{{Type: toolType}}}
+			for _, call := range []func() error{
+				func() error { _, err := client.Responses(t.Context(), request); return err },
+				func() error {
+					_, err := client.StreamResponses(t.Context(), request, func(string, string) error { return nil })
+					return err
+				},
+			} {
+				var failure *Error
+				if err := call(); !errors.As(err, &failure) || failure.Param != "tools" || failure.UpstreamCode != "unsupported_parameter" {
+					t.Fatalf("unsupported tool was not rejected explicitly: %v", err)
+				}
+			}
+		})
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("unsupported tools reached upstream %d times", calls.Load())
+	}
+	if err := client.ValidateResponseParameters(openai.ResponseRequest{Tools: []openai.ResponseTool{{Type: "function", Name: "lookup"}}}); err != nil {
+		t.Fatalf("function tool rejected: %v", err)
 	}
 }
 

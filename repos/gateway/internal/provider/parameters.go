@@ -103,6 +103,11 @@ func (Anthropic) ValidateResponseParameters(request openai.ResponseRequest) erro
 	if err := validateAnthropicResponseHistory(request.Input); err != nil {
 		return err
 	}
+	for _, tool := range request.Tools {
+		if tool.Type != "function" {
+			return &Error{Class: FailureClientRequest, Provider: "anthropic", StatusCode: http.StatusBadRequest, UpstreamCode: "unsupported_parameter", Param: "tools", Err: fmt.Errorf("Responses tool type %q is not supported by this adapter", tool.Type)}
+		}
+	}
 	_, verbositySupplied := openai.ResponseTextVerbosity(request.Text)
 	return rejectParameters("anthropic",
 		parameterCheck{"background", request.Background},
