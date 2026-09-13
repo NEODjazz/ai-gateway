@@ -812,7 +812,7 @@ func TestRemoteAnonymizerUsesEmbeddingInputWithoutIdentity(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(AnonymizeResponse{Input: []any{"masked"}, Replacements: map[string]string{"{{EMAIL_1}}": "user@example.com"}})
 	}))
 	defer server.Close()
-	request := openai.EmbeddingRequest{Model: "embed", Input: []any{"user@example.com"}}
+	request := openai.EmbeddingRequest{Model: "embed", Input: []string{"user@example.com"}}
 	req := sensitiveContext()
 	req.Request.Messages = nil
 	req.EmbeddingRequest = &request
@@ -821,6 +821,9 @@ func TestRemoteAnonymizerUsesEmbeddingInputWithoutIdentity(t *testing.T) {
 	}
 	if got := openai.EmbeddingInputText(req.EmbeddingRequest.Input); got != "masked" {
 		t.Fatalf("unexpected anonymized embedding input: %q", got)
+	}
+	if _, ok := req.EmbeddingRequest.Input.([]string); !ok {
+		t.Fatalf("embedding input type changed: %T", req.EmbeddingRequest.Input)
 	}
 }
 

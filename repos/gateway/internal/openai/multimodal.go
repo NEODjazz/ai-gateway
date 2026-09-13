@@ -291,6 +291,11 @@ func TransformTextContent(value any, transform func(string) string) any {
 	switch typed := value.(type) {
 	case string:
 		return transform(typed)
+	case []string:
+		for index := range typed {
+			typed[index] = transform(typed[index])
+		}
+		return typed
 	case []any:
 		for index := range typed {
 			typed[index] = TransformTextContent(typed[index], transform)
@@ -314,6 +319,8 @@ func TransformTextContent(value any, transform func(string) string) any {
 
 func TextOnlyProjection(value any) any {
 	switch typed := value.(type) {
+	case []string:
+		return append([]string(nil), typed...)
 	case []any:
 		projected := make([]any, len(typed))
 		for index, item := range typed {
@@ -344,6 +351,29 @@ func MergeTextProjection(original any, transformed any) any {
 			return value
 		}
 		return original
+	case []string:
+		merged := make([]string, len(typed))
+		switch other := transformed.(type) {
+		case []string:
+			if len(other) != len(typed) {
+				return original
+			}
+			copy(merged, other)
+		case []any:
+			if len(other) != len(typed) {
+				return original
+			}
+			for index := range other {
+				value, ok := other[index].(string)
+				if !ok {
+					return original
+				}
+				merged[index] = value
+			}
+		default:
+			return original
+		}
+		return merged
 	case []any:
 		other, ok := transformed.([]any)
 		if !ok || len(other) != len(typed) {

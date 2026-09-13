@@ -106,6 +106,32 @@ func TestVectorStoreSearchRevalidatesPolicyOutputAndEffectiveModel(t *testing.T)
 	}
 }
 
+func TestVectorStoreSearchAnonymizesStringSliceEmbeddingInput(t *testing.T) {
+	owner := fileOwnerKey(modules.RequestContext{CredentialID: "credential", UserID: "user"})
+	vectors := &memoryVectorStore{
+		stores: map[string]vectorstate.VectorStore{"vs_owned": {ID: "vs_owned", OwnerKey: owner}},
+		files:  map[string]vectorstate.File{"vs_owned/file_text": {VectorStoreID: "vs_owned", FileID: "file_text", OwnerKey: owner, Status: "completed", Bytes: 17}},
+	}
+	files := &memoryFileStore{files: map[string]filestate.File{
+		"file_text": {ID: "file_text", OwnerKey: owner, Filename: "text.txt", Purpose: "assistants", ContentType: "text/plain", Bytes: 17, Content: []byte("owner@example.com")},
+	}}
+	embedder := &vectorSearchProvider{}
+	handler := NewHandler(modules.NewPipeline([]modules.Module{&vectorSearchAuthModule{}, modules.NewAnonymizerModule(true, modules.RuleEmail)}), embedder).
+		WithFileStore(files, FileRuntimeConfig{MaxBytes: 1024, OwnerQuotaBytes: 4096}).
+		WithVectorStore(vectors, VectorStoreRuntimeConfig{OwnerQuota: 10, FileQuota: 10, ByteQuota: 4096})
+	request := httptest.NewRequest(http.MethodPost, "/v1/vector_stores/vs_owned/search", strings.NewReader(`{"query":"user@example.com","model":"embed-model"}`))
+	request.Header.Set("Authorization", "Bearer key")
+	response := httptest.NewRecorder()
+	Routes(handler).ServeHTTP(response, request)
+	if response.Code != http.StatusOK || embedder.calls != 1 || embedder.request.EmbeddingRequest == nil {
+		t.Fatalf("status=%d calls=%d request=%+v body=%s", response.Code, embedder.calls, embedder.request, response.Body.String())
+	}
+	inputs, ok := embedder.request.EmbeddingRequest.Input.([]string)
+	if !ok || len(inputs) != 2 || inputs[0] != "{{EMAIL_1}}" || inputs[1] != "{{EMAIL_2}}" {
+		t.Fatalf("embedding input was not anonymized: %#v", embedder.request.EmbeddingRequest.Input)
+	}
+}
+
 func TestVectorStoreSearchUsesOwnedTextPolicyAndEmbeddingBilling(t *testing.T) {
 	owner := fileOwnerKey(modules.RequestContext{CredentialID: "credential", UserID: "user"})
 	vectors := &memoryVectorStore{

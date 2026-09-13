@@ -124,6 +124,30 @@ func TestTextProjectionExcludesVideoPayload(t *testing.T) {
 	}
 }
 
+func TestTextProjectionTransformsAndMergesStringSlices(t *testing.T) {
+	original := []string{"first@example.com", "second@example.com"}
+	projection, ok := TextOnlyProjection(original).([]string)
+	if !ok || len(projection) != 2 || projection[0] != original[0] {
+		t.Fatalf("projection=%#v", projection)
+	}
+	projection[0] = "changed"
+	if original[0] == "changed" {
+		t.Fatal("text projection aliases the original string slice")
+	}
+
+	transformed, ok := TransformTextContent(append([]string(nil), original...), strings.ToUpper).([]string)
+	if !ok || transformed[0] != "FIRST@EXAMPLE.COM" || transformed[1] != "SECOND@EXAMPLE.COM" {
+		t.Fatalf("transformed=%#v", transformed)
+	}
+	merged, ok := MergeTextProjection(original, []any{"{{EMAIL_1}}", "{{EMAIL_2}}"}).([]string)
+	if !ok || merged[0] != "{{EMAIL_1}}" || merged[1] != "{{EMAIL_2}}" {
+		t.Fatalf("merged=%#v", merged)
+	}
+	if invalid := MergeTextProjection(original, []any{"only one"}).([]string); invalid[0] != original[0] || len(invalid) != len(original) {
+		t.Fatalf("invalid projection changed input=%#v", invalid)
+	}
+}
+
 func mustJSON(t *testing.T, value any) []byte {
 	t.Helper()
 	encoded, err := json.Marshal(value)
