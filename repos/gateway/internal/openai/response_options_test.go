@@ -260,6 +260,17 @@ func TestResponseToolDefinitionValidation(t *testing.T) {
 	}
 }
 
+func TestResponseCodeInterpreterAcceptsReusableContainerID(t *testing.T) {
+	request := ResponseRequest{Tools: []ResponseTool{{Type: "code_interpreter", Container: "cntr_owned"}}}
+	if message := request.Validate(); message != "" {
+		t.Fatalf("valid container ID rejected: %s", message)
+	}
+	request.Tools[0].Container = "bad/id"
+	if message := request.Validate(); message == "" {
+		t.Fatal("invalid container ID was accepted")
+	}
+}
+
 func floatPointer(value float64) *float64 { return &value }
 
 func boolPointer(value bool) *bool { return &value }

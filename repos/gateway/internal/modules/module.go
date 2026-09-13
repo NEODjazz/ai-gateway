@@ -75,6 +75,12 @@ type RequestContext struct {
 	AnonymizationValues map[string]string        `json:"anonymization_values,omitempty"`
 }
 
+const (
+	MetadataResponseContainerEndpoint   = "gateway.responses.container.endpoint"
+	MetadataResponseContainerDeployment = "gateway.responses.container.deployment"
+	MetadataResponseContainerModel      = "gateway.responses.container.model"
+)
+
 type Module interface {
 	Name() string
 	Required() bool

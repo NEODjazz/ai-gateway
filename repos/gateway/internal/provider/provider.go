@@ -3079,6 +3079,11 @@ func (r Router) responseCandidates(ctx context.Context, req modules.RequestConte
 		chatRequest.MaxTokens = request.MaxTokens
 	}
 	candidates := r.routeCandidates(ctx, req, chatRequest, capabilities...)
+	var err error
+	candidates, err = boundResponseContainerCandidates(req, request.Model, candidates)
+	if err != nil {
+		return nil, err
+	}
 	comparisonResponseID := ""
 	if request.PromptCacheOptions != nil {
 		comparisonResponseID = request.PromptCacheOptions.ComparisonResponseID
@@ -3147,6 +3152,25 @@ func (r Router) responseCandidates(ctx context.Context, req modules.RequestConte
 		return nil, invalidResponseComparisonReference()
 	}
 	return nil, fmt.Errorf("responses session endpoint %q is unavailable for previous_response_id", pinnedEndpoint)
+}
+
+func boundResponseContainerCandidates(req modules.RequestContext, model string, candidates []Endpoint) ([]Endpoint, error) {
+	endpointName := req.Metadata[modules.MetadataResponseContainerEndpoint]
+	if endpointName == "" {
+		return candidates, nil
+	}
+	deployment := req.Metadata[modules.MetadataResponseContainerDeployment]
+	boundModel := req.Metadata[modules.MetadataResponseContainerModel]
+	bound := candidates[:0]
+	for _, candidate := range candidates {
+		if candidate.Name == endpointName && responseDeploymentIdentity(candidate) == deployment && model == boundModel {
+			bound = append(bound, candidate)
+		}
+	}
+	if len(bound) != 1 {
+		return nil, ErrContainerDeploymentChanged
+	}
+	return bound, nil
 }
 
 func invalidResponseComparisonReference() error {

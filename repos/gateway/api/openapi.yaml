@@ -8980,17 +8980,23 @@ components:
       properties:
         type: {type: string, const: code_interpreter}
         container:
-          type: object
-          additionalProperties: false
-          required: [type]
-          properties:
-            type: {type: string, const: auto}
-            memory_limit: {type: string, enum: [1g, 4g, 16g, 64g]}
-            file_ids:
-              type: array
-              maxItems: 20
-              uniqueItems: true
-              items: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}
+          oneOf:
+            - type: string
+              minLength: 1
+              maxLength: 128
+              pattern: '^[A-Za-z0-9_.-]+$'
+              description: Owner-scoped gateway container ID. Execution remains pinned to its original deployment.
+            - type: object
+              additionalProperties: false
+              required: [type]
+              properties:
+                type: {type: string, const: auto}
+                memory_limit: {type: string, enum: [1g, 4g, 16g, 64g]}
+                file_ids:
+                  type: array
+                  maxItems: 20
+                  uniqueItems: true
+                  items: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}
     FileSearchResponseTool:
       type: object
       description: Provider-managed search over one vector store owned by the authenticated credential and user.

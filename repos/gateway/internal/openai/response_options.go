@@ -236,7 +236,7 @@ func validateResponseTools(tools []ResponseTool) string {
 			if tool.Name != "" || tool.Description != "" || tool.Parameters != nil || tool.Strict != nil || tool.ServerLabel != "" || tool.ServerURL != "" || tool.ServerDescription != "" || len(tool.AllowedTools) > 0 || tool.RequireApproval != nil || len(tool.Headers) > 0 || len(tool.VectorStoreIDs) > 0 || tool.Filters != nil || tool.MaxNumResults != nil || tool.RankingOptions != nil || tool.RewriteQuery != nil {
 				return "code_interpreter tools contain unsupported fields"
 			}
-			if _, message := ResponseCodeInterpreterContainerFileIDs(tool.Container); message != "" {
+			if _, _, message := InspectResponseCodeInterpreterContainer(tool.Container); message != "" {
 				return message
 			}
 		case "file_search":
@@ -408,52 +408,58 @@ func isJSONObject(value any) bool {
 	return json.Unmarshal(encoded, &object) == nil && object != nil
 }
 
-// ResponseCodeInterpreterContainerFileIDs validates the supported automatic
-// container shape and returns the referenced file IDs.
-func ResponseCodeInterpreterContainerFileIDs(value any) ([]string, string) {
+// InspectResponseCodeInterpreterContainer validates a reusable container ID or
+// an automatic container definition and returns its resource references.
+func InspectResponseCodeInterpreterContainer(value any) (string, []string, string) {
+	if id, ok := value.(string); ok {
+		if !validResponseToolResourceID(id) {
+			return "", nil, "code_interpreter container ID is invalid"
+		}
+		return id, nil, ""
+	}
 	encoded, err := json.Marshal(value)
 	if err != nil {
-		return nil, "code_interpreter tools require an object container"
+		return "", nil, "code_interpreter tools require a container ID or object"
 	}
 	var object map[string]json.RawMessage
 	if json.Unmarshal(encoded, &object) != nil || object == nil {
-		return nil, "code_interpreter tools require an object container"
+		return "", nil, "code_interpreter tools require a container ID or object"
 	}
 	for field := range object {
 		if field != "type" && field != "memory_limit" && field != "file_ids" {
-			return nil, "code_interpreter container contains unsupported fields"
+			return "", nil, "code_interpreter container contains unsupported fields"
 		}
 	}
 	var containerType string
 	if json.Unmarshal(object["type"], &containerType) != nil || containerType != "auto" {
-		return nil, "code_interpreter container.type must be auto"
+		return "", nil, "code_interpreter container.type must be auto"
 	}
 	if raw, present := object["memory_limit"]; present {
 		var memoryLimit string
 		if json.Unmarshal(raw, &memoryLimit) != nil || memoryLimit != "1g" && memoryLimit != "4g" && memoryLimit != "16g" && memoryLimit != "64g" {
-			return nil, "code_interpreter container.memory_limit must be 1g, 4g, 16g, or 64g"
+			return "", nil, "code_interpreter container.memory_limit must be 1g, 4g, 16g, or 64g"
 		}
 	}
 	var fileIDs []string
 	if raw, present := object["file_ids"]; present {
 		if json.Unmarshal(raw, &fileIDs) != nil {
-			return nil, "code_interpreter container.file_ids must be an array"
+			return "", nil, "code_interpreter container.file_ids must be an array"
 		}
 		if len(fileIDs) > 20 {
-			return nil, "code_interpreter container.file_ids must contain at most 20 IDs"
+			return "", nil, "code_interpreter container.file_ids must contain at most 20 IDs"
 		}
 		seen := make(map[string]struct{}, len(fileIDs))
 		for _, id := range fileIDs {
 			if !validResponseToolResourceID(id) {
-				return nil, "code_interpreter container.file_ids contain an invalid ID"
+				return "", nil, "code_interpreter container.file_ids contain an invalid ID"
 			}
 			if _, duplicate := seen[id]; duplicate {
-				return nil, "code_interpreter container.file_ids must be unique"
+				return "", nil, "code_interpreter container.file_ids must be unique"
 			}
 			seen[id] = struct{}{}
 		}
 	}
-	return fileIDs, ""
+	return "", fileIDs, ""
 }
 
 func validResponseToolResourceID(value string) bool {

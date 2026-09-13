@@ -5,21 +5,47 @@ import (
 	"errors"
 	"net/http"
 
+	"ai-gateway-gateway/internal/containerstate"
 	"ai-gateway-gateway/internal/filestate"
 	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/openai"
 	"ai-gateway-gateway/internal/vectorstate"
 )
 
-func (h Handler) authorizeResponseToolResources(w http.ResponseWriter, ctx context.Context, identity modules.RequestContext, tools []openai.ResponseTool) bool {
-	owner := fileOwnerKey(identity)
-	for _, tool := range tools {
+func (h Handler) authorizeResponseToolResources(w http.ResponseWriter, ctx context.Context, identity *modules.RequestContext, request *openai.ResponseRequest) bool {
+	owner := fileOwnerKey(*identity)
+	for _, tool := range request.Tools {
 		switch tool.Type {
 		case "code_interpreter":
-			fileIDs, message := openai.ResponseCodeInterpreterContainerFileIDs(tool.Container)
+			containerID, fileIDs, message := openai.InspectResponseCodeInterpreterContainer(tool.Container)
 			if message != "" {
 				writeError(w, http.StatusBadRequest, "invalid_request", message)
 				return false
+			}
+			if containerID != "" {
+				if h.containers == nil {
+					writeError(w, http.StatusServiceUnavailable, "container_unavailable", "container storage is unavailable")
+					return false
+				}
+				record, err := h.containers.GetContainerRecord(ctx, owner, containerID)
+				if err != nil {
+					if errors.Is(err, containerstate.ErrUnavailable) {
+						writeError(w, http.StatusServiceUnavailable, "container_unavailable", "container storage is unavailable")
+					} else {
+						writeError(w, http.StatusBadRequest, "invalid_request", "code interpreter container is unavailable")
+					}
+					return false
+				}
+				if record.Container.ID != containerID || record.Binding.Endpoint == "" || record.Binding.Deployment == "" || record.Binding.Model != request.Model {
+					writeError(w, http.StatusBadRequest, "invalid_request", "code interpreter container is incompatible with the requested model")
+					return false
+				}
+				if identity.Metadata == nil {
+					identity.Metadata = map[string]string{}
+				}
+				identity.Metadata[modules.MetadataResponseContainerEndpoint] = record.Binding.Endpoint
+				identity.Metadata[modules.MetadataResponseContainerDeployment] = record.Binding.Deployment
+				identity.Metadata[modules.MetadataResponseContainerModel] = record.Binding.Model
 			}
 			if len(fileIDs) == 0 {
 				continue

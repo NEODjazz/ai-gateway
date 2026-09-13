@@ -7,8 +7,10 @@ import (
 	"strings"
 	"testing"
 
+	"ai-gateway-gateway/internal/containerstate"
 	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/openai"
+	"ai-gateway-gateway/internal/provider"
 )
 
 type responseInputTokenCountProvider struct {
@@ -116,6 +118,24 @@ func TestResponseInputTokenCountRejectsUnresolvedBuiltInToolResources(t *testing
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/v1/responses/input_tokens", strings.NewReader(`{"model":"m","input":"x","tools":[{"type":"file_search","vector_store_ids":["vs_missing"]}]}`)))
 	if response.Code != http.StatusServiceUnavailable || counter.calls != 0 || !strings.Contains(response.Body.String(), "vector_store_unavailable") {
 		t.Fatalf("unresolved resource reached provider: status=%d calls=%d body=%s", response.Code, counter.calls, response.Body.String())
+	}
+}
+
+func TestResponseInputTokenCountUsesOwnedContainerBinding(t *testing.T) {
+	counter := &responseInputTokenCountProvider{}
+	identity := modules.RequestContext{CredentialID: "credential-1", UserID: "user-1"}
+	owner := fileOwnerKey(identity)
+	binding := provider.ContainerBinding{Endpoint: "bound-endpoint", Model: "m", Deployment: "deployment-v1"}
+	record := containerstate.Record{OwnerKey: owner, Binding: binding, Container: openai.Container{ID: "cntr_owned"}}
+	containers := &memoryContainerStore{records: map[string]containerstate.Record{containerKey(owner, "cntr_owned"): record}}
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}, tools: []string{"code_interpreter"}}}), counter).WithContainerStore(containers))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/v1/responses/input_tokens", strings.NewReader(`{"model":"m","input":"x","tools":[{"type":"code_interpreter","container":"cntr_owned"}]}`)))
+	if response.Code != http.StatusOK || counter.calls != 1 {
+		t.Fatalf("status=%d calls=%d body=%s", response.Code, counter.calls, response.Body.String())
+	}
+	if counter.request.Metadata[modules.MetadataResponseContainerEndpoint] != binding.Endpoint || counter.request.Metadata[modules.MetadataResponseContainerDeployment] != binding.Deployment || counter.request.Metadata[modules.MetadataResponseContainerModel] != binding.Model {
+		t.Fatalf("container binding was not propagated: %+v", counter.request.Metadata)
 	}
 }
 

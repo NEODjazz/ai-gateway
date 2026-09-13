@@ -5,8 +5,11 @@ import (
 	"strings"
 	"testing"
 
+	"ai-gateway-gateway/internal/containerstate"
 	"ai-gateway-gateway/internal/filestate"
 	"ai-gateway-gateway/internal/modules"
+	"ai-gateway-gateway/internal/openai"
+	"ai-gateway-gateway/internal/provider"
 	"ai-gateway-gateway/internal/vectorstate"
 )
 
@@ -25,6 +28,40 @@ func TestResponsesRejectsInvalidEnvelopeBeforePipeline(t *testing.T) {
 		if out.Code != 400 || !strings.Contains(out.Body.String(), `"invalid_request"`) {
 			t.Fatalf("body=%s status=%d response=%s", body, out.Code, out.Body.String())
 		}
+	}
+}
+
+func TestResponsesReuseOnlyOwnedBoundContainer(t *testing.T) {
+	identity := modules.RequestContext{CredentialID: "credential-1", UserID: "user-1"}
+	owner := fileOwnerKey(identity)
+	binding := provider.ContainerBinding{Endpoint: "bound-endpoint", Model: "m", Deployment: "deployment-v1"}
+
+	for _, test := range []struct {
+		name        string
+		recordOwner string
+		wantStatus  int
+	}{
+		{name: "owned", recordOwner: owner, wantStatus: 200},
+		{name: "foreign", recordOwner: "foreign", wantStatus: 400},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			upstream := &chatProvider{}
+			record := containerstate.Record{OwnerKey: test.recordOwner, Binding: binding, Container: openai.Container{ID: "cntr_owned"}}
+			containers := &memoryContainerStore{records: map[string]containerstate.Record{containerKey(test.recordOwner, "cntr_owned"): record}}
+			handler := NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}, tools: []string{"code_interpreter"}}}), upstream).WithContainerStore(containers)
+			out := httptest.NewRecorder()
+			handler.Responses(out, httptest.NewRequest("POST", "/v1/responses", strings.NewReader(`{"model":"m","input":"continue","tools":[{"type":"code_interpreter","container":"cntr_owned"}]}`)))
+			if out.Code != test.wantStatus {
+				t.Fatalf("status=%d body=%s", out.Code, out.Body.String())
+			}
+			if test.wantStatus == 200 {
+				if upstream.request.Metadata[modules.MetadataResponseContainerEndpoint] != binding.Endpoint || upstream.request.Metadata[modules.MetadataResponseContainerDeployment] != binding.Deployment || upstream.request.Metadata[modules.MetadataResponseContainerModel] != binding.Model {
+					t.Fatalf("container binding was not propagated: %+v", upstream.request.Metadata)
+				}
+			} else if upstream.request.ResponseRequest != nil {
+				t.Fatal("foreign container reached provider")
+			}
+		})
 	}
 }
 

@@ -82,7 +82,7 @@ func (h Handler) serveNativeInteraction(w http.ResponseWriter, r *http.Request, 
 	if !h.authorizeTools(w, reqCtx, toolIdentifiers, validTools) {
 		return
 	}
-	if !h.authorizeResponseToolResources(w, r.Context(), reqCtx, shared.Tools) {
+	if !h.authorizeResponseToolResources(w, r.Context(), &reqCtx, &shared) {
 		return
 	}
 	if !h.authorizeAccess(w, r.Context(), reqCtx, shared.Model, estimateResponseTokens(shared)) {

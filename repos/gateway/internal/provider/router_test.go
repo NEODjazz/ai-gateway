@@ -1761,6 +1761,30 @@ func TestResponsesBuiltInToolsRouteOnlyToDeclaredDeployment(t *testing.T) {
 	}
 }
 
+func TestResponsesReusableContainerPinsOriginalDeployment(t *testing.T) {
+	first := &modelCaptureProvider{content: "first"}
+	bound := &modelCaptureProvider{content: "bound"}
+	firstEndpoint := Endpoint{Name: "first", Type: "openai-compatible", Priority: 1, Capabilities: []string{"responses", "tools", "code_interpreter"}, Provider: first}
+	boundEndpoint := Endpoint{Name: "bound", Type: "openai-compatible", Priority: 2, Capabilities: []string{"responses", "tools", "code_interpreter"}, Provider: bound}
+	router := Router{health: newEndpointHealthTracker(), endpoints: []Endpoint{firstEndpoint, boundEndpoint}}
+	request := openai.ResponseRequest{Model: "model", Input: "continue", Tools: []openai.ResponseTool{{Type: "code_interpreter", Container: "cntr_owned"}}}
+	identity := modules.RequestContext{Request: openai.ChatCompletionRequest{Model: "model"}, ResponseRequest: &request, Metadata: map[string]string{
+		modules.MetadataResponseContainerEndpoint:   boundEndpoint.Name,
+		modules.MetadataResponseContainerDeployment: responseDeploymentIdentity(boundEndpoint),
+		modules.MetadataResponseContainerModel:      request.Model,
+	}}
+	if _, err := router.Responses(t.Context(), identity); err != nil {
+		t.Fatal(err)
+	}
+	if first.seenModel != "" || bound.seenModel != "model" {
+		t.Fatalf("container escaped its deployment: first=%q bound=%q", first.seenModel, bound.seenModel)
+	}
+	identity.Metadata[modules.MetadataResponseContainerDeployment] = "stale"
+	if _, err := router.Responses(t.Context(), identity); !errors.Is(err, ErrContainerDeploymentChanged) {
+		t.Fatalf("stale container deployment was not rejected: %v", err)
+	}
+}
+
 func TestResponseFileInputRequiresExplicitEndpointCapability(t *testing.T) {
 	legacy := &modelCaptureProvider{content: "legacy"}
 	files := &modelCaptureProvider{content: "files"}

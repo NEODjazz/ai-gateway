@@ -162,6 +162,13 @@ func (h Handler) decodeBatchItems(w http.ResponseWriter, ctx context.Context, id
 		if err != nil {
 			return nil, fmt.Errorf("line %d: %w", lineNumber, err)
 		}
+		itemIdentity := identity
+		if identity.Metadata != nil {
+			itemIdentity.Metadata = make(map[string]string, len(identity.Metadata))
+			for key, value := range identity.Metadata {
+				itemIdentity.Metadata[key] = value
+			}
+		}
 		if endpoint == "/v1/ocr" {
 			var request openai.OCRRequest
 			if json.Unmarshal(normalized, &request) != nil {
@@ -202,14 +209,13 @@ func (h Handler) decodeBatchItems(w http.ResponseWriter, ctx context.Context, id
 			if json.Unmarshal(normalized, &request) != nil {
 				return nil, fmt.Errorf("line %d: normalized Responses request is invalid", lineNumber)
 			}
-			if !h.authorizeResponseToolResources(w, ctx, identity, request.Tools) {
+			if !h.authorizeResponseToolResources(w, ctx, &itemIdentity, &request) {
 				return nil, errBatchResponseWritten
 			}
 		}
 		if !h.authorizeBatchModel(w, identity, model) {
 			return nil, errBatchResponseWritten
 		}
-		itemIdentity := identity
 		itemIdentity.RequestID = ""
 		itemIdentity.Request = openai.ChatCompletionRequest{}
 		if !h.prepareModelFallbacks(w, ctx, &itemIdentity, model) {
