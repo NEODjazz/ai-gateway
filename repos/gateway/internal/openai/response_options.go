@@ -187,8 +187,11 @@ func validateResponseTools(tools []ResponseTool) string {
 	for index, tool := range tools {
 		switch tool.Type {
 		case "function":
-			if strings.TrimSpace(tool.Name) == "" {
-				return "function tools require a name"
+			if !chatFunctionName.MatchString(tool.Name) {
+				return "function tool names must contain 1 to 64 letters, digits, underscores, or hyphens"
+			}
+			if utf8.RuneCountInString(tool.Description) > 4096 {
+				return "function tool descriptions must contain at most 4096 characters"
 			}
 			if tool.ServerLabel != "" || tool.ServerURL != "" || tool.ServerDescription != "" || len(tool.AllowedTools) > 0 || tool.RequireApproval != nil || len(tool.Headers) > 0 || len(tool.VectorStoreIDs) > 0 || tool.Container != nil {
 				return "function tools contain unsupported fields"
