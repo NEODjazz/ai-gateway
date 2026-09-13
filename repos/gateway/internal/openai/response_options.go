@@ -3,6 +3,9 @@ package openai
 import (
 	"encoding/json"
 	"math"
+	"net/url"
+	"strconv"
+	"strings"
 	"unicode/utf8"
 )
 
@@ -21,6 +24,9 @@ func (r ResponseRequest) Validate() string {
 		return message
 	}
 	if message := validateResponseIncludes(r.Include); message != "" {
+		return message
+	}
+	if message := validateResponseTools(r.Tools); message != "" {
 		return message
 	}
 	if message := validateResponseToolChoice(r.Tools, r.ToolChoice); message != "" {
@@ -71,6 +77,97 @@ func (r ResponseRequest) Validate() string {
 		return "max_tool_calls must be between 1 and 1000"
 	}
 	return ""
+}
+
+func validateResponseTools(tools []ResponseTool) string {
+	if len(tools) > 128 {
+		return "tools must contain at most 128 entries"
+	}
+	functionNames := make(map[string]struct{}, len(tools))
+	mcpLabels := make(map[string]struct{}, len(tools))
+	for index, tool := range tools {
+		switch tool.Type {
+		case "function":
+			if strings.TrimSpace(tool.Name) == "" {
+				return "function tools require a name"
+			}
+			if tool.ServerLabel != "" || tool.ServerURL != "" || tool.ServerDescription != "" || len(tool.AllowedTools) > 0 || tool.RequireApproval != nil || len(tool.Headers) > 0 || len(tool.VectorStoreIDs) > 0 || tool.Container != nil {
+				return "function tools contain unsupported fields"
+			}
+			if tool.Parameters != nil && !isJSONObject(tool.Parameters) {
+				return "function tool parameters must be an object"
+			}
+			if _, duplicate := functionNames[tool.Name]; duplicate {
+				return "function tool names must be unique"
+			}
+			functionNames[tool.Name] = struct{}{}
+		case "mcp":
+			if strings.TrimSpace(tool.ServerLabel) == "" || !validResponseMCPURL(tool.ServerURL) {
+				return "mcp tools require a server_label and safe HTTPS server_url"
+			}
+			if tool.Name != "" || tool.Description != "" || tool.Parameters != nil || tool.Strict != nil || len(tool.VectorStoreIDs) > 0 || tool.Container != nil {
+				return "mcp tools contain unsupported fields"
+			}
+			if _, duplicate := mcpLabels[tool.ServerLabel]; duplicate {
+				return "mcp server labels must be unique"
+			}
+			mcpLabels[tool.ServerLabel] = struct{}{}
+			if len(tool.AllowedTools) > 128 {
+				return "mcp allowed_tools must contain at most 128 names"
+			}
+			allowed := make(map[string]struct{}, len(tool.AllowedTools))
+			for _, name := range tool.AllowedTools {
+				if strings.TrimSpace(name) == "" {
+					return "mcp allowed_tools must contain non-empty names"
+				}
+				if _, duplicate := allowed[name]; duplicate {
+					return "mcp allowed_tools names must be unique"
+				}
+				allowed[name] = struct{}{}
+			}
+		case "code_interpreter":
+			if tool.Name != "" || tool.Description != "" || tool.Parameters != nil || tool.Strict != nil || tool.ServerLabel != "" || tool.ServerURL != "" || tool.ServerDescription != "" || len(tool.AllowedTools) > 0 || tool.RequireApproval != nil || len(tool.Headers) > 0 || len(tool.VectorStoreIDs) > 0 {
+				return "code_interpreter tools contain unsupported fields"
+			}
+			if tool.Container == nil || !isJSONObject(tool.Container) {
+				return "code_interpreter tools require an object container"
+			}
+		case "file_search":
+			if tool.Name != "" || tool.Description != "" || tool.Parameters != nil || tool.Strict != nil || tool.ServerLabel != "" || tool.ServerURL != "" || tool.ServerDescription != "" || len(tool.AllowedTools) > 0 || tool.RequireApproval != nil || len(tool.Headers) > 0 || tool.Container != nil {
+				return "file_search tools contain unsupported fields"
+			}
+			if len(tool.VectorStoreIDs) == 0 {
+				return "file_search tools require vector_store_ids"
+			}
+			vectorStores := make(map[string]struct{}, len(tool.VectorStoreIDs))
+			for _, id := range tool.VectorStoreIDs {
+				if strings.TrimSpace(id) == "" {
+					return "file_search vector_store_ids must contain non-empty IDs"
+				}
+				if _, duplicate := vectorStores[id]; duplicate {
+					return "file_search vector_store_ids must be unique"
+				}
+				vectorStores[id] = struct{}{}
+			}
+		default:
+			return "tools contain an unsupported type at index " + strconv.Itoa(index)
+		}
+	}
+	return ""
+}
+
+func isJSONObject(value any) bool {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return false
+	}
+	var object map[string]json.RawMessage
+	return json.Unmarshal(encoded, &object) == nil && object != nil
+}
+
+func validResponseMCPURL(value string) bool {
+	parsed, err := url.Parse(value)
+	return err == nil && parsed.Scheme == "https" && parsed.Host != "" && parsed.User == nil && parsed.RawQuery == "" && parsed.Fragment == ""
 }
 
 func validateResponseToolChoice(tools []ResponseTool, choice any) string {

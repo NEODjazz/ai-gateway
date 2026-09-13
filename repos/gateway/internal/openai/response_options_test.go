@@ -110,7 +110,7 @@ func TestResponseIncludeValidation(t *testing.T) {
 func TestResponseToolChoiceValidation(t *testing.T) {
 	tools := []ResponseTool{
 		{Type: "function", Name: "lookup"},
-		{Type: "mcp", ServerLabel: "documents", AllowedTools: []string{"search"}},
+		{Type: "mcp", ServerLabel: "documents", ServerURL: "https://documents.example.test", AllowedTools: []string{"search"}},
 	}
 	for _, choice := range []any{
 		"none", "auto", "required",
@@ -137,6 +137,58 @@ func TestResponseToolChoiceValidation(t *testing.T) {
 		if message := request.Validate(); message == "" {
 			t.Fatalf("invalid choice accepted: %#v", choice)
 		}
+	}
+}
+
+func TestResponseToolDefinitionValidation(t *testing.T) {
+	strict := true
+	valid := []ResponseTool{
+		{Type: "function", Name: "lookup", Parameters: map[string]any{"type": "object"}, Strict: &strict},
+		{Type: "mcp", ServerLabel: "documents", ServerURL: "https://documents.example.test/mcp", AllowedTools: []string{"search"}, Headers: map[string]string{"X-Tenant": "example"}},
+		{Type: "code_interpreter", Container: map[string]any{"type": "auto"}},
+		{Type: "file_search", VectorStoreIDs: []string{"vs_owned"}},
+	}
+	if message := (ResponseRequest{Tools: valid}).Validate(); message != "" {
+		t.Fatalf("valid tools rejected: %s", message)
+	}
+
+	tooMany := make([]ResponseTool, 129)
+	for index := range tooMany {
+		tooMany[index] = ResponseTool{Type: "function", Name: "lookup"}
+	}
+	tooManyAllowed := make([]string, 129)
+	for index := range tooManyAllowed {
+		tooManyAllowed[index] = string(rune(0x100 + index))
+	}
+	for _, test := range []struct {
+		name  string
+		tools []ResponseTool
+	}{
+		{name: "unsupported type", tools: []ResponseTool{{Type: "unknown"}}},
+		{name: "missing function name", tools: []ResponseTool{{Type: "function"}}},
+		{name: "non-object parameters", tools: []ResponseTool{{Type: "function", Name: "lookup", Parameters: []any{"invalid"}}}},
+		{name: "function with MCP field", tools: []ResponseTool{{Type: "function", Name: "lookup", ServerURL: "https://example.test"}}},
+		{name: "duplicate function name", tools: []ResponseTool{{Type: "function", Name: "lookup"}, {Type: "function", Name: "lookup"}}},
+		{name: "missing MCP URL", tools: []ResponseTool{{Type: "mcp", ServerLabel: "documents"}}},
+		{name: "unsafe MCP URL", tools: []ResponseTool{{Type: "mcp", ServerLabel: "documents", ServerURL: "https://user@example.test/mcp"}}},
+		{name: "MCP with function field", tools: []ResponseTool{{Type: "mcp", ServerLabel: "documents", ServerURL: "https://example.test", Parameters: map[string]any{"type": "object"}}}},
+		{name: "duplicate MCP label", tools: []ResponseTool{{Type: "mcp", ServerLabel: "documents", ServerURL: "https://one.example.test"}, {Type: "mcp", ServerLabel: "documents", ServerURL: "https://two.example.test"}}},
+		{name: "empty allowed tool", tools: []ResponseTool{{Type: "mcp", ServerLabel: "documents", ServerURL: "https://example.test", AllowedTools: []string{""}}}},
+		{name: "duplicate allowed tool", tools: []ResponseTool{{Type: "mcp", ServerLabel: "documents", ServerURL: "https://example.test", AllowedTools: []string{"search", "search"}}}},
+		{name: "too many allowed tools", tools: []ResponseTool{{Type: "mcp", ServerLabel: "documents", ServerURL: "https://example.test", AllowedTools: tooManyAllowed}}},
+		{name: "missing code interpreter container", tools: []ResponseTool{{Type: "code_interpreter"}}},
+		{name: "non-object code interpreter container", tools: []ResponseTool{{Type: "code_interpreter", Container: []string{"invalid"}}}},
+		{name: "code interpreter with function field", tools: []ResponseTool{{Type: "code_interpreter", Name: "lookup", Container: map[string]any{"type": "auto"}}}},
+		{name: "missing file search stores", tools: []ResponseTool{{Type: "file_search"}}},
+		{name: "duplicate file search store", tools: []ResponseTool{{Type: "file_search", VectorStoreIDs: []string{"vs_owned", "vs_owned"}}}},
+		{name: "file search with MCP field", tools: []ResponseTool{{Type: "file_search", VectorStoreIDs: []string{"vs_owned"}, ServerURL: "https://example.test"}}},
+		{name: "too many tools", tools: tooMany},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if message := (ResponseRequest{Tools: test.tools}).Validate(); message == "" {
+				t.Fatalf("invalid tools accepted: %+v", test.tools)
+			}
+		})
 	}
 }
 

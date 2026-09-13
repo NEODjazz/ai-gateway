@@ -61,3 +61,19 @@ func TestResponsesRejectsInvalidToolChoiceBeforeExecution(t *testing.T) {
 		}
 	}
 }
+
+func TestResponsesRejectsMixedToolDefinitionsBeforeExecution(t *testing.T) {
+	handler := Handler{}
+	for _, tools := range []string{
+		`[{"type":"function","name":"lookup","server_url":"https://example.test"}]`,
+		`[{"type":"mcp","server_label":"documents","server_url":"https://example.test","parameters":{"type":"object"}}]`,
+		`[{"type":"function","name":"lookup"},{"type":"function","name":"lookup"}]`,
+	} {
+		out := httptest.NewRecorder()
+		body := `{"model":"m","input":"hello","tools":` + tools + `}`
+		handler.Responses(out, httptest.NewRequest("POST", "/v1/responses", strings.NewReader(body)))
+		if out.Code != 400 || !strings.Contains(out.Body.String(), `"invalid_request"`) {
+			t.Fatalf("tools=%s status=%d response=%s", tools, out.Code, out.Body.String())
+		}
+	}
+}
