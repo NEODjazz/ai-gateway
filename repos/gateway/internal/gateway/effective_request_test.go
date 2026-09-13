@@ -107,6 +107,18 @@ func TestRerankRejectsOptionsInvalidatedByPipeline(t *testing.T) {
 	}
 }
 
+func TestModerationsRejectsOptionsInvalidatedByPipeline(t *testing.T) {
+	provider := &chatProvider{}
+	handler := NewHandler(modules.NewPipeline([]modules.Module{rewriteContextModule{rewrite: func(req *modules.RequestContext) {
+		req.ModerationRequest.Metadata = map[string]string{strings.Repeat("k", 65): "value"}
+	}}}), provider)
+	response := httptest.NewRecorder()
+	handler.Moderations(response, httptest.NewRequest(http.MethodPost, "/v1/moderations", strings.NewReader(`{"input":"hello"}`)))
+	if response.Code != http.StatusBadGateway || provider.request.RequestID != "" || !strings.Contains(response.Body.String(), `"module_failed"`) || !strings.Contains(response.Body.String(), "metadata") {
+		t.Fatalf("invalid pipeline output continued: status=%d provider=%+v body=%s", response.Code, provider.request, response.Body.String())
+	}
+}
+
 func TestAdmissionUsesReplacedTypedRequests(t *testing.T) {
 	for _, endpoint := range []struct{ path, body string }{
 		{"/v1/responses", `{"model":"m","input":"hi","max_output_tokens":1}`},

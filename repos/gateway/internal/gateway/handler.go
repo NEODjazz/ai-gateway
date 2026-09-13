@@ -1269,11 +1269,7 @@ func (h Handler) Moderations(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(request.Model) == "" {
 		request.Model = "omni-moderation-latest"
 	}
-	if _, err := openai.InspectModerationInput(request.Input); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
-		return
-	}
-	if message := openai.ValidateMetadata(request.Metadata); message != "" {
+	if message := validateModerationRequest(request); message != "" {
 		writeError(w, http.StatusBadRequest, "invalid_request", message)
 		return
 	}
@@ -1295,8 +1291,8 @@ func (h Handler) Moderations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	request = *reqCtx.ModerationRequest
-	if _, err := openai.InspectModerationInput(request.Input); err != nil {
-		writeError(w, http.StatusBadGateway, "module_failed", "module returned an invalid moderation input")
+	if message := validateModerationRequest(request); message != "" {
+		writeError(w, http.StatusBadGateway, "module_failed", "module produced an invalid moderation request: "+message)
 		return
 	}
 	if !h.prepareAccessGroups(w, &reqCtx) {
@@ -1319,6 +1315,16 @@ func (h Handler) Moderations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, response)
+}
+
+func validateModerationRequest(request openai.ModerationRequest) string {
+	if strings.TrimSpace(request.Model) == "" {
+		return "model is required"
+	}
+	if _, err := openai.InspectModerationInput(request.Input); err != nil {
+		return err.Error()
+	}
+	return openai.ValidateMetadata(request.Metadata)
 }
 
 func (h Handler) GenerateImage(w http.ResponseWriter, r *http.Request) {
