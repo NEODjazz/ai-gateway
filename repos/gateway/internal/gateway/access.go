@@ -165,6 +165,10 @@ func responseToolIdentifiers(tools []openai.ResponseTool) ([]string, bool) {
 		switch tool.Type {
 		case "function":
 			identifier = tool.Name
+		case "code_interpreter":
+			identifier = "code_interpreter"
+		case "file_search":
+			identifier = "file_search"
 		case "mcp":
 			var valid bool
 			identifier, valid = mcpToolIdentifier(tool)

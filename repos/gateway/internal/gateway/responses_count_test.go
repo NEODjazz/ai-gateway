@@ -109,6 +109,16 @@ func TestResponseInputTokenCountEnforcesModelAndToolACL(t *testing.T) {
 	}
 }
 
+func TestResponseInputTokenCountRejectsUnresolvedBuiltInToolResources(t *testing.T) {
+	counter := &responseInputTokenCountProvider{}
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}, tools: []string{"file_search"}}}), counter))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/v1/responses/input_tokens", strings.NewReader(`{"model":"m","input":"x","tools":[{"type":"file_search","vector_store_ids":["vs_missing"]}]}`)))
+	if response.Code != http.StatusServiceUnavailable || counter.calls != 0 || !strings.Contains(response.Body.String(), "vector_store_unavailable") {
+		t.Fatalf("unresolved resource reached provider: status=%d calls=%d body=%s", response.Code, counter.calls, response.Body.String())
+	}
+}
+
 func TestResponseInputTokenCountRejectsGenerationOnlyFields(t *testing.T) {
 	counter := &responseInputTokenCountProvider{}
 	handler := Routes(NewHandler(modules.NewPipeline(nil), counter))

@@ -184,6 +184,7 @@ func validateResponseTools(tools []ResponseTool) string {
 	}
 	functionNames := make(map[string]struct{}, len(tools))
 	mcpLabels := make(map[string]struct{}, len(tools))
+	hostedTypes := make(map[string]struct{}, 2)
 	for index, tool := range tools {
 		switch tool.Type {
 		case "function":
@@ -228,23 +229,31 @@ func validateResponseTools(tools []ResponseTool) string {
 				allowed[name] = struct{}{}
 			}
 		case "code_interpreter":
+			if _, duplicate := hostedTypes[tool.Type]; duplicate {
+				return "code_interpreter tools must be unique"
+			}
+			hostedTypes[tool.Type] = struct{}{}
 			if tool.Name != "" || tool.Description != "" || tool.Parameters != nil || tool.Strict != nil || tool.ServerLabel != "" || tool.ServerURL != "" || tool.ServerDescription != "" || len(tool.AllowedTools) > 0 || tool.RequireApproval != nil || len(tool.Headers) > 0 || len(tool.VectorStoreIDs) > 0 {
 				return "code_interpreter tools contain unsupported fields"
 			}
-			if tool.Container == nil || !isJSONObject(tool.Container) {
-				return "code_interpreter tools require an object container"
+			if _, message := ResponseCodeInterpreterContainerFileIDs(tool.Container); message != "" {
+				return message
 			}
 		case "file_search":
+			if _, duplicate := hostedTypes[tool.Type]; duplicate {
+				return "file_search tools must be unique"
+			}
+			hostedTypes[tool.Type] = struct{}{}
 			if tool.Name != "" || tool.Description != "" || tool.Parameters != nil || tool.Strict != nil || tool.ServerLabel != "" || tool.ServerURL != "" || tool.ServerDescription != "" || len(tool.AllowedTools) > 0 || tool.RequireApproval != nil || len(tool.Headers) > 0 || tool.Container != nil {
 				return "file_search tools contain unsupported fields"
 			}
-			if len(tool.VectorStoreIDs) == 0 {
-				return "file_search tools require vector_store_ids"
+			if len(tool.VectorStoreIDs) == 0 || len(tool.VectorStoreIDs) > 1 {
+				return "file_search tools require exactly one vector_store_id"
 			}
 			vectorStores := make(map[string]struct{}, len(tool.VectorStoreIDs))
 			for _, id := range tool.VectorStoreIDs {
-				if strings.TrimSpace(id) == "" {
-					return "file_search vector_store_ids must contain non-empty IDs"
+				if !validResponseToolResourceID(id) {
+					return "file_search vector_store_ids contain an invalid ID"
 				}
 				if _, duplicate := vectorStores[id]; duplicate {
 					return "file_search vector_store_ids must be unique"
@@ -265,6 +274,67 @@ func isJSONObject(value any) bool {
 	}
 	var object map[string]json.RawMessage
 	return json.Unmarshal(encoded, &object) == nil && object != nil
+}
+
+// ResponseCodeInterpreterContainerFileIDs validates the supported automatic
+// container shape and returns the referenced file IDs.
+func ResponseCodeInterpreterContainerFileIDs(value any) ([]string, string) {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return nil, "code_interpreter tools require an object container"
+	}
+	var object map[string]json.RawMessage
+	if json.Unmarshal(encoded, &object) != nil || object == nil {
+		return nil, "code_interpreter tools require an object container"
+	}
+	for field := range object {
+		if field != "type" && field != "memory_limit" && field != "file_ids" {
+			return nil, "code_interpreter container contains unsupported fields"
+		}
+	}
+	var containerType string
+	if json.Unmarshal(object["type"], &containerType) != nil || containerType != "auto" {
+		return nil, "code_interpreter container.type must be auto"
+	}
+	if raw, present := object["memory_limit"]; present {
+		var memoryLimit string
+		if json.Unmarshal(raw, &memoryLimit) != nil || memoryLimit != "1g" && memoryLimit != "4g" && memoryLimit != "16g" && memoryLimit != "64g" {
+			return nil, "code_interpreter container.memory_limit must be 1g, 4g, 16g, or 64g"
+		}
+	}
+	var fileIDs []string
+	if raw, present := object["file_ids"]; present {
+		if json.Unmarshal(raw, &fileIDs) != nil {
+			return nil, "code_interpreter container.file_ids must be an array"
+		}
+		if len(fileIDs) > 20 {
+			return nil, "code_interpreter container.file_ids must contain at most 20 IDs"
+		}
+		seen := make(map[string]struct{}, len(fileIDs))
+		for _, id := range fileIDs {
+			if !validResponseToolResourceID(id) {
+				return nil, "code_interpreter container.file_ids contain an invalid ID"
+			}
+			if _, duplicate := seen[id]; duplicate {
+				return nil, "code_interpreter container.file_ids must be unique"
+			}
+			seen[id] = struct{}{}
+		}
+	}
+	return fileIDs, ""
+}
+
+func validResponseToolResourceID(value string) bool {
+	if value == "" || len(value) > 128 {
+		return false
+	}
+	for _, character := range value {
+		if character >= 'a' && character <= 'z' || character >= 'A' && character <= 'Z' || character >= '0' && character <= '9' || character == '_' || character == '-' || character == '.' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func validResponseMCPURL(value string) bool {
@@ -292,7 +362,7 @@ func validateResponseToolChoice(tools []ResponseTool, choice any) string {
 		return "tool_choice must be a supported string or object"
 	}
 	var object map[string]json.RawMessage
-	if err := json.Unmarshal(encoded, &object); err != nil || len(object) < 2 {
+	if err := json.Unmarshal(encoded, &object); err != nil || len(object) == 0 {
 		return "tool_choice must be a supported string or object"
 	}
 	var kind, name, serverLabel string
@@ -300,6 +370,14 @@ func validateResponseToolChoice(tools []ResponseTool, choice any) string {
 		return "tool_choice must be a supported string or object"
 	}
 	switch kind {
+	case "code_interpreter", "file_search":
+		if len(object) == 1 {
+			for _, tool := range tools {
+				if tool.Type == kind {
+					return ""
+				}
+			}
+		}
 	case "function":
 		if len(object) != 2 || json.Unmarshal(object["name"], &name) != nil || name == "" {
 			return "tool_choice must reference an available tool"

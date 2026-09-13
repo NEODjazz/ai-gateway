@@ -197,6 +197,15 @@ func (h Handler) decodeBatchItems(w http.ResponseWriter, ctx context.Context, id
 				return nil, fmt.Errorf("line %d: resolved Messages request exceeds the 4 MiB limit", lineNumber)
 			}
 		}
+		if endpoint == "/v1/responses" {
+			var request openai.ResponseRequest
+			if json.Unmarshal(normalized, &request) != nil {
+				return nil, fmt.Errorf("line %d: normalized Responses request is invalid", lineNumber)
+			}
+			if !h.authorizeResponseToolResources(w, ctx, identity, request.Tools) {
+				return nil, errBatchResponseWritten
+			}
+		}
 		if !h.authorizeBatchModel(w, identity, model) {
 			return nil, errBatchResponseWritten
 		}

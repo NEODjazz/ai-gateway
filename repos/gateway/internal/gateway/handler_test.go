@@ -37,6 +37,7 @@ type lifecycleBillingModule struct{ calls int }
 
 type lifecycleAuthModule struct {
 	allowedModels []string
+	allowedTools  []string
 }
 
 type lifecycleResourceProvider struct {
@@ -63,6 +64,7 @@ func (m *lifecycleAuthModule) Handle(_ context.Context, req *modules.RequestCont
 	req.CredentialID = "credential"
 	req.UserID = "user"
 	req.AllowedModels = append([]string(nil), m.allowedModels...)
+	req.AllowedTools = append([]string(nil), m.allowedTools...)
 	return nil
 }
 
@@ -362,7 +364,8 @@ func (*chatProvider) StreamChatCompletions(context.Context, modules.RequestConte
 	return openai.ChatCompletionResponse{}, false, nil
 }
 
-func (*chatProvider) Responses(context.Context, modules.RequestContext) (openai.ResponseResponse, error) {
+func (p *chatProvider) Responses(_ context.Context, req modules.RequestContext) (openai.ResponseResponse, error) {
+	p.request = req
 	return openai.ResponseResponse{}, nil
 }
 

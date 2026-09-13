@@ -1730,6 +1730,37 @@ func TestResponsesCatalogRequirementsIncludeToolsStructuredOutputAndStream(t *te
 	}
 }
 
+func TestResponsesCodeInterpreterRequiresExplicitCapability(t *testing.T) {
+	required := requiredResponseCapabilities(openai.ResponseRequest{
+		Tools: []openai.ResponseTool{
+			{Type: "code_interpreter", Container: map[string]any{"type": "auto"}},
+			{Type: "file_search", VectorStoreIDs: []string{"vs_owned"}},
+		},
+	}, false)
+	if strings.Join(required, ",") != "responses,tools,code_interpreter,file_search" {
+		t.Fatalf("unexpected Responses capabilities: %v", required)
+	}
+}
+
+func TestResponsesBuiltInToolsRouteOnlyToDeclaredDeployment(t *testing.T) {
+	legacy := &modelCaptureProvider{content: "legacy"}
+	builtIn := &modelCaptureProvider{content: "built-in"}
+	router := Router{health: newEndpointHealthTracker(), endpoints: []Endpoint{
+		{Name: "legacy", Type: "openai-compatible", Priority: 1, Capabilities: []string{"responses", "tools"}, Provider: legacy},
+		{Name: "built-in", Type: "openai-compatible", Priority: 2, Capabilities: []string{"responses", "tools", "code_interpreter", "file_search"}, Provider: builtIn},
+	}}
+	request := openai.ResponseRequest{Model: "model", Input: "analyze", Tools: []openai.ResponseTool{
+		{Type: "code_interpreter", Container: map[string]any{"type": "auto"}},
+		{Type: "file_search", VectorStoreIDs: []string{"vs_owned"}},
+	}}
+	if _, err := router.Responses(t.Context(), modules.RequestContext{Request: openai.ChatCompletionRequest{Model: "model"}, ResponseRequest: &request}); err != nil {
+		t.Fatal(err)
+	}
+	if legacy.seenModel != "" || builtIn.seenModel != "model" {
+		t.Fatalf("built-in request used an undeclared deployment: legacy=%q built-in=%q", legacy.seenModel, builtIn.seenModel)
+	}
+}
+
 func TestResponseFileInputRequiresExplicitEndpointCapability(t *testing.T) {
 	legacy := &modelCaptureProvider{content: "legacy"}
 	files := &modelCaptureProvider{content: "files"}

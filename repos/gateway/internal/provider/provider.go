@@ -3344,9 +3344,14 @@ func requiredResponseCapabilities(request openai.ResponseRequest, stream bool) [
 		required = append(required, "tools")
 	}
 	for _, tool := range request.Tools {
+		if tool.Type == "code_interpreter" {
+			required = append(required, "code_interpreter")
+		}
+		if tool.Type == "file_search" {
+			required = append(required, "file_search")
+		}
 		if tool.Type == "mcp" {
 			required = append(required, "mcp")
-			break
 		}
 	}
 	if request.Text != nil {

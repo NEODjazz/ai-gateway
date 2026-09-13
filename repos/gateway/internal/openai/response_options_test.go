@@ -197,7 +197,7 @@ func TestResponseToolDefinitionValidation(t *testing.T) {
 	valid := []ResponseTool{
 		{Type: "function", Name: "lookup", Parameters: map[string]any{"type": "object"}, Strict: &strict},
 		{Type: "mcp", ServerLabel: "documents", ServerURL: "https://documents.example.test/mcp", AllowedTools: []string{"search"}, Headers: map[string]string{"X-Tenant": "example"}},
-		{Type: "code_interpreter", Container: map[string]any{"type": "auto"}},
+		{Type: "code_interpreter", Container: map[string]any{"type": "auto", "memory_limit": "4g", "file_ids": []string{"file_owned"}}},
 		{Type: "file_search", VectorStoreIDs: []string{"vs_owned"}},
 	}
 	if message := (ResponseRequest{Tools: valid}).Validate(); message != "" {
@@ -233,9 +233,16 @@ func TestResponseToolDefinitionValidation(t *testing.T) {
 		{name: "too many allowed tools", tools: []ResponseTool{{Type: "mcp", ServerLabel: "documents", ServerURL: "https://example.test", AllowedTools: tooManyAllowed}}},
 		{name: "missing code interpreter container", tools: []ResponseTool{{Type: "code_interpreter"}}},
 		{name: "non-object code interpreter container", tools: []ResponseTool{{Type: "code_interpreter", Container: []string{"invalid"}}}},
+		{name: "code interpreter container without type", tools: []ResponseTool{{Type: "code_interpreter", Container: map[string]any{}}}},
+		{name: "code interpreter container with invalid type", tools: []ResponseTool{{Type: "code_interpreter", Container: map[string]any{"type": "existing"}}}},
+		{name: "code interpreter container with invalid memory", tools: []ResponseTool{{Type: "code_interpreter", Container: map[string]any{"type": "auto", "memory_limit": "2g"}}}},
+		{name: "code interpreter container with invalid file reference", tools: []ResponseTool{{Type: "code_interpreter", Container: map[string]any{"type": "auto", "file_ids": []string{"bad/id"}}}}},
+		{name: "code interpreter container with unknown field", tools: []ResponseTool{{Type: "code_interpreter", Container: map[string]any{"type": "auto", "network": true}}}},
+		{name: "duplicate code interpreter", tools: []ResponseTool{{Type: "code_interpreter", Container: map[string]any{"type": "auto"}}, {Type: "code_interpreter", Container: map[string]any{"type": "auto"}}}},
 		{name: "code interpreter with function field", tools: []ResponseTool{{Type: "code_interpreter", Name: "lookup", Container: map[string]any{"type": "auto"}}}},
 		{name: "missing file search stores", tools: []ResponseTool{{Type: "file_search"}}},
 		{name: "duplicate file search store", tools: []ResponseTool{{Type: "file_search", VectorStoreIDs: []string{"vs_owned", "vs_owned"}}}},
+		{name: "duplicate file search", tools: []ResponseTool{{Type: "file_search", VectorStoreIDs: []string{"vs_one"}}, {Type: "file_search", VectorStoreIDs: []string{"vs_two"}}}},
 		{name: "file search with MCP field", tools: []ResponseTool{{Type: "file_search", VectorStoreIDs: []string{"vs_owned"}, ServerURL: "https://example.test"}}},
 		{name: "too many tools", tools: tooMany},
 	} {
@@ -244,6 +251,20 @@ func TestResponseToolDefinitionValidation(t *testing.T) {
 				t.Fatalf("invalid tools accepted: %+v", test.tools)
 			}
 		})
+	}
+}
+
+func TestResponseCodeInterpreterToolChoice(t *testing.T) {
+	request := ResponseRequest{
+		Tools:      []ResponseTool{{Type: "code_interpreter", Container: map[string]any{"type": "auto", "memory_limit": "4g"}}},
+		ToolChoice: map[string]any{"type": "code_interpreter"},
+	}
+	if message := request.Validate(); message != "" {
+		t.Fatalf("valid code interpreter choice rejected: %s", message)
+	}
+	request.Tools = []ResponseTool{{Type: "function", Name: "lookup"}}
+	if message := request.Validate(); message == "" {
+		t.Fatal("code interpreter choice without matching tool was accepted")
 	}
 }
 

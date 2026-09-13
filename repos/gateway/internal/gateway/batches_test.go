@@ -21,6 +21,7 @@ import (
 	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/openai"
 	providerpkg "ai-gateway-gateway/internal/provider"
+	"ai-gateway-gateway/internal/vectorstate"
 )
 
 type memoryBatchStore struct {
@@ -481,6 +482,37 @@ func TestBatchLifecycleExecutesMixedModelsWithDistinctBillingIDs(t *testing.T) {
 	provider.mu.Unlock()
 	if len(executions) != 2 || executions[0] == executions[1] {
 		t.Fatalf("execution IDs=%v", executions)
+	}
+}
+
+func TestBatchResponsesRequireOwnedBuiltInToolResources(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		storeOwner string
+		wantStatus int
+	}{
+		{name: "owned", storeOwner: fileOwnerKey(modules.RequestContext{CredentialID: "credential", UserID: "user"}), wantStatus: http.StatusOK},
+		{name: "foreign", storeOwner: "foreign", wantStatus: http.StatusBadRequest},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store := newMemoryBatchStore()
+			files := &memoryFileStore{files: map[string]filestate.File{}}
+			owner := fileOwnerKey(modules.RequestContext{CredentialID: "credential", UserID: "user"})
+			payload := []byte(`{"custom_id":"one","method":"POST","url":"/v1/responses","body":{"model":"model-a","input":"search","tools":[{"type":"file_search","vector_store_ids":["vs_owned"]}]}}` + "\n")
+			files.files["file_input"] = filestate.File{ID: "file_input", OwnerKey: owner, Filename: "input.jsonl", Purpose: "batch", ContentType: "application/jsonl", Bytes: int64(len(payload)), Content: payload}
+			vectors := &memoryVectorStore{stores: map[string]vectorstate.VectorStore{"vs_owned": {ID: "vs_owned", OwnerKey: test.storeOwner}}, files: map[string]vectorstate.File{}}
+			handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{&lifecycleAuthModule{allowedModels: []string{"model-a"}, allowedTools: []string{"file_search"}}}), &batchProvider{models: []string{"model-a"}}).
+				WithFileStore(files, FileRuntimeConfig{MaxBytes: 4 << 20, OwnerQuotaBytes: 64 << 20}).
+				WithVectorStore(vectors, VectorStoreRuntimeConfig{OwnerQuota: 10}).
+				WithBatchStore(store, store))
+			request := httptest.NewRequest(http.MethodPost, "/v1/batches", strings.NewReader(`{"input_file_id":"file_input","endpoint":"/v1/responses","completion_window":"24h"}`))
+			request.Header.Set("Authorization", "Bearer key")
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			if response.Code != test.wantStatus {
+				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+			}
+		})
 	}
 }
 

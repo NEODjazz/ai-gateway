@@ -39,6 +39,8 @@ export const modelCapabilityOptions: ChipOption[] = [
   { value: "tools", label: "Tools", description: "Function and tool calling" },
   { value: "structured_output", label: "Structured output", description: "Structured JSON output" },
   { value: "mcp", label: "MCP", description: "MCP tool calls" },
+  { value: "code_interpreter", label: "Code interpreter", description: "Provider-managed code execution in Responses" },
+  { value: "file_search", label: "File search", description: "Provider-managed file search in Responses" },
   { value: "vision", label: "Vision", description: "Image inputs" },
   { value: "web_search", label: "Web search", description: "Provider web search tools" },
   { value: "web_fetch", label: "Web fetch", description: "Provider retrieval of explicitly allowed web domains" },

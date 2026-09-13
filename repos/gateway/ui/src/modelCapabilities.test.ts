@@ -42,6 +42,8 @@ describe("modelCapabilityOptions", () => {
       "tools",
       "structured_output",
       "mcp",
+      "code_interpreter",
+      "file_search",
       "vision",
       "web_search",
       "web_fetch",

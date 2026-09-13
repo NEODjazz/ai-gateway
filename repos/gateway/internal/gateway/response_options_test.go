@@ -5,7 +5,9 @@ import (
 	"strings"
 	"testing"
 
+	"ai-gateway-gateway/internal/filestate"
 	"ai-gateway-gateway/internal/modules"
+	"ai-gateway-gateway/internal/vectorstate"
 )
 
 func TestResponsesRejectsInvalidEnvelopeBeforePipeline(t *testing.T) {
@@ -118,6 +120,66 @@ func TestResponsesRejectsMixedToolDefinitionsBeforeExecution(t *testing.T) {
 		if out.Code != 400 || !strings.Contains(out.Body.String(), `"invalid_request"`) {
 			t.Fatalf("tools=%s status=%d response=%s", tools, out.Code, out.Body.String())
 		}
+	}
+}
+
+func TestResponsesAuthorizesCodeInterpreterTool(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		allowed     []string
+		wantStatus  int
+		wantForward bool
+	}{
+		{name: "allowed", allowed: []string{"code_interpreter"}, wantStatus: 200, wantForward: true},
+		{name: "denied", allowed: []string{"lookup"}, wantStatus: 403},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			upstream := &chatProvider{}
+			handler := NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}, tools: test.allowed}}), upstream)
+			out := httptest.NewRecorder()
+			handler.Responses(out, httptest.NewRequest("POST", "/v1/responses", strings.NewReader(`{"model":"m","input":"calculate","tools":[{"type":"code_interpreter","container":{"type":"auto","memory_limit":"4g"}}],"tool_choice":{"type":"code_interpreter"}}`)))
+			if out.Code != test.wantStatus {
+				t.Fatalf("status=%d body=%s", out.Code, out.Body.String())
+			}
+			forwarded := upstream.request.ResponseRequest != nil && len(upstream.request.ResponseRequest.Tools) == 1 && upstream.request.ResponseRequest.Tools[0].Type == "code_interpreter"
+			if forwarded != test.wantForward {
+				t.Fatalf("forwarded=%t request=%+v", forwarded, upstream.request.ResponseRequest)
+			}
+		})
+	}
+}
+
+func TestResponsesRequireOwnedBuiltInToolResources(t *testing.T) {
+	identity := modules.RequestContext{CredentialID: "credential-1", UserID: "user-1"}
+	owner := fileOwnerKey(identity)
+	body := `{"model":"m","input":"analyze","tools":[{"type":"code_interpreter","container":{"type":"auto","file_ids":["file_owned"]}},{"type":"file_search","vector_store_ids":["vs_owned"]}]}`
+
+	for _, test := range []struct {
+		name       string
+		fileOwner  string
+		storeOwner string
+		wantStatus int
+	}{
+		{name: "owned", fileOwner: owner, storeOwner: owner, wantStatus: 200},
+		{name: "foreign file", fileOwner: "foreign", storeOwner: owner, wantStatus: 400},
+		{name: "foreign vector store", fileOwner: owner, storeOwner: "foreign", wantStatus: 400},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			upstream := &chatProvider{}
+			files := &memoryFileStore{files: map[string]filestate.File{"file_owned": {ID: "file_owned", OwnerKey: test.fileOwner}}}
+			vectors := &memoryVectorStore{stores: map[string]vectorstate.VectorStore{"vs_owned": {ID: "vs_owned", OwnerKey: test.storeOwner}}, files: map[string]vectorstate.File{}}
+			handler := NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}, tools: []string{"code_interpreter", "file_search"}}}), upstream).
+				WithFileStore(files, FileRuntimeConfig{MaxBytes: 1 << 20, OwnerQuotaBytes: 1 << 20}).
+				WithVectorStore(vectors, VectorStoreRuntimeConfig{OwnerQuota: 10})
+			out := httptest.NewRecorder()
+			handler.Responses(out, httptest.NewRequest("POST", "/v1/responses", strings.NewReader(body)))
+			if out.Code != test.wantStatus {
+				t.Fatalf("status=%d body=%s", out.Code, out.Body.String())
+			}
+			if (upstream.request.ResponseRequest != nil) != (test.wantStatus == 200) {
+				t.Fatalf("unexpected provider execution: request=%+v", upstream.request.ResponseRequest)
+			}
+		})
 	}
 }
 

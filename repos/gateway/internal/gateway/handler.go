@@ -740,6 +740,9 @@ func (h Handler) serveResponsesAs(w http.ResponseWriter, r *http.Request, reques
 	if !h.authorizeTools(w, reqCtx, toolIdentifiers, validTools) {
 		return
 	}
+	if !h.authorizeResponseToolResources(w, r.Context(), reqCtx, request.Tools) {
+		return
+	}
 	if !h.authorizeAccess(w, r.Context(), reqCtx, request.Model, estimateResponseTokens(request)) {
 		return
 	}
