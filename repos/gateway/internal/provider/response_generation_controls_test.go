@@ -13,6 +13,7 @@ import (
 
 func TestResponsesGenerationControlsForwarding(t *testing.T) {
 	frequency, presence, maxToolCalls := 0.5, -0.25, 0
+	user := "customer@example.com"
 	for _, adapter := range []string{"compatible", "openrouter"} {
 		for _, stream := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/stream=%v", adapter, stream), func(t *testing.T) {
@@ -21,7 +22,7 @@ func TestResponsesGenerationControlsForwarding(t *testing.T) {
 					if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 						t.Fatal(err)
 					}
-					if body["frequency_penalty"] != frequency || body["presence_penalty"] != presence || body["max_tool_calls"] != float64(maxToolCalls) {
+					if body["frequency_penalty"] != frequency || body["presence_penalty"] != presence || body["max_tool_calls"] != float64(maxToolCalls) || body["user"] != user {
 						t.Fatalf("generation controls lost: %#v", body)
 					}
 					if stream {
@@ -31,7 +32,7 @@ func TestResponsesGenerationControlsForwarding(t *testing.T) {
 					}
 				}))
 				defer server.Close()
-				request := openai.ResponseRequest{Model: "m", Input: "hello", FrequencyPenalty: &frequency, PresencePenalty: &presence, MaxToolCalls: &maxToolCalls}
+				request := openai.ResponseRequest{Model: "m", Input: "hello", User: user, FrequencyPenalty: &frequency, PresencePenalty: &presence, MaxToolCalls: &maxToolCalls}
 				var client Client
 				if adapter == "openrouter" {
 					value := NewOpenRouter(server.URL, "", true, "")
