@@ -19,6 +19,31 @@ func TestResponseOptionsValidation(t *testing.T) {
 	}
 }
 
+func TestResponseEnvelopeValidation(t *testing.T) {
+	for _, request := range []ResponseRequest{
+		{Model: "model", Input: ""},
+		{Model: "model", Input: []any{map[string]any{"role": "user", "content": "hello"}}},
+	} {
+		if message := request.ValidateEnvelope(); message != "" {
+			t.Fatalf("valid envelope rejected: %+v: %s", request, message)
+		}
+	}
+	for _, request := range []ResponseRequest{
+		{Input: "hello"},
+		{Model: strings.Repeat("m", 257), Input: "hello"},
+		{Model: "model"},
+		{Model: "model", Input: []any{}},
+		{Model: "model", Input: 42},
+		{Model: "model", Input: map[string]any{"role": "user"}},
+		{Model: "model", Input: []any{"hello"}},
+		{Model: "model", Input: []any{nil}},
+	} {
+		if message := request.ValidateEnvelope(); message == "" {
+			t.Fatalf("invalid envelope accepted: %+v", request)
+		}
+	}
+}
+
 func TestResponseStreamOptionsRequireStreaming(t *testing.T) {
 	value := false
 	request := ResponseRequest{StreamOptions: &ResponseStreamOptions{IncludeObfuscation: &value}}

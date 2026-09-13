@@ -4,7 +4,38 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"ai-gateway-gateway/internal/modules"
 )
+
+func TestResponsesRejectsInvalidEnvelopeBeforePipeline(t *testing.T) {
+	handler := Handler{}
+	for _, body := range []string{
+		`{"input":"hello"}`,
+		`{"model":"m"}`,
+		`{"model":"m","input":null}`,
+		`{"model":"m","input":[]}`,
+		`{"model":"m","input":42}`,
+		`{"model":"m","input":["hello"]}`,
+	} {
+		out := httptest.NewRecorder()
+		handler.Responses(out, httptest.NewRequest("POST", "/v1/responses", strings.NewReader(body)))
+		if out.Code != 400 || !strings.Contains(out.Body.String(), `"invalid_request"`) {
+			t.Fatalf("body=%s status=%d response=%s", body, out.Code, out.Body.String())
+		}
+	}
+}
+
+func TestResponsesRejectsEnvelopeInvalidatedByPipeline(t *testing.T) {
+	handler := NewHandler(modules.NewPipeline([]modules.Module{rewriteContextModule{rewrite: func(req *modules.RequestContext) {
+		req.ResponseRequest.Model = ""
+	}}}), nil)
+	out := httptest.NewRecorder()
+	handler.Responses(out, httptest.NewRequest("POST", "/v1/responses", strings.NewReader(`{"model":"m","input":"hello"}`)))
+	if out.Code != 502 || !strings.Contains(out.Body.String(), `"module_failed"`) {
+		t.Fatalf("status=%d response=%s", out.Code, out.Body.String())
+	}
+}
 
 func TestResponsesRejectsInvalidOptionsBeforeExecution(t *testing.T) {
 	// No pipeline/router: an invalid request must stop before either is invoked.

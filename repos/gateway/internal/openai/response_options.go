@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"bytes"
 	"encoding/json"
 	"math"
 	"net/url"
@@ -8,6 +9,35 @@ import (
 	"strings"
 	"unicode/utf8"
 )
+
+// ValidateEnvelope checks the required model and input shape shared by public
+// Responses entry points before policy, accounting, and provider execution.
+func (r ResponseRequest) ValidateEnvelope() string {
+	if strings.TrimSpace(r.Model) == "" || utf8.RuneCountInString(r.Model) > 256 {
+		return "model must contain between 1 and 256 characters"
+	}
+	if r.Input == nil {
+		return "input is required"
+	}
+	if _, ok := r.Input.(string); ok {
+		return ""
+	}
+	encoded, err := json.Marshal(r.Input)
+	if err != nil {
+		return "input must be a string or non-empty array of objects"
+	}
+	var items []json.RawMessage
+	if json.Unmarshal(encoded, &items) != nil || len(items) == 0 {
+		return "input must be a string or non-empty array of objects"
+	}
+	for _, item := range items {
+		var object map[string]json.RawMessage
+		if bytes.Equal(bytes.TrimSpace(item), []byte("null")) || json.Unmarshal(item, &object) != nil || object == nil {
+			return "input array entries must be objects"
+		}
+	}
+	return ""
+}
 
 // Validate checks provider-independent Responses generation options.
 func (r ResponseRequest) Validate() string {

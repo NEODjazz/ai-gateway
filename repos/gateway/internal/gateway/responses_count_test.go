@@ -65,6 +65,18 @@ func TestResponseInputTokenCountRejectsInvalidTextVerbosity(t *testing.T) {
 	}
 }
 
+func TestResponseInputTokenCountRejectsInvalidEnvelope(t *testing.T) {
+	for _, body := range []string{`{"input":"hello"}`, `{"model":"m"}`, `{"model":"m","input":[]}`, `{"model":"m","input":42}`} {
+		counter := &responseInputTokenCountProvider{}
+		handler := Routes(NewHandler(modules.NewPipeline(nil), counter))
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/v1/responses/input_tokens", strings.NewReader(body)))
+		if response.Code != http.StatusBadRequest || counter.calls != 0 || !strings.Contains(response.Body.String(), "invalid_request") {
+			t.Fatalf("body=%s status=%d calls=%d response=%s", body, response.Code, counter.calls, response.Body.String())
+		}
+	}
+}
+
 func TestResponseInputTokenCountEnforcesModelAndToolACL(t *testing.T) {
 	for _, test := range []struct {
 		name string

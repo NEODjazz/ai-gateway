@@ -651,6 +651,10 @@ type responseStreamTransform func(string, string, modules.RequestContext) ([]res
 type responseStreamFinalize func(openai.ResponseResponse, modules.RequestContext) ([]responseStreamEvent, error)
 
 func (h Handler) serveResponsesAs(w http.ResponseWriter, r *http.Request, request openai.ResponseRequest, apiType string, transform func(openai.ResponseResponse, modules.RequestContext) any, streamTransform responseStreamTransform, streamFinalize responseStreamFinalize, closeStreamWithoutSentinel bool) {
+	if message := request.ValidateEnvelope(); message != "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", message)
+		return
+	}
 	if message := request.Validate(); message != "" {
 		writeError(w, http.StatusBadRequest, "invalid_request", message)
 		return
@@ -697,6 +701,10 @@ func (h Handler) serveResponsesAs(w http.ResponseWriter, r *http.Request, reques
 		return
 	}
 	request = *reqCtx.ResponseRequest
+	if message := request.ValidateEnvelope(); message != "" {
+		writeError(w, http.StatusBadGateway, "module_failed", "module produced an invalid inference request: "+message)
+		return
+	}
 	if !h.prepareAccessGroups(w, &reqCtx) {
 		return
 	}

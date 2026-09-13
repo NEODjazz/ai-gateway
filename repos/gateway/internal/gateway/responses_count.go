@@ -3,7 +3,6 @@ package gateway
 import (
 	"errors"
 	"net/http"
-	"strings"
 
 	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/openai"
@@ -16,12 +15,8 @@ func (h Handler) CountResponseInputTokens(w http.ResponseWriter, r *http.Request
 		return
 	}
 	responseRequest := request.ResponseRequest()
-	if strings.TrimSpace(responseRequest.Model) == "" {
-		writeError(w, http.StatusBadRequest, "invalid_request", "model is required")
-		return
-	}
-	if responseRequest.Input == nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "input is required")
+	if message := responseRequest.ValidateEnvelope(); message != "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", message)
 		return
 	}
 	if message := responseRequest.Validate(); message != "" {
@@ -50,6 +45,10 @@ func (h Handler) CountResponseInputTokens(w http.ResponseWriter, r *http.Request
 		return
 	}
 	responseRequest = *reqCtx.ResponseRequest
+	if message := responseRequest.ValidateEnvelope(); message != "" {
+		writeError(w, http.StatusBadGateway, "module_failed", "module produced an invalid token-count request: "+message)
+		return
+	}
 	if !h.prepareAccessGroups(w, &reqCtx) {
 		return
 	}

@@ -665,6 +665,19 @@ func TestBatchRejectsInvalidResponseCompaction(t *testing.T) {
 	}
 }
 
+func TestBatchRejectsInvalidResponseEnvelope(t *testing.T) {
+	for _, body := range []string{
+		`{"input":"hello"}`,
+		`{"model":"model"}`,
+		`{"model":"model","input":[]}`,
+		`{"model":"model","input":42}`,
+	} {
+		if _, _, _, err := validateBatchBody("/v1/responses", []byte(body)); err == nil {
+			t.Fatalf("invalid response request accepted: %s", body)
+		}
+	}
+}
+
 func TestBatchLifecycleExecutesSearchWithPerQueryAccounting(t *testing.T) {
 	store := newMemoryBatchStore()
 	files := &memoryFileStore{files: map[string]filestate.File{}}

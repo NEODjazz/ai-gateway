@@ -333,6 +333,9 @@ func validateBatchBody(endpoint string, body []byte) ([]byte, string, []string, 
 		if request.Stream || request.Background {
 			return nil, "", nil, errors.New("stream and background are not supported in batches")
 		}
+		if message := request.ValidateEnvelope(); message != "" {
+			return nil, "", nil, errors.New(message)
+		}
 		if message := request.Validate(); message != "" {
 			return nil, "", nil, errors.New(message)
 		}
