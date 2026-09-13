@@ -32,6 +32,9 @@ func (r ResponseRequest) Validate() string {
 	if message := validateResponseToolChoice(r.Tools, r.ToolChoice); message != "" {
 		return message
 	}
+	if message := validateResponseReasoning(r.Reasoning); message != "" {
+		return message
+	}
 	if utf8.RuneCountInString(r.SafetyIdentifier) > 64 {
 		return "safety_identifier must contain at most 64 characters"
 	}
@@ -75,6 +78,40 @@ func (r ResponseRequest) Validate() string {
 	}
 	if r.MaxToolCalls != nil && (*r.MaxToolCalls < 1 || *r.MaxToolCalls > 1000) {
 		return "max_tool_calls must be between 1 and 1000"
+	}
+	return ""
+}
+
+func validateResponseReasoning(reasoning *ResponseReasoning) string {
+	if reasoning == nil {
+		return ""
+	}
+	if reasoning.Effort != nil {
+		switch *reasoning.Effort {
+		case "none", "minimal", "low", "medium", "high", "xhigh", "max", "default":
+		default:
+			return "reasoning.effort contains an unsupported value"
+		}
+	}
+	for _, summary := range []*string{reasoning.Summary, reasoning.GenerateSummary} {
+		if summary == nil {
+			continue
+		}
+		switch *summary {
+		case "auto", "concise", "detailed":
+		default:
+			return "reasoning summary must be auto, concise, or detailed"
+		}
+	}
+	if reasoning.Context != nil {
+		switch *reasoning.Context {
+		case "auto", "current_turn", "all_turns":
+		default:
+			return "reasoning.context must be auto, current_turn, or all_turns"
+		}
+	}
+	if reasoning.Mode != nil && (strings.TrimSpace(*reasoning.Mode) == "" || utf8.RuneCountInString(*reasoning.Mode) > 128) {
+		return "reasoning.mode must contain between 1 and 128 characters"
 	}
 	return ""
 }

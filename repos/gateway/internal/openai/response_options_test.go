@@ -192,6 +192,37 @@ func TestResponseToolDefinitionValidation(t *testing.T) {
 	}
 }
 
+func TestResponseReasoningValidation(t *testing.T) {
+	for _, body := range []string{
+		`{"reasoning":{"effort":"max","summary":"concise","generate_summary":"detailed","context":"all_turns","mode":"pro"}}`,
+		`{"reasoning":{"effort":"default","context":"current_turn","mode":"provider-mode"}}`,
+		`{"reasoning":{}}`,
+	} {
+		var request ResponseRequest
+		if err := json.Unmarshal([]byte(body), &request); err != nil {
+			t.Fatal(err)
+		}
+		if message := request.Validate(); message != "" {
+			t.Fatalf("%s: %s", body, message)
+		}
+	}
+	for _, body := range []string{
+		`{"reasoning":{"effort":"extreme"}}`,
+		`{"reasoning":{"summary":"full"}}`,
+		`{"reasoning":{"generate_summary":"full"}}`,
+		`{"reasoning":{"context":"previous_turn"}}`,
+		`{"reasoning":{"mode":""}}`,
+	} {
+		var request ResponseRequest
+		if err := json.Unmarshal([]byte(body), &request); err != nil {
+			t.Fatal(err)
+		}
+		if message := request.Validate(); message == "" {
+			t.Fatalf("invalid reasoning accepted: %s", body)
+		}
+	}
+}
+
 func TestServiceTierValues(t *testing.T) {
 	for _, value := range []string{"", "auto", "default", "on_demand", "flex", "performance", "scale", "priority", "fast", "ultrafast"} {
 		if !validServiceTier(value) {

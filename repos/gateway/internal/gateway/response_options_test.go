@@ -77,3 +77,21 @@ func TestResponsesRejectsMixedToolDefinitionsBeforeExecution(t *testing.T) {
 		}
 	}
 }
+
+func TestResponsesRejectsInvalidReasoningBeforeExecution(t *testing.T) {
+	handler := Handler{}
+	for _, reasoning := range []string{
+		`{"effort":"extreme"}`,
+		`{"summary":"full"}`,
+		`{"generate_summary":"full"}`,
+		`{"context":"previous_turn"}`,
+		`{"mode":""}`,
+	} {
+		out := httptest.NewRecorder()
+		body := `{"model":"m","input":"hello","reasoning":` + reasoning + `}`
+		handler.Responses(out, httptest.NewRequest("POST", "/v1/responses", strings.NewReader(body)))
+		if out.Code != 400 || !strings.Contains(out.Body.String(), `"invalid_request"`) {
+			t.Fatalf("reasoning=%s status=%d response=%s", reasoning, out.Code, out.Body.String())
+		}
+	}
+}
