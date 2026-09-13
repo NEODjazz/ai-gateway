@@ -697,6 +697,9 @@ func (x XAI) ValidateResponseParameters(request openai.ResponseRequest) error {
 	if request.PromptCacheRetention != "" {
 		return xaiUnsupportedParameter("prompt_cache_retention")
 	}
+	if request.StreamOptions != nil {
+		return xaiUnsupportedParameter("stream_options")
+	}
 	if request.MaxToolCalls != nil {
 		return xaiUnsupportedParameter("max_tool_calls")
 	}

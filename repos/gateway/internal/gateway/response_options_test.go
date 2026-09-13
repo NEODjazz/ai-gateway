@@ -20,3 +20,17 @@ func TestResponsesRejectsInvalidOptionsBeforeExecution(t *testing.T) {
 		}
 	}
 }
+
+func TestResponsesValidatesStreamOptionsBeforeExecution(t *testing.T) {
+	handler := Handler{}
+	for _, body := range []string{
+		`{"model":"m","input":"hello","stream_options":{"include_obfuscation":false}}`,
+		`{"model":"m","input":"hello","stream":true,"stream_options":{"include_usage":true}}`,
+	} {
+		out := httptest.NewRecorder()
+		handler.Responses(out, httptest.NewRequest("POST", "/v1/responses", strings.NewReader(body)))
+		if out.Code != 400 || !strings.Contains(out.Body.String(), `"invalid_request"`) {
+			t.Fatalf("body=%s status=%d response=%s", body, out.Code, out.Body.String())
+		}
+	}
+}

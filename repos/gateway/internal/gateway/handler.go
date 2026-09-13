@@ -787,6 +787,10 @@ func (h Handler) serveResponsesAs(w http.ResponseWriter, r *http.Request, reques
 			return
 		}
 	}
+	if stream && request.StreamOptions != nil {
+		writeError(w, http.StatusBadGateway, "streaming_unsupported", "stream_options require native Responses streaming on the selected deployment policy")
+		return
+	}
 
 	reqCtx.ResponseRequest.Stream = false
 	response, err := h.provider.Responses(r.Context(), reqCtx)

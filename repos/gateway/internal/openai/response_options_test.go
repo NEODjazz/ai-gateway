@@ -8,7 +8,7 @@ import (
 )
 
 func TestResponseOptionsValidation(t *testing.T) {
-	for _, body := range []string{`{"max_output_tokens":1}`, `{"max_tokens":1}`, `{"max_output_tokens":null,"max_tokens":null}`, `{}`, `{"top_logprobs":null,"truncation":null}`, `{"top_logprobs":0,"truncation":"auto"}`, `{"top_logprobs":20,"truncation":"disabled"}`, `{"service_tier":"priority"}`, `{"text":{"verbosity":"low"}}`, `{"text":{"verbosity":null}}`, `{"frequency_penalty":-2,"presence_penalty":2,"max_tool_calls":1000}`, `{"prompt_cache_options":{"mode":"explicit","ttl":"30m","comparison_response_id":"resp_reference"},"prompt_cache_retention":"24h"}`} {
+	for _, body := range []string{`{"max_output_tokens":1}`, `{"max_tokens":1}`, `{"max_output_tokens":null,"max_tokens":null}`, `{}`, `{"top_logprobs":null,"truncation":null}`, `{"top_logprobs":0,"truncation":"auto"}`, `{"top_logprobs":20,"truncation":"disabled"}`, `{"service_tier":"priority"}`, `{"text":{"verbosity":"low"}}`, `{"text":{"verbosity":null}}`, `{"frequency_penalty":-2,"presence_penalty":2,"max_tool_calls":1000}`, `{"prompt_cache_options":{"mode":"explicit","ttl":"30m","comparison_response_id":"resp_reference"},"prompt_cache_retention":"24h"}`, `{"stream":true,"stream_options":{"include_obfuscation":false}}`} {
 		var request ResponseRequest
 		if err := json.Unmarshal([]byte(body), &request); err != nil {
 			t.Fatal(err)
@@ -16,6 +16,14 @@ func TestResponseOptionsValidation(t *testing.T) {
 		if message := request.Validate(); message != "" {
 			t.Fatalf("%s: %s", body, message)
 		}
+	}
+}
+
+func TestResponseStreamOptionsRequireStreaming(t *testing.T) {
+	value := false
+	request := ResponseRequest{StreamOptions: &ResponseStreamOptions{IncludeObfuscation: &value}}
+	if message := request.Validate(); message != "stream_options requires stream=true" {
+		t.Fatalf("unexpected validation result: %q", message)
 	}
 }
 

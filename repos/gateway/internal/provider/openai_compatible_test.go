@@ -638,9 +638,10 @@ func TestOpenAICompatibleStreamsResponsesWhenEnabled(t *testing.T) {
 
 	var events []string
 	var payloads []string
+	includeObfuscation := false
 	provider := NewOpenAICompatible(server.URL, "", true)
 	response, err := provider.StreamResponses(context.Background(), openai.ResponseRequest{
-		Model: "test-model", Input: "hello", Stream: true, PreviousResponse: "resp-previous", SafetyIdentifier: "provider-user", PromptCacheKey: "tenant-thread",
+		Model: "test-model", Input: "hello", Stream: true, StreamOptions: &openai.ResponseStreamOptions{IncludeObfuscation: &includeObfuscation}, PreviousResponse: "resp-previous", SafetyIdentifier: "provider-user", PromptCacheKey: "tenant-thread",
 		Tools: []openai.ResponseTool{
 			{Type: "function", Name: "weather", Parameters: map[string]any{"type": "object"}},
 			{Type: "mcp", ServerLabel: "weather-prod", ServerURL: "https://mcp.example.test", AllowedTools: []string{"forecast"}, RequireApproval: "never", Headers: map[string]string{"X-MCP-Key": "scoped"}},
@@ -658,6 +659,9 @@ func TestOpenAICompatibleStreamsResponsesWhenEnabled(t *testing.T) {
 	}
 	if !upstreamRequest.Stream {
 		t.Fatal("expected responses upstream stream to be enabled")
+	}
+	if upstreamRequest.StreamOptions == nil || upstreamRequest.StreamOptions.IncludeObfuscation == nil || *upstreamRequest.StreamOptions.IncludeObfuscation {
+		t.Fatalf("responses stream options were not forwarded: %+v", upstreamRequest.StreamOptions)
 	}
 	textConfig, _ := upstreamRequest.Text.(map[string]any)
 	container, _ := upstreamRequest.Tools[2].Container.(map[string]any)

@@ -58,3 +58,17 @@ func TestResponsesStreamFallsBackToExplicitNonStreamingDeployment(t *testing.T) 
 		})
 	}
 }
+
+func TestResponsesStreamOptionsDoNotFallBackToSyntheticStreaming(t *testing.T) {
+	router := provider.New(provider.Config{Endpoints: []config.ProviderEndpointConfig{{
+		Name: "json-only", Type: "openai-compatible", BaseURL: "http://127.0.0.1:1", Models: []string{"m"}, Capabilities: []string{"responses"},
+	}}})
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{messagesAuth{accessPolicyModule{models: []string{"m"}}}}), router))
+	request := httptest.NewRequest("POST", "/v1/responses", strings.NewReader(`{"model":"m","input":"hello","stream":true,"stream_options":{"include_obfuscation":false}}`))
+	request.Header.Set("Authorization", "Bearer gateway-test-key")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusBadGateway || !strings.Contains(response.Body.String(), `"streaming_unsupported"`) {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}

@@ -56,6 +56,7 @@ func TestResponsesGenerationControlsForwarding(t *testing.T) {
 
 func TestResponsesGenerationControlsRejectUnsupportedAdapters(t *testing.T) {
 	frequency, presence, maxToolCalls := 0.5, -0.25, 7
+	obfuscation := false
 	tests := []struct {
 		field   string
 		request openai.ResponseRequest
@@ -63,6 +64,7 @@ func TestResponsesGenerationControlsRejectUnsupportedAdapters(t *testing.T) {
 		{"frequency_penalty", openai.ResponseRequest{FrequencyPenalty: &frequency}},
 		{"presence_penalty", openai.ResponseRequest{PresencePenalty: &presence}},
 		{"max_tool_calls", openai.ResponseRequest{MaxToolCalls: &maxToolCalls}},
+		{"stream_options", openai.ResponseRequest{Stream: true, StreamOptions: &openai.ResponseStreamOptions{IncludeObfuscation: &obfuscation}}},
 	}
 	clients := map[string]Client{
 		"anthropic": NewAnthropic("http://127.0.0.1:1", "", true),

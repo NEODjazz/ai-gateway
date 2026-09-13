@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.404
+  version: 0.1.405
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -9039,6 +9039,12 @@ components:
         prompt_cache_retention: {type: string, enum: [in_memory, 24h], deprecated: true}
         service_tier: {type: string, enum: [auto, default, on_demand, flex, performance, scale, priority, fast, ultrafast, standard_only], description: Forwarded by compatible adapters; native adapters may reject it.}
         stream: {type: boolean, default: false}
+        stream_options:
+          type: object
+          additionalProperties: false
+          description: Responses streaming controls. Accepted only when stream is true and only by adapters that advertise this option.
+          properties:
+            include_obfuscation: {type: boolean, default: true}
         max_output_tokens: {type: integer, minimum: 1}
         max_tokens: {type: integer, minimum: 1}
         temperature: {type: number}
@@ -10496,7 +10502,7 @@ components:
         supported_options:
           type: array
           uniqueItems: true
-          items: {type: string, enum: [metadata, top_logprobs, truncation, store, include, parallel_tool_calls, text.verbosity, previous_response_id, user, safety_identifier, prompt_cache_key, prompt_cache_options, prompt_cache_retention, max_output_tokens, max_tokens, temperature, top_p, frequency_penalty, presence_penalty, max_tool_calls, reasoning, service_tier]}
+          items: {type: string, enum: [metadata, top_logprobs, truncation, store, include, parallel_tool_calls, text.verbosity, previous_response_id, user, safety_identifier, prompt_cache_key, prompt_cache_options, prompt_cache_retention, stream_options, max_output_tokens, max_tokens, temperature, top_p, frequency_penalty, presence_penalty, max_tool_calls, reasoning, service_tier]}
         reasoning_effort:
           type: array
           uniqueItems: true

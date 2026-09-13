@@ -10,6 +10,9 @@ func (r ResponseRequest) Validate() string {
 	if r.Background && r.Stream {
 		return "background and stream cannot both be enabled"
 	}
+	if r.StreamOptions != nil && !r.Stream {
+		return "stream_options requires stream=true"
+	}
 	if r.Background && (r.Store == nil || !*r.Store) {
 		return "background requires store=true"
 	}

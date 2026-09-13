@@ -113,6 +113,7 @@ func (Anthropic) ValidateResponseParameters(request openai.ResponseRequest) erro
 		parameterCheck{"prompt_cache_key", request.PromptCacheKey != ""},
 		parameterCheck{"prompt_cache_options", request.PromptCacheOptions != nil},
 		parameterCheck{"prompt_cache_retention", request.PromptCacheRetention != ""},
+		parameterCheck{"stream_options", request.StreamOptions != nil},
 		parameterCheck{"text.verbosity", verbositySupplied},
 		parameterCheck{"service_tier", request.ServiceTier != ""},
 		parameterCheck{"previous_response_id", request.PreviousResponse != ""},
@@ -124,7 +125,7 @@ func (Anthropic) ValidateResponseParameters(request openai.ResponseRequest) erro
 
 func (Ollama) ValidateResponseParameters(request openai.ResponseRequest) error {
 	_, verbositySupplied := openai.ResponseTextVerbosity(request.Text)
-	return rejectParameters("ollama", parameterCheck{"background", request.Background}, parameterCheck{"user", request.User != ""}, parameterCheck{"safety_identifier", request.SafetyIdentifier != ""}, parameterCheck{"prompt_cache_key", request.PromptCacheKey != ""}, parameterCheck{"prompt_cache_options", request.PromptCacheOptions != nil}, parameterCheck{"prompt_cache_retention", request.PromptCacheRetention != ""}, parameterCheck{"text.verbosity", verbositySupplied}, parameterCheck{"service_tier", request.ServiceTier != ""}, parameterCheck{"frequency_penalty", request.FrequencyPenalty != nil}, parameterCheck{"presence_penalty", request.PresencePenalty != nil}, parameterCheck{"max_tool_calls", request.MaxToolCalls != nil})
+	return rejectParameters("ollama", parameterCheck{"background", request.Background}, parameterCheck{"user", request.User != ""}, parameterCheck{"safety_identifier", request.SafetyIdentifier != ""}, parameterCheck{"prompt_cache_key", request.PromptCacheKey != ""}, parameterCheck{"prompt_cache_options", request.PromptCacheOptions != nil}, parameterCheck{"prompt_cache_retention", request.PromptCacheRetention != ""}, parameterCheck{"stream_options", request.StreamOptions != nil}, parameterCheck{"text.verbosity", verbositySupplied}, parameterCheck{"service_tier", request.ServiceTier != ""}, parameterCheck{"frequency_penalty", request.FrequencyPenalty != nil}, parameterCheck{"presence_penalty", request.PresencePenalty != nil}, parameterCheck{"max_tool_calls", request.MaxToolCalls != nil})
 }
 
 func (Ollama) ValidateChatParameters(request openai.ChatCompletionRequest) error {
@@ -507,6 +508,7 @@ func (Demo) ValidateResponseParameters(request openai.ResponseRequest) error {
 		parameterCheck{"previous_response_id", request.PreviousResponse != ""}, parameterCheck{"user", request.User != ""}, parameterCheck{"safety_identifier", request.SafetyIdentifier != ""},
 		parameterCheck{"prompt_cache_key", request.PromptCacheKey != ""}, parameterCheck{"text.verbosity", verbositySupplied}, parameterCheck{"service_tier", request.ServiceTier != ""},
 		parameterCheck{"prompt_cache_options", request.PromptCacheOptions != nil}, parameterCheck{"prompt_cache_retention", request.PromptCacheRetention != ""},
+		parameterCheck{"stream_options", request.StreamOptions != nil},
 		parameterCheck{"max_output_tokens", request.MaxOutputTokens != nil}, parameterCheck{"max_tokens", request.MaxTokens != nil}, parameterCheck{"temperature", request.Temperature != nil},
 		parameterCheck{"top_p", request.TopP != nil}, parameterCheck{"frequency_penalty", request.FrequencyPenalty != nil}, parameterCheck{"presence_penalty", request.PresencePenalty != nil},
 		parameterCheck{"max_tool_calls", request.MaxToolCalls != nil},

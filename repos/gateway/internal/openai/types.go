@@ -130,6 +130,10 @@ type ChatStreamOptions struct {
 	IncludeObfuscation *bool `json:"include_obfuscation,omitempty"`
 }
 
+type ResponseStreamOptions struct {
+	IncludeObfuscation *bool `json:"include_obfuscation,omitempty"`
+}
+
 type Message struct {
 	Role        string           `json:"role"`
 	Content     any              `json:"content"`
@@ -709,37 +713,38 @@ func EmbeddingInputText(value any) string {
 
 type ResponseRequest struct {
 	// NativeInputTokens reserves provider-native context omitted from the public Responses wire shape.
-	NativeInputTokens    int                 `json:"-"`
-	Metadata             map[string]string   `json:"metadata,omitempty"`
-	TopLogprobs          *int                `json:"top_logprobs,omitempty"`
-	Truncation           *string             `json:"truncation,omitempty"`
-	Reasoning            *ResponseReasoning  `json:"reasoning,omitempty"`
-	Store                *bool               `json:"store,omitempty"`
-	Include              []string            `json:"include,omitempty"`
-	Provider             string              `json:"provider,omitempty"`
-	Model                string              `json:"model"`
-	Input                any                 `json:"input"`
-	Instructions         string              `json:"instructions,omitempty"`
-	Tools                []ResponseTool      `json:"tools,omitempty"`
-	ToolChoice           any                 `json:"tool_choice,omitempty"`
-	ParallelToolCalls    *bool               `json:"parallel_tool_calls,omitempty"`
-	Text                 any                 `json:"text,omitempty"`
-	PreviousResponse     string              `json:"previous_response_id,omitempty"`
-	User                 string              `json:"user,omitempty"`
-	SafetyIdentifier     string              `json:"safety_identifier,omitempty"`
-	PromptCacheKey       string              `json:"prompt_cache_key,omitempty"`
-	PromptCacheOptions   *PromptCacheOptions `json:"prompt_cache_options,omitempty"`
-	PromptCacheRetention string              `json:"prompt_cache_retention,omitempty"`
-	ServiceTier          string              `json:"service_tier,omitempty"`
-	Background           bool                `json:"background,omitempty"`
-	Stream               bool                `json:"stream,omitempty"`
-	MaxOutputTokens      *int                `json:"max_output_tokens,omitempty"`
-	MaxTokens            *int                `json:"max_tokens,omitempty"`
-	Temperature          *float64            `json:"temperature,omitempty"`
-	TopP                 *float64            `json:"top_p,omitempty"`
-	FrequencyPenalty     *float64            `json:"frequency_penalty,omitempty"`
-	PresencePenalty      *float64            `json:"presence_penalty,omitempty"`
-	MaxToolCalls         *int                `json:"max_tool_calls,omitempty"`
+	NativeInputTokens    int                    `json:"-"`
+	Metadata             map[string]string      `json:"metadata,omitempty"`
+	TopLogprobs          *int                   `json:"top_logprobs,omitempty"`
+	Truncation           *string                `json:"truncation,omitempty"`
+	Reasoning            *ResponseReasoning     `json:"reasoning,omitempty"`
+	Store                *bool                  `json:"store,omitempty"`
+	Include              []string               `json:"include,omitempty"`
+	Provider             string                 `json:"provider,omitempty"`
+	Model                string                 `json:"model"`
+	Input                any                    `json:"input"`
+	Instructions         string                 `json:"instructions,omitempty"`
+	Tools                []ResponseTool         `json:"tools,omitempty"`
+	ToolChoice           any                    `json:"tool_choice,omitempty"`
+	ParallelToolCalls    *bool                  `json:"parallel_tool_calls,omitempty"`
+	Text                 any                    `json:"text,omitempty"`
+	PreviousResponse     string                 `json:"previous_response_id,omitempty"`
+	User                 string                 `json:"user,omitempty"`
+	SafetyIdentifier     string                 `json:"safety_identifier,omitempty"`
+	PromptCacheKey       string                 `json:"prompt_cache_key,omitempty"`
+	PromptCacheOptions   *PromptCacheOptions    `json:"prompt_cache_options,omitempty"`
+	PromptCacheRetention string                 `json:"prompt_cache_retention,omitempty"`
+	ServiceTier          string                 `json:"service_tier,omitempty"`
+	Background           bool                   `json:"background,omitempty"`
+	Stream               bool                   `json:"stream,omitempty"`
+	StreamOptions        *ResponseStreamOptions `json:"stream_options,omitempty"`
+	MaxOutputTokens      *int                   `json:"max_output_tokens,omitempty"`
+	MaxTokens            *int                   `json:"max_tokens,omitempty"`
+	Temperature          *float64               `json:"temperature,omitempty"`
+	TopP                 *float64               `json:"top_p,omitempty"`
+	FrequencyPenalty     *float64               `json:"frequency_penalty,omitempty"`
+	PresencePenalty      *float64               `json:"presence_penalty,omitempty"`
+	MaxToolCalls         *int                   `json:"max_tool_calls,omitempty"`
 }
 
 type ResponseInputTokenCountRequest struct {
