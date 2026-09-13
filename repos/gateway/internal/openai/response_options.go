@@ -106,8 +106,8 @@ func (r ResponseRequest) Validate() string {
 			return "frequency_penalty and presence_penalty must be between -2 and 2"
 		}
 	}
-	if r.MaxToolCalls != nil && (*r.MaxToolCalls < 1 || *r.MaxToolCalls > 1000) {
-		return "max_tool_calls must be between 1 and 1000"
+	if r.MaxToolCalls != nil && (*r.MaxToolCalls < 0 || *r.MaxToolCalls > 1000) {
+		return "max_tool_calls must be between 0 and 1000"
 	}
 	return ""
 }

@@ -12,7 +12,7 @@ import (
 )
 
 func TestResponsesGenerationControlsForwarding(t *testing.T) {
-	frequency, presence, maxToolCalls := 0.5, -0.25, 7
+	frequency, presence, maxToolCalls := 0.5, -0.25, 0
 	for _, adapter := range []string{"compatible", "openrouter"} {
 		for _, stream := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/stream=%v", adapter, stream), func(t *testing.T) {
