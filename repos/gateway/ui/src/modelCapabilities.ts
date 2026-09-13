@@ -32,6 +32,7 @@ export const modelCapabilityOptions: ChipOption[] = [
   { value: "container", label: "Containers", description: "Create and manage provider containers" },
   { value: "container_files", label: "Container files", description: "Upload and manage files in provider containers" },
   { value: "container_network", label: "Container network", description: "Apply provider-enforced container egress policies" },
+  { value: "cached_content", label: "Cached content", description: "Create and reuse durable provider-side Gemini context" },
   { value: "sandbox", label: "Sandbox", description: "Execute code in an ephemeral isolated runtime" },
   { value: "realtime", label: "Realtime", description: "Bidirectional low-latency sessions" },
   { value: "stream", label: "Stream", description: "Streaming responses" },

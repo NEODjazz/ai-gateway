@@ -35,6 +35,7 @@ describe("modelCapabilityOptions", () => {
       "container",
       "container_files",
       "container_network",
+      "cached_content",
       "sandbox",
       "realtime",
       "stream",

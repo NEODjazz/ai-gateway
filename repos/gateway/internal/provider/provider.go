@@ -102,6 +102,19 @@ type ContainerBinding struct {
 	Deployment string `json:"deployment"`
 }
 
+type CachedContentBinding struct {
+	Endpoint   string `json:"endpoint"`
+	Model      string `json:"model"`
+	Deployment string `json:"deployment"`
+}
+
+type CachedContentProvider interface {
+	CreateCachedContent(context.Context, modules.RequestContext, openai.ChatCompletionRequest, string, openai.GeminiCachedContentExpiration, func(context.Context, *modules.RequestContext) error) (openai.GeminiCachedContent, CachedContentBinding, error)
+	RetrieveCachedContent(context.Context, CachedContentBinding, string) (openai.GeminiCachedContent, error)
+	UpdateCachedContent(context.Context, CachedContentBinding, string, openai.GeminiCachedContentExpiration) (openai.GeminiCachedContent, error)
+	DeleteCachedContent(context.Context, CachedContentBinding, string) error
+}
+
 type ContainerProvider interface {
 	CreateContainer(context.Context, modules.RequestContext, openai.ContainerCreateRequest, func(context.Context, *modules.RequestContext) error) (openai.Container, ContainerBinding, error)
 	RetrieveContainer(context.Context, ContainerBinding, string) (openai.Container, error)
@@ -3393,6 +3406,11 @@ func (e Endpoint) supportsCapabilities(required ...string) bool {
 			return false
 		}
 	}
+	if hasCapability(required, "cached_content") {
+		if _, ok := e.Provider.(GeminiCachedContentClient); !ok || e.Type != "gemini" {
+			return false
+		}
+	}
 	if hasCapability(required, "realtime") {
 		if _, ok := e.Provider.(RealtimeClient); !ok || e.Type != "openai" && e.Type != "openai-compatible" {
 			return false
@@ -3458,11 +3476,11 @@ func supportsCatalogCapabilities(catalog modelcatalog.Catalog, endpoint Endpoint
 }
 
 func requiresExplicitEndpointCapability(required []string) bool {
-	return hasCapability(required, "interactions") || hasCapability(required, "interaction_agents") || hasCapability(required, "interaction_environment_reuse") || hasCapability(required, "gemini_safety_settings") || hasCapability(required, "gemini_code_execution") || hasCapability(required, "url_context") || hasCapability(required, "google_maps") || hasCapability(required, "background_interactions") || hasCapability(required, "mcp") || hasCapability(required, "vision") || hasCapability(required, "rerank") || hasCapability(required, "moderation") || hasCapability(required, "image_generation") || hasCapability(required, "image_edit") || hasCapability(required, "image_variation") || hasCapability(required, "audio_transcription") || hasCapability(required, "audio_translation") || hasCapability(required, "audio_speech") || hasCapability(required, "ocr") || hasCapability(required, "search") || hasCapability(required, "fine_tuning") || hasCapability(required, "video") || hasCapability(required, "video_remix") || hasCapability(required, "video_extension") || hasCapability(required, "container") || hasCapability(required, "container_files") || hasCapability(required, "container_network") || hasCapability(required, "video_input") || hasCapability(required, "realtime") || hasCapability(required, "web_search") || hasCapability(required, "web_fetch") || hasCapability(required, "tool_search") || hasCapability(required, "thinking") || hasCapability(required, "zero_output") || hasCapability(required, "inference_geo") || hasCapability(required, "context_management") || hasCapability(required, "tool_result_error") || hasCapability(required, "document_citations") || hasCapability(required, "document_metadata") || hasCapability(required, "document_text") || hasCapability(required, "audio") || hasCapability(required, "audio_input") || hasCapability(required, "prompt_cache") || hasCapability(required, "assistant_prefill") || hasCapability(required, "background_responses") || hasCapability(required, "file_input") || hasCapability(required, "bedrock_invoke")
+	return hasCapability(required, "interactions") || hasCapability(required, "interaction_agents") || hasCapability(required, "interaction_environment_reuse") || hasCapability(required, "gemini_safety_settings") || hasCapability(required, "gemini_code_execution") || hasCapability(required, "url_context") || hasCapability(required, "google_maps") || hasCapability(required, "background_interactions") || hasCapability(required, "mcp") || hasCapability(required, "vision") || hasCapability(required, "rerank") || hasCapability(required, "moderation") || hasCapability(required, "image_generation") || hasCapability(required, "image_edit") || hasCapability(required, "image_variation") || hasCapability(required, "audio_transcription") || hasCapability(required, "audio_translation") || hasCapability(required, "audio_speech") || hasCapability(required, "ocr") || hasCapability(required, "search") || hasCapability(required, "fine_tuning") || hasCapability(required, "video") || hasCapability(required, "video_remix") || hasCapability(required, "video_extension") || hasCapability(required, "container") || hasCapability(required, "container_files") || hasCapability(required, "container_network") || hasCapability(required, "cached_content") || hasCapability(required, "video_input") || hasCapability(required, "realtime") || hasCapability(required, "web_search") || hasCapability(required, "web_fetch") || hasCapability(required, "tool_search") || hasCapability(required, "thinking") || hasCapability(required, "zero_output") || hasCapability(required, "inference_geo") || hasCapability(required, "context_management") || hasCapability(required, "tool_result_error") || hasCapability(required, "document_citations") || hasCapability(required, "document_metadata") || hasCapability(required, "document_text") || hasCapability(required, "audio") || hasCapability(required, "audio_input") || hasCapability(required, "prompt_cache") || hasCapability(required, "assistant_prefill") || hasCapability(required, "background_responses") || hasCapability(required, "file_input") || hasCapability(required, "bedrock_invoke")
 }
 
 func hasExplicitEndpointCapabilities(available []string, required []string) bool {
-	for _, capability := range []string{"interactions", "interaction_agents", "interaction_environment_reuse", "gemini_safety_settings", "gemini_code_execution", "url_context", "google_maps", "background_interactions", "mcp", "vision", "rerank", "moderation", "image_generation", "image_edit", "image_variation", "audio_transcription", "audio_translation", "audio_speech", "ocr", "search", "fine_tuning", "video", "video_remix", "video_extension", "container", "container_files", "container_network", "video_input", "realtime", "web_search", "web_fetch", "tool_search", "thinking", "zero_output", "inference_geo", "context_management", "tool_result_error", "document_citations", "document_metadata", "document_text", "audio", "audio_input", "prompt_cache", "assistant_prefill", "background_responses", "file_input", "bedrock_invoke"} {
+	for _, capability := range []string{"interactions", "interaction_agents", "interaction_environment_reuse", "gemini_safety_settings", "gemini_code_execution", "url_context", "google_maps", "background_interactions", "mcp", "vision", "rerank", "moderation", "image_generation", "image_edit", "image_variation", "audio_transcription", "audio_translation", "audio_speech", "ocr", "search", "fine_tuning", "video", "video_remix", "video_extension", "container", "container_files", "container_network", "cached_content", "video_input", "realtime", "web_search", "web_fetch", "tool_search", "thinking", "zero_output", "inference_geo", "context_management", "tool_result_error", "document_citations", "document_metadata", "document_text", "audio", "audio_input", "prompt_cache", "assistant_prefill", "background_responses", "file_input", "bedrock_invoke"} {
 		if hasCapability(required, capability) && !hasCapability(available, capability) {
 			return false
 		}

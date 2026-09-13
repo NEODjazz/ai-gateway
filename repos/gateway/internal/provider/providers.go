@@ -162,7 +162,7 @@ var managedProviderTypes = []string{"demo", "ollama", "openai", "openai-compatib
 var managedOperationCapabilities = []string{
 	"chat", "completions", "responses", "interactions", "count_tokens", "embeddings", "rerank", "moderation",
 	"image_generation", "image_edit", "image_variation",
-	"audio_transcription", "audio_translation", "audio_speech", "ocr", "search", "skills", "fine_tuning", "video", "video_remix", "video_extension", "container", "container_files", "container_network", "sandbox", "realtime", "stream", "bedrock_invoke",
+	"audio_transcription", "audio_translation", "audio_speech", "ocr", "search", "skills", "fine_tuning", "video", "video_remix", "video_extension", "container", "container_files", "container_network", "cached_content", "sandbox", "realtime", "stream", "bedrock_invoke",
 }
 
 var managedFeatureCapabilities = []string{

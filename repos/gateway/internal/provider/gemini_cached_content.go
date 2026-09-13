@@ -24,12 +24,6 @@ type GeminiCachedContentClient interface {
 	DeleteCachedContent(context.Context, string) error
 }
 
-type CachedContentBinding struct {
-	Endpoint   string
-	Model      string
-	Deployment string
-}
-
 func (g Gemini) CreateCachedContent(ctx context.Context, request openai.ChatCompletionRequest, displayName string, expiration openai.GeminiCachedContentExpiration) (openai.GeminiCachedContent, error) {
 	var result openai.GeminiCachedContent
 	if !validGeminiCachedContentDisplayName(displayName) || !validGeminiCachedContentExpiration(expiration) {

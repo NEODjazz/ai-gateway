@@ -10,7 +10,7 @@ func TestCapabilityContractIsSharedByDeploymentsAndOnboarding(t *testing.T) {
 	capabilities := []string{
 		"chat", "responses", "interactions", "embeddings", "rerank", "moderation",
 		"image_generation", "image_edit", "image_variation",
-		"audio_transcription", "audio_translation", "audio_speech", "ocr", "search", "skills", "fine_tuning", "video", "video_remix", "video_extension", "container", "container_files", "container_network", "sandbox", "realtime",
+		"audio_transcription", "audio_translation", "audio_speech", "ocr", "search", "skills", "fine_tuning", "video", "video_remix", "video_extension", "container", "container_files", "container_network", "cached_content", "sandbox", "realtime",
 		"stream", "tools", "structured_output", "mcp", "vision",
 		"web_search", "web_fetch", "tool_search", "memory_tool", "bash_tool", "text_editor_tool", "computer_toolset", "browser_toolset", "thinking", "zero_output", "inference_geo", "context_management", "tool_result_error", "document_citations", "document_metadata", "document_text", "audio", "audio_input", "video_input", "prompt_cache", "assistant_prefill", "background_responses", "background_interactions", "file_input", "bedrock_invoke", "interaction_agents", "interaction_environment_reuse", "gemini_safety_settings", "gemini_code_execution", "url_context", "google_maps",
 	}
@@ -25,6 +25,12 @@ func TestCapabilityContractIsSharedByDeploymentsAndOnboarding(t *testing.T) {
 		if !ValidModelCapability(capability) {
 			t.Fatalf("capability %q is missing from the shared contract", capability)
 		}
+	}
+}
+
+func TestCachedContentRequiresChat(t *testing.T) {
+	if validDeploymentCapabilities([]string{"cached_content"}) || !validDeploymentCapabilities([]string{"chat", "cached_content"}) {
+		t.Fatal("cached content capability dependency is incorrect")
 	}
 }
 
