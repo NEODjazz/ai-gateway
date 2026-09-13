@@ -95,3 +95,20 @@ func TestResponsesRejectsInvalidReasoningBeforeExecution(t *testing.T) {
 		}
 	}
 }
+
+func TestResponsesRejectsInvalidTextConfigurationBeforeExecution(t *testing.T) {
+	handler := Handler{}
+	for _, textConfig := range []string{
+		`"plain"`,
+		`[]`,
+		`{"unknown":true}`,
+		`{"format":"json_object"}`,
+	} {
+		out := httptest.NewRecorder()
+		body := `{"model":"m","input":"hello","text":` + textConfig + `}`
+		handler.Responses(out, httptest.NewRequest("POST", "/v1/responses", strings.NewReader(body)))
+		if out.Code != 400 || !strings.Contains(out.Body.String(), `"invalid_request"`) {
+			t.Fatalf("text=%s status=%d response=%s", textConfig, out.Code, out.Body.String())
+		}
+	}
+}

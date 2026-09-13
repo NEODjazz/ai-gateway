@@ -77,6 +77,30 @@ func TestResponseRejectsInvalidTextVerbosity(t *testing.T) {
 	}
 }
 
+func TestResponseTextConfigurationValidation(t *testing.T) {
+	for _, text := range []any{
+		map[string]any{},
+		map[string]any{"format": map[string]any{"type": "text"}},
+		map[string]any{"format": json.RawMessage(`{"type":"json_schema","name":"answer","schema":{"type":"object"}}`), "verbosity": "high"},
+		map[string]any{"format": nil, "verbosity": nil},
+	} {
+		if message := (ResponseRequest{Text: text}).Validate(); message != "" {
+			t.Fatalf("valid text configuration rejected: %#v: %s", text, message)
+		}
+	}
+	for _, text := range []any{
+		"plain",
+		[]any{"text"},
+		map[string]any{"unknown": true},
+		map[string]any{"format": "json_object"},
+		map[string]any{"format": []any{}},
+	} {
+		if message := (ResponseRequest{Text: text}).Validate(); message == "" {
+			t.Fatalf("invalid text configuration accepted: %#v", text)
+		}
+	}
+}
+
 func TestResponseRejectsUnknownServiceTier(t *testing.T) {
 	if message := (ResponseRequest{ServiceTier: "unknown"}).Validate(); message != "unsupported service_tier value" {
 		t.Fatalf("unexpected validation result: %q", message)

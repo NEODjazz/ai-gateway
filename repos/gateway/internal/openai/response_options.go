@@ -47,8 +47,8 @@ func (r ResponseRequest) Validate() string {
 	if !validServiceTier(r.ServiceTier) {
 		return "unsupported service_tier value"
 	}
-	if _, _, valid := responseTextVerbosity(r.Text); !valid {
-		return "text.verbosity must be low, medium, or high"
+	if message := validateResponseText(r.Text); message != "" {
+		return message
 	}
 	if r.MaxOutputTokens != nil && r.MaxTokens != nil {
 		return "max_output_tokens and max_tokens are mutually exclusive"
@@ -78,6 +78,38 @@ func (r ResponseRequest) Validate() string {
 	}
 	if r.MaxToolCalls != nil && (*r.MaxToolCalls < 1 || *r.MaxToolCalls > 1000) {
 		return "max_tool_calls must be between 1 and 1000"
+	}
+	return ""
+}
+
+func validateResponseText(value any) string {
+	if value == nil {
+		return ""
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return "text must be an object"
+	}
+	var config map[string]json.RawMessage
+	if json.Unmarshal(encoded, &config) != nil || config == nil {
+		return "text must be an object"
+	}
+	for key := range config {
+		if key != "format" && key != "verbosity" {
+			return "text contains an unsupported field"
+		}
+	}
+	if raw, supplied := config["format"]; supplied && string(raw) != "null" {
+		var format map[string]json.RawMessage
+		if json.Unmarshal(raw, &format) != nil || format == nil {
+			return "text.format must be an object"
+		}
+	}
+	if raw, supplied := config["verbosity"]; supplied && string(raw) != "null" {
+		var verbosity string
+		if json.Unmarshal(raw, &verbosity) != nil || !validVerbosity(verbosity) {
+			return "text.verbosity must be low, medium, or high"
+		}
 	}
 	return ""
 }
