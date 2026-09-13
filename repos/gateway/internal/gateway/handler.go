@@ -918,6 +918,10 @@ func (h Handler) CompactResponse(w http.ResponseWriter, r *http.Request) {
 		Provider: reqCtx.ResponseRequest.Provider, Model: reqCtx.ResponseRequest.Model,
 		Input: reqCtx.ResponseRequest.Input, Instructions: reqCtx.ResponseRequest.Instructions,
 	}
+	if message := validateResponseCompactRequest(request); message != "" {
+		writeError(w, http.StatusBadGateway, "module_failed", "module produced an invalid response compaction request: "+message)
+		return
+	}
 	if !h.prepareAccessGroups(w, &reqCtx) || !h.authorizeAccess(w, r.Context(), reqCtx, request.Model, estimateResponseCompactTokens(request)) {
 		return
 	}
