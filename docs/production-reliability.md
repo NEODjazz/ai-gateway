@@ -2028,3 +2028,19 @@ image. Live liveness and readiness returned 204, OpenAPI 0.1.400 exposed the
 Maps request and capability contract, the production UI bundle contained the
 Maps capability selector, and an unauthenticated Maps request returned 401 at
 the authentication boundary without provider execution.
+
+Source `25677d3` extends native GenerateContent inline and owner-scoped stored
+video input to MPEG, MPG, MOV, AVI, FLV, WMV and 3GPP alongside MP4 and WebM.
+Every declared MIME type must match its bounded container or stream signature;
+the content then uses the existing AV projection, TPM reserve, `video_input`
+capability routing and response-cache exclusion. Focused provider, gateway,
+OpenAPI and shared-media regressions, vet, build, the full Go suite and the full
+race suite passed.
+
+Rancher Desktop built `ai-gateway-gateway:gemini-video-25677d3` with image ID
+`sha256:0114fd5f9f0e1a10ec635ab19e63118dce7db4b9cbb14791b8710be7b9b3e238`.
+Gateway Helm revision 507 completed successfully. Pod
+`ai-gateway-gateway-ff5b8bd89-qlfjf` became Ready with zero restarts on that
+image. Live liveness and readiness returned 204, OpenAPI 0.1.401 exposed the
+expanded MIME contract, and a cluster-local unauthenticated AVI request returned
+401 at the authentication boundary without provider execution.
