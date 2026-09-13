@@ -37,7 +37,7 @@ func (r Router) mirrorResponses(ctx context.Context, requestID string, request o
 	// Shadow endpoints do not own the primary endpoint's response state. Sending
 	// its ID cannot reproduce continuity or a cache comparison and must not
 	// create a shadow job.
-	if request.PreviousResponse != "" || request.PromptCacheOptions != nil && request.PromptCacheOptions.ComparisonResponseID != "" {
+	if request.PreviousResponse != "" || request.PromptCacheOptions != nil && request.PromptCacheOptions.ComparisonResponseID != "" || !responseToolsReplaySafe(request) {
 		return
 	}
 	catalog := r.catalog.Current(ctx)

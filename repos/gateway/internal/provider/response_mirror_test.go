@@ -17,6 +17,10 @@ type responseMirrorCapture struct {
 	requests chan openai.ResponseRequest
 }
 
+type mcpResponseMirrorCapture struct{ *responseMirrorCapture }
+
+func (mcpResponseMirrorCapture) SupportsMCP() bool { return true }
+
 func (p *responseMirrorCapture) Responses(_ context.Context, req openai.ResponseRequest) (openai.ResponseResponse, error) {
 	p.requests <- req
 	return openai.ResponseResponse{ID: "shadow-response"}, nil
@@ -115,6 +119,23 @@ func TestResponsesPromptCacheComparisonIsNotMirrored(t *testing.T) {
 		select {
 		case mirrored := <-shadow.requests:
 			t.Fatalf("prompt-cache comparison sent to shadow: %+v", mirrored)
+		default:
+		}
+	})
+}
+
+func TestResponsesHostedToolsAreNotMirrored(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		capture := &responseMirrorCapture{requests: make(chan openai.ResponseRequest, 1)}
+		router := Router{health: newEndpointHealthTracker(), modules: modules.NewPipeline(nil), endpoints: []Endpoint{
+			{Name: "shadow", Models: []string{"m"}, Capabilities: []string{"responses", "tools", "mcp"}, Shadow: true, MirrorPercentage: 100, MirrorTimeout: time.Second, Provider: mcpResponseMirrorCapture{capture}},
+		}}
+		request := openai.ResponseRequest{Model: "m", Input: "hello", Tools: []openai.ResponseTool{{Type: "mcp", ServerLabel: "documents", ServerURL: "https://documents.example.test"}}}
+		router.mirrorResponses(t.Context(), "request", request, "m", "responses", "tools", "mcp")
+		synctest.Wait()
+		select {
+		case mirrored := <-capture.requests:
+			t.Fatalf("hosted tool request sent to shadow: %+v", mirrored)
 		default:
 		}
 	})

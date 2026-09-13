@@ -268,3 +268,16 @@ func cacheIsolationScope(req modules.RequestContext) string {
 func cacheableResponsesResult(response openai.ResponseResponse) bool {
 	return response.Error == nil && response.IncompleteDetails == nil && (response.Status == "" || response.Status == "completed")
 }
+
+// responseToolsReplaySafe reports whether a Responses request can be served
+// from an exact cache or copied to a shadow deployment. Provider-managed tools
+// may read mutable state or perform external work, so their execution cannot be
+// safely replayed or replaced with an earlier result.
+func responseToolsReplaySafe(request openai.ResponseRequest) bool {
+	for _, tool := range request.Tools {
+		if tool.Type != "function" {
+			return false
+		}
+	}
+	return true
+}

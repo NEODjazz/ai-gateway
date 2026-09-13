@@ -32,6 +32,28 @@ func TestResponsesCachePreservesEndpointOwnership(t *testing.T) {
 	}
 }
 
+type replayUnsafeResponseClient struct{ *affinityResponseClient }
+
+func (replayUnsafeResponseClient) SupportsMCP() bool { return true }
+
+func TestResponsesWithHostedToolsBypassExactCache(t *testing.T) {
+	client := &affinityResponseClient{id: "resp-tool"}
+	router := Router{
+		endpoints: []Endpoint{{Name: "tool-endpoint", Type: "demo", Capabilities: []string{"responses", "tools", "mcp"}, Provider: replayUnsafeResponseClient{client}}},
+		modules:   modules.NewPipeline(nil), health: newEndpointHealthTracker(), cache: newExactCache(time.Hour),
+	}
+	request := openai.ResponseRequest{Model: "m", Input: "hello", Tools: []openai.ResponseTool{{Type: "mcp", ServerLabel: "documents", ServerURL: "https://documents.example.test"}}}
+	req := modules.RequestContext{CredentialID: "tenant", Request: openai.ChatCompletionRequest{Model: "m"}, ResponseRequest: &request}
+	for range 2 {
+		if _, err := router.Responses(t.Context(), req); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if client.calls != 2 {
+		t.Fatalf("hosted tool response was served from cache: calls=%d", client.calls)
+	}
+}
+
 func TestResponsesCacheHitRestoresExpiredAffinity(t *testing.T) {
 	ctx := context.Background()
 	now := time.Unix(1000, 0)
