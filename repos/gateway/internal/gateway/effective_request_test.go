@@ -94,6 +94,19 @@ func TestEmbeddingsRejectsOptionsInvalidatedByPipeline(t *testing.T) {
 	}
 }
 
+func TestRerankRejectsOptionsInvalidatedByPipeline(t *testing.T) {
+	provider := &chatProvider{}
+	handler := NewHandler(modules.NewPipeline([]modules.Module{rewriteContextModule{rewrite: func(req *modules.RequestContext) {
+		limit := 0
+		req.RerankRequest.MaxChunksPerDoc = &limit
+	}}}), provider)
+	response := httptest.NewRecorder()
+	handler.Rerank(response, httptest.NewRequest(http.MethodPost, "/v1/rerank", strings.NewReader(`{"model":"m","query":"hello","documents":["one"]}`)))
+	if response.Code != http.StatusBadGateway || provider.request.RequestID != "" || !strings.Contains(response.Body.String(), `"module_failed"`) || !strings.Contains(response.Body.String(), "max_chunks_per_doc") {
+		t.Fatalf("invalid pipeline output continued: status=%d provider=%+v body=%s", response.Code, provider.request, response.Body.String())
+	}
+}
+
 func TestAdmissionUsesReplacedTypedRequests(t *testing.T) {
 	for _, endpoint := range []struct{ path, body string }{
 		{"/v1/responses", `{"model":"m","input":"hi","max_output_tokens":1}`},

@@ -1235,6 +1235,10 @@ func (h Handler) Rerank(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	request = *reqCtx.RerankRequest
+	if message := validateRerankRequest(request); message != "" {
+		writeError(w, http.StatusBadGateway, "module_failed", "module produced an invalid rerank request: "+message)
+		return
+	}
 	if !h.prepareAccessGroups(w, &reqCtx) {
 		return
 	}
