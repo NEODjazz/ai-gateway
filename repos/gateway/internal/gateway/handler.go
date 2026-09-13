@@ -295,9 +295,42 @@ func validateChatRequest(request openai.ChatCompletionRequest) string {
 	return ""
 }
 
+func chatAttachmentError(messages []openai.Message) (string, error) {
+	if _, err := openai.ChatImageAttachments(messages); err != nil {
+		return "image", err
+	}
+	if _, err := openai.ChatAudioAttachments(messages); err != nil {
+		return "audio", err
+	}
+	if _, err := openai.ChatFileAttachments(messages); err != nil {
+		return "file", err
+	}
+	if _, err := openai.ChatVideoAttachments(messages); err != nil {
+		return "video", err
+	}
+	return "", nil
+}
+
+func responseAttachmentError(input any) (string, error) {
+	if _, err := openai.ResponseImageAttachments(input); err != nil {
+		return "image", err
+	}
+	if _, err := openai.ResponseAudioAttachments(input); err != nil {
+		return "audio", err
+	}
+	if _, err := openai.ResponseFileAttachments(input); err != nil {
+		return "file", err
+	}
+	return "", nil
+}
+
 func (h Handler) serveChatAdapted(w http.ResponseWriter, r *http.Request, request openai.ChatCompletionRequest, apiType string, transform func(openai.ChatCompletionResponse) (any, error)) {
 	if message := validateChatRequest(request); message != "" {
 		writeError(w, http.StatusBadRequest, "invalid_request", message)
+		return
+	}
+	if kind, err := chatAttachmentError(request.Messages); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_"+kind, err.Error())
 		return
 	}
 	stream := request.Stream
@@ -349,23 +382,11 @@ func (h Handler) serveChatAdapted(w http.ResponseWriter, r *http.Request, reques
 		writeError(w, http.StatusBadGateway, "module_failed", "module produced an invalid inference request: "+message)
 		return
 	}
+	if kind, err := chatAttachmentError(reqCtx.Request.Messages); err != nil {
+		writeError(w, http.StatusBadGateway, "module_failed", "module produced invalid "+kind+" input: "+err.Error())
+		return
+	}
 	if !h.prepareAccessGroups(w, &reqCtx) {
-		return
-	}
-	if _, err := openai.ChatImageAttachments(reqCtx.Request.Messages); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_image", err.Error())
-		return
-	}
-	if _, err := openai.ChatAudioAttachments(reqCtx.Request.Messages); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_audio", err.Error())
-		return
-	}
-	if _, err := openai.ChatFileAttachments(reqCtx.Request.Messages); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_file", err.Error())
-		return
-	}
-	if _, err := openai.ChatVideoAttachments(reqCtx.Request.Messages); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_video", err.Error())
 		return
 	}
 	request = reqCtx.Request
@@ -666,16 +687,8 @@ func (h Handler) serveResponsesAs(w http.ResponseWriter, r *http.Request, reques
 		writeError(w, http.StatusBadRequest, "invalid_request", message)
 		return
 	}
-	if _, err := openai.ResponseImageAttachments(request.Input); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_image", err.Error())
-		return
-	}
-	if _, err := openai.ResponseAudioAttachments(request.Input); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_audio", err.Error())
-		return
-	}
-	if _, err := openai.ResponseFileAttachments(request.Input); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_file", err.Error())
+	if kind, err := responseAttachmentError(request.Input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_"+kind, err.Error())
 		return
 	}
 
@@ -716,19 +729,11 @@ func (h Handler) serveResponsesAs(w http.ResponseWriter, r *http.Request, reques
 		writeError(w, http.StatusBadGateway, "module_failed", "module produced an invalid inference request: "+message)
 		return
 	}
+	if kind, err := responseAttachmentError(reqCtx.ResponseRequest.Input); err != nil {
+		writeError(w, http.StatusBadGateway, "module_failed", "module produced invalid "+kind+" input: "+err.Error())
+		return
+	}
 	if !h.prepareAccessGroups(w, &reqCtx) {
-		return
-	}
-	if _, err := openai.ResponseImageAttachments(reqCtx.ResponseRequest.Input); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_image", err.Error())
-		return
-	}
-	if _, err := openai.ResponseAudioAttachments(reqCtx.ResponseRequest.Input); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_audio", err.Error())
-		return
-	}
-	if _, err := openai.ResponseFileAttachments(reqCtx.ResponseRequest.Input); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_file", err.Error())
 		return
 	}
 	toolIdentifiers, validTools := responseToolIdentifiers(request.Tools)

@@ -131,6 +131,58 @@ func TestResponseCompactionRejectsEnvelopeInvalidatedByPipeline(t *testing.T) {
 	}
 }
 
+func TestInferenceRejectsAttachmentsInvalidatedByPipeline(t *testing.T) {
+	invalidImage := []any{map[string]any{"type": "input_image", "image_url": "https://example.test/image.png"}}
+	invalidAudio := []any{map[string]any{"type": "input_audio", "input_audio": map[string]any{"data": "invalid", "format": "wav"}}}
+	invalidFile := []any{map[string]any{"type": "input_file", "filename": "document.pdf", "file_data": "invalid"}}
+	invalidVideo := []any{map[string]any{"type": "input_video", "input_video": map[string]any{"data": "invalid", "format": "mp4"}}}
+
+	for _, test := range []struct {
+		name    string
+		path    string
+		body    string
+		rewrite func(*modules.RequestContext)
+		input   string
+	}{
+		{name: "chat image", path: "/v1/chat/completions", body: `{"model":"m","messages":[{"role":"user","content":"hello"}]}`, rewrite: func(req *modules.RequestContext) { req.Request.Messages[0].Content = invalidImage }, input: "image"},
+		{name: "chat audio", path: "/v1/chat/completions", body: `{"model":"m","messages":[{"role":"user","content":"hello"}]}`, rewrite: func(req *modules.RequestContext) { req.Request.Messages[0].Content = invalidAudio }, input: "audio"},
+		{name: "chat file", path: "/v1/chat/completions", body: `{"model":"m","messages":[{"role":"user","content":"hello"}]}`, rewrite: func(req *modules.RequestContext) { req.Request.Messages[0].Content = invalidFile }, input: "file"},
+		{name: "chat video", path: "/v1/chat/completions", body: `{"model":"m","messages":[{"role":"user","content":"hello"}]}`, rewrite: func(req *modules.RequestContext) { req.Request.Messages[0].Content = invalidVideo }, input: "video"},
+		{name: "responses image", path: "/v1/responses", body: `{"model":"m","input":"hello"}`, rewrite: func(req *modules.RequestContext) { req.ResponseRequest.Input = invalidImage }, input: "image"},
+		{name: "responses audio", path: "/v1/responses", body: `{"model":"m","input":"hello"}`, rewrite: func(req *modules.RequestContext) { req.ResponseRequest.Input = invalidAudio }, input: "audio"},
+		{name: "responses file", path: "/v1/responses", body: `{"model":"m","input":"hello"}`, rewrite: func(req *modules.RequestContext) { req.ResponseRequest.Input = invalidFile }, input: "file"},
+		{name: "token count image", path: "/v1/responses/input_tokens", body: `{"model":"m","input":"hello"}`, rewrite: func(req *modules.RequestContext) { req.ResponseRequest.Input = invalidImage }, input: "image"},
+		{name: "token count audio", path: "/v1/responses/input_tokens", body: `{"model":"m","input":"hello"}`, rewrite: func(req *modules.RequestContext) { req.ResponseRequest.Input = invalidAudio }, input: "audio"},
+		{name: "token count file", path: "/v1/responses/input_tokens", body: `{"model":"m","input":"hello"}`, rewrite: func(req *modules.RequestContext) { req.ResponseRequest.Input = invalidFile }, input: "file"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			upstream := &responseInputTokenCountProvider{}
+			handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{rewriteContextModule{rewrite: test.rewrite}}), upstream))
+			response := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodPost, test.path, strings.NewReader(test.body))
+			request.Header.Set("anthropic-version", "2023-06-01")
+			handler.ServeHTTP(response, request)
+			if response.Code != http.StatusBadGateway || upstream.calls != 0 || !strings.Contains(response.Body.String(), `"code":"module_failed"`) || !strings.Contains(response.Body.String(), "invalid "+test.input+" input") {
+				t.Fatalf("invalid module attachment continued: status=%d count_calls=%d body=%s", response.Code, upstream.calls, response.Body.String())
+			}
+		})
+	}
+
+	for kind, invalid := range map[string]any{"image": invalidImage, "audio": invalidAudio, "file": invalidFile, "video": invalidVideo} {
+		t.Run("message count "+kind, func(t *testing.T) {
+			upstream := &countProviderSpy{}
+			handler := NewHandler(modules.NewPipeline([]modules.Module{rewriteContextModule{rewrite: func(req *modules.RequestContext) {
+				req.Request.Messages[0].Content = invalid
+			}}}), upstream)
+			response := httptest.NewRecorder()
+			_, ok := handler.countContextTokens(response, httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens", nil), openai.ChatCompletionRequest{Model: "m", Messages: []openai.Message{{Role: "user", Content: "hello"}}}, "")
+			if ok || response.Code != http.StatusBadGateway || upstream.calls != 0 || !strings.Contains(response.Body.String(), `"code":"module_failed"`) || !strings.Contains(response.Body.String(), "invalid "+kind+" input") {
+				t.Fatalf("invalid module attachment continued: ok=%t status=%d calls=%d body=%s", ok, response.Code, upstream.calls, response.Body.String())
+			}
+		})
+	}
+}
+
 func TestAdmissionUsesReplacedTypedRequests(t *testing.T) {
 	for _, endpoint := range []struct{ path, body string }{
 		{"/v1/responses", `{"model":"m","input":"hi","max_output_tokens":1}`},

@@ -70,6 +70,10 @@ func (h Handler) CountMessageTokens(w http.ResponseWriter, r *http.Request) {
 // countContextTokens applies the same admission and policy checks to each native
 // counting protocol, without opening a generation billing lifecycle.
 func (h Handler) countContextTokens(w http.ResponseWriter, r *http.Request, request openai.ChatCompletionRequest, key string) (provider.TokenCountResult, bool) {
+	if kind, err := chatAttachmentError(request.Messages); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_"+kind, err.Error())
+		return provider.TokenCountResult{}, false
+	}
 	req := modules.RequestContext{APIKey: key, RequestID: executionID(w), SessionID: sessionID(r), Request: request}
 	var pipelineErr error
 	if openai.HasChatResolvableReferences(request) {
@@ -104,15 +108,15 @@ func (h Handler) countContextTokens(w http.ResponseWriter, r *http.Request, requ
 		return provider.TokenCountResult{}, false
 	}
 	req.APIKey = ""
+	if kind, err := chatAttachmentError(req.Request.Messages); err != nil {
+		writeError(w, http.StatusBadGateway, "module_failed", "module produced invalid "+kind+" input: "+err.Error())
+		return provider.TokenCountResult{}, false
+	}
 	if !h.prepareAccessGroups(w, &req) {
 		return provider.TokenCountResult{}, false
 	}
 	if err := h.bindSkillExecution(r.Context(), &req); err != nil {
 		writeSkillExecutionError(w, err)
-		return provider.TokenCountResult{}, false
-	}
-	if _, err := openai.ChatImageAttachments(req.Request.Messages); err != nil {
-		writeError(w, 400, "invalid_image", err.Error())
 		return provider.TokenCountResult{}, false
 	}
 	request = req.Request

@@ -23,6 +23,10 @@ func (h Handler) CountResponseInputTokens(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, "invalid_request", message)
 		return
 	}
+	if kind, err := responseAttachmentError(responseRequest.Input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_"+kind, err.Error())
+		return
+	}
 
 	reqCtx := modules.RequestContext{
 		APIKey: bearerToken(r.Header.Get("Authorization")), RequestID: executionID(w), SessionID: sessionID(r),
@@ -53,19 +57,11 @@ func (h Handler) CountResponseInputTokens(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadGateway, "module_failed", "module produced an invalid token-count request: "+message)
 		return
 	}
+	if kind, err := responseAttachmentError(responseRequest.Input); err != nil {
+		writeError(w, http.StatusBadGateway, "module_failed", "module produced invalid "+kind+" input: "+err.Error())
+		return
+	}
 	if !h.prepareAccessGroups(w, &reqCtx) {
-		return
-	}
-	if _, err := openai.ResponseImageAttachments(responseRequest.Input); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_image", err.Error())
-		return
-	}
-	if _, err := openai.ResponseAudioAttachments(responseRequest.Input); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_audio", err.Error())
-		return
-	}
-	if _, err := openai.ResponseFileAttachments(responseRequest.Input); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_file", err.Error())
 		return
 	}
 	toolIdentifiers, validTools := responseToolIdentifiers(responseRequest.Tools)
