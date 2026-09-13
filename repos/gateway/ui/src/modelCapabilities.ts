@@ -17,6 +17,7 @@ export const modelCapabilityOptions: ChipOption[] = [
   { value: "rerank", label: "Rerank", description: "Document reranking" },
   { value: "moderation", label: "Moderation", description: "Text and image safety classification" },
   { value: "image_generation", label: "Image generation", description: "Generate images from prompts" },
+  { value: "response_image_generation", label: "Responses image generation", description: "Run provider-hosted image generation from Responses" },
   { value: "image_edit", label: "Image editing", description: "Edit uploaded images from prompts" },
   { value: "image_variation", label: "Image variations", description: "Create variations of uploaded images" },
   { value: "audio_transcription", label: "Audio transcription", description: "Transcribe uploaded audio" },

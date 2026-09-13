@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -240,6 +241,34 @@ func TestResponsesRequireOwnedBuiltInToolResources(t *testing.T) {
 				t.Fatalf("status=%d body=%s", out.Code, out.Body.String())
 			}
 			if (upstream.request.ResponseRequest != nil) != (test.wantStatus == 200) {
+				t.Fatalf("unexpected provider execution: request=%+v", upstream.request.ResponseRequest)
+			}
+		})
+	}
+}
+
+func TestResponsesRequireOwnedImageGenerationMask(t *testing.T) {
+	identity := modules.RequestContext{CredentialID: "credential-1", UserID: "user-1"}
+	owner := fileOwnerKey(identity)
+	for _, test := range []struct {
+		name       string
+		fileOwner  string
+		wantStatus int
+	}{
+		{name: "owned", fileOwner: owner, wantStatus: http.StatusOK},
+		{name: "foreign", fileOwner: "foreign", wantStatus: http.StatusBadRequest},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			upstream := &chatProvider{}
+			files := &memoryFileStore{files: map[string]filestate.File{"file_mask": {ID: "file_mask", OwnerKey: test.fileOwner}}}
+			handler := NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}, tools: []string{"image_generation"}}}), upstream).
+				WithFileStore(files, FileRuntimeConfig{MaxBytes: 1 << 20, OwnerQuotaBytes: 1 << 20})
+			out := httptest.NewRecorder()
+			handler.Responses(out, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"m","input":"edit","tools":[{"type":"image_generation","action":"edit","input_image_mask":{"file_id":"file_mask"}}]}`)))
+			if out.Code != test.wantStatus {
+				t.Fatalf("status=%d body=%s", out.Code, out.Body.String())
+			}
+			if (upstream.request.ResponseRequest != nil) != (test.wantStatus == http.StatusOK) {
 				t.Fatalf("unexpected provider execution: request=%+v", upstream.request.ResponseRequest)
 			}
 		})

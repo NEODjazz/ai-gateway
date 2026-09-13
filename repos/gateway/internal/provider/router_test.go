@@ -569,6 +569,10 @@ type responseCustomToolCaptureClient struct{ *modelCaptureProvider }
 
 func (responseCustomToolCaptureClient) SupportsResponseCustomTools() bool { return true }
 
+type responseImageGenerationCaptureClient struct{ *modelCaptureProvider }
+
+func (responseImageGenerationCaptureClient) SupportsResponseImageGeneration() bool { return true }
+
 func (p *modelCaptureProvider) ChatCompletions(_ context.Context, request openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
 	p.seenModel = request.Model
 	return staticProvider{content: p.content}.ChatCompletions(context.Background(), request)
@@ -1793,6 +1797,29 @@ func TestResponsesCustomToolsRequireDeclaredAndAdapterCapability(t *testing.T) {
 	}
 	if undeclared.seenModel != "" || unsupported.seenModel != "" || supported.seenModel != "model" {
 		t.Fatalf("custom tool used an incompatible deployment: undeclared=%q unsupported=%q supported=%q", undeclared.seenModel, unsupported.seenModel, supported.seenModel)
+	}
+}
+
+func TestResponsesImageGenerationRequiresDeclaredAndAdapterCapability(t *testing.T) {
+	required := requiredResponseCapabilities(openai.ResponseRequest{Tools: []openai.ResponseTool{{Type: "image_generation"}}}, false)
+	if strings.Join(required, ",") != "responses,tools,response_image_generation" {
+		t.Fatalf("unexpected Responses image generation capabilities: %v", required)
+	}
+
+	undeclared := &modelCaptureProvider{content: "undeclared"}
+	unsupported := &modelCaptureProvider{content: "unsupported"}
+	supported := &modelCaptureProvider{content: "supported"}
+	router := Router{health: newEndpointHealthTracker(), endpoints: []Endpoint{
+		{Name: "undeclared", Type: "openai-compatible", Priority: 1, Capabilities: []string{"responses", "tools"}, Provider: responseImageGenerationCaptureClient{undeclared}},
+		{Name: "unsupported", Type: "anthropic", Priority: 2, Capabilities: []string{"responses", "tools", "response_image_generation"}, Provider: unsupported},
+		{Name: "supported", Type: "openai-compatible", Priority: 3, Capabilities: []string{"responses", "tools", "response_image_generation"}, Provider: responseImageGenerationCaptureClient{supported}},
+	}}
+	request := openai.ResponseRequest{Model: "model", Input: "draw", Tools: []openai.ResponseTool{{Type: "image_generation"}}}
+	if _, err := router.Responses(t.Context(), modules.RequestContext{Request: openai.ChatCompletionRequest{Model: "model"}, ResponseRequest: &request}); err != nil {
+		t.Fatal(err)
+	}
+	if undeclared.seenModel != "" || unsupported.seenModel != "" || supported.seenModel != "model" {
+		t.Fatalf("image generation tool used an incompatible deployment: undeclared=%q unsupported=%q supported=%q", undeclared.seenModel, unsupported.seenModel, supported.seenModel)
 	}
 }
 

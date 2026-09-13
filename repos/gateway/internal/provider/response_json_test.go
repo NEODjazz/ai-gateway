@@ -29,6 +29,25 @@ func TestResponsesRejectsInvalidJSONDocuments(t *testing.T) {
 	}
 }
 
+func TestResponsesRejectsInvalidImageGenerationResults(t *testing.T) {
+	for _, output := range []string{
+		`{"type":"image_generation_call","status":"completed"}`,
+		`{"type":"image_generation_call","status":"completed","result":{}}`,
+		`{"type":"image_generation_call","status":"completed","result":"%%%"}`,
+	} {
+		document := `{"id":"r","object":"response","model":"m","status":"completed","output":[` + output + `],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`
+		if _, err := decodeResponseJSON(strings.NewReader(document)); err == nil {
+			t.Fatalf("invalid image generation output accepted: %s", output)
+		}
+	}
+	for _, result := range []string{`null`, `"aW1hZ2U="`} {
+		document := `{"id":"r","object":"response","model":"m","status":"completed","output":[{"type":"image_generation_call","status":"completed","result":` + result + `}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`
+		if _, err := decodeResponseJSON(strings.NewReader(document)); err != nil {
+			t.Fatalf("valid image generation output rejected: result=%s err=%v", result, err)
+		}
+	}
+}
+
 func TestResponsesJSONReadLimitAndErrors(t *testing.T) {
 	reader := &embeddingLimitReader{}
 	if _, err := decodeResponseJSON(reader); err == nil || reader.read != maxResponseJSONBytes+1 {

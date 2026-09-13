@@ -20,6 +20,7 @@ describe("modelCapabilityOptions", () => {
       "rerank",
       "moderation",
       "image_generation",
+      "response_image_generation",
       "image_edit",
       "image_variation",
       "audio_transcription",

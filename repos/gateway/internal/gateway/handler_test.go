@@ -196,6 +196,22 @@ func TestResponsesCustomToolACLUsesToolName(t *testing.T) {
 	}
 }
 
+func TestResponsesImageGenerationACLUsesCanonicalToolName(t *testing.T) {
+	handler := NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}, tools: []string{"image_generation"}}}), &chatProvider{})
+	allowedResponse := httptest.NewRecorder()
+	handler.Responses(allowedResponse, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"test","input":"draw","tools":[{"type":"image_generation","output_format":"png"}],"tool_choice":{"type":"image_generation"}}`)))
+	if allowedResponse.Code != http.StatusOK {
+		t.Fatalf("allowed image generation tool rejected: status=%d body=%s", allowedResponse.Code, allowedResponse.Body.String())
+	}
+
+	denied := NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}, tools: []string{"lookup"}}}), &chatProvider{})
+	deniedResponse := httptest.NewRecorder()
+	denied.Responses(deniedResponse, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"test","input":"draw","tools":[{"type":"image_generation"}]}`)))
+	if deniedResponse.Code != http.StatusForbidden || !strings.Contains(deniedResponse.Body.String(), "tool_not_allowed") {
+		t.Fatalf("unscoped image generation tool accepted: status=%d body=%s", deniedResponse.Code, deniedResponse.Body.String())
+	}
+}
+
 func TestResponsesMCPACLRejectsLabelReuseForAnotherURL(t *testing.T) {
 	handler := NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}, tools: []string{"mcp:weather-prod@https://mcp.example.test"}}}), &chatProvider{})
 	request := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"test","input":"weather","tools":[{"type":"mcp","server_label":"weather-prod","server_url":"https://evil.example.test"}]}`))

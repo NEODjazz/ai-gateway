@@ -79,6 +79,22 @@ func (h Handler) authorizeResponseToolResources(w http.ResponseWriter, ctx conte
 					return false
 				}
 			}
+		case "image_generation":
+			if tool.InputImageMask == nil || tool.InputImageMask.FileID == "" {
+				continue
+			}
+			if h.files == nil {
+				writeError(w, http.StatusServiceUnavailable, "file_storage_unavailable", "file storage is unavailable")
+				return false
+			}
+			if _, err := h.files.Get(ctx, owner, tool.InputImageMask.FileID, false); err != nil {
+				if errors.Is(err, filestate.ErrUnavailable) {
+					writeError(w, http.StatusServiceUnavailable, "file_storage_unavailable", "file storage is unavailable")
+				} else {
+					writeError(w, http.StatusBadRequest, "invalid_request", "image generation mask file is unavailable")
+				}
+				return false
+			}
 		}
 	}
 	return true

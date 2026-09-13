@@ -527,6 +527,40 @@ func TestImageGenerationBillingReserveAndSettlement(t *testing.T) {
 	}
 }
 
+func TestResponsesImageGenerationBillingReserveAndSettlement(t *testing.T) {
+	maxToolCalls := 3
+	req := &RequestContext{
+		Request: openai.ChatCompletionRequest{Model: "model"},
+		ResponseRequest: &openai.ResponseRequest{
+			Model: "model", Input: "draw", MaxToolCalls: &maxToolCalls,
+			Tools: []openai.ResponseTool{{Type: "image_generation"}},
+		},
+	}
+	reserved := billingRequest(req)
+	if reserved.APIType != "responses" || reserved.OutputImages != 3 {
+		t.Fatalf("Responses image reserve=%+v", reserved)
+	}
+	req.ResponsesResponse = &openai.ResponseResponse{
+		ID: "resp_image", Model: "model", Status: "completed",
+		Output: []openai.ResponseOutputItem{
+			{Type: "image_generation_call", Status: "completed", Result: json.RawMessage(`"b25l"`)},
+			{Type: "image_generation_call", Status: "failed", Result: json.RawMessage(`null`)},
+			{Type: "message", Status: "completed"},
+			{Type: "image_generation_call", Status: "completed", Result: json.RawMessage(`"dHdv"`)},
+		},
+		Usage: openai.ResponseUsage{InputTokens: 7, OutputTokens: 11, TotalTokens: 18},
+	}
+	settled := billingRequest(req)
+	if settled.Phase != "commit" || settled.OutputImages != 2 || settled.TotalTokens != 18 || settled.UsageEstimated {
+		t.Fatalf("Responses image settlement=%+v", settled)
+	}
+	req.ResponsesResponse = nil
+	req.ResponseRequest.MaxToolCalls = nil
+	if defaultReserve := billingRequest(req); defaultReserve.OutputImages != 1 {
+		t.Fatalf("default Responses image reserve=%+v", defaultReserve)
+	}
+}
+
 func TestImageEditBillingReserveAndSettlement(t *testing.T) {
 	n := 2
 	attachment := openai.ImageAttachment{MediaType: "image/png", Data: "iVBORw0KGgpmaXh0dXJl"}

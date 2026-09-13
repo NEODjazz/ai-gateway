@@ -2,6 +2,7 @@ package modules
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strconv"
 
@@ -419,6 +420,7 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.TotalTokens = req.ResponsesResponse.Usage.TotalTokens
 		request.UpstreamModel = req.ResponsesResponse.Model
 		request.ProviderCostUSDTicks = trustedProviderCost(req, req.ResponsesResponse.Usage.ProviderCostUSDTicks)
+		request.OutputImages = responseOutputImageCount(*req.ResponsesResponse)
 		request.UsageEstimated = request.TotalTokens == 0
 		if details := req.ResponsesResponse.Usage.InputTokensDetails; details != nil {
 			request.CacheReadInputTokens = nonNegative(details.CachedTokens)
@@ -544,6 +546,11 @@ func billingRequest(req *RequestContext) UsageRequest {
 func requestedImageCount(req *RequestContext) int {
 	var count *int
 	switch {
+	case req.ResponseRequest != nil && responseRequestsImageGeneration(*req.ResponseRequest):
+		if req.ResponseRequest.MaxToolCalls == nil {
+			return 1
+		}
+		return *req.ResponseRequest.MaxToolCalls
 	case req.ImageGenerationRequest != nil:
 		count = req.ImageGenerationRequest.N
 	case req.ImageEditRequest != nil:
@@ -557,6 +564,29 @@ func requestedImageCount(req *RequestContext) int {
 		return 1
 	}
 	return *count
+}
+
+func responseRequestsImageGeneration(request openai.ResponseRequest) bool {
+	for _, tool := range request.Tools {
+		if tool.Type == "image_generation" {
+			return true
+		}
+	}
+	return false
+}
+
+func responseOutputImageCount(response openai.ResponseResponse) int {
+	count := 0
+	for _, item := range response.Output {
+		if item.Type != "image_generation_call" || len(item.Result) == 0 || string(item.Result) == "null" {
+			continue
+		}
+		var encoded string
+		if json.Unmarshal(item.Result, &encoded) == nil && encoded != "" {
+			count++
+		}
+	}
+	return count
 }
 
 func trustedProviderCost(req *RequestContext, ticks *int64) *int64 {

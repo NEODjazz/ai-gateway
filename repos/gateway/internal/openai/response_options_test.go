@@ -165,6 +165,7 @@ func TestResponseToolChoiceValidation(t *testing.T) {
 		{Type: "custom", Name: "dsl", Format: &ResponseCustomToolFormat{Type: "grammar", Syntax: "lark", Definition: "start: /[a-z]+/"}},
 		{Type: "mcp", ServerLabel: "documents", ServerURL: "https://documents.example.test", AllowedTools: []string{"search"}},
 		{Type: "web_search", SearchContextSize: "medium"},
+		{Type: "image_generation", OutputFormat: "png"},
 	}
 	for _, choice := range []any{
 		"none", "auto", "required",
@@ -173,6 +174,7 @@ func TestResponseToolChoiceValidation(t *testing.T) {
 		map[string]any{"type": "mcp", "server_label": "documents", "name": "search"},
 		map[string]any{"type": "web_search"},
 		map[string]any{"type": "web_search_preview"},
+		map[string]any{"type": "image_generation"},
 	} {
 		if message := (ResponseRequest{Tools: tools, ToolChoice: choice}).Validate(); message != "" {
 			t.Fatalf("choice %#v rejected: %s", choice, message)
@@ -194,6 +196,41 @@ func TestResponseToolChoiceValidation(t *testing.T) {
 		}
 		if message := request.Validate(); message == "" {
 			t.Fatalf("invalid choice accepted: %#v", choice)
+		}
+	}
+}
+
+func TestResponseImageGenerationToolValidation(t *testing.T) {
+	compression, partialImages := 90, 3
+	validMask := "data:image/png;base64,iVBORw0KGgpmaXh0dXJl"
+	for _, tool := range []ResponseTool{
+		{Type: "image_generation"},
+		{Type: "image_generation", Action: "generate", Background: "opaque", Model: "gpt-image", Moderation: "low", OutputCompression: &compression, OutputFormat: "jpeg", PartialImages: &partialImages, Quality: "high", Size: "1536x864"},
+		{Type: "image_generation", Action: "edit", Background: "transparent", InputFidelity: "high", InputImageMask: &ResponseInputImageMask{ImageURL: validMask}, OutputFormat: "webp", Size: "auto"},
+		{Type: "image_generation", InputImageMask: &ResponseInputImageMask{FileID: "file_mask"}},
+	} {
+		if message := (ResponseRequest{Tools: []ResponseTool{tool}}).Validate(); message != "" {
+			t.Fatalf("valid image generation tool rejected: %+v: %s", tool, message)
+		}
+	}
+
+	negative, tooMany := -1, 4
+	for _, tools := range [][]ResponseTool{
+		{{Type: "image_generation", Action: "replace"}},
+		{{Type: "image_generation", Background: "transparent", OutputFormat: "jpeg"}},
+		{{Type: "image_generation", InputFidelity: "medium"}},
+		{{Type: "image_generation", InputImageMask: &ResponseInputImageMask{}}},
+		{{Type: "image_generation", InputImageMask: &ResponseInputImageMask{FileID: "file_mask", ImageURL: validMask}}},
+		{{Type: "image_generation", InputImageMask: &ResponseInputImageMask{ImageURL: "https://example.test/mask.png"}}},
+		{{Type: "image_generation", OutputCompression: &negative}},
+		{{Type: "image_generation", PartialImages: &tooMany}},
+		{{Type: "image_generation", Quality: "maximum"}},
+		{{Type: "image_generation", Size: "1000x1000"}},
+		{{Type: "image_generation"}, {Type: "image_generation"}},
+		{{Type: "function", Name: "draw", OutputFormat: "png"}},
+	} {
+		if message := (ResponseRequest{Tools: tools}).Validate(); message == "" {
+			t.Fatalf("invalid image generation tools accepted: %+v", tools)
 		}
 	}
 }

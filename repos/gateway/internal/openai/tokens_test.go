@@ -92,6 +92,10 @@ func TestTokenEstimatesIncludeFullContextAndEquivalentLimits(t *testing.T) {
 	if ResponseInputTokens(withCustomGrammar) <= ResponseInputTokens(ResponseRequest{Input: "test"})+1000 {
 		t.Fatal("custom tool grammar omitted from the input-token reserve")
 	}
+	withImageTool := ResponseRequest{Input: "test", Tools: []ResponseTool{{Type: "image_generation", Model: "gpt-image", InputImageMask: &ResponseInputImageMask{FileID: "file_mask"}, OutputFormat: "png", Size: "1024x1024"}}}
+	if ResponseInputTokens(withImageTool) <= ResponseInputTokens(ResponseRequest{Input: "test"}) {
+		t.Fatal("image generation tool configuration omitted from the input-token reserve")
+	}
 	native := response
 	native.NativeInputTokens = 37
 	if ResponseInputTokens(native) != ResponseInputTokens(response)+37 {

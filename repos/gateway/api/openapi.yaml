@@ -7964,7 +7964,7 @@ components:
         capabilities:
           type: array
           uniqueItems: true
-          items: {type: string, enum: [chat, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, gemini_code_execution, url_context, google_maps, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, cached_content, realtime, stream, tools, custom_tools, structured_output, mcp, code_interpreter, file_search, vision, web_search, web_fetch, tool_search, zero_output, inference_geo, context_management, tool_result_error, document_citations, document_metadata, document_text, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
+          items: {type: string, enum: [chat, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, gemini_code_execution, url_context, google_maps, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, cached_content, realtime, stream, tools, custom_tools, response_image_generation, structured_output, mcp, code_interpreter, file_search, vision, web_search, web_fetch, tool_search, zero_output, inference_geo, context_management, tool_result_error, document_citations, document_metadata, document_text, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
         max_input_tokens: {type: integer, minimum: 0}
         max_output_tokens: {type: integer, minimum: 0}
         input_cost_per_1m: {type: number, minimum: 0}
@@ -8972,6 +8972,31 @@ components:
                 type: {type: string, const: grammar}
                 syntax: {type: string, enum: [lark, regex]}
                 definition: {type: string, minLength: 1, maxLength: 65536}
+    ImageGenerationResponseTool:
+      type: object
+      description: Provider-hosted image generation within a Responses request. Routing requires the explicit response_image_generation deployment capability. A mask file must belong to the authenticated credential and user.
+      additionalProperties: false
+      required: [type]
+      properties:
+        type: {type: string, const: image_generation}
+        action: {type: string, enum: [generate, edit, auto]}
+        background: {type: string, enum: [transparent, opaque, auto]}
+        input_fidelity: {type: string, enum: [high, low]}
+        input_image_mask:
+          type: object
+          additionalProperties: false
+          minProperties: 1
+          maxProperties: 1
+          properties:
+            file_id: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}
+            image_url: {type: string, description: Base64 data image URL, maxLength: 33554432}
+        model: {type: string, maxLength: 256}
+        moderation: {type: string, enum: [auto, low]}
+        output_compression: {type: integer, minimum: 0, maximum: 100}
+        output_format: {type: string, enum: [png, webp, jpeg]}
+        partial_images: {type: integer, minimum: 0, maximum: 3}
+        quality: {type: string, enum: [low, medium, high, auto]}
+        size: {type: string, description: auto or WIDTHxHEIGHT; dimensions must be divisible by 16 and have an aspect ratio from 1:3 to 3:1.}
     MCPResponseTool:
       type: object
       description: Remote connector forwarded to the selected provider for execution. This does not reference or automatically load a registry entry. Gateway authorization checks mcp:<server_label>@<canonical-https-url>; the provider enforces connector-level allowed_tools and require_approval.
@@ -9170,6 +9195,7 @@ components:
             oneOf:
               - $ref: '#/components/schemas/FunctionResponseTool'
               - $ref: '#/components/schemas/CustomResponseTool'
+              - $ref: '#/components/schemas/ImageGenerationResponseTool'
               - $ref: '#/components/schemas/MCPResponseTool'
               - $ref: '#/components/schemas/CodeInterpreterResponseTool'
               - $ref: '#/components/schemas/FileSearchResponseTool'
@@ -9347,6 +9373,7 @@ components:
             oneOf:
               - $ref: '#/components/schemas/FunctionResponseTool'
               - $ref: '#/components/schemas/CustomResponseTool'
+              - $ref: '#/components/schemas/ImageGenerationResponseTool'
               - $ref: '#/components/schemas/MCPResponseTool'
               - $ref: '#/components/schemas/CodeInterpreterResponseTool'
               - $ref: '#/components/schemas/FileSearchResponseTool'
@@ -9446,6 +9473,11 @@ components:
         code: {type: string}
         arguments: {type: string}
         input: {type: string, description: Raw custom-tool input produced by the model.}
+        result:
+          oneOf:
+            - type: string
+              description: Base64-encoded image returned by an image generation call.
+            - type: 'null'
         action:
           type: object
           additionalProperties: true
@@ -10597,7 +10629,7 @@ components:
           type: array
           uniqueItems: true
           description: Operations and optional request features preserved by the managed adapter.
-          items: {type: string, enum: [chat, completions, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, gemini_code_execution, url_context, google_maps, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, cached_content, realtime, stream, tools, custom_tools, structured_output, mcp, code_interpreter, file_search, vision, web_search, web_fetch, tool_search, zero_output, inference_geo, context_management, tool_result_error, document_citations, document_metadata, document_text, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
+          items: {type: string, enum: [chat, completions, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, gemini_code_execution, url_context, google_maps, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, cached_content, realtime, stream, tools, custom_tools, response_image_generation, structured_output, mcp, code_interpreter, file_search, vision, web_search, web_fetch, tool_search, zero_output, inference_geo, context_management, tool_result_error, document_citations, document_metadata, document_text, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
         auth_types:
           type: array
           uniqueItems: true

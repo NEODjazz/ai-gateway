@@ -95,6 +95,60 @@ func TestOpenAICompatibleForwardsCustomToolsAndPreservesCalls(t *testing.T) {
 	}
 }
 
+func TestOpenAICompatibleForwardsResponseImageGenerationAndPreservesResult(t *testing.T) {
+	var upstream map[string]json.RawMessage
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&upstream); err != nil {
+			t.Fatal(err)
+		}
+		_, _ = fmt.Fprint(w, `{"id":"resp-image","object":"response","status":"completed","model":"model","output":[{"id":"ig_1","type":"image_generation_call","status":"completed","result":"aW1hZ2U="}],"usage":{"input_tokens":4,"output_tokens":8,"total_tokens":12}}`)
+	}))
+	defer server.Close()
+
+	compression, partialImages := 80, 2
+	request := openai.ResponseRequest{Model: "model", Input: "draw a lighthouse", Tools: []openai.ResponseTool{{Type: "image_generation", Action: "generate", Background: "transparent", InputFidelity: "high", Model: "gpt-image", Moderation: "low", OutputCompression: &compression, OutputFormat: "webp", PartialImages: &partialImages, Quality: "high", Size: "1024x1536"}}, ToolChoice: map[string]any{"type": "image_generation"}}
+	response, err := NewOpenAICompatible(server.URL, "", false).Responses(t.Context(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tools := string(upstream["tools"])
+	if !strings.Contains(tools, `"type":"image_generation"`) || !strings.Contains(tools, `"background":"transparent"`) || !strings.Contains(tools, `"output_compression":80`) || !strings.Contains(tools, `"partial_images":2`) || string(upstream["tool_choice"]) != `{"type":"image_generation"}` {
+		t.Fatalf("image generation contract was not forwarded: %s", upstream)
+	}
+	if len(response.Output) != 1 || response.Output[0].Type != "image_generation_call" || string(response.Output[0].Result) != `"aW1hZ2U="` {
+		t.Fatalf("image generation result was not preserved: %+v", response.Output)
+	}
+}
+
+func TestOpenAICompatibleStreamsResponseImageGenerationEvents(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "event: response.created\n"+`data: {"type":"response.created","response":{"id":"resp-image","object":"response","status":"in_progress","model":"model","output":[]}}`+"\n\n")
+		_, _ = fmt.Fprint(w, "event: response.image_generation_call.in_progress\n"+`data: {"type":"response.image_generation_call.in_progress","output_index":0,"item_id":"ig_1","sequence_number":1}`+"\n\n")
+		_, _ = fmt.Fprint(w, "event: response.image_generation_call.generating\n"+`data: {"type":"response.image_generation_call.generating","output_index":0,"item_id":"ig_1","sequence_number":2}`+"\n\n")
+		_, _ = fmt.Fprint(w, "event: response.image_generation_call.partial_image\n"+`data: {"type":"response.image_generation_call.partial_image","output_index":0,"item_id":"ig_1","sequence_number":3,"partial_image_index":0,"partial_image_b64":"cGFydGlhbA=="}`+"\n\n")
+		_, _ = fmt.Fprint(w, "event: response.output_item.done\n"+`data: {"type":"response.output_item.done","output_index":0,"item":{"id":"ig_1","type":"image_generation_call","status":"completed","result":"ZmluYWw="}}`+"\n\n")
+		_, _ = fmt.Fprint(w, "event: response.image_generation_call.completed\n"+`data: {"type":"response.image_generation_call.completed","output_index":0,"item_id":"ig_1","sequence_number":4}`+"\n\n")
+		_, _ = fmt.Fprint(w, "event: response.completed\n"+`data: {"type":"response.completed","response":{"id":"resp-image","object":"response","status":"completed","model":"model","usage":{"input_tokens":2,"output_tokens":4,"total_tokens":6}}}`+"\n\n")
+	}))
+	defer server.Close()
+
+	var events, payloads []string
+	response, err := NewOpenAICompatible(server.URL, "", true).StreamResponses(t.Context(), openai.ResponseRequest{Model: "model", Input: "draw", Stream: true, Tools: []openai.ResponseTool{{Type: "image_generation"}}}, func(event, payload string) error {
+		events, payloads = append(events, event), append(payloads, payload)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 7 || events[3] != "response.image_generation_call.partial_image" || !strings.Contains(payloads[3], `"partial_image_b64":"cGFydGlhbA=="`) {
+		t.Fatalf("image generation stream events were not preserved: events=%v payloads=%v", events, payloads)
+	}
+	if len(response.Output) != 1 || response.Output[0].ID != "ig_1" || string(response.Output[0].Result) != `"ZmluYWw="` || response.Usage.TotalTokens != 6 {
+		t.Fatalf("streamed image generation result was not collected: %+v", response)
+	}
+}
+
 func TestOpenAICompatibleStreamsHostedToolOutputPayloads(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")

@@ -130,6 +130,7 @@ func TestManagedDeploymentRejectsUnsupportedProviderCapabilities(t *testing.T) {
 		{providerType: "cohere", capability: "vision"},
 		{providerType: "anthropic", capability: "mcp"},
 		{providerType: "anthropic", capability: "custom_tools"},
+		{providerType: "anthropic", capability: "response_image_generation"},
 		{providerType: "mistral", capability: "web_search"},
 		{providerType: "openai", capability: "tool_search"},
 		{providerType: "openai", capability: "computer_toolset"},
@@ -170,6 +171,8 @@ func TestManagedDeploymentRejectsUnsupportedProviderCapabilities(t *testing.T) {
 				capabilities = []string{"responses", "tools", "mcp"}
 			case "custom_tools":
 				capabilities = []string{"responses", "tools", "custom_tools"}
+			case "response_image_generation":
+				capabilities = []string{"responses", "tools", "response_image_generation"}
 			}
 			_, err := router.CreateModelDeployment(ModelDeployment{ID: "deployment", ProviderID: "provider", Models: []string{"model"}, Capabilities: capabilities, Enabled: true})
 			if !errors.Is(err, ErrUnsupportedProviderCapability) {
@@ -189,6 +192,9 @@ func TestDeploymentCapabilitiesRequireRoutableBaseOperations(t *testing.T) {
 		{"custom_tools"},
 		{"responses", "custom_tools"},
 		{"tools", "custom_tools"},
+		{"response_image_generation"},
+		{"responses", "response_image_generation"},
+		{"tools", "response_image_generation"},
 		{"responses", "mcp"},
 		{"chat", "mcp", "tools"},
 		{"web_search"},
@@ -231,6 +237,7 @@ func TestDeploymentCapabilitiesRequireRoutableBaseOperations(t *testing.T) {
 		{"chat", "tools", "structured_output", "vision"},
 		{"responses", "tools", "mcp"},
 		{"responses", "tools", "custom_tools"},
+		{"responses", "tools", "response_image_generation"},
 		{"responses", "background_responses"},
 		{"interactions", "tools", "structured_output", "vision"},
 		{"interactions", "interaction_agents"},

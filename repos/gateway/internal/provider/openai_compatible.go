@@ -1474,6 +1474,9 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 			if err := json.Unmarshal(marshaled, &snapshot); err != nil {
 				return err
 			}
+			if err := validateResponseOutputItems([]openai.ResponseOutputItem{snapshot}); err != nil {
+				return err
+			}
 			*ensureResponseOutputItem(&response, outputIndex) = snapshot
 			response.OutputText = ""
 		}
@@ -1496,6 +1499,9 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 				return err
 			}
 			if err := validateResponseUsage(response.Usage); err != nil {
+				return err
+			}
+			if err := validateResponseOutputItems(response.Output); err != nil {
 				return err
 			}
 			response.OutputText = responseText(response)

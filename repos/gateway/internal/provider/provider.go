@@ -3380,6 +3380,9 @@ func requiredResponseCapabilities(request openai.ResponseRequest, stream bool) [
 		if tool.Type == "custom" {
 			required = append(required, "custom_tools")
 		}
+		if tool.Type == "image_generation" {
+			required = append(required, "response_image_generation")
+		}
 		if openai.IsResponseWebSearchTool(tool.Type) {
 			required = append(required, "web_search")
 		}
@@ -3442,6 +3445,12 @@ func (e Endpoint) supportsCapabilities(required ...string) bool {
 		if hasCapability(required, "custom_tools") {
 			client, ok := e.Provider.(interface{ SupportsResponseCustomTools() bool })
 			if !ok || !client.SupportsResponseCustomTools() {
+				return false
+			}
+		}
+		if hasCapability(required, "response_image_generation") {
+			client, ok := e.Provider.(interface{ SupportsResponseImageGeneration() bool })
+			if !ok || !client.SupportsResponseImageGeneration() {
 				return false
 			}
 		}
