@@ -350,6 +350,37 @@ func TestCachedContentCreateEnforcesToolAuthorization(t *testing.T) {
 	}
 }
 
+func TestCachedContentRejectsInvalidPolicyMutationBeforeBilling(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		rewrite func(*modules.RequestContext)
+	}{
+		{name: "routing model", rewrite: func(req *modules.RequestContext) { req.Request.Model = "other-model" }},
+		{name: "provider", rewrite: func(req *modules.RequestContext) { req.Request.Provider = "other-provider" }},
+		{name: "tool identity", rewrite: func(req *modules.RequestContext) {
+			req.Request.Tools = []openai.Tool{{Type: "function", Function: openai.FunctionDefinition{Name: "safe", Parameters: map[string]any{"type": "object"}}}}
+		}},
+		{name: "generation option", rewrite: func(req *modules.RequestContext) {
+			value := 0
+			req.Request.MaxCompletionTokens = &value
+		}},
+		{name: "attachment", rewrite: func(req *modules.RequestContext) {
+			req.Request.Messages[0].Content = []any{map[string]any{"type": "input_image", "image_url": "https://example.test/image.png"}}
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store := &memoryCachedContentStore{records: map[string]cachedstate.Record{}}
+			runtime := &gatewayCachedContentProvider{batchProvider: &batchProvider{models: []string{"public-model"}}, contents: map[string]openai.GeminiCachedContent{}}
+			billing := &cachedContentBillingModule{}
+			handler := cachedContentTestHandler(store, runtime, rewriteContextModule{rewrite: test.rewrite}, billing)
+			response := cachedContentRequest(handler, http.MethodPost, "/v1beta/cachedContents", `{"model":"models/public-model","ttl":"3600s","contents":[{"parts":[{"text":"hello"}]}]}`, "user-a")
+			if response.Code != http.StatusBadGateway || runtime.createCalls != 1 || len(runtime.createRequests) != 0 || len(store.records) != 0 || len(billing.phases) != 0 {
+				t.Fatalf("status=%d body=%s create_calls=%d provider_requests=%d stored=%d billing=%v", response.Code, response.Body.String(), runtime.createCalls, len(runtime.createRequests), len(store.records), billing.phases)
+			}
+		})
+	}
+}
+
 func TestCachedContentOwnerIsolationAndCreateCompensation(t *testing.T) {
 	store := &memoryCachedContentStore{records: map[string]cachedstate.Record{}}
 	runtime := &gatewayCachedContentProvider{batchProvider: &batchProvider{models: []string{"public-model"}}, contents: map[string]openai.GeminiCachedContent{}}

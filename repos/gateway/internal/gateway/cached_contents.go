@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -32,6 +34,40 @@ type cachedContentCreateRequest struct {
 	DisplayName string `json:"displayName,omitempty"`
 	TTL         string `json:"ttl,omitempty"`
 	ExpireTime  string `json:"expireTime,omitempty"`
+}
+
+func cachedContentToolIdentifiers(request openai.ChatCompletionRequest) ([]string, bool) {
+	identifiers, valid := chatToolIdentifiers(request.Tools, nil)
+	if request.GeminiCodeExecution {
+		identifiers = append(identifiers, "code_execution")
+	}
+	if request.GeminiURLContext {
+		identifiers = append(identifiers, "url_context")
+	}
+	if request.GeminiGoogleMaps {
+		identifiers = append(identifiers, "google_maps")
+	}
+	return identifiers, valid
+}
+
+func validateEffectiveCachedContentRequest(request openai.ChatCompletionRequest, model, providerName string, toolIdentifiers []string) error {
+	if request.Model != model || request.Provider != providerName {
+		return errors.New("module changed cached content routing identity")
+	}
+	if request.Stream || request.GeminiCachedContent != "" {
+		return errors.New("module produced an invalid cached content request")
+	}
+	if message := validateChatRequest(request); message != "" {
+		return errors.New("module produced an invalid cached content request: " + message)
+	}
+	if kind, err := chatAttachmentError(request.Messages); err != nil {
+		return fmt.Errorf("module produced invalid cached content %s input: %w", kind, err)
+	}
+	effectiveTools, valid := cachedContentToolIdentifiers(request)
+	if !valid || !slices.Equal(effectiveTools, toolIdentifiers) {
+		return errors.New("module changed cached content tool identities")
+	}
+	return nil
 }
 
 func (h Handler) WithCachedContentStore(store cachedstate.Store) Handler {
@@ -117,16 +153,7 @@ func (h Handler) CreateCachedContent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "invalid cached content request")
 		return
 	}
-	toolIdentifiers, validTools := chatToolIdentifiers(chat.Tools, nil)
-	if chat.GeminiCodeExecution {
-		toolIdentifiers = append(toolIdentifiers, "code_execution")
-	}
-	if chat.GeminiURLContext {
-		toolIdentifiers = append(toolIdentifiers, "url_context")
-	}
-	if chat.GeminiGoogleMaps {
-		toolIdentifiers = append(toolIdentifiers, "google_maps")
-	}
+	toolIdentifiers, validTools := cachedContentToolIdentifiers(chat)
 	if !h.authorizeBatchModel(w, identity, model) || !h.authorizeTools(w, identity, toolIdentifiers, validTools) || !h.applyPolicyAttachments(w, &identity, model) {
 		return
 	}
@@ -134,7 +161,18 @@ func (h Handler) CreateCachedContent(w http.ResponseWriter, r *http.Request) {
 	var attempt *modules.RequestContext
 	content, binding, err := runtime.CreateCachedContent(r.Context(), identity, chat, input.DisplayName, openai.GeminiCachedContentExpiration{TTL: input.TTL, ExpireTime: input.ExpireTime}, func(ctx context.Context, current *modules.RequestContext) error {
 		attempt = current
-		return pipeline.RunAfterAuthentication(ctx, current)
+		routedModel, routedProvider := current.Request.Model, current.Request.Provider
+		routedTools, valid := cachedContentToolIdentifiers(current.Request)
+		if !valid {
+			return errors.New("provider produced invalid cached content tool identities")
+		}
+		if err := pipeline.RunTokenCountAfterAuthentication(ctx, current); err != nil {
+			return err
+		}
+		if err := validateEffectiveCachedContentRequest(current.Request, routedModel, routedProvider, routedTools); err != nil {
+			return err
+		}
+		return pipeline.RunBillingLifecycle(ctx, current, "reserve", nil)
 	})
 	if err != nil {
 		writeProviderFailure(w, err)
