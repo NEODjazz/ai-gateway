@@ -32,6 +32,7 @@ func (cachedContentAuthModule) Handle(_ context.Context, req *modules.RequestCon
 	req.CredentialID = "credential"
 	req.UserID = req.APIKey
 	req.AllowedModels = []string{"public-model", "other-model"}
+	req.AllowedTools = []string{"safe"}
 	return nil
 }
 
@@ -322,6 +323,30 @@ func TestCachedContentOwnedLifecycleAppliesPolicyBillingAndPagination(t *testing
 	deleted := cachedContentRequest(handler, http.MethodDelete, "/v1beta/cachedContents/cache-1", "", "user-a")
 	if get.Code != http.StatusOK || patch.Code != http.StatusOK || deleted.Code != http.StatusNoContent {
 		t.Fatalf("get=%d/%s patch=%d/%s delete=%d/%s", get.Code, get.Body.String(), patch.Code, patch.Body.String(), deleted.Code, deleted.Body.String())
+	}
+}
+
+func TestCachedContentCreateEnforcesToolAuthorization(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		tool       string
+		status     int
+		wantCalls  int
+		wantStored int
+	}{
+		{name: "allowed", tool: "safe", status: http.StatusOK, wantCalls: 1, wantStored: 1},
+		{name: "denied", tool: "forbidden", status: http.StatusForbidden},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store := &memoryCachedContentStore{records: map[string]cachedstate.Record{}}
+			runtime := &gatewayCachedContentProvider{batchProvider: &batchProvider{models: []string{"public-model"}}, contents: map[string]openai.GeminiCachedContent{}}
+			handler := cachedContentTestHandler(store, runtime, nil, nil)
+			body := `{"model":"models/public-model","ttl":"3600s","tools":[{"functionDeclarations":[{"name":"` + test.tool + `","parameters":{"type":"object"}}]}]}`
+			response := cachedContentRequest(handler, http.MethodPost, "/v1beta/cachedContents", body, "user-a")
+			if response.Code != test.status || runtime.createCalls != test.wantCalls || len(store.records) != test.wantStored {
+				t.Fatalf("status=%d body=%s calls=%d stored=%d", response.Code, response.Body.String(), runtime.createCalls, len(store.records))
+			}
+		})
 	}
 }
 

@@ -117,7 +117,17 @@ func (h Handler) CreateCachedContent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "invalid cached content request")
 		return
 	}
-	if !h.authorizeBatchModel(w, identity, model) || !h.applyPolicyAttachments(w, &identity, model) {
+	toolIdentifiers, validTools := chatToolIdentifiers(chat.Tools, nil)
+	if chat.GeminiCodeExecution {
+		toolIdentifiers = append(toolIdentifiers, "code_execution")
+	}
+	if chat.GeminiURLContext {
+		toolIdentifiers = append(toolIdentifiers, "url_context")
+	}
+	if chat.GeminiGoogleMaps {
+		toolIdentifiers = append(toolIdentifiers, "google_maps")
+	}
+	if !h.authorizeBatchModel(w, identity, model) || !h.authorizeTools(w, identity, toolIdentifiers, validTools) || !h.applyPolicyAttachments(w, &identity, model) {
 		return
 	}
 	pipeline := h.resourceBillingPipeline()
