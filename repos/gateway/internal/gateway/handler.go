@@ -525,6 +525,10 @@ func (h Handler) Completions(w http.ResponseWriter, r *http.Request) {
 	}
 	request.Prompt = effectivePrompt
 	*reqCtx.CompletionRequest = request
+	if message := validateCompletionRequest(request); message != "" {
+		writeError(w, http.StatusBadGateway, "module_failed", "module produced an invalid completion request: "+message)
+		return
+	}
 	if !h.prepareAccessGroups(w, &reqCtx) || !h.authorizeAccess(w, r.Context(), reqCtx, request.Model, estimateCompletionTokens(request)) {
 		return
 	}
