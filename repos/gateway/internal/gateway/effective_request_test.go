@@ -81,6 +81,19 @@ func TestCompletionsRejectsOptionsInvalidatedByPipeline(t *testing.T) {
 	}
 }
 
+func TestEmbeddingsRejectsOptionsInvalidatedByPipeline(t *testing.T) {
+	provider := &chatProvider{}
+	handler := NewHandler(modules.NewPipeline([]modules.Module{rewriteContextModule{rewrite: func(req *modules.RequestContext) {
+		dimensions := 0
+		req.EmbeddingRequest.Dimensions = &dimensions
+	}}}), provider)
+	response := httptest.NewRecorder()
+	handler.Embeddings(response, httptest.NewRequest(http.MethodPost, "/v1/embeddings", strings.NewReader(`{"model":"m","input":"hello"}`)))
+	if response.Code != http.StatusBadGateway || provider.request.RequestID != "" || !strings.Contains(response.Body.String(), `"module_failed"`) || !strings.Contains(response.Body.String(), "dimensions") {
+		t.Fatalf("invalid pipeline output continued: status=%d provider=%+v body=%s", response.Code, provider.request, response.Body.String())
+	}
+}
+
 func TestAdmissionUsesReplacedTypedRequests(t *testing.T) {
 	for _, endpoint := range []struct{ path, body string }{
 		{"/v1/responses", `{"model":"m","input":"hi","max_output_tokens":1}`},

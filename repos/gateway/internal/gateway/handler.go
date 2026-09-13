@@ -1128,32 +1128,8 @@ func (h Handler) Embeddings(w http.ResponseWriter, r *http.Request) {
 	if !decodeInferenceRequest(w, r, &request) {
 		return
 	}
-	if strings.TrimSpace(request.Model) == "" {
-		writeError(w, http.StatusBadRequest, "invalid_request", "model is required")
-		return
-	}
-	if _, err := openai.InspectEmbeddingInput(request.Input); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
-		return
-	}
-	if message := openai.ValidateMetadata(request.Metadata); message != "" {
+	if message := validateEmbeddingRequest(request); message != "" {
 		writeError(w, http.StatusBadRequest, "invalid_request", message)
-		return
-	}
-	if request.EncodingFormat != "" && request.EncodingFormat != "float" && request.EncodingFormat != "base64" {
-		writeError(w, http.StatusBadRequest, "invalid_request", "encoding_format must be float or base64")
-		return
-	}
-	if request.OutputDType != "" && request.OutputDType != "float" && request.OutputDType != "int8" && request.OutputDType != "uint8" && request.OutputDType != "binary" && request.OutputDType != "ubinary" {
-		writeError(w, http.StatusBadRequest, "invalid_request", "output_dtype must be float, int8, uint8, binary, or ubinary")
-		return
-	}
-	if request.InputType != "" && request.InputType != "search_document" && request.InputType != "search_query" && request.InputType != "classification" && request.InputType != "clustering" {
-		writeError(w, http.StatusBadRequest, "invalid_request", "input_type is invalid")
-		return
-	}
-	if request.Dimensions != nil && *request.Dimensions <= 0 {
-		writeError(w, http.StatusBadRequest, "invalid_request", "dimensions must be positive")
 		return
 	}
 
@@ -1181,6 +1157,10 @@ func (h Handler) Embeddings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	request = *reqCtx.EmbeddingRequest
+	if message := validateEmbeddingRequest(request); message != "" {
+		writeError(w, http.StatusBadGateway, "module_failed", "module produced an invalid embedding request: "+message)
+		return
+	}
 	if !h.prepareAccessGroups(w, &reqCtx) {
 		return
 	}
@@ -1201,6 +1181,31 @@ func (h Handler) Embeddings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, response)
+}
+
+func validateEmbeddingRequest(request openai.EmbeddingRequest) string {
+	if strings.TrimSpace(request.Model) == "" {
+		return "model is required"
+	}
+	if _, err := openai.InspectEmbeddingInput(request.Input); err != nil {
+		return err.Error()
+	}
+	if message := openai.ValidateMetadata(request.Metadata); message != "" {
+		return message
+	}
+	if request.EncodingFormat != "" && request.EncodingFormat != "float" && request.EncodingFormat != "base64" {
+		return "encoding_format must be float or base64"
+	}
+	if request.OutputDType != "" && request.OutputDType != "float" && request.OutputDType != "int8" && request.OutputDType != "uint8" && request.OutputDType != "binary" && request.OutputDType != "ubinary" {
+		return "output_dtype must be float, int8, uint8, binary, or ubinary"
+	}
+	if request.InputType != "" && request.InputType != "search_document" && request.InputType != "search_query" && request.InputType != "classification" && request.InputType != "clustering" {
+		return "input_type is invalid"
+	}
+	if request.Dimensions != nil && *request.Dimensions <= 0 {
+		return "dimensions must be positive"
+	}
+	return ""
 }
 
 func (h Handler) Rerank(w http.ResponseWriter, r *http.Request) {
