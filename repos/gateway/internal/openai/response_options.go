@@ -194,7 +194,7 @@ func validateResponseTools(tools []ResponseTool) string {
 			if utf8.RuneCountInString(tool.Description) > 4096 {
 				return "function tool descriptions must contain at most 4096 characters"
 			}
-			if tool.ServerLabel != "" || tool.ServerURL != "" || tool.ServerDescription != "" || len(tool.AllowedTools) > 0 || tool.RequireApproval != nil || len(tool.Headers) > 0 || len(tool.VectorStoreIDs) > 0 || tool.Container != nil {
+			if tool.ServerLabel != "" || tool.ServerURL != "" || tool.ServerDescription != "" || len(tool.AllowedTools) > 0 || tool.RequireApproval != nil || len(tool.Headers) > 0 || len(tool.VectorStoreIDs) > 0 || tool.Container != nil || tool.Filters != nil || tool.MaxNumResults != nil || tool.RankingOptions != nil || tool.RewriteQuery != nil {
 				return "function tools contain unsupported fields"
 			}
 			if tool.Parameters != nil && !isJSONObject(tool.Parameters) {
@@ -208,7 +208,7 @@ func validateResponseTools(tools []ResponseTool) string {
 			if strings.TrimSpace(tool.ServerLabel) == "" || !validResponseMCPURL(tool.ServerURL) {
 				return "mcp tools require a server_label and safe HTTPS server_url"
 			}
-			if tool.Name != "" || tool.Description != "" || tool.Parameters != nil || tool.Strict != nil || len(tool.VectorStoreIDs) > 0 || tool.Container != nil {
+			if tool.Name != "" || tool.Description != "" || tool.Parameters != nil || tool.Strict != nil || len(tool.VectorStoreIDs) > 0 || tool.Container != nil || tool.Filters != nil || tool.MaxNumResults != nil || tool.RankingOptions != nil || tool.RewriteQuery != nil {
 				return "mcp tools contain unsupported fields"
 			}
 			if _, duplicate := mcpLabels[tool.ServerLabel]; duplicate {
@@ -233,7 +233,7 @@ func validateResponseTools(tools []ResponseTool) string {
 				return "code_interpreter tools must be unique"
 			}
 			hostedTypes[tool.Type] = struct{}{}
-			if tool.Name != "" || tool.Description != "" || tool.Parameters != nil || tool.Strict != nil || tool.ServerLabel != "" || tool.ServerURL != "" || tool.ServerDescription != "" || len(tool.AllowedTools) > 0 || tool.RequireApproval != nil || len(tool.Headers) > 0 || len(tool.VectorStoreIDs) > 0 {
+			if tool.Name != "" || tool.Description != "" || tool.Parameters != nil || tool.Strict != nil || tool.ServerLabel != "" || tool.ServerURL != "" || tool.ServerDescription != "" || len(tool.AllowedTools) > 0 || tool.RequireApproval != nil || len(tool.Headers) > 0 || len(tool.VectorStoreIDs) > 0 || tool.Filters != nil || tool.MaxNumResults != nil || tool.RankingOptions != nil || tool.RewriteQuery != nil {
 				return "code_interpreter tools contain unsupported fields"
 			}
 			if _, message := ResponseCodeInterpreterContainerFileIDs(tool.Container); message != "" {
@@ -260,11 +260,143 @@ func validateResponseTools(tools []ResponseTool) string {
 				}
 				vectorStores[id] = struct{}{}
 			}
+			if message := validateResponseFileSearchOptions(tool); message != "" {
+				return message
+			}
 		default:
 			return "tools contain an unsupported type at index " + strconv.Itoa(index)
 		}
 	}
 	return ""
+}
+
+func validateResponseFileSearchOptions(tool ResponseTool) string {
+	if tool.Filters != nil {
+		if message := validateResponseFileSearchFilter(tool.Filters); message != "" {
+			return message
+		}
+	}
+	if tool.MaxNumResults != nil && (*tool.MaxNumResults < 1 || *tool.MaxNumResults > 50) {
+		return "file_search max_num_results must be between 1 and 50"
+	}
+	if options := tool.RankingOptions; options != nil {
+		if options.Ranker != "" && (strings.TrimSpace(options.Ranker) != options.Ranker || utf8.RuneCountInString(options.Ranker) > 128) {
+			return "file_search ranking_options.ranker is invalid"
+		}
+		if options.ScoreThreshold != nil && (!finiteNumber(*options.ScoreThreshold) || *options.ScoreThreshold < 0 || *options.ScoreThreshold > 1) {
+			return "file_search ranking_options.score_threshold must be between 0 and 1"
+		}
+		if hybrid := options.HybridSearch; hybrid != nil {
+			if hybrid.EmbeddingWeight == nil && hybrid.TextWeight == nil {
+				return "file_search hybrid_search requires at least one weight"
+			}
+			for _, weight := range []*float64{hybrid.EmbeddingWeight, hybrid.TextWeight} {
+				if weight != nil && (!finiteNumber(*weight) || *weight < 0 || *weight > 1) {
+					return "file_search hybrid search weights must be between 0 and 1"
+				}
+			}
+		}
+	}
+	return ""
+}
+
+func validateResponseFileSearchFilter(value any) string {
+	encoded, err := json.Marshal(value)
+	if err != nil || len(encoded) > 64<<10 {
+		return "file_search filters must be a bounded object"
+	}
+	nodes := 0
+	return validateResponseFileSearchFilterNode(encoded, 1, &nodes)
+}
+
+func validateResponseFileSearchFilterNode(raw json.RawMessage, depth int, nodes *int) string {
+	*nodes++
+	if depth > 4 || *nodes > 32 {
+		return "file_search filters exceed the maximum depth or node count"
+	}
+	var object map[string]json.RawMessage
+	if json.Unmarshal(raw, &object) != nil || object == nil {
+		return "file_search filters must contain objects"
+	}
+	var kind string
+	if json.Unmarshal(object["type"], &kind) != nil {
+		return "file_search filter type is required"
+	}
+	if kind == "and" || kind == "or" {
+		if !onlyResponseFilterKeys(object, "type", "filters") {
+			return "file_search compound filters accept only type and filters"
+		}
+		var children []json.RawMessage
+		if json.Unmarshal(object["filters"], &children) != nil || len(children) < 1 || len(children) > 16 {
+			return "file_search compound filters require 1 to 16 children"
+		}
+		for _, child := range children {
+			if message := validateResponseFileSearchFilterNode(child, depth+1, nodes); message != "" {
+				return message
+			}
+		}
+		return ""
+	}
+	if !onlyResponseFilterKeys(object, "type", "key", "value") {
+		return "file_search comparison filters accept only type, key and value"
+	}
+	allowed := map[string]bool{"eq": true, "ne": true, "gt": true, "gte": true, "lt": true, "lte": true, "in": true, "nin": true}
+	if !allowed[kind] {
+		return "file_search filter type is unsupported"
+	}
+	var key string
+	if json.Unmarshal(object["key"], &key) != nil || key == "" || !utf8.ValidString(key) || utf8.RuneCountInString(key) > 64 {
+		return "file_search filter key must contain 1 to 64 valid UTF-8 characters"
+	}
+	decoder := json.NewDecoder(bytes.NewReader(object["value"]))
+	decoder.UseNumber()
+	var valueAny any
+	if decoder.Decode(&valueAny) != nil {
+		return "file_search filter value is required"
+	}
+	values := []any{valueAny}
+	if kind == "in" || kind == "nin" {
+		var ok bool
+		values, ok = valueAny.([]any)
+		if !ok || len(values) < 1 || len(values) > 16 {
+			return "file_search membership filters require 1 to 16 values"
+		}
+	}
+	for _, item := range values {
+		switch typed := item.(type) {
+		case string:
+			if !utf8.ValidString(typed) || utf8.RuneCountInString(typed) > 512 {
+				return "file_search filter string values must contain at most 512 valid UTF-8 characters"
+			}
+			if kind == "gt" || kind == "gte" || kind == "lt" || kind == "lte" {
+				return "file_search ordered filters require a numeric value"
+			}
+		case bool:
+			if kind == "gt" || kind == "gte" || kind == "lt" || kind == "lte" {
+				return "file_search ordered filters require a numeric value"
+			}
+		case json.Number:
+			number, err := typed.Float64()
+			if err != nil || !finiteNumber(number) {
+				return "file_search filter numeric values must be finite"
+			}
+		default:
+			return "file_search filter values must be strings, booleans or numbers"
+		}
+	}
+	return ""
+}
+
+func onlyResponseFilterKeys(object map[string]json.RawMessage, allowed ...string) bool {
+	if len(object) != len(allowed) {
+		return false
+	}
+	for _, key := range allowed {
+		if _, present := object[key]; !present {
+			return false
+		}
+	}
+	return true
 }
 
 func isJSONObject(value any) bool {

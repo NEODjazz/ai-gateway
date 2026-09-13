@@ -639,6 +639,9 @@ func TestOpenAICompatibleStreamsResponsesWhenEnabled(t *testing.T) {
 	var events []string
 	var payloads []string
 	includeObfuscation := false
+	maxResults := 12
+	scoreThreshold := 0.4
+	rewriteQuery := true
 	provider := NewOpenAICompatible(server.URL, "", true)
 	response, err := provider.StreamResponses(context.Background(), openai.ResponseRequest{
 		Model: "test-model", Input: "hello", Stream: true, StreamOptions: &openai.ResponseStreamOptions{IncludeObfuscation: &includeObfuscation}, PreviousResponse: "resp-previous", SafetyIdentifier: "provider-user", PromptCacheKey: "tenant-thread",
@@ -646,7 +649,7 @@ func TestOpenAICompatibleStreamsResponsesWhenEnabled(t *testing.T) {
 			{Type: "function", Name: "weather", Parameters: map[string]any{"type": "object"}},
 			{Type: "mcp", ServerLabel: "weather-prod", ServerURL: "https://mcp.example.test", AllowedTools: []string{"forecast"}, RequireApproval: "never", Headers: map[string]string{"X-MCP-Key": "scoped"}},
 			{Type: "code_interpreter", Container: map[string]any{"type": "auto", "file_ids": []string{"file_owned"}}},
-			{Type: "file_search", VectorStoreIDs: []string{"vs_owned"}},
+			{Type: "file_search", VectorStoreIDs: []string{"vs_owned"}, Filters: map[string]any{"type": "eq", "key": "team", "value": "support"}, MaxNumResults: &maxResults, RankingOptions: &openai.FileSearchRankingOptions{Ranker: "auto", ScoreThreshold: &scoreThreshold}, RewriteQuery: &rewriteQuery},
 		},
 		ToolChoice: "auto", Text: map[string]any{"format": map[string]any{"type": "json_object"}, "verbosity": "high"},
 	}, func(event string, payload string) error {
@@ -666,7 +669,9 @@ func TestOpenAICompatibleStreamsResponsesWhenEnabled(t *testing.T) {
 	textConfig, _ := upstreamRequest.Text.(map[string]any)
 	container, _ := upstreamRequest.Tools[2].Container.(map[string]any)
 	fileIDs, _ := container["file_ids"].([]any)
-	if upstreamRequest.PreviousResponse != "resp-previous" || upstreamRequest.SafetyIdentifier != "provider-user" || upstreamRequest.PromptCacheKey != "tenant-thread" || len(upstreamRequest.Tools) != 4 || upstreamRequest.Tools[0].Name != "weather" || upstreamRequest.Tools[1].ServerLabel != "weather-prod" || upstreamRequest.Tools[1].Headers["X-MCP-Key"] != "scoped" || len(fileIDs) != 1 || fileIDs[0] != "file_owned" || len(upstreamRequest.Tools[3].VectorStoreIDs) != 1 || upstreamRequest.Tools[3].VectorStoreIDs[0] != "vs_owned" || textConfig["verbosity"] != "high" {
+	fileSearch := upstreamRequest.Tools[3]
+	filter, _ := fileSearch.Filters.(map[string]any)
+	if upstreamRequest.PreviousResponse != "resp-previous" || upstreamRequest.SafetyIdentifier != "provider-user" || upstreamRequest.PromptCacheKey != "tenant-thread" || len(upstreamRequest.Tools) != 4 || upstreamRequest.Tools[0].Name != "weather" || upstreamRequest.Tools[1].ServerLabel != "weather-prod" || upstreamRequest.Tools[1].Headers["X-MCP-Key"] != "scoped" || len(fileIDs) != 1 || fileIDs[0] != "file_owned" || len(fileSearch.VectorStoreIDs) != 1 || fileSearch.VectorStoreIDs[0] != "vs_owned" || filter["key"] != "team" || fileSearch.MaxNumResults == nil || *fileSearch.MaxNumResults != 12 || fileSearch.RankingOptions == nil || fileSearch.RankingOptions.ScoreThreshold == nil || *fileSearch.RankingOptions.ScoreThreshold != 0.4 || fileSearch.RewriteQuery == nil || !*fileSearch.RewriteQuery || textConfig["verbosity"] != "high" {
 		t.Fatalf("responses tools/state/format were not forwarded: %+v", upstreamRequest)
 	}
 	if len(payloads) != 4 {

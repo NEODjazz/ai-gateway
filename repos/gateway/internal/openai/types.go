@@ -776,19 +776,34 @@ type ResponseInputTokenCount struct {
 }
 
 type ResponseTool struct {
-	Type              string            `json:"type"`
-	Name              string            `json:"name,omitempty"`
-	Description       string            `json:"description,omitempty"`
-	Parameters        any               `json:"parameters,omitempty"`
-	Strict            *bool             `json:"strict,omitempty"`
-	ServerLabel       string            `json:"server_label,omitempty"`
-	ServerURL         string            `json:"server_url,omitempty"`
-	ServerDescription string            `json:"server_description,omitempty"`
-	AllowedTools      []string          `json:"allowed_tools,omitempty"`
-	RequireApproval   any               `json:"require_approval,omitempty"`
-	Headers           map[string]string `json:"headers,omitempty"`
-	VectorStoreIDs    []string          `json:"vector_store_ids,omitempty"`
-	Container         any               `json:"container,omitempty"`
+	Type              string                    `json:"type"`
+	Name              string                    `json:"name,omitempty"`
+	Description       string                    `json:"description,omitempty"`
+	Parameters        any                       `json:"parameters,omitempty"`
+	Strict            *bool                     `json:"strict,omitempty"`
+	ServerLabel       string                    `json:"server_label,omitempty"`
+	ServerURL         string                    `json:"server_url,omitempty"`
+	ServerDescription string                    `json:"server_description,omitempty"`
+	AllowedTools      []string                  `json:"allowed_tools,omitempty"`
+	RequireApproval   any                       `json:"require_approval,omitempty"`
+	Headers           map[string]string         `json:"headers,omitempty"`
+	VectorStoreIDs    []string                  `json:"vector_store_ids,omitempty"`
+	Container         any                       `json:"container,omitempty"`
+	Filters           any                       `json:"filters,omitempty"`
+	MaxNumResults     *int                      `json:"max_num_results,omitempty"`
+	RankingOptions    *FileSearchRankingOptions `json:"ranking_options,omitempty"`
+	RewriteQuery      *bool                     `json:"rewrite_query,omitempty"`
+}
+
+type FileSearchRankingOptions struct {
+	Ranker         string                  `json:"ranker,omitempty"`
+	ScoreThreshold *float64                `json:"score_threshold,omitempty"`
+	HybridSearch   *FileSearchHybridSearch `json:"hybrid_search,omitempty"`
+}
+
+type FileSearchHybridSearch struct {
+	EmbeddingWeight *float64 `json:"embedding_weight,omitempty"`
+	TextWeight      *float64 `json:"text_weight,omitempty"`
 }
 
 type ResponseResponse struct {

@@ -198,7 +198,7 @@ func TestResponseToolDefinitionValidation(t *testing.T) {
 		{Type: "function", Name: "lookup", Parameters: map[string]any{"type": "object"}, Strict: &strict},
 		{Type: "mcp", ServerLabel: "documents", ServerURL: "https://documents.example.test/mcp", AllowedTools: []string{"search"}, Headers: map[string]string{"X-Tenant": "example"}},
 		{Type: "code_interpreter", Container: map[string]any{"type": "auto", "memory_limit": "4g", "file_ids": []string{"file_owned"}}},
-		{Type: "file_search", VectorStoreIDs: []string{"vs_owned"}},
+		{Type: "file_search", VectorStoreIDs: []string{"vs_owned"}, Filters: map[string]any{"type": "eq", "key": "team", "value": "support"}, MaxNumResults: intPointer(12), RankingOptions: &FileSearchRankingOptions{Ranker: "auto", ScoreThreshold: floatPointer(0.4), HybridSearch: &FileSearchHybridSearch{EmbeddingWeight: floatPointer(0.7), TextWeight: floatPointer(0.3)}}, RewriteQuery: boolPointer(true)},
 	}
 	if message := (ResponseRequest{Tools: valid}).Validate(); message != "" {
 		t.Fatalf("valid tools rejected: %s", message)
@@ -244,6 +244,12 @@ func TestResponseToolDefinitionValidation(t *testing.T) {
 		{name: "duplicate file search store", tools: []ResponseTool{{Type: "file_search", VectorStoreIDs: []string{"vs_owned", "vs_owned"}}}},
 		{name: "duplicate file search", tools: []ResponseTool{{Type: "file_search", VectorStoreIDs: []string{"vs_one"}}, {Type: "file_search", VectorStoreIDs: []string{"vs_two"}}}},
 		{name: "file search with MCP field", tools: []ResponseTool{{Type: "file_search", VectorStoreIDs: []string{"vs_owned"}, ServerURL: "https://example.test"}}},
+		{name: "file search with scalar filter", tools: []ResponseTool{{Type: "file_search", VectorStoreIDs: []string{"vs_owned"}, Filters: "team=support"}}},
+		{name: "file search with unknown comparison", tools: []ResponseTool{{Type: "file_search", VectorStoreIDs: []string{"vs_owned"}, Filters: map[string]any{"type": "contains", "key": "team", "value": "support"}}}},
+		{name: "file search with invalid compound filter", tools: []ResponseTool{{Type: "file_search", VectorStoreIDs: []string{"vs_owned"}, Filters: map[string]any{"type": "and", "filters": []any{}}}}},
+		{name: "file search with excessive results", tools: []ResponseTool{{Type: "file_search", VectorStoreIDs: []string{"vs_owned"}, MaxNumResults: intPointer(51)}}},
+		{name: "file search with invalid score", tools: []ResponseTool{{Type: "file_search", VectorStoreIDs: []string{"vs_owned"}, RankingOptions: &FileSearchRankingOptions{ScoreThreshold: floatPointer(1.1)}}}},
+		{name: "file search with empty hybrid search", tools: []ResponseTool{{Type: "file_search", VectorStoreIDs: []string{"vs_owned"}, RankingOptions: &FileSearchRankingOptions{HybridSearch: &FileSearchHybridSearch{}}}}},
 		{name: "too many tools", tools: tooMany},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -253,6 +259,10 @@ func TestResponseToolDefinitionValidation(t *testing.T) {
 		})
 	}
 }
+
+func floatPointer(value float64) *float64 { return &value }
+
+func boolPointer(value bool) *bool { return &value }
 
 func TestResponseCodeInterpreterToolChoice(t *testing.T) {
 	request := ResponseRequest{
