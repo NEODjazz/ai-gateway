@@ -300,6 +300,41 @@ func TestGenerateRequestMapsInlineVideo(t *testing.T) {
 	}
 }
 
+func TestGenerateRequestMapsAdditionalInlineVideoFormats(t *testing.T) {
+	tests := []struct {
+		mediaType string
+		data      []byte
+	}{
+		{"video/mpeg", []byte("\x00\x00\x01\xbapayload")},
+		{"video/mpg", []byte("\x00\x00\x01\xb3payload")},
+		{"video/mov", []byte("\x00\x00\x00\x18ftypqt  ")},
+		{"video/avi", []byte("RIFF\x00\x00\x00\x00AVI payload")},
+		{"video/x-flv", []byte("FLV\x01\x05payload")},
+		{"video/wmv", []byte("\x30\x26\xb2\x75\x8e\x66\xcf\x11\xa6\xd9\x00\xaa\x00\x62\xce\x6cpayload")},
+		{"video/3gpp", []byte("\x00\x00\x00\x18ftyp3gp5")},
+	}
+	for _, test := range tests {
+		t.Run(test.mediaType, func(t *testing.T) {
+			var native generateRequest
+			raw := `{"contents":[{"role":"user","parts":[{"inlineData":{"mimeType":"` + test.mediaType + `","data":"` + base64.StdEncoding.EncodeToString(test.data) + `"}}]}]}`
+			if err := decodeMessagesValue(json.RawMessage(raw), &native); err != nil {
+				t.Fatal(err)
+			}
+			chat, err := native.chat("model", false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			attachments, err := openai.ChatVideoAttachments(chat.Messages)
+			if err != nil || len(attachments) != 1 || attachments[0].MediaType != test.mediaType {
+				t.Fatalf("attachments=%+v err=%v", attachments, err)
+			}
+			if openai.ChatInputTokens(chat) == 0 {
+				t.Fatal("video omitted from token reserve")
+			}
+		})
+	}
+}
+
 func TestGenerateRequestRejectsMalformedInlineVideo(t *testing.T) {
 	var native generateRequest
 	if err := decodeMessagesValue(json.RawMessage(`{"contents":[{"parts":[{"inlineData":{"mimeType":"video/webm","data":"bm90IHdlYm0="}}]}]}`), &native); err != nil {

@@ -283,14 +283,8 @@ func (r generateRequest) chat(model string, stream bool) (openai.ChatCompletionR
 					parts = append(parts, file)
 					break
 				}
-				videoFormat := ""
-				switch part.InlineData.MIMEType {
-				case "video/mp4":
-					videoFormat = "mp4"
-				case "video/webm":
-					videoFormat = "webm"
-				}
-				if videoFormat != "" {
+				videoFormat, videoOK := openai.VideoInputFormat(part.InlineData.MIMEType)
+				if videoOK {
 					video := map[string]any{"type": "input_video", "input_video": map[string]any{"data": part.InlineData.Data, "format": videoFormat}}
 					if _, err := openai.ChatVideoAttachments([]openai.Message{{Role: "user", Content: []any{video}}}); err != nil {
 						return result, err
@@ -514,7 +508,7 @@ func generateFileReferenceType(mediaType string) string {
 	if supportedA2AImageType(mediaType) {
 		return "input_file_image_reference"
 	}
-	if supportedA2AVideoType(mediaType) {
+	if _, ok := openai.VideoInputFormat(mediaType); ok {
 		return "input_file_video_reference"
 	}
 	switch mediaType {

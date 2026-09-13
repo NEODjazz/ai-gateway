@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.400
+  version: 0.1.401
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -7043,15 +7043,15 @@ components:
           additionalProperties: false
           required: [mimeType, data]
           properties:
-            mimeType: {type: string, enum: [image/png, image/jpeg, image/gif, image/webp, audio/wav, audio/mp3, audio/mpeg, audio/aiff, audio/aac, audio/ogg, audio/opus, audio/flac, audio/m4a, audio/webm, video/mp4, video/webm, application/pdf]}
+            mimeType: {type: string, enum: [image/png, image/jpeg, image/gif, image/webp, audio/wav, audio/mp3, audio/mpeg, audio/aiff, audio/aac, audio/ogg, audio/opus, audio/flac, audio/m4a, audio/webm, video/mp4, video/webm, video/mpeg, video/mpg, video/mov, video/avi, video/x-flv, video/wmv, video/3gpp, application/pdf]}
             data: {type: string, format: byte}
-          description: Inline images require vision; signature-verifiable audio containers require audio_input; MP4 and WebM video require video_input; PDF requires file_input. All binary parts are bounded, signature-validated and projected to configured AV scanners.
+          description: Inline images require vision; signature-verifiable audio containers require audio_input; MP4, WebM, MPEG, MPG, MOV, AVI, FLV, WMV and 3GPP video require video_input; PDF requires file_input. All binary parts are bounded, signature-validated and projected to configured AV scanners.
         fileData:
           type: object
           additionalProperties: false
           required: [mimeType, fileUri]
           properties:
-            mimeType: {type: string, enum: [image/png, image/jpeg, image/gif, image/webp, audio/wav, audio/mp3, audio/mpeg, audio/aiff, audio/aac, audio/ogg, audio/opus, audio/flac, audio/m4a, audio/webm, audio/mp4, video/mp4, video/webm, application/pdf, text/plain]}
+            mimeType: {type: string, enum: [image/png, image/jpeg, image/gif, image/webp, audio/wav, audio/mp3, audio/mpeg, audio/aiff, audio/aac, audio/ogg, audio/opus, audio/flac, audio/m4a, audio/webm, audio/mp4, video/mp4, video/webm, video/mpeg, video/mpg, video/mov, video/avi, video/x-flv, video/wmv, video/3gpp, application/pdf, text/plain]}
             fileUri: {type: string, minLength: 6, maxLength: 128, pattern: '^file_[A-Za-z0-9_.-]+$', description: Owner-scoped gateway Files identifier with purpose=user_data.}
           description: The authenticated credential and user must own the referenced gateway File. The stored MIME type must match mimeType. Resolution and signature validation happen before policy, token counting, routing or billing.
         functionCall:

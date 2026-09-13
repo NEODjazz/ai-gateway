@@ -1256,6 +1256,12 @@ the native part has no sample-rate/channel fields from which the gateway could
 validate and account for headerless bytes. Provider file references remain
 unsupported.
 
+Inline and owner-scoped stored video accepts MP4, WebM, MPEG, MPG, MOV, AVI,
+FLV, WMV and 3GPP. The declared MIME type must match a bounded container or
+stream signature before policy execution. Video bytes enter AV projection and
+the conservative TPM estimate, require `video_input`, and bypass exact and
+semantic response caches.
+
 
 ### Native GenerateContent token counting
 

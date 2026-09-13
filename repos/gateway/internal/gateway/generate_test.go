@@ -99,19 +99,20 @@ func TestGenerateContentResolvesOwnedFileDataAfterAuthentication(t *testing.T) {
 		"file_text":  {ID: "file_text", OwnerKey: owner, Filename: "notes.txt", Purpose: "user_data", ContentType: "text/plain", Bytes: 5, Content: []byte("notes")},
 		"file_audio": {ID: "file_audio", OwnerKey: owner, Filename: "audio.wav", Purpose: "user_data", ContentType: "audio/wav", Bytes: 12, Content: []byte("RIFF\x00\x00\x00\x00WAVE")},
 		"file_video": {ID: "file_video", OwnerKey: owner, Filename: "video.mp4", Purpose: "user_data", ContentType: "video/mp4", Bytes: 12, Content: []byte("\x00\x00\x00\x0cftypmp42")},
+		"file_avi":   {ID: "file_avi", OwnerKey: owner, Filename: "video.avi", Purpose: "user_data", ContentType: "video/avi", Bytes: 19, Content: []byte("RIFF\x00\x00\x00\x00AVI payload")},
 		"file_other": {ID: "file_other", OwnerKey: "another-owner", Filename: "other.png", Purpose: "user_data", ContentType: "image/png", Bytes: 12, Content: []byte("\x89PNG\r\n\x1a\nbody")},
 	}}
 	upstream := &fallbackChatProvider{response: openai.ChatCompletionResponse{ID: "id", Model: "m", Choices: []openai.Choice{{Index: 0, Message: openai.Message{Role: "assistant", Content: "ok"}, FinishReason: "stop"}}, Usage: openai.Usage{PromptTokens: 10, CompletionTokens: 1, TotalTokens: 11}}}
 	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{&lifecycleAuthModule{}}), upstream).
 		WithFileStore(files, FileRuntimeConfig{MaxBytes: 32 << 20, OwnerQuotaBytes: 64 << 20}))
-	body := `{"contents":[{"parts":[{"fileData":{"mimeType":"image/png","fileUri":"file_image"}},{"fileData":{"mimeType":"application/pdf","fileUri":"file_pdf"}},{"fileData":{"mimeType":"text/plain","fileUri":"file_text"}},{"fileData":{"mimeType":"audio/wav","fileUri":"file_audio"}},{"fileData":{"mimeType":"video/mp4","fileUri":"file_video"}}]}]}`
+	body := `{"contents":[{"parts":[{"fileData":{"mimeType":"image/png","fileUri":"file_image"}},{"fileData":{"mimeType":"application/pdf","fileUri":"file_pdf"}},{"fileData":{"mimeType":"text/plain","fileUri":"file_text"}},{"fileData":{"mimeType":"audio/wav","fileUri":"file_audio"}},{"fileData":{"mimeType":"video/mp4","fileUri":"file_video"}},{"fileData":{"mimeType":"video/avi","fileUri":"file_avi"}}]}]}`
 	response := generateCall(handler, "/v1beta/models/m:generateContent", body, "gateway-test-key")
 	request := upstream.request.Request
 	images, imageErr := openai.ChatImageAttachments(request.Messages)
 	filesFound, fileErr := openai.ChatFileAttachments(request.Messages)
 	audio, audioErr := openai.ChatAudioAttachments(request.Messages)
 	videos, videoErr := openai.ChatVideoAttachments(request.Messages)
-	if response.Code != http.StatusOK || upstream.calls != 1 || imageErr != nil || len(images) != 1 || fileErr != nil || len(filesFound) != 1 || !openai.HasChatTextDocuments(request) || audioErr != nil || len(audio) != 1 || videoErr != nil || len(videos) != 1 {
+	if response.Code != http.StatusOK || upstream.calls != 1 || imageErr != nil || len(images) != 1 || fileErr != nil || len(filesFound) != 1 || !openai.HasChatTextDocuments(request) || audioErr != nil || len(audio) != 1 || videoErr != nil || len(videos) != 2 || videos[1].MediaType != "video/avi" {
 		t.Fatalf("status=%d calls=%d images=%d/%v files=%d/%v audio=%d/%v videos=%d/%v request=%+v body=%s", response.Code, upstream.calls, len(images), imageErr, len(filesFound), fileErr, len(audio), audioErr, len(videos), videoErr, request, response.Body.String())
 	}
 

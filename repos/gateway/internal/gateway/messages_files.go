@@ -265,15 +265,9 @@ func (h Handler) resolveMessagesDocumentReferences(ctx context.Context, identity
 				if err != nil {
 					return err
 				}
-				format := ""
-				switch file.ContentType {
-				case "video/mp4":
-					format = "mp4"
-				case "video/webm":
-					format = "webm"
-				}
+				format, formatOK := openai.VideoInputFormat(file.ContentType)
 				video := map[string]any{"type": "input_video", "input_video": map[string]any{"data": base64.StdEncoding.EncodeToString(file.Content), "format": format}}
-				if !referenceMediaTypeMatches(object, file.ContentType) || format == "" {
+				if !referenceMediaTypeMatches(object, file.ContentType) || !formatOK {
 					return errMessagesFileUnavailable
 				}
 				if _, err := openai.ChatVideoAttachments([]openai.Message{{Role: "user", Content: []any{video}}}); err != nil {

@@ -737,6 +737,26 @@ func TestGeminiInlineVideoPreservesPartOrder(t *testing.T) {
 	}
 }
 
+func TestGeminiAdditionalInlineVideoFormats(t *testing.T) {
+	formats := []struct{ format, mediaType, data string }{
+		{"mpeg", "video/mpeg", "AAABunBheWxvYWQ="},
+		{"mpg", "video/mpg", "AAABs3BheWxvYWQ="},
+		{"mov", "video/mov", "AAAAGGZ0eXBxdCAg"},
+		{"avi", "video/avi", "UklGRgAAAABBVkkgcGF5bG9hZA=="},
+		{"flv", "video/x-flv", "RkxWAQVwYXlsb2Fk"},
+		{"wmv", "video/wmv", "MCaydY5mzxGm2QCqAGLObHBheWxvYWQ="},
+		{"3gpp", "video/3gpp", "AAAAGGZ0eXAzZ3A1"},
+	}
+	for _, test := range formats {
+		t.Run(test.format, func(t *testing.T) {
+			parts, err := geminiMessageParts([]any{map[string]any{"type": "input_video", "input_video": map[string]any{"data": test.data, "format": test.format}}})
+			if err != nil || len(parts) != 1 || parts[0].InlineData == nil || parts[0].InlineData.MIMEType != test.mediaType {
+				t.Fatalf("parts=%+v err=%v", parts, err)
+			}
+		})
+	}
+}
+
 func TestGeminiUsageValidation(t *testing.T) {
 	maxInt := int(^uint(0) >> 1)
 	for _, usage := range []geminiUsage{{Prompt: -1}, {ToolUsePrompt: -1}, {Prompt: 1, Cached: 2}, {Prompt: 10, ToolUsePrompt: 4, Candidates: 2, Thoughts: 3, Total: 18}, {Prompt: maxInt, ToolUsePrompt: 1, Total: maxInt}} {
