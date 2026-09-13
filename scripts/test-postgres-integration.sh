@@ -8,7 +8,8 @@ export POSTGRES_INTEGRATION_REQUIRED=true
 project_root=$(cd "$(dirname "$0")/.." && pwd)
 for migration in \
   "$project_root"/migrations/postgres/007_gateway_control_plane.sql \
-  "$project_root"/migrations/postgres/014_gateway_mcp_tool_calls.sql; do
+  "$project_root"/migrations/postgres/014_gateway_mcp_tool_calls.sql \
+  "$project_root"/migrations/postgres/034_gateway_cached_contents.sql; do
   psql "$CONTROL_PLANE_POSTGRES_TEST_DSN" -v ON_ERROR_STOP=1 -f "$migration" >/dev/null
 done
 for migration in "$project_root"/repos/auth/migrations/postgres/*.sql; do
