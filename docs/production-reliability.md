@@ -2011,3 +2011,20 @@ image. Live liveness and readiness returned 204, OpenAPI 0.1.399 exposed the
 URL Context request, response and capability contract, the production UI bundle
 contained both managed Gemini tool selectors, and an unauthenticated URL Context
 request returned 401 at the authentication boundary without provider execution.
+
+Source `c9cf8ca` adds native GenerateContent Google Maps grounding with a
+separate deployment capability and tool authorization, optional validated
+coordinates, bounded place/review metadata, URL citations, actual grounding-use
+billing and exact and semantic cache bypass. Native token counting applies the
+same tool grant and includes the tool configuration in the TPM estimate.
+Focused regressions, OpenAPI validation, vet, build, the full Go suite, the full
+race suite, all 167 UI tests and UI type checking passed.
+
+Rancher Desktop built `ai-gateway-gateway:gemini-maps-c9cf8ca` with image ID
+`sha256:48486c4a00e9c4c5b33026706877e1e5732f0bf7bd130f71cce70710737d466e`.
+Gateway Helm revision 506 completed successfully. Pod
+`ai-gateway-gateway-6c9f9fd65b-dcc7s` became Ready with zero restarts on that
+image. Live liveness and readiness returned 204, OpenAPI 0.1.400 exposed the
+Maps request and capability contract, the production UI bundle contained the
+Maps capability selector, and an unauthenticated Maps request returned 401 at
+the authentication boundary without provider execution.
