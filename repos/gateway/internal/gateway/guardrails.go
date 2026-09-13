@@ -37,30 +37,35 @@ func (h Handler) ListAnonymizerRules(w http.ResponseWriter, r *http.Request) {
 	if _, ok := h.authorizeAdmin(w, r); !ok {
 		return
 	}
-	lister, ok := h.anonymizer.(anonymizerRuleLister)
-	if !ok {
+	rules, err := h.anonymizerRuleNames(r.Context())
+	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "management_unavailable", "anonymizer rule inventory is unavailable")
 		return
 	}
-	rules, err := lister.RuleNames(r.Context())
+	writeJSON(w, http.StatusOK, map[string]any{"data": rules})
+}
+
+func (h Handler) anonymizerRuleNames(ctx context.Context) ([]string, error) {
+	lister, ok := h.anonymizer.(anonymizerRuleLister)
+	if !ok {
+		return nil, errors.New("anonymizer rule inventory is unavailable")
+	}
+	rules, err := lister.RuleNames(ctx)
 	if err != nil || len(rules) > 256 {
-		writeError(w, http.StatusServiceUnavailable, "management_unavailable", "anonymizer rule inventory is unavailable")
-		return
+		return nil, errors.New("anonymizer rule inventory is unavailable")
 	}
 	seen := make(map[string]struct{}, len(rules))
 	for _, rule := range rules {
 		if !validGuardrailName(rule) {
-			writeError(w, http.StatusServiceUnavailable, "management_unavailable", "anonymizer rule inventory is unavailable")
-			return
+			return nil, errors.New("anonymizer rule inventory is unavailable")
 		}
 		if _, duplicate := seen[rule]; duplicate {
-			writeError(w, http.StatusServiceUnavailable, "management_unavailable", "anonymizer rule inventory is unavailable")
-			return
+			return nil, errors.New("anonymizer rule inventory is unavailable")
 		}
 		seen[rule] = struct{}{}
 	}
 	sort.Strings(rules)
-	writeJSON(w, http.StatusOK, map[string]any{"data": rules})
+	return rules, nil
 }
 
 func (h Handler) ListGuardrailPolicies(w http.ResponseWriter, r *http.Request) {
@@ -95,6 +100,23 @@ func (h Handler) UpdateGuardrailPolicy(w http.ResponseWriter, r *http.Request) {
 	}
 	if !decodeGuardrailJSON(w, r, &input) {
 		return
+	}
+	if strings.EqualFold(strings.TrimSpace(input.Anonymization), "custom") && len(input.AnonymizationRules) > 0 {
+		rules, err := h.anonymizerRuleNames(r.Context())
+		if err != nil {
+			writeError(w, http.StatusServiceUnavailable, "management_unavailable", "anonymizer rule inventory is unavailable")
+			return
+		}
+		available := make(map[string]struct{}, len(rules))
+		for _, rule := range rules {
+			available[rule] = struct{}{}
+		}
+		for _, rule := range input.AnonymizationRules {
+			if _, ok := available[strings.TrimSpace(rule)]; !ok {
+				writeError(w, http.StatusBadRequest, "invalid_request", "anonymization_rules contains a rule that is not configured")
+				return
+			}
+		}
 	}
 	name := r.PathValue("name")
 	audit := managementAudit(req)

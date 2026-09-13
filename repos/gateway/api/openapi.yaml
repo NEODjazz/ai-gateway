@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.415
+  version: 0.1.416
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -10963,7 +10963,7 @@ components:
         output_dlp: {type: boolean, description: Scan textual provider output before returning it. Native streams are buffered through the non-streaming path when enabled.}
         av: {type: boolean}
         anonymization: {type: string, enum: [disabled, basic, strict, custom], description: Per-request anonymization profile. Omit to leave the safe global default unchanged.}
-        anonymization_rules: {type: array, maxItems: 256, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9._-]+$'}, description: Required only for custom anonymization.}
+        anonymization_rules: {type: array, maxItems: 256, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9._-]+$'}, description: Required only for custom anonymization. Every selected name must exist in the active anonymizer rule inventory when the policy is saved.}
         enabled: {type: boolean}
     GuardrailApplyRequest:
       type: object

@@ -69,6 +69,33 @@ func TestGuardrailPolicyAndCompliancePlayground(t *testing.T) {
 	}
 }
 
+func TestGuardrailPolicyRejectsUnavailableCustomAnonymizationRules(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		anonymizer modules.Module
+		body       string
+		status     int
+		code       string
+	}{
+		{name: "unknown rule", anonymizer: modules.NewAnonymizerModule(true, modules.RuleEmail), body: `{"dlp":false,"av":false,"anonymization":"custom","anonymization_rules":["missing"],"enabled":true}`, status: http.StatusBadRequest, code: "invalid_request"},
+		{name: "unavailable inventory", body: `{"dlp":false,"av":false,"anonymization":"custom","anonymization_rules":["email"],"enabled":true}`, status: http.StatusServiceUnavailable, code: "management_unavailable"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			runtime := provider.New(provider.Config{})
+			handler := NewHandler(modulesPipeline("admin"), runtime)
+			if test.anonymizer != nil {
+				handler = handler.WithAnonymizerModule(test.anonymizer)
+			}
+			response := httptest.NewRecorder()
+			Routes(handler).ServeHTTP(response, httptest.NewRequest(http.MethodPut, "/admin/v1/guardrail-policies/custom", strings.NewReader(test.body)))
+			_, saved := runtime.(provider.GuardrailController).GetGuardrailPolicy("custom")
+			if response.Code != test.status || saved || !strings.Contains(response.Body.String(), `"code":"`+test.code+`"`) {
+				t.Fatalf("status=%d saved=%t body=%s", response.Code, saved, response.Body.String())
+			}
+		})
+	}
+}
+
 func TestComplianceUnavailableFailsClosed(t *testing.T) {
 	runtime := provider.New(provider.Config{})
 	_, _ = runtime.(provider.GuardrailController).UpdateGuardrailPolicy("strict", provider.GuardrailPolicy{DLP: true, Enabled: true})
