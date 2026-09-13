@@ -226,7 +226,11 @@ func (h Handler) executeRAGRerank(w http.ResponseWriter, r *http.Request, identi
 		return nil, false
 	}
 	request = *reqCtx.RerankRequest
-	if !h.authorizeRateLimit(w, r.Context(), reqCtx, estimateRerankTokens(request)) || !h.prepareModelFallbacks(w, r.Context(), &reqCtx, request.Model) {
+	if message := validateRerankRequest(request); message != "" {
+		writeError(w, http.StatusBadGateway, "module_failed", "module produced an invalid RAG rerank request: "+message)
+		return nil, false
+	}
+	if !h.authorizeModel(w, reqCtx, request.Model) || !h.authorizeRateLimit(w, r.Context(), reqCtx, estimateRerankTokens(request)) || !h.prepareModelFallbacks(w, r.Context(), &reqCtx, request.Model) {
 		return nil, false
 	}
 	runtime, ok := h.provider.(provider.RerankProvider)

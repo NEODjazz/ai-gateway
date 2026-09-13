@@ -96,7 +96,7 @@ func TestRAGQueryStreamsChatCompletion(t *testing.T) {
 	}
 }
 
-func newRAGQueryHandler(t *testing.T, user string, runtime *ragQueryProvider) (*ragQueryAuthModule, http.Handler) {
+func newRAGQueryHandler(t *testing.T, user string, runtime *ragQueryProvider, extraModules ...modules.Module) (*ragQueryAuthModule, http.Handler) {
 	t.Helper()
 	owner := fileOwnerKey(modules.RequestContext{CredentialID: "credential", UserID: user})
 	vectors := &memoryVectorStore{
@@ -111,10 +111,44 @@ func newRAGQueryHandler(t *testing.T, user string, runtime *ragQueryProvider) (*
 		"file_beta":  {ID: "file_beta", OwnerKey: owner, Filename: "beta.txt", Purpose: "assistants", ContentType: "text/plain", Bytes: 9, Content: []byte("beta text")},
 	}}
 	auth := &ragQueryAuthModule{user: user}
-	handler := NewHandler(modules.NewPipeline([]modules.Module{auth}), runtime).
+	pipelineModules := append([]modules.Module{auth}, extraModules...)
+	handler := NewHandler(modules.NewPipeline(pipelineModules), runtime).
 		WithFileStore(files, FileRuntimeConfig{MaxBytes: 1024, OwnerQuotaBytes: 4096}).
 		WithVectorStore(vectors, VectorStoreRuntimeConfig{OwnerQuota: 10, FileQuota: 10, ByteQuota: 4096})
 	return auth, Routes(handler)
+}
+
+func TestRAGQueryRevalidatesRerankPolicyOutputAndEffectiveModel(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		rewrite func(*openai.RerankRequest)
+		status  int
+		code    string
+	}{
+		{name: "invalid top n", rewrite: func(request *openai.RerankRequest) {
+			zero := 0
+			request.TopN = &zero
+		}, status: http.StatusBadGateway, code: "module_failed"},
+		{name: "unauthorized effective model", rewrite: func(request *openai.RerankRequest) {
+			request.Model = "forbidden-model"
+		}, status: http.StatusForbidden, code: "model_not_allowed"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			runtime := &ragQueryProvider{}
+			_, handler := newRAGQueryHandler(t, "user", runtime, rewriteContextModule{rewrite: func(req *modules.RequestContext) {
+				if req.RerankRequest != nil {
+					test.rewrite(req.RerankRequest)
+				}
+			}})
+			request := httptest.NewRequest(http.MethodPost, "/v1/rag/query", strings.NewReader(`{"model":"chat-model","messages":[{"role":"user","content":"alpha"}],"retrieval_config":{"vector_store_id":"vs_owned","model":"embed-model","top_k":2},"rerank":{"enabled":true,"model":"rerank-model","top_n":1}}`))
+			request.Header.Set("Authorization", "Bearer key")
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			if response.Code != test.status || runtime.embeddingRequest.EmbeddingRequest == nil || runtime.rerankRequest.RerankRequest != nil || runtime.chatRequest.Request.Model != "" || !strings.Contains(response.Body.String(), `"code":"`+test.code+`"`) {
+				t.Fatalf("invalid effective rerank continued: status=%d embedding=%+v rerank=%+v chat=%+v body=%s", response.Code, runtime.embeddingRequest, runtime.rerankRequest, runtime.chatRequest, response.Body.String())
+			}
+		})
+	}
 }
 
 func TestRAGQueryRunsOwnerScopedRetrievalRerankAndChatWithDistinctExecutions(t *testing.T) {
