@@ -68,10 +68,16 @@ func (h Handler) serveNativeInteraction(w http.ResponseWriter, r *http.Request, 
 		writeError(w, http.StatusBadGateway, "module_failed", "module removed inference request")
 		return
 	}
+	request = request.WithResponseRequest(*reqCtx.ResponseRequest)
+	shared, message = request.NativeResponseRequest()
+	if message != "" {
+		writeError(w, http.StatusBadGateway, "module_failed", "module produced an invalid interaction request: "+message)
+		return
+	}
+	reqCtx.ResponseRequest = &shared
 	if !h.prepareAccessGroups(w, &reqCtx) {
 		return
 	}
-	shared = *reqCtx.ResponseRequest
 	toolIdentifiers, validTools := responseToolIdentifiers(shared.Tools)
 	if !h.authorizeTools(w, reqCtx, toolIdentifiers, validTools) {
 		return
@@ -82,7 +88,6 @@ func (h Handler) serveNativeInteraction(w http.ResponseWriter, r *http.Request, 
 	if !h.prepareModelFallbacks(w, r.Context(), &reqCtx, shared.Model) {
 		return
 	}
-	request = request.WithResponseRequest(*reqCtx.ResponseRequest)
 	if request.Stream {
 		streaming, ok := native.(provider.StreamingInteractionProvider)
 		if ok {

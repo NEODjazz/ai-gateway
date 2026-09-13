@@ -150,6 +150,33 @@ func TestInteractionsUsesNativeGeminiRoutingAndBilling(t *testing.T) {
 	}
 }
 
+func TestNativeInteractionsRejectOptionsInvalidatedByPipeline(t *testing.T) {
+	var calls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		_, _ = fmt.Fprint(w, `{"id":"interaction_native","object":"interaction","model":"upstream","status":"completed"}`)
+	}))
+	defer upstream.Close()
+	router := provider.New(provider.Config{Endpoints: []config.ProviderEndpointConfig{{
+		Name: "gemini-deployment", Type: "gemini", BaseURL: upstream.URL, APIKey: "secret",
+		Models: []string{"public"}, ModelAliases: map[string]string{"public": "upstream"}, Capabilities: []string{"interactions"},
+	}}})
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{
+		messagesAuth{accessPolicyModule{models: []string{"public"}, tpm: 100}},
+		rewriteContextModule{rewrite: func(req *modules.RequestContext) {
+			limit := 0
+			req.ResponseRequest.MaxOutputTokens = &limit
+		}},
+	}), router))
+	request := httptest.NewRequest(http.MethodPost, "/v1/interactions", strings.NewReader(`{"provider":"gemini-deployment","model":"public","input":"hello"}`))
+	request.Header.Set("Authorization", "Bearer gateway-test-key")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusBadGateway || calls.Load() != 0 || !strings.Contains(response.Body.String(), `"code":"module_failed"`) || !strings.Contains(response.Body.String(), "max_output_tokens") {
+		t.Fatalf("invalid pipeline output continued: status=%d calls=%d body=%s", response.Code, calls.Load(), response.Body.String())
+	}
+}
+
 func TestInteractionsUsesNativeGeminiAgentWithExplicitCapability(t *testing.T) {
 	var calls atomic.Int32
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
