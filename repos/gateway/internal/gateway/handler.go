@@ -16,6 +16,7 @@ import (
 	"ai-gateway-gateway/internal/assistantstate"
 	"ai-gateway-gateway/internal/asyncstate"
 	"ai-gateway-gateway/internal/batchstate"
+	"ai-gateway-gateway/internal/cachedstate"
 	"ai-gateway-gateway/internal/containerstate"
 	"ai-gateway-gateway/internal/filestate"
 	"ai-gateway-gateway/internal/finetunestate"
@@ -71,6 +72,7 @@ type Handler struct {
 	fineTuningJobs    asyncstate.Store
 	videos            videostate.Store
 	containers        containerstate.Store
+	cachedContents    cachedstate.Store
 	videoJobs         asyncstate.Store
 	batchJobs         asyncstate.Store
 	skills            skillstate.Store

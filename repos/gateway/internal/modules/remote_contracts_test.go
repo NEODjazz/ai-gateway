@@ -342,6 +342,18 @@ func TestRemoteBillingUsesOnlyDurationForVideo(t *testing.T) {
 	}
 }
 
+func TestRemoteBillingClassifiesCachedContentAndCacheWriteTokens(t *testing.T) {
+	req := RequestContext{
+		Request:  openai.ChatCompletionRequest{Model: "gemini"},
+		Response: &openai.ChatCompletionResponse{Usage: openai.Usage{PromptTokens: 23, TotalTokens: 23, PromptTokensDetails: &openai.PromptTokenDetails{CacheWriteTokens: 23}}},
+		Metadata: map[string]string{"gateway.api_type": "cached_content"},
+	}
+	request := billingRequest(&req)
+	if request.APIType != "cached_content" || request.InputTokens != 23 || request.TotalTokens != 23 || request.CacheWriteInputTokens != 23 || request.UsageEstimated {
+		t.Fatalf("cached content billing=%+v", request)
+	}
+}
+
 func TestRemoteBillingUsesRealtimeReserveAndExactUsage(t *testing.T) {
 	req := sensitiveContext()
 	req.Request.Model = "realtime-model"

@@ -87,6 +87,14 @@ type generatePart struct {
 }
 
 func (r generateRequest) chat(model string, stream bool) (openai.ChatCompletionRequest, error) {
+	return r.chatWithContentRequirement(model, stream, true)
+}
+
+func (r generateRequest) cachedContentChat(model string) (openai.ChatCompletionRequest, error) {
+	return r.chatWithContentRequirement(model, false, false)
+}
+
+func (r generateRequest) chatWithContentRequirement(model string, stream, requireContents bool) (openai.ChatCompletionRequest, error) {
 	result := openai.ChatCompletionRequest{Model: model, Stream: stream, MaxCompletionTokens: r.Generation.MaxOutputTokens, Temperature: r.Generation.Temperature, TopP: r.Generation.TopP, Seed: r.Generation.Seed}
 	if stream {
 		result.StreamOptions = &openai.ChatStreamOptions{IncludeUsage: true}
@@ -106,7 +114,7 @@ func (r generateRequest) chat(model string, stream bool) (openai.ChatCompletionR
 		return fail("serviceTier")
 	}
 	result.Store = r.Store
-	if strings.TrimSpace(model) == "" || len(r.Contents) == 0 || len(r.Contents) > 10000 {
+	if strings.TrimSpace(model) == "" || len(r.Contents) > 10000 || requireContents && len(r.Contents) == 0 || !requireContents && len(r.Contents) == 0 && r.System == nil && len(r.Tools) == 0 {
 		return fail("contents")
 	}
 	if err := openai.ValidateGeminiSafetySettings(r.Safety); err != nil {

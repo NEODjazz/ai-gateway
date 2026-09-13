@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.401
+  version: 0.1.402
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -32,6 +32,7 @@ tags:
   - name: Skills
   - name: Projects and access
   - name: Caching and logging
+  - name: Cached content
   - name: Agent templates
   - name: Customers
   - name: Organizations
@@ -782,6 +783,95 @@ paths:
         '429': {$ref: '#/components/responses/RateLimited'}
         '451': {$ref: '#/components/responses/ContentRejected'}
         '502': {$ref: '#/components/responses/ProviderFailed'}
+  /v1beta/cachedContents:
+    post:
+      operationId: createCachedContent
+      tags: [Cached content]
+      summary: Create owner-scoped Gemini cached content
+      description: Applies gateway authentication, model authorization, policy transforms, provider quotas and billing before persisting only provider metadata. Prompt content is never stored by the gateway. The selected deployment and credential binding are pinned for the resource lifecycle.
+      security:
+        - googleAPIKey: []
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/GeminiCachedContentCreateRequest'}
+      responses:
+        '200': {description: Created cached content metadata, content: {application/json: {schema: {$ref: '#/components/schemas/GeminiCachedContent'}}}}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '451': {$ref: '#/components/responses/ContentRejected'}
+        '502': {$ref: '#/components/responses/ProviderFailed'}
+        '503': {description: Durable cached content storage or a required policy service is unavailable}
+    get:
+      operationId: listCachedContents
+      tags: [Cached content]
+      summary: List active cached content owned by the caller
+      description: Reads the owner-filtered durable gateway index and never enumerates a shared provider credential.
+      security:
+        - googleAPIKey: []
+        - bearerAuth: []
+      parameters:
+        - {name: pageSize, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
+        - {name: pageToken, in: query, schema: {type: string, minLength: 1, maxLength: 344}}
+      responses:
+        '200': {description: Owner-filtered cached content page, content: {application/json: {schema: {$ref: '#/components/schemas/GeminiCachedContentList'}}}}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '503': {description: Durable cached content storage is unavailable}
+  /v1beta/cachedContents/{id}:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, minLength: 1, maxLength: 241, pattern: '^[A-Za-z0-9_.-]+$'}}
+    get:
+      operationId: getCachedContent
+      tags: [Cached content]
+      summary: Retrieve owned cached content metadata
+      description: Resolves ownership locally and retrieves metadata only from the deployment pinned at creation.
+      security:
+        - googleAPIKey: []
+        - bearerAuth: []
+      responses:
+        '200': {description: Current cached content metadata, content: {application/json: {schema: {$ref: '#/components/schemas/GeminiCachedContent'}}}}
+        '404': {description: 'Cached content is absent, expired, or belongs to another owner'}
+        '409': {description: The pinned deployment has changed}
+        '503': {description: Durable cached content storage is unavailable}
+    patch:
+      operationId: updateCachedContent
+      tags: [Cached content]
+      summary: Update owned cached content expiration
+      description: Updates exactly one expiration field on the pinned provider resource and restores the old provider expiration if durable metadata persistence fails.
+      security:
+        - googleAPIKey: []
+        - bearerAuth: []
+      parameters:
+        - {name: updateMask, in: query, required: true, schema: {type: string, enum: [ttl, expireTime]}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/GeminiCachedContentExpiration'}
+      responses:
+        '200': {description: Updated cached content metadata, content: {application/json: {schema: {$ref: '#/components/schemas/GeminiCachedContent'}}}}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '404': {description: 'Cached content is absent, expired, or belongs to another owner'}
+        '409': {description: The pinned deployment has changed}
+        '503': {description: Durable cached content storage is unavailable}
+    delete:
+      operationId: deleteCachedContent
+      tags: [Cached content]
+      summary: Delete owned cached content
+      description: Deletes the pinned provider resource and its owner-scoped durable metadata. A provider-side missing resource is treated as an idempotent cleanup.
+      security:
+        - googleAPIKey: []
+        - bearerAuth: []
+      responses:
+        '204': {description: Cached content deleted}
+        '404': {description: 'Cached content is absent, expired, or belongs to another owner'}
+        '409': {description: The pinned deployment has changed}
+        '503': {description: Durable cached content storage is unavailable}
   /v1beta/models/{model}:countTokens:
     post:
       operationId: countGenerateTokens
@@ -6762,6 +6852,74 @@ components:
         trace:
           description: Provider guardrail trace returned only when tracing was explicitly enabled.
           readOnly: true
+    GeminiCachedContent:
+      type: object
+      additionalProperties: false
+      required: [name, model, createTime, updateTime, expireTime]
+      properties:
+        name: {type: string, pattern: '^cachedContents/[A-Za-z0-9_.-]+$', maxLength: 256}
+        displayName: {type: string, maxLength: 128}
+        model: {type: string, pattern: '^models/[A-Za-z0-9_.:-]+$', maxLength: 263}
+        createTime: {type: string, format: date-time}
+        updateTime: {type: string, format: date-time}
+        expireTime: {type: string, format: date-time}
+        usageMetadata:
+          type: object
+          additionalProperties: false
+          required: [totalTokenCount]
+          properties:
+            totalTokenCount: {type: integer, minimum: 0}
+    GeminiCachedContentExpiration:
+      type: object
+      additionalProperties: false
+      oneOf:
+        - required: [ttl]
+        - required: [expireTime]
+      properties:
+        ttl: {type: string, pattern: '^[0-9]+(?:\.[0-9]+)?s$'}
+        expireTime: {type: string, format: date-time}
+    GeminiCachedContentCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [model]
+      anyOf:
+        - required: [contents]
+        - required: [systemInstruction]
+        - required: [tools]
+      allOf:
+        - oneOf:
+            - required: [ttl]
+            - required: [expireTime]
+      properties:
+        model: {type: string, pattern: '^models/[A-Za-z0-9_.:-]+$', maxLength: 263, description: Public gateway model resource name.}
+        displayName: {type: string, maxLength: 128}
+        ttl: {type: string, pattern: '^[0-9]+(?:\.[0-9]+)?s$'}
+        expireTime: {type: string, format: date-time}
+        contents:
+          type: array
+          maxItems: 10000
+          items: {$ref: '#/components/schemas/GenerateContent'}
+        systemInstruction:
+          allOf:
+            - {$ref: '#/components/schemas/GenerateContent'}
+          description: Text parts only; role must be absent or system.
+        tools:
+          type: array
+          maxItems: 128
+          items: {type: object}
+        toolConfig:
+          type: object
+          description: Native function-calling or retrieval configuration validated against the selected tools.
+    GeminiCachedContentList:
+      type: object
+      additionalProperties: false
+      required: [cachedContents]
+      properties:
+        cachedContents:
+          type: array
+          maxItems: 100
+          items: {$ref: '#/components/schemas/GeminiCachedContent'}
+        nextPageToken: {type: string, minLength: 1, maxLength: 344}
     GenerateContentError:
       type: object
       required: [error]

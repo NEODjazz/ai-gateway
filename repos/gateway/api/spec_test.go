@@ -48,6 +48,23 @@ func TestOpenAPIGenerateContentServiceControls(t *testing.T) {
 	}
 }
 
+func TestOpenAPICachedContentLifecycleIsOwnerScopedAndBounded(t *testing.T) {
+	document := loadDocument(t)
+	collection := document.Paths.Find("/v1beta/cachedContents")
+	resource := document.Paths.Find("/v1beta/cachedContents/{id}")
+	if collection == nil || collection.Get == nil || collection.Post == nil || resource == nil || resource.Get == nil || resource.Patch == nil || resource.Delete == nil {
+		t.Fatal("cached content lifecycle paths are incomplete")
+	}
+	create := document.Components.Schemas["GeminiCachedContentCreateRequest"].Value
+	if create == nil || create.Properties["model"] == nil || create.Properties["contents"] == nil || create.Properties["ttl"] == nil || create.Properties["expireTime"] == nil || create.Properties["generationConfig"] != nil {
+		t.Fatalf("cached content create contract is incomplete: %#v", create)
+	}
+	list := document.Components.Schemas["GeminiCachedContentList"].Value
+	if list == nil || list.Properties["cachedContents"] == nil || list.Properties["cachedContents"].Value == nil || list.Properties["cachedContents"].Value.MaxItems == nil || *list.Properties["cachedContents"].Value.MaxItems != 100 || list.Properties["nextPageToken"] == nil {
+		t.Fatalf("cached content list contract is unbounded: %#v", list)
+	}
+}
+
 func TestOpenAPIProviderProfilesExposeModelSpecificChatPolicy(t *testing.T) {
 	document := loadDocument(t)
 	profile := document.Components.Schemas["ProviderCapabilityProfile"].Value
