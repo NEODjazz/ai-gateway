@@ -53,6 +53,43 @@ func TestOpenAICompatiblePreservesWebSearchAction(t *testing.T) {
 	}
 }
 
+func TestOpenAICompatiblePreservesHostedToolOutputPayloads(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprint(w, `{"id":"resp-tools","object":"response","status":"completed","model":"model","output":[{"id":"ci_1","type":"code_interpreter_call","status":"completed","container_id":"cntr_1","code":"print(1)","outputs":[{"type":"logs","logs":"1"}]},{"id":"fs_1","type":"file_search_call","status":"completed","results":[{"file_id":"file_1","filename":"facts.txt","score":0.9,"text":"fact"}]},{"id":"mcp_1","type":"mcp_call","status":"completed","name":"lookup","server_label":"documents","approval_request_id":"approval_1","arguments":"{}","output":"found","error":null},{"id":"mcpl_1","type":"mcp_list_tools","server_label":"documents","tools":[{"name":"lookup","description":"Lookup","input_schema":{"type":"object"}}]}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`)
+	}))
+	defer server.Close()
+
+	response, err := NewOpenAICompatible(server.URL, "", false).Responses(t.Context(), openai.ResponseRequest{Model: "model", Input: "run tools"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Output) != 4 || response.Output[0].ContainerID != "cntr_1" || response.Output[0].Code != "print(1)" || len(response.Output[0].Outputs) != 1 || !strings.Contains(string(response.Output[0].Outputs[0]), `"logs":"1"`) || len(response.Output[1].Results) != 1 || !strings.Contains(string(response.Output[1].Results[0]), `"file_id":"file_1"`) || response.Output[2].ServerLabel != "documents" || response.Output[2].ApprovalRequestID != "approval_1" || string(response.Output[2].Output) != `"found"` || string(response.Output[2].Error) != "null" || len(response.Output[3].Tools) != 1 {
+		t.Fatalf("hosted tool payloads were not preserved: %+v", response.Output)
+	}
+	encoded, err := json.Marshal(response)
+	if err != nil || !strings.Contains(string(encoded), `"results":[{"file_id":"file_1"`) || !strings.Contains(string(encoded), `"output":"found"`) {
+		t.Fatalf("hosted tool payloads were not returned to the client: %s err=%v", encoded, err)
+	}
+}
+
+func TestOpenAICompatibleStreamsHostedToolOutputPayloads(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "event: response.created\n"+`data: {"type":"response.created","response":{"id":"resp-tools","object":"response","status":"in_progress","model":"model","output":[]}}`+"\n\n")
+		_, _ = fmt.Fprint(w, "event: response.output_item.done\n"+`data: {"type":"response.output_item.done","output_index":0,"item":{"id":"ci_1","type":"code_interpreter_call","status":"completed","container_id":"cntr_1","code":"print(1)","outputs":[{"type":"logs","logs":"1"}]}}`+"\n\n")
+		_, _ = fmt.Fprint(w, "event: response.completed\n"+`data: {"type":"response.completed","response":{"id":"resp-tools","object":"response","status":"completed","model":"model","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}`+"\n\n")
+	}))
+	defer server.Close()
+
+	response, err := NewOpenAICompatible(server.URL, "", true).StreamResponses(t.Context(), openai.ResponseRequest{Model: "model", Input: "run tools", Stream: true}, func(string, string) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Output) != 1 || response.Output[0].ContainerID != "cntr_1" || len(response.Output[0].Outputs) != 1 || !strings.Contains(string(response.Output[0].Outputs[0]), `"logs":"1"`) {
+		t.Fatalf("streamed hosted tool payload was not preserved: %+v", response.Output)
+	}
+}
+
 func TestOpenAICompatibleForwardsMaxCompletionTokensWithoutLegacyParameters(t *testing.T) {
 	var upstream map[string]json.RawMessage
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

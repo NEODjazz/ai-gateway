@@ -9415,11 +9415,28 @@ components:
         role: {type: string}
         name: {type: string}
         call_id: {type: string}
+        container_id: {type: string}
+        server_label: {type: string}
+        approval_request_id: {type: string}
+        code: {type: string}
         arguments: {type: string}
         action:
           type: object
           additionalProperties: true
           description: Provider web-search action, including bounded query, page and source metadata when returned upstream.
+        outputs:
+          type: array
+          nullable: true
+          items: {type: object, additionalProperties: true}
+        results:
+          type: array
+          nullable: true
+          items: {type: object, additionalProperties: true}
+        tools:
+          type: array
+          items: {type: object, additionalProperties: true}
+        output: {}
+        error: {}
         encrypted_content: {type: string, nullable: true}
         phase:
           type: [string, "null"]
