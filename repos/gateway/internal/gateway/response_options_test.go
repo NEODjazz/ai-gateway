@@ -9,7 +9,7 @@ import (
 func TestResponsesRejectsInvalidOptionsBeforeExecution(t *testing.T) {
 	// No pipeline/router: an invalid request must stop before either is invoked.
 	handler := Handler{}
-	for _, option := range []string{`"max_output_tokens":1,"max_tokens":1000`, `"max_output_tokens":0`, `"max_output_tokens":-1`, `"max_tokens":0`, `"max_tokens":-1`, `"top_logprobs":-1`, `"top_logprobs":21`, `"truncation":""`, `"truncation":"unknown"`} {
+	for _, option := range []string{`"max_output_tokens":1,"max_tokens":1000`, `"max_output_tokens":0`, `"max_output_tokens":-1`, `"max_tokens":0`, `"max_tokens":-1`, `"top_logprobs":-1`, `"top_logprobs":21`, `"truncation":""`, `"truncation":"unknown"`, `"temperature":-0.1`, `"temperature":2.1`, `"top_p":-0.1`, `"top_p":1.1`} {
 		for _, stream := range []string{"false", "true"} {
 			out := httptest.NewRecorder()
 			request := httptest.NewRequest("POST", "/v1/responses", strings.NewReader(`{"model":"m","input":"hello","stream":`+stream+`,`+option+`}`))

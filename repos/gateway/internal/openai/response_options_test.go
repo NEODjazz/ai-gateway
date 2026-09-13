@@ -42,8 +42,11 @@ func TestResponseBackgroundRequiresDurableNonStreamingStorage(t *testing.T) {
 func TestResponseRejectsInvalidGenerationControls(t *testing.T) {
 	tooFew, tooMany := 0, 1001
 	below, above, nan := -2.1, 2.1, math.NaN()
+	negative, aboveTemperature, aboveTopP := -0.1, 2.1, 1.1
 	for _, request := range []ResponseRequest{
 		{FrequencyPenalty: &below}, {FrequencyPenalty: &nan}, {PresencePenalty: &above},
+		{Temperature: &negative}, {Temperature: &aboveTemperature}, {Temperature: &nan},
+		{TopP: &negative}, {TopP: &aboveTopP}, {TopP: &nan},
 		{MaxToolCalls: &tooFew}, {MaxToolCalls: &tooMany},
 	} {
 		if request.Validate() == "" {
@@ -51,6 +54,19 @@ func TestResponseRejectsInvalidGenerationControls(t *testing.T) {
 		}
 	}
 }
+
+func TestResponseAcceptsGenerationControlBoundaries(t *testing.T) {
+	for _, request := range []ResponseRequest{
+		{Temperature: float64Pointer(0)}, {Temperature: float64Pointer(2)},
+		{TopP: float64Pointer(0)}, {TopP: float64Pointer(1)},
+	} {
+		if message := request.Validate(); message != "" {
+			t.Fatalf("boundary rejected: %+v: %s", request, message)
+		}
+	}
+}
+
+func float64Pointer(value float64) *float64 { return &value }
 
 func TestResponseRejectsInvalidTextVerbosity(t *testing.T) {
 	for _, value := range []any{"unknown", 1, true} {

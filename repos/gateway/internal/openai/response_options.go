@@ -52,6 +52,12 @@ func (r ResponseRequest) Validate() string {
 	if r.Truncation != nil && *r.Truncation != "auto" && *r.Truncation != "disabled" {
 		return "truncation must be auto or disabled"
 	}
+	if r.Temperature != nil && (math.IsNaN(*r.Temperature) || math.IsInf(*r.Temperature, 0) || *r.Temperature < 0 || *r.Temperature > 2) {
+		return "temperature must be between 0 and 2"
+	}
+	if r.TopP != nil && (math.IsNaN(*r.TopP) || math.IsInf(*r.TopP, 0) || *r.TopP < 0 || *r.TopP > 1) {
+		return "top_p must be between 0 and 1"
+	}
 	for _, penalty := range []*float64{r.FrequencyPenalty, r.PresencePenalty} {
 		if penalty != nil && (math.IsNaN(*penalty) || math.IsInf(*penalty, 0) || *penalty < -2 || *penalty > 2) {
 			return "frequency_penalty and presence_penalty must be between -2 and 2"
