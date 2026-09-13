@@ -46,3 +46,18 @@ func TestResponsesRejectsUnsupportedIncludeBeforeExecution(t *testing.T) {
 		}
 	}
 }
+
+func TestResponsesRejectsInvalidToolChoiceBeforeExecution(t *testing.T) {
+	handler := Handler{}
+	for _, choice := range []string{`"unknown"`, `"required"`, `{"type":"function","name":"missing"}`, `{"type":"function","name":"lookup","extra":true}`} {
+		out := httptest.NewRecorder()
+		body := `{"model":"m","input":"hello","tools":[{"type":"function","name":"lookup"}],"tool_choice":` + choice + `}`
+		if choice == `"required"` {
+			body = `{"model":"m","input":"hello","tool_choice":"required"}`
+		}
+		handler.Responses(out, httptest.NewRequest("POST", "/v1/responses", strings.NewReader(body)))
+		if out.Code != 400 || !strings.Contains(out.Body.String(), `"invalid_request"`) {
+			t.Fatalf("choice=%s status=%d response=%s", choice, out.Code, out.Body.String())
+		}
+	}
+}

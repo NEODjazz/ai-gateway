@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"encoding/json"
 	"math"
 	"unicode/utf8"
 )
@@ -20,6 +21,9 @@ func (r ResponseRequest) Validate() string {
 		return message
 	}
 	if message := validateResponseIncludes(r.Include); message != "" {
+		return message
+	}
+	if message := validateResponseToolChoice(r.Tools, r.ToolChoice); message != "" {
 		return message
 	}
 	if utf8.RuneCountInString(r.SafetyIdentifier) > 64 {
@@ -67,6 +71,64 @@ func (r ResponseRequest) Validate() string {
 		return "max_tool_calls must be between 1 and 1000"
 	}
 	return ""
+}
+
+func validateResponseToolChoice(tools []ResponseTool, choice any) string {
+	if choice == nil {
+		return ""
+	}
+	if value, ok := choice.(string); ok {
+		switch value {
+		case "none":
+			return ""
+		case "auto", "required":
+			if len(tools) > 0 {
+				return ""
+			}
+		}
+		return "tool_choice must reference an available tool"
+	}
+	encoded, err := json.Marshal(choice)
+	if err != nil {
+		return "tool_choice must be a supported string or object"
+	}
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &object); err != nil || len(object) < 2 {
+		return "tool_choice must be a supported string or object"
+	}
+	var kind, name, serverLabel string
+	if err := json.Unmarshal(object["type"], &kind); err != nil {
+		return "tool_choice must be a supported string or object"
+	}
+	switch kind {
+	case "function":
+		if len(object) != 2 || json.Unmarshal(object["name"], &name) != nil || name == "" {
+			return "tool_choice must reference an available tool"
+		}
+		for _, tool := range tools {
+			if tool.Type == "function" && tool.Name == name {
+				return ""
+			}
+		}
+	case "mcp":
+		if len(object) != 3 || json.Unmarshal(object["server_label"], &serverLabel) != nil || json.Unmarshal(object["name"], &name) != nil || serverLabel == "" || name == "" {
+			return "tool_choice must reference an available tool"
+		}
+		for _, tool := range tools {
+			if tool.Type != "mcp" || tool.ServerLabel != serverLabel {
+				continue
+			}
+			if len(tool.AllowedTools) == 0 {
+				return ""
+			}
+			for _, allowed := range tool.AllowedTools {
+				if allowed == name {
+					return ""
+				}
+			}
+		}
+	}
+	return "tool_choice must reference an available tool"
 }
 
 func validateResponseIncludes(include []string) string {

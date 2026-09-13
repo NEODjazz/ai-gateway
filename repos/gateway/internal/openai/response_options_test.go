@@ -107,6 +107,39 @@ func TestResponseIncludeValidation(t *testing.T) {
 	}
 }
 
+func TestResponseToolChoiceValidation(t *testing.T) {
+	tools := []ResponseTool{
+		{Type: "function", Name: "lookup"},
+		{Type: "mcp", ServerLabel: "documents", AllowedTools: []string{"search"}},
+	}
+	for _, choice := range []any{
+		"none", "auto", "required",
+		map[string]any{"type": "function", "name": "lookup"},
+		map[string]any{"type": "mcp", "server_label": "documents", "name": "search"},
+	} {
+		if message := (ResponseRequest{Tools: tools, ToolChoice: choice}).Validate(); message != "" {
+			t.Fatalf("choice %#v rejected: %s", choice, message)
+		}
+	}
+	for _, choice := range []any{
+		"unknown", "required",
+		map[string]any{"type": "function", "name": "missing"},
+		map[string]any{"type": "function", "name": "lookup", "extra": true},
+		map[string]any{"type": "mcp", "server_label": "documents", "name": "write"},
+		map[string]any{"type": "mcp", "server_label": "missing", "name": "search"},
+		map[string]any{"type": "unknown", "name": "lookup"},
+		42,
+	} {
+		request := ResponseRequest{Tools: tools, ToolChoice: choice}
+		if choice == "required" {
+			request.Tools = nil
+		}
+		if message := request.Validate(); message == "" {
+			t.Fatalf("invalid choice accepted: %#v", choice)
+		}
+	}
+}
+
 func TestServiceTierValues(t *testing.T) {
 	for _, value := range []string{"", "auto", "default", "on_demand", "flex", "performance", "scale", "priority", "fast", "ultrafast"} {
 		if !validServiceTier(value) {
