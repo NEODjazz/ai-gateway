@@ -357,7 +357,7 @@ func validDeploymentCapabilities(capabilities []string) bool {
 	if seen["bedrock_invoke"] && !seen["chat"] && !seen["responses"] {
 		return false
 	}
-	for _, capability := range []string{"web_search", "web_fetch", "tool_search", "memory_tool", "bash_tool", "text_editor_tool", "computer_toolset", "browser_toolset", "thinking", "zero_output", "inference_geo", "context_management", "tool_result_error", "document_citations", "document_metadata", "document_text", "audio", "audio_input", "video_input", "prompt_cache", "assistant_prefill", "gemini_code_execution", "url_context"} {
+	for _, capability := range []string{"web_search", "web_fetch", "tool_search", "memory_tool", "bash_tool", "text_editor_tool", "computer_toolset", "browser_toolset", "thinking", "zero_output", "inference_geo", "context_management", "tool_result_error", "document_citations", "document_metadata", "document_text", "audio", "audio_input", "video_input", "prompt_cache", "assistant_prefill", "gemini_code_execution", "url_context", "google_maps"} {
 		if seen[capability] && !seen["chat"] {
 			return false
 		}
@@ -395,7 +395,7 @@ func ValidModelCapability(capability string) bool {
 		"image_generation", "image_edit", "image_variation",
 		"audio_transcription", "audio_translation", "audio_speech", "ocr", "search", "skills", "fine_tuning", "video", "video_remix", "video_extension", "container", "container_files", "container_network", "sandbox", "realtime",
 		"stream", "tools", "structured_output", "mcp", "vision",
-		"web_search", "web_fetch", "tool_search", "memory_tool", "bash_tool", "text_editor_tool", "computer_toolset", "browser_toolset", "thinking", "zero_output", "inference_geo", "context_management", "tool_result_error", "document_citations", "document_metadata", "document_text", "audio", "audio_input", "video_input", "prompt_cache", "assistant_prefill", "background_responses", "file_input", "bedrock_invoke", "gemini_code_execution", "url_context":
+		"web_search", "web_fetch", "tool_search", "memory_tool", "bash_tool", "text_editor_tool", "computer_toolset", "browser_toolset", "thinking", "zero_output", "inference_geo", "context_management", "tool_result_error", "document_citations", "document_metadata", "document_text", "audio", "audio_input", "video_input", "prompt_cache", "assistant_prefill", "background_responses", "file_input", "bedrock_invoke", "gemini_code_execution", "url_context", "google_maps":
 		return true
 	default:
 		return false
@@ -638,6 +638,9 @@ func supportsManagedAdapterCapability(endpoint Endpoint, capability string) bool
 	case "url_context":
 		client, ok := endpoint.Provider.(interface{ SupportsURLContext() bool })
 		return endpoint.Type == "gemini" && ok && client.SupportsURLContext()
+	case "google_maps":
+		client, ok := endpoint.Provider.(interface{ SupportsGoogleMaps() bool })
+		return endpoint.Type == "gemini" && ok && client.SupportsGoogleMaps()
 	case "web_fetch":
 		client, ok := endpoint.Provider.(interface{ SupportsWebFetch() bool })
 		return ok && client.SupportsWebFetch()

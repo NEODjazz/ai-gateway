@@ -120,6 +120,9 @@ func (h Handler) countContextTokens(w http.ResponseWriter, r *http.Request, requ
 	if request.GeminiURLContext {
 		tools = append(tools, "url_context")
 	}
+	if request.GeminiGoogleMaps {
+		tools = append(tools, "google_maps")
+	}
 	if request.AnthropicCodeExecution {
 		tools = append(tools, "code_execution")
 	}

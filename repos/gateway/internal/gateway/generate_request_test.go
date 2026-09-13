@@ -95,6 +95,42 @@ func TestGenerateRequestMapsGoogleSearchTool(t *testing.T) {
 	}
 }
 
+func TestGenerateRequestMapsGoogleMapsAndLocation(t *testing.T) {
+	var native generateRequest
+	raw := `{"contents":[{"parts":[{"text":"restaurants near here"}]}],"tools":[{"googleMaps":{}}],"toolConfig":{"retrievalConfig":{"latLng":{"latitude":40.758896,"longitude":-73.98513}}}}`
+	if err := decodeMessagesValue(json.RawMessage(raw), &native); err != nil {
+		t.Fatal(err)
+	}
+	chat, err := native.chat("model", false)
+	if err != nil || !chat.GeminiGoogleMaps || chat.GeminiRetrievalLocation == nil || chat.GeminiRetrievalLocation.Latitude != 40.758896 || chat.NativeInputTokens == 0 {
+		t.Fatalf("chat=%+v err=%v", chat, err)
+	}
+	var withoutLocation generateRequest
+	if err := decodeMessagesValue(json.RawMessage(`{"contents":[{"parts":[{"text":"restaurants"}]}],"tools":[{"googleMaps":{}}]}`), &withoutLocation); err != nil {
+		t.Fatal(err)
+	}
+	withoutLocationChat, err := withoutLocation.chat("model", false)
+	if err != nil || chat.NativeInputTokens <= withoutLocationChat.NativeInputTokens {
+		t.Fatalf("location context was not added to token reserve: with=%d without=%d err=%v", chat.NativeInputTokens, withoutLocationChat.NativeInputTokens, err)
+	}
+	for _, invalid := range []string{
+		`{"contents":[{"parts":[{"text":"hi"}]}],"tools":[{"googleMaps":{}},{"googleMaps":{}}]}`,
+		`{"contents":[{"parts":[{"text":"hi"}]}],"tools":[{"googleMaps":{},"googleSearch":{}}]}`,
+		`{"contents":[{"parts":[{"text":"hi"}]}],"toolConfig":{"retrievalConfig":{"latLng":{"latitude":0,"longitude":0}}}}`,
+		`{"contents":[{"parts":[{"text":"hi"}]}],"tools":[{"googleMaps":{}}],"toolConfig":{"retrievalConfig":{}}}`,
+		`{"contents":[{"parts":[{"text":"hi"}]}],"tools":[{"googleMaps":{}}],"toolConfig":{"retrievalConfig":{"latLng":{"latitude":91,"longitude":0}}}}`,
+		`{"contents":[{"parts":[{"text":"hi"}]}],"tools":[{"googleMaps":{}}],"toolConfig":{"retrievalConfig":{"latLng":{"latitude":0,"longitude":-181}}}}`,
+	} {
+		var request generateRequest
+		if err := decodeMessagesValue(json.RawMessage(invalid), &request); err != nil {
+			continue
+		}
+		if _, err := request.chat("model", false); err == nil {
+			t.Fatalf("invalid Google Maps request accepted: %s", invalid)
+		}
+	}
+}
+
 func TestGenerateRequestMapsCodeExecutionToolAndHistory(t *testing.T) {
 	var native generateRequest
 	raw := `{"contents":[{"role":"model","parts":[{"executableCode":{"id":"exec-1","language":"PYTHON","code":"print(4)"}},{"codeExecutionResult":{"id":"exec-1","outcome":"OUTCOME_OK","output":"4\n"}},{"text":"done"}]},{"role":"user","parts":[{"text":"continue"}]}],"tools":[{"codeExecution":{}}]}`

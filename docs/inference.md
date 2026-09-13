@@ -802,6 +802,7 @@ schemas fail explicitly; seed/output limits must fit the native integer range.
 
 Protocol references: [GenerateContent](https://ai.google.dev/api/generate-content),
 [URL Context](https://ai.google.dev/gemini-api/docs/generate-content/url-context)
+[Google Maps grounding](https://ai.google.dev/gemini-api/docs/generate-content/maps-grounding)
 and [tool signatures](https://ai.google.dev/gemini-api/docs/generate-content/thought-signatures).
 
 ## Native Anthropic model discovery
@@ -1233,8 +1234,18 @@ estimate, includes reported tool-input tokens in billing and bypasses exact and
 semantic response caches. JSON and SSE preserve at most 20 validated
 `urlContextMetadata.urlMetadata` entries; malformed URLs, unknown retrieval statuses,
 unknown fields and oversized metadata fail closed. Native token counting applies the
-same tool ACL. Cached content, other grounding/server tools, file parts and other
+same tool ACL. Cached content, other server tools, file parts and other
 audio formats remain unsupported.
+
+A native `googleMaps: {}` tool requires the `google_maps` deployment capability
+and matching tool grant. `toolConfig.retrievalConfig.latLng` is optional when the
+tool is enabled; when present, both coordinates are required and validated before
+provider execution. The tool declaration and location enter TPM estimation. Exact
+and semantic response caches are bypassed. A provider response that confirms Maps
+use through bounded place or widget metadata settles one grounding request, while
+web-search queries remain separately counted. JSON and SSE preserve the validated
+metadata and derive ordinary URL citations from Maps grounding supports. Native
+token counting applies the same tool grant.
 
 GenerateContent accepts inline WAV, MP3/MPEG, AIFF, AAC, OGG/Opus, FLAC, M4A
 and WebM audio parts in user content. Audio is size- and container-signature

@@ -24,6 +24,10 @@ type ChatCompletionRequest struct {
 	GeminiCodeExecution bool `json:"-"`
 	// GeminiURLContext enables the native server-side URL retrieval tool.
 	GeminiURLContext bool `json:"-"`
+	// GeminiGoogleMaps enables native location grounding. The optional location
+	// is validated at the native request boundary.
+	GeminiGoogleMaps        bool          `json:"-"`
+	GeminiRetrievalLocation *GeminiLatLng `json:"-"`
 	// AnthropicSkills contains validated native Messages skill references.
 	AnthropicSkills      []AnthropicSkillReference `json:"-"`
 	AnthropicContainerID string                    `json:"-"`
@@ -108,6 +112,11 @@ type AnthropicToolsetMemberConfig struct {
 type GeminiSafetySetting struct {
 	Category  string `json:"category"`
 	Threshold string `json:"threshold"`
+}
+
+type GeminiLatLng struct {
+	Latitude  float64 `json:"latitude"`
+	Longitude float64 `json:"longitude"`
 }
 
 type ChatStreamOptions struct {

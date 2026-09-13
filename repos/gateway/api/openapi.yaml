@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.399
+  version: 0.1.400
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -6843,6 +6843,14 @@ components:
                     type: object
                     additionalProperties: false
                     description: Native server-side URL retrieval included in token counting context. Requires the url_context tool grant.
+              - type: object
+                additionalProperties: false
+                required: [googleMaps]
+                properties:
+                  googleMaps:
+                    type: object
+                    additionalProperties: false
+                    description: Native location grounding included in token counting context. Requires the google_maps tool grant.
         toolConfig:
           type: object
           additionalProperties: false
@@ -6857,6 +6865,12 @@ components:
                   maxItems: 1
                   items: {type: string}
                   description: ANY requires exactly one declared function name.
+            retrievalConfig:
+              type: object
+              additionalProperties: false
+              required: [latLng]
+              properties:
+                latLng: {$ref: '#/components/schemas/GeminiLatLng'}
     GenerateContentRequest:
       type: object
       additionalProperties: false
@@ -6937,6 +6951,14 @@ components:
                     type: object
                     additionalProperties: false
                     description: Native server-side URL retrieval. Requires the url_context deployment capability and tool grant, includes returned tool-input tokens in billing, and bypasses response caches.
+              - type: object
+                additionalProperties: false
+                required: [googleMaps]
+                properties:
+                  googleMaps:
+                    type: object
+                    additionalProperties: false
+                    description: Native location-aware grounding. Requires the google_maps deployment capability and tool grant, bills an actual grounding request when provider metadata confirms use, and bypasses response caches.
         toolConfig:
           type: object
           additionalProperties: false
@@ -6951,6 +6973,13 @@ components:
                   maxItems: 1
                   items: {type: string}
                   description: ANY requires exactly one declared function name.
+            retrievalConfig:
+              type: object
+              additionalProperties: false
+              required: [latLng]
+              description: Optional user location for Google Maps grounding; invalid coordinates fail before provider execution.
+              properties:
+                latLng: {$ref: '#/components/schemas/GeminiLatLng'}
         generationConfig:
           type: object
           additionalProperties: false
@@ -7106,6 +7135,13 @@ components:
             cachedContentTokenCount: {type: integer, minimum: 0}
             totalTokenCount: {type: integer, minimum: 0}
             serviceTier: {type: string, enum: [unspecified, standard, flex, priority]}
+    GeminiLatLng:
+      type: object
+      additionalProperties: false
+      required: [latitude, longitude]
+      properties:
+        latitude: {type: number, minimum: -90, maximum: 90}
+        longitude: {type: number, minimum: -180, maximum: 180}
     MessagesContextManagement:
       type: object
       additionalProperties: false
@@ -7765,7 +7801,7 @@ components:
         capabilities:
           type: array
           uniqueItems: true
-          items: {type: string, enum: [chat, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, gemini_code_execution, url_context, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, tool_search, zero_output, inference_geo, context_management, tool_result_error, document_citations, document_metadata, document_text, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
+          items: {type: string, enum: [chat, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, gemini_code_execution, url_context, google_maps, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, tool_search, zero_output, inference_geo, context_management, tool_result_error, document_citations, document_metadata, document_text, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
         max_input_tokens: {type: integer, minimum: 0}
         max_output_tokens: {type: integer, minimum: 0}
         input_cost_per_1m: {type: number, minimum: 0}
@@ -10190,7 +10226,7 @@ components:
           type: array
           uniqueItems: true
           description: Operations and optional request features preserved by the managed adapter.
-          items: {type: string, enum: [chat, completions, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, gemini_code_execution, url_context, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, tool_search, zero_output, inference_geo, context_management, tool_result_error, document_citations, document_metadata, document_text, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
+          items: {type: string, enum: [chat, completions, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, gemini_code_execution, url_context, google_maps, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, realtime, stream, tools, structured_output, mcp, vision, web_search, web_fetch, tool_search, zero_output, inference_geo, context_management, tool_result_error, document_citations, document_metadata, document_text, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
         auth_types:
           type: array
           uniqueItems: true

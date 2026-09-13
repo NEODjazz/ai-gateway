@@ -359,12 +359,51 @@ func TestGenerateContentGeminiURLContextStreamACLAndBilling(t *testing.T) {
 	}
 }
 
+func TestGenerateContentGeminiGoogleMapsStreamACLAndBilling(t *testing.T) {
+	denied := &fallbackChatProvider{}
+	deniedHandler := Routes(NewHandler(modules.NewPipeline([]modules.Module{messagesAuth{accessPolicyModule{models: []string{"*"}, tools: []string{"safe"}}}}), denied))
+	requestBody := `{"contents":[{"parts":[{"text":"restaurants near here"}]}],"tools":[{"googleMaps":{}}],"toolConfig":{"retrievalConfig":{"latLng":{"latitude":40.758896,"longitude":-73.98513}}}}`
+	response := generateCall(deniedHandler, "/v1beta/models/m:generateContent", requestBody, "gateway-test-key")
+	if response.Code != http.StatusForbidden || denied.calls != 0 || !strings.Contains(response.Body.String(), "google_maps") {
+		t.Fatalf("Google Maps ACL bypassed: %d %s calls=%d", response.Code, response.Body.String(), denied.calls)
+	}
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		encoded, _ := json.Marshal(body)
+		for _, want := range []string{`"googleMaps":{}`, `"retrievalConfig":{"latLng":{"latitude":40.758896,"longitude":-73.98513}}`} {
+			if !strings.Contains(string(encoded), want) {
+				t.Fatalf("native Maps request lost %s: %s", want, encoded)
+			}
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"responseId\":\"maps\",\"modelVersion\":\"gemini-maps\",\"candidates\":[{\"index\":0,\"content\":{\"parts\":[{\"text\":\"Try Cafe One.\"}]},\"finishReason\":\"STOP\",\"groundingMetadata\":{\"googleMapsWidgetContextToken\":\"widget\",\"groundingChunks\":[{\"maps\":{\"uri\":\"https://maps.google.com/?cid=1\",\"title\":\"Cafe One\",\"text\":\"Coffee shop\",\"placeId\":\"places/one\"}}],\"groundingSupports\":[{\"segment\":{\"startIndex\":4,\"endIndex\":12,\"text\":\"Cafe One\"},\"groundingChunkIndices\":[0]}]}}],\"usageMetadata\":{\"promptTokenCount\":4,\"toolUsePromptTokenCount\":2,\"candidatesTokenCount\":3,\"totalTokenCount\":9}}\n\n"))
+	}))
+	defer upstream.Close()
+	billing := &messagesUsageRecorder{}
+	router := provider.New(provider.Config{Endpoints: []config.ProviderEndpointConfig{{Name: "native", Type: "gemini", BaseURL: upstream.URL, APIKey: "provider-key", Stream: true, Models: []string{"m"}, ModelAliases: map[string]string{"m": "gemini-maps"}, Capabilities: []string{"chat", "stream", "google_maps"}}}, Modules: modules.NewPipeline([]modules.Module{billing})})
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{messagesAuth{accessPolicyModule{models: []string{"m"}, tools: []string{"google_maps"}}}}), router))
+	response = generateCall(handler, "/v1beta/models/m:streamGenerateContent?alt=sse", requestBody, "gateway-test-key")
+	for _, want := range []string{`"text":"Try Cafe One."`, `"googleMapsWidgetContextToken":"widget"`, `"maps":{"uri":"https://maps.google.com/?cid=1"`, `"totalTokenCount":9`} {
+		if !strings.Contains(response.Body.String(), want) {
+			t.Fatalf("missing %s: %d %s", want, response.Code, response.Body.String())
+		}
+	}
+	if response.Code != http.StatusOK || billing.calls != 1 || billing.usage.PromptTokens != 6 || billing.usage.ProviderToolInputTokens != 2 || billing.usage.TotalTokens != 9 || billing.usage.SearchRequests != 1 {
+		t.Fatalf("Maps settlement: status=%d billing=%d usage=%+v", response.Code, billing.calls, billing.usage)
+	}
+}
+
 func TestGenerateCountTokensEnforcesNativeManagedToolACL(t *testing.T) {
 	for _, test := range []struct {
 		name, tool, grant string
 	}{
 		{name: "code execution", tool: `"codeExecution":{}`, grant: "code_execution"},
 		{name: "URL context", tool: `"urlContext":{}`, grant: "url_context"},
+		{name: "Google Maps", tool: `"googleMaps":{}`, grant: "google_maps"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			counter := &countProviderSpy{}

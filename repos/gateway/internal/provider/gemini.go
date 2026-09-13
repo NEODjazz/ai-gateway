@@ -65,6 +65,7 @@ func (Gemini) SupportsVision() bool        { return true }
 func (Gemini) SupportsWebSearch() bool     { return true }
 func (Gemini) SupportsCodeExecution() bool { return true }
 func (Gemini) SupportsURLContext() bool    { return true }
+func (Gemini) SupportsGoogleMaps() bool    { return true }
 func (Gemini) SupportsAudioInput() bool    { return true }
 func (Gemini) SupportsFileInput() bool     { return true }
 func (Gemini) SupportsVideoInput() bool    { return true }
@@ -111,6 +112,7 @@ type geminiFunction struct {
 type geminiTool struct {
 	Functions     []geminiFunction `json:"functionDeclarations,omitempty"`
 	GoogleSearch  *struct{}        `json:"googleSearch,omitempty"`
+	GoogleMaps    *struct{}        `json:"googleMaps,omitempty"`
 	CodeExecution *struct{}        `json:"codeExecution,omitempty"`
 	URLContext    *struct{}        `json:"urlContext,omitempty"`
 }
@@ -521,6 +523,18 @@ func geminiChatRequest(request openai.ChatCompletionRequest) (geminiRequest, err
 	if request.GeminiURLContext {
 		result.Tools = append(result.Tools, geminiTool{URLContext: &struct{}{}})
 	}
+	if request.GeminiGoogleMaps {
+		result.Tools = append(result.Tools, geminiTool{GoogleMaps: &struct{}{}})
+		if request.GeminiRetrievalLocation != nil {
+			location := *request.GeminiRetrievalLocation
+			if math.IsNaN(location.Latitude) || math.IsInf(location.Latitude, 0) || location.Latitude < -90 || location.Latitude > 90 || math.IsNaN(location.Longitude) || math.IsInf(location.Longitude, 0) || location.Longitude < -180 || location.Longitude > 180 {
+				return result, geminiInvalid("retrieval_config.lat_lng")
+			}
+			result.ToolConfig = map[string]any{"retrievalConfig": map[string]any{"latLng": location}}
+		}
+	} else if request.GeminiRetrievalLocation != nil {
+		return result, geminiInvalid("retrieval_config")
+	}
 	if request.ToolChoice != nil {
 		if len(request.Tools) == 0 {
 			return result, geminiInvalid("tool_choice")
@@ -549,7 +563,10 @@ func geminiChatRequest(request openai.ChatCompletionRequest) (geminiRequest, err
 		default:
 			return result, geminiInvalid("tool_choice")
 		}
-		result.ToolConfig = map[string]any{"functionCallingConfig": config}
+		if result.ToolConfig == nil {
+			result.ToolConfig = map[string]any{}
+		}
+		result.ToolConfig["functionCallingConfig"] = config
 	}
 	return result, nil
 }
@@ -888,6 +905,19 @@ func geminiGrounding(raw json.RawMessage, text string) ([]openai.ChatAnnotation,
 				URI   string `json:"uri"`
 				Title string `json:"title"`
 			} `json:"web"`
+			Maps *struct {
+				URI                string `json:"uri"`
+				Title              string `json:"title"`
+				Text               string `json:"text"`
+				PlaceID            string `json:"placeId"`
+				PlaceAnswerSources *struct {
+					Reviews []struct {
+						ReviewID      string `json:"reviewId"`
+						GoogleMapsURI string `json:"googleMapsUri"`
+						Title         string `json:"title"`
+					} `json:"reviewSnippets"`
+				} `json:"placeAnswerSources"`
+			} `json:"maps"`
 		} `json:"groundingChunks"`
 		Supports []struct {
 			Indices []int `json:"groundingChunkIndices"`
@@ -897,9 +927,10 @@ func geminiGrounding(raw json.RawMessage, text string) ([]openai.ChatAnnotation,
 				Text  string `json:"text"`
 			} `json:"segment"`
 		} `json:"groundingSupports"`
-		Queries []string `json:"webSearchQueries"`
+		Queries    []string `json:"webSearchQueries"`
+		MapsWidget string   `json:"googleMapsWidgetContextToken"`
 	}
-	if err := json.Unmarshal(raw, &metadata); err != nil || metadata.Chunks == nil && metadata.Supports == nil && metadata.Queries == nil {
+	if err := json.Unmarshal(raw, &metadata); err != nil || metadata.Chunks == nil && metadata.Supports == nil && metadata.Queries == nil && metadata.MapsWidget == "" {
 		return nil, 0, errors.New("invalid Gemini grounding metadata")
 	}
 	if len(metadata.Queries) > openai.WebSearchMaxUses || len(metadata.Chunks) > 128 || len(metadata.Supports) > 128 {
@@ -908,6 +939,36 @@ func geminiGrounding(raw json.RawMessage, text string) ([]openai.ChatAnnotation,
 	for _, query := range metadata.Queries {
 		if strings.TrimSpace(query) == "" || len(query) > 8192 {
 			return nil, 0, errors.New("invalid Gemini search query metadata")
+		}
+	}
+	if len(metadata.MapsWidget) > 65536 {
+		return nil, 0, errors.New("invalid Gemini Maps widget token")
+	}
+	mapsUsed := metadata.MapsWidget != ""
+	for _, chunk := range metadata.Chunks {
+		if (chunk.Web == nil) == (chunk.Maps == nil) {
+			return nil, 0, errors.New("invalid Gemini grounding source")
+		}
+		if chunk.Web != nil {
+			if !validGeminiGroundingURL(chunk.Web.URI, false) || len(chunk.Web.Title) > 8192 {
+				return nil, 0, errors.New("invalid Gemini grounding source")
+			}
+			continue
+		}
+		mapsUsed = true
+		maps := chunk.Maps
+		if !validGeminiGroundingURL(maps.URI, true) || strings.TrimSpace(maps.Title) == "" || len(maps.Title) > 8192 || len(maps.Text) > 65536 || !strings.HasPrefix(maps.PlaceID, "places/") || len(maps.PlaceID) > 512 {
+			return nil, 0, errors.New("invalid Gemini Maps grounding source")
+		}
+		if maps.PlaceAnswerSources != nil {
+			if len(maps.PlaceAnswerSources.Reviews) > 32 {
+				return nil, 0, errors.New("Gemini Maps grounding metadata exceeds limit")
+			}
+			for _, review := range maps.PlaceAnswerSources.Reviews {
+				if strings.TrimSpace(review.ReviewID) == "" || len(review.ReviewID) > 512 || !validGeminiGroundingURL(review.GoogleMapsURI, true) || len(review.Title) > 8192 {
+					return nil, 0, errors.New("invalid Gemini Maps review source")
+				}
+			}
 		}
 	}
 	annotations := make([]openai.ChatAnnotation, 0)
@@ -922,16 +983,27 @@ func geminiGrounding(raw json.RawMessage, text string) ([]openai.ChatAnnotation,
 			}
 			seenIndices[index] = true
 			chunk := metadata.Chunks[index]
-			if chunk.Web == nil {
-				return nil, 0, errors.New("unsupported Gemini grounding source")
+			if chunk.Web != nil {
+				annotations = append(annotations, openai.ChatAnnotation{Type: "url_citation", URLCitation: &openai.ChatURLCitation{StartIndex: support.Segment.Start, EndIndex: support.Segment.End, Title: chunk.Web.Title, URL: chunk.Web.URI}})
+			} else {
+				annotations = append(annotations, openai.ChatAnnotation{Type: "url_citation", URLCitation: &openai.ChatURLCitation{StartIndex: support.Segment.Start, EndIndex: support.Segment.End, Title: chunk.Maps.Title, URL: chunk.Maps.URI}})
 			}
-			annotations = append(annotations, openai.ChatAnnotation{Type: "url_citation", URLCitation: &openai.ChatURLCitation{StartIndex: support.Segment.Start, EndIndex: support.Segment.End, Title: chunk.Web.Title, URL: chunk.Web.URI}})
 		}
 	}
 	if err := openai.ValidateChatAnnotations(annotations); err != nil {
 		return nil, 0, err
 	}
-	return annotations, len(metadata.Queries), nil
+	searches := len(metadata.Queries)
+	if mapsUsed {
+		searches++
+	}
+	return annotations, searches, nil
+}
+
+func validGeminiGroundingURL(value string, httpsOnly bool) bool {
+	parsed, err := url.Parse(value)
+	validScheme := parsed.Scheme == "https" || !httpsOnly && parsed.Scheme == "http"
+	return err == nil && validScheme && parsed.Host != "" && parsed.User == nil && len(value) <= 8192
 }
 
 func validateGeminiReasoning(blocks []openai.ReasoningBlock) error {

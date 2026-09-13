@@ -250,6 +250,10 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.SearchRequests = openai.WebSearchMaxUses
 		request.SearchRequestsEstimated = true
 	}
+	if req.Request.GeminiGoogleMaps {
+		request.SearchRequests = openai.ReserveTokens(request.SearchRequests, 1)
+		request.SearchRequestsEstimated = true
+	}
 	if req.Request.AnthropicCodeExecution {
 		request.ToolRequests = 1
 	}

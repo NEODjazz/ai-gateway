@@ -39,7 +39,7 @@ func TestGeminiManagedToolsRequireExplicitEndpointCapabilities(t *testing.T) {
 		t.Fatal(err)
 	}
 	legacy := Endpoint{Name: "gemini", Type: "gemini", Provider: Gemini{}}
-	for _, capability := range []string{"gemini_code_execution", "url_context"} {
+	for _, capability := range []string{"gemini_code_execution", "url_context", "google_maps"} {
 		if supportsCatalogCapabilities(catalog, legacy, "model", "chat", capability) {
 			t.Fatalf("legacy endpoint implicitly enabled %s", capability)
 		}

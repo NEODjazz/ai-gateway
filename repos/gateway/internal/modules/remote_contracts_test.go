@@ -446,6 +446,20 @@ func TestRemoteBillingReservesAndCommitsProviderSearchUsage(t *testing.T) {
 	}
 }
 
+func TestRemoteBillingReservesAndCommitsGoogleMapsUsage(t *testing.T) {
+	req := sensitiveContext()
+	req.Request.GeminiGoogleMaps = true
+	reserved := billingRequest(&req)
+	if reserved.SearchRequests != 1 || !reserved.SearchRequestsEstimated {
+		t.Fatalf("Maps reserve=%+v", reserved)
+	}
+	req.Response = &openai.ChatCompletionResponse{Usage: openai.Usage{SearchRequests: 1}}
+	committed := billingRequest(&req)
+	if committed.SearchRequests != 1 || committed.SearchRequestsEstimated {
+		t.Fatalf("Maps commit=%+v", committed)
+	}
+}
+
 func TestRemoteBillingReservesAndCommitsCodeExecutionUsage(t *testing.T) {
 	req := sensitiveContext()
 	req.Request.AnthropicCodeExecution = true

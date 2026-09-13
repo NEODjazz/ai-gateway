@@ -377,6 +377,9 @@ func (h Handler) serveChatAdapted(w http.ResponseWriter, r *http.Request, reques
 	if request.GeminiURLContext {
 		toolIdentifiers = append(toolIdentifiers, "url_context")
 	}
+	if request.GeminiGoogleMaps {
+		toolIdentifiers = append(toolIdentifiers, "google_maps")
+	}
 	if request.AnthropicCodeExecution {
 		toolIdentifiers = append(toolIdentifiers, "code_execution")
 	}

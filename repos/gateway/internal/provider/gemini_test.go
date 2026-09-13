@@ -94,6 +94,52 @@ func TestGeminiGoogleSearchGroundingAndUsage(t *testing.T) {
 	}
 }
 
+func TestGeminiGoogleMapsGroundingAndUsage(t *testing.T) {
+	var upstream geminiRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&upstream); err != nil {
+			t.Fatal(err)
+		}
+		_, _ = fmt.Fprint(w, `{"responseId":"maps","candidates":[{"index":0,"content":{"parts":[{"text":"Try Cafe One."}]},"finishReason":"STOP","groundingMetadata":{"googleMapsWidgetContextToken":"widget-token","groundingChunks":[{"maps":{"uri":"https://maps.google.com/?cid=1","title":"Cafe One","text":"Coffee shop","placeId":"places/one","placeAnswerSources":{"reviewSnippets":[{"reviewId":"review-1","googleMapsUri":"https://maps.google.com/review/1","title":"Review"}]}}}],"groundingSupports":[{"segment":{"startIndex":4,"endIndex":12,"text":"Cafe One"},"groundingChunkIndices":[0]}]}}],"usageMetadata":{"promptTokenCount":4,"toolUsePromptTokenCount":2,"candidatesTokenCount":3,"totalTokenCount":9}}`)
+	}))
+	defer server.Close()
+	location := &openai.GeminiLatLng{Latitude: 40.758896, Longitude: -73.98513}
+	request := openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "restaurants"}}, GeminiGoogleMaps: true, GeminiRetrievalLocation: location}
+	response, err := NewGemini(server.URL, "key", false).ChatCompletions(t.Context(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config, _ := upstream.ToolConfig["retrievalConfig"].(map[string]any)
+	encodedConfig, _ := json.Marshal(config)
+	annotations := response.Choices[0].Message.Annotations
+	if len(upstream.Tools) != 1 || upstream.Tools[0].GoogleMaps == nil || !strings.Contains(string(encodedConfig), `"latitude":40.758896`) || response.Usage.SearchRequests != 1 || response.Usage.ProviderToolInputTokens != 2 || len(annotations) != 1 || annotations[0].URLCitation.URL != "https://maps.google.com/?cid=1" || !strings.Contains(string(response.Choices[0].GeminiGroundingMetadata), "googleMapsWidgetContextToken") {
+		t.Fatalf("upstream=%+v response=%+v", upstream, response)
+	}
+}
+
+func TestGeminiRejectsInvalidGoogleMapsGrounding(t *testing.T) {
+	for _, raw := range []string{
+		`{"groundingChunks":[{"maps":{"uri":"javascript:alert(1)","title":"Place","placeId":"places/one"}}]}`,
+		`{"groundingChunks":[{"maps":{"uri":"https://maps.google.com/place/1","title":"","placeId":"places/one"}}]}`,
+		`{"groundingChunks":[{"maps":{"uri":"https://maps.google.com/place/1","title":"Place","placeId":"wrong"}}]}`,
+		`{"groundingChunks":[{"web":{"uri":"https://example.com","title":"Web"},"maps":{"uri":"https://maps.google.com/place/1","title":"Place","placeId":"places/one"}}]}`,
+		`{"googleMapsWidgetContextToken":"` + strings.Repeat("x", 65537) + `"}`,
+	} {
+		if _, _, err := geminiGrounding(json.RawMessage(raw), "Place"); err == nil {
+			t.Fatalf("invalid Maps grounding accepted: %s", raw[:min(len(raw), 200)])
+		}
+	}
+	request := openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "places"}}, GeminiRetrievalLocation: &openai.GeminiLatLng{}}
+	if _, err := geminiChatRequest(request); err == nil {
+		t.Fatal("retrieval location without Google Maps accepted")
+	}
+	request.GeminiGoogleMaps = true
+	request.GeminiRetrievalLocation.Latitude = 91
+	if _, err := geminiChatRequest(request); err == nil {
+		t.Fatal("out-of-range Maps location accepted")
+	}
+}
+
 func TestGeminiCodeExecutionRoundTrip(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body geminiRequest

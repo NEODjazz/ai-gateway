@@ -13,6 +13,7 @@ describe("modelCapabilityOptions", () => {
       "gemini_safety_settings",
       "gemini_code_execution",
       "url_context",
+      "google_maps",
       "background_responses",
       "background_interactions",
       "embeddings",

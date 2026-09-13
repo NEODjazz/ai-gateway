@@ -19,14 +19,18 @@ type generateRequest struct {
 	Tools       []struct {
 		Functions     []generateFunction `json:"functionDeclarations,omitempty"`
 		GoogleSearch  *struct{}          `json:"googleSearch,omitempty"`
+		GoogleMaps    *struct{}          `json:"googleMaps,omitempty"`
 		CodeExecution *struct{}          `json:"codeExecution,omitempty"`
 		URLContext    *struct{}          `json:"urlContext,omitempty"`
 	} `json:"tools,omitempty"`
 	ToolConfig *struct {
-		FunctionCalling struct {
+		FunctionCalling *struct {
 			Mode  string   `json:"mode"`
 			Names []string `json:"allowedFunctionNames,omitempty"`
-		} `json:"functionCallingConfig"`
+		} `json:"functionCallingConfig,omitempty"`
+		Retrieval *struct {
+			Location *openai.GeminiLatLng `json:"latLng,omitempty"`
+		} `json:"retrievalConfig,omitempty"`
 	} `json:"toolConfig,omitempty"`
 	Generation struct {
 		MaxOutputTokens  *int           `json:"maxOutputTokens,omitempty"`
@@ -399,7 +403,7 @@ func (r generateRequest) chat(model string, stream bool) (openai.ChatCompletionR
 	}
 	for _, tool := range r.Tools {
 		members := 0
-		for _, present := range []bool{len(tool.Functions) > 0, tool.GoogleSearch != nil, tool.CodeExecution != nil, tool.URLContext != nil} {
+		for _, present := range []bool{len(tool.Functions) > 0, tool.GoogleSearch != nil, tool.GoogleMaps != nil, tool.CodeExecution != nil, tool.URLContext != nil} {
 			if present {
 				members++
 			}
@@ -420,6 +424,14 @@ func (r generateRequest) chat(model string, stream bool) (openai.ChatCompletionR
 				return fail("codeExecution")
 			}
 			result.GeminiCodeExecution = true
+			result.NativeInputTokens = openai.ReserveTokens(result.NativeInputTokens, openai.EstimateContextTokens(tool))
+			continue
+		}
+		if tool.GoogleMaps != nil {
+			if result.GeminiGoogleMaps {
+				return fail("googleMaps")
+			}
+			result.GeminiGoogleMaps = true
 			result.NativeInputTokens = openai.ReserveTokens(result.NativeInputTokens, openai.EstimateContextTokens(tool))
 			continue
 		}
@@ -456,26 +468,38 @@ func (r generateRequest) chat(model string, stream bool) (openai.ChatCompletionR
 		return fail("functionDeclarations")
 	}
 	if r.ToolConfig != nil {
-		if len(result.Tools) == 0 {
+		if r.ToolConfig.FunctionCalling == nil && r.ToolConfig.Retrieval == nil {
 			return fail("toolConfig")
 		}
-		config := r.ToolConfig.FunctionCalling
-		switch config.Mode {
-		case "AUTO":
-			result.ToolChoice = "auto"
-		case "NONE":
-			result.ToolChoice = "none"
-		case "ANY":
-			result.ToolChoice = "required"
-		default:
-			return fail("functionCallingConfig.mode")
-		}
-		if len(config.Names) > 0 {
-			if config.Mode != "ANY" || len(config.Names) != 1 || config.Names[0] == "" {
-				return fail("allowedFunctionNames")
+		if config := r.ToolConfig.FunctionCalling; config != nil {
+			if len(result.Tools) == 0 {
+				return fail("toolConfig")
 			}
-			result.ToolChoice = map[string]any{"type": "function", "function": map[string]any{"name": config.Names[0]}}
+			switch config.Mode {
+			case "AUTO":
+				result.ToolChoice = "auto"
+			case "NONE":
+				result.ToolChoice = "none"
+			case "ANY":
+				result.ToolChoice = "required"
+			default:
+				return fail("functionCallingConfig.mode")
+			}
+			if len(config.Names) > 0 {
+				if config.Mode != "ANY" || len(config.Names) != 1 || config.Names[0] == "" {
+					return fail("allowedFunctionNames")
+				}
+				result.ToolChoice = map[string]any{"type": "function", "function": map[string]any{"name": config.Names[0]}}
+			}
 		}
+		if config := r.ToolConfig.Retrieval; config != nil {
+			if !result.GeminiGoogleMaps || config.Location == nil || math.IsNaN(config.Location.Latitude) || math.IsInf(config.Location.Latitude, 0) || config.Location.Latitude < -90 || config.Location.Latitude > 90 || math.IsNaN(config.Location.Longitude) || math.IsInf(config.Location.Longitude, 0) || config.Location.Longitude < -180 || config.Location.Longitude > 180 {
+				return fail("retrievalConfig.latLng")
+			}
+			location := *config.Location
+			result.GeminiRetrievalLocation = &location
+		}
+		result.NativeInputTokens = openai.ReserveTokens(result.NativeInputTokens, openai.EstimateContextTokens(r.ToolConfig))
 	}
 	if _, err := openai.ChatImageAttachments(result.Messages); err != nil {
 		return result, err
