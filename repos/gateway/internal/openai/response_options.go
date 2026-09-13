@@ -19,6 +19,9 @@ func (r ResponseRequest) Validate() string {
 	if message := ValidateMetadata(r.Metadata); message != "" {
 		return message
 	}
+	if message := validateResponseIncludes(r.Include); message != "" {
+		return message
+	}
 	if utf8.RuneCountInString(r.SafetyIdentifier) > 64 {
 		return "safety_identifier must contain at most 64 characters"
 	}
@@ -56,6 +59,31 @@ func (r ResponseRequest) Validate() string {
 	}
 	if r.MaxToolCalls != nil && (*r.MaxToolCalls < 1 || *r.MaxToolCalls > 1000) {
 		return "max_tool_calls must be between 1 and 1000"
+	}
+	return ""
+}
+
+func validateResponseIncludes(include []string) string {
+	if len(include) > 7 {
+		return "include must contain at most 7 values"
+	}
+	seen := make(map[string]struct{}, len(include))
+	for _, value := range include {
+		switch value {
+		case "web_search_call.action.sources",
+			"code_interpreter_call.outputs",
+			"computer_call_output.output.image_url",
+			"file_search_call.results",
+			"message.input_image.image_url",
+			"message.output_text.logprobs",
+			"reasoning.encrypted_content":
+		default:
+			return "include contains an unsupported value"
+		}
+		if _, duplicate := seen[value]; duplicate {
+			return "include values must be unique"
+		}
+		seen[value] = struct{}{}
 	}
 	return ""
 }

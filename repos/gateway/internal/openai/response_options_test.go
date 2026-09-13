@@ -67,6 +67,30 @@ func TestResponseRejectsUnknownServiceTier(t *testing.T) {
 	}
 }
 
+func TestResponseIncludeValidation(t *testing.T) {
+	valid := []string{
+		"web_search_call.action.sources",
+		"code_interpreter_call.outputs",
+		"computer_call_output.output.image_url",
+		"file_search_call.results",
+		"message.input_image.image_url",
+		"message.output_text.logprobs",
+		"reasoning.encrypted_content",
+	}
+	if message := (ResponseRequest{Include: valid}).Validate(); message != "" {
+		t.Fatalf("valid include set rejected: %s", message)
+	}
+	for _, include := range [][]string{
+		{"unknown"},
+		{"reasoning.encrypted_content", "reasoning.encrypted_content"},
+		append(append([]string(nil), valid...), "reasoning.encrypted_content"),
+	} {
+		if message := (ResponseRequest{Include: include}).Validate(); message == "" {
+			t.Fatalf("invalid include set accepted: %v", include)
+		}
+	}
+}
+
 func TestServiceTierValues(t *testing.T) {
 	for _, value := range []string{"", "auto", "default", "on_demand", "flex", "performance", "scale", "priority", "fast", "ultrafast"} {
 		if !validServiceTier(value) {

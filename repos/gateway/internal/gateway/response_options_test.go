@@ -34,3 +34,15 @@ func TestResponsesValidatesStreamOptionsBeforeExecution(t *testing.T) {
 		}
 	}
 }
+
+func TestResponsesRejectsUnsupportedIncludeBeforeExecution(t *testing.T) {
+	handler := Handler{}
+	for _, include := range []string{`["unknown"]`, `["reasoning.encrypted_content","reasoning.encrypted_content"]`} {
+		out := httptest.NewRecorder()
+		body := `{"model":"m","input":"hello","include":` + include + `}`
+		handler.Responses(out, httptest.NewRequest("POST", "/v1/responses", strings.NewReader(body)))
+		if out.Code != 400 || !strings.Contains(out.Body.String(), `"invalid_request"`) {
+			t.Fatalf("include=%s status=%d response=%s", include, out.Code, out.Body.String())
+		}
+	}
+}
