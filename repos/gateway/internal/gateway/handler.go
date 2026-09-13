@@ -255,51 +255,49 @@ func (h Handler) serveChatAs(w http.ResponseWriter, r *http.Request, request ope
 	h.serveChatAdapted(w, r, request, apiType, nil)
 }
 
-func (h Handler) serveChatAdapted(w http.ResponseWriter, r *http.Request, request openai.ChatCompletionRequest, apiType string, transform func(openai.ChatCompletionResponse) (any, error)) {
+func validateChatRequest(request openai.ChatCompletionRequest) string {
 	if err := openai.ValidateLegacyFunctionRequest(request); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
-		return
+		return err.Error()
 	}
 	if message := request.ChatGenerationOptions.Validate(); message != "" {
-		writeError(w, http.StatusBadRequest, "invalid_request", message)
-		return
+		return message
 	}
 	if _, message := openai.ChatRequestPromptCacheBreakpoints(request); message != "" {
-		writeError(w, http.StatusBadRequest, "invalid_request", message)
-		return
+		return message
 	}
 	for _, message := range request.Messages {
 		if err := openai.ValidateChatReasoningContent(message.Role, message.ReasoningContent); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
-			return
+			return err.Error()
 		}
 		if message.Annotations != nil {
-			writeError(w, http.StatusBadRequest, "invalid_request", "messages.annotations is response-only")
-			return
+			return "messages.annotations is response-only"
 		}
 		if message.Audio != nil {
 			if message.Role != "assistant" {
-				writeError(w, http.StatusBadRequest, "invalid_request", "messages.audio requires role=assistant")
-				return
+				return "messages.audio requires role=assistant"
 			}
 			if err := openai.ValidateChatAudioReference(message.Audio); err != nil {
-				writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
-				return
+				return err.Error()
 			}
 		}
 	}
 	if request.MaxTokens != nil && request.MaxCompletionTokens != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "max_tokens and max_completion_tokens are mutually exclusive")
-		return
+		return "max_tokens and max_completion_tokens are mutually exclusive"
 	}
 	if request.StreamOptions != nil && !request.Stream {
-		writeError(w, http.StatusBadRequest, "invalid_request", "stream_options requires stream=true")
-		return
+		return "stream_options requires stream=true"
 	}
 
 	invalidMaxTokens := request.MaxTokens != nil && (*request.MaxTokens < 0 || *request.MaxTokens == 0 && !request.AllowZeroMaxTokens)
 	if invalidMaxTokens || (request.MaxCompletionTokens != nil && *request.MaxCompletionTokens <= 0) {
-		writeError(w, http.StatusBadRequest, "invalid_request", "output token limit must be positive")
+		return "output token limit must be positive"
+	}
+	return ""
+}
+
+func (h Handler) serveChatAdapted(w http.ResponseWriter, r *http.Request, request openai.ChatCompletionRequest, apiType string, transform func(openai.ChatCompletionResponse) (any, error)) {
+	if message := validateChatRequest(request); message != "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", message)
 		return
 	}
 	stream := request.Stream
@@ -346,6 +344,11 @@ func (h Handler) serveChatAdapted(w http.ResponseWriter, r *http.Request, reques
 		return
 	}
 	reqCtx.APIKey = ""
+	request = reqCtx.Request
+	if message := validateChatRequest(request); message != "" {
+		writeError(w, http.StatusBadGateway, "module_failed", "module produced an invalid inference request: "+message)
+		return
+	}
 	if !h.prepareAccessGroups(w, &reqCtx) {
 		return
 	}

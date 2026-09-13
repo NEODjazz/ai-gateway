@@ -55,6 +55,19 @@ func TestAdmissionUsesEffectiveChatAndCountContext(t *testing.T) {
 	}
 }
 
+func TestChatRejectsOptionsInvalidatedByPipeline(t *testing.T) {
+	provider := &chatProvider{}
+	handler := NewHandler(modules.NewPipeline([]modules.Module{rewriteContextModule{rewrite: func(req *modules.RequestContext) {
+		limit := 0
+		req.Request.MaxCompletionTokens = &limit
+	}}}), provider)
+	response := httptest.NewRecorder()
+	handler.ChatCompletions(response, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"m","messages":[{"role":"user","content":"hello"}]}`)))
+	if response.Code != http.StatusBadGateway || provider.request.RequestID != "" || !strings.Contains(response.Body.String(), `"module_failed"`) || !strings.Contains(response.Body.String(), "output token limit") {
+		t.Fatalf("invalid pipeline output continued: status=%d provider=%+v body=%s", response.Code, provider.request, response.Body.String())
+	}
+}
+
 func TestAdmissionUsesReplacedTypedRequests(t *testing.T) {
 	for _, endpoint := range []struct{ path, body string }{
 		{"/v1/responses", `{"model":"m","input":"hi","max_output_tokens":1}`},
