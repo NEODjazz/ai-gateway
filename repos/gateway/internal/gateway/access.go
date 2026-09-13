@@ -169,6 +169,8 @@ func responseToolIdentifiers(tools []openai.ResponseTool) ([]string, bool) {
 			identifier = "code_interpreter"
 		case "file_search":
 			identifier = "file_search"
+		case "web_search", "web_search_2025_08_26", "web_search_preview", "web_search_preview_2025_03_11":
+			identifier = "web_search"
 		case "mcp":
 			var valid bool
 			identifier, valid = mcpToolIdentifier(tool)

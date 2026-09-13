@@ -357,7 +357,10 @@ func validDeploymentCapabilities(capabilities []string) bool {
 	if seen["bedrock_invoke"] && !seen["chat"] && !seen["responses"] {
 		return false
 	}
-	for _, capability := range []string{"web_search", "web_fetch", "tool_search", "memory_tool", "bash_tool", "text_editor_tool", "computer_toolset", "browser_toolset", "thinking", "zero_output", "inference_geo", "context_management", "tool_result_error", "document_citations", "document_metadata", "document_text", "audio", "audio_input", "video_input", "prompt_cache", "assistant_prefill", "gemini_code_execution", "url_context", "google_maps"} {
+	if seen["web_search"] && !seen["chat"] && !seen["responses"] {
+		return false
+	}
+	for _, capability := range []string{"web_fetch", "tool_search", "memory_tool", "bash_tool", "text_editor_tool", "computer_toolset", "browser_toolset", "thinking", "zero_output", "inference_geo", "context_management", "tool_result_error", "document_citations", "document_metadata", "document_text", "audio", "audio_input", "video_input", "prompt_cache", "assistant_prefill", "gemini_code_execution", "url_context", "google_maps"} {
 		if seen[capability] && !seen["chat"] {
 			return false
 		}
@@ -465,6 +468,9 @@ func (r *Router) endpointForManagedDeploymentWithSecret(deployment ModelDeployme
 		}
 	}
 	endpoint := Endpoint{Name: deployment.ID, ProviderID: deployment.ProviderID, Type: managed.Type, Models: append([]string(nil), deployment.Models...), Capabilities: append([]string(nil), deployment.Capabilities...), Priority: deployment.Priority, Weight: deployment.Weight, GuardrailPolicy: deployment.GuardrailPolicy, GuardrailPolicyValid: true, ModelAliases: aliases, Provider: client, Admission: newAdmissionController(deployment.MaxParallelRequests, deployment.QueueCapacity, time.Duration(deployment.QueueTimeoutMS)*time.Millisecond), BaseURL: managed.BaseURL, CredentialID: deployment.CredentialID, RequestTimeout: time.Duration(deployment.RequestTimeoutMS) * time.Millisecond, MaxRetries: deployment.MaxRetries, CooldownAfterFailures: deployment.CooldownAfterFailures, Cooldown: time.Duration(deployment.CooldownSeconds) * time.Second, RateLimitRPM: deployment.RateLimitRPM, RateLimitTPM: deployment.RateLimitTPM, ProviderRateLimitRPM: managed.RateLimitRPM, ProviderRateLimitTPM: managed.RateLimitTPM}
+	if hasCapability(deployment.Capabilities, "responses") && hasCapability(deployment.Capabilities, "web_search") && !endpoint.supportsCapabilities("responses", "web_search") {
+		return Endpoint{}, fmt.Errorf("%w: %s does not support web_search for Responses", ErrUnsupportedProviderCapability, managed.Type)
+	}
 	for _, capability := range deployment.Capabilities {
 		if !supportsManagedAdapterCapability(endpoint, capability) {
 			return Endpoint{}, fmt.Errorf("%w: %s does not support %s", ErrUnsupportedProviderCapability, managed.Type, capability)

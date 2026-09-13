@@ -163,11 +163,14 @@ func TestResponseToolChoiceValidation(t *testing.T) {
 	tools := []ResponseTool{
 		{Type: "function", Name: "lookup"},
 		{Type: "mcp", ServerLabel: "documents", ServerURL: "https://documents.example.test", AllowedTools: []string{"search"}},
+		{Type: "web_search", SearchContextSize: "medium"},
 	}
 	for _, choice := range []any{
 		"none", "auto", "required",
 		map[string]any{"type": "function", "name": "lookup"},
 		map[string]any{"type": "mcp", "server_label": "documents", "name": "search"},
+		map[string]any{"type": "web_search"},
+		map[string]any{"type": "web_search_preview"},
 	} {
 		if message := (ResponseRequest{Tools: tools, ToolChoice: choice}).Validate(); message != "" {
 			t.Fatalf("choice %#v rejected: %s", choice, message)
@@ -188,6 +191,37 @@ func TestResponseToolChoiceValidation(t *testing.T) {
 		}
 		if message := request.Validate(); message == "" {
 			t.Fatalf("invalid choice accepted: %#v", choice)
+		}
+	}
+}
+
+func TestResponseWebSearchToolValidation(t *testing.T) {
+	for _, toolType := range []string{"web_search", "web_search_2025_08_26", "web_search_preview", "web_search_preview_2025_03_11"} {
+		tool := ResponseTool{Type: toolType, SearchContextSize: "high", UserLocation: &ResponseWebSearchLocation{Type: "approximate", City: "Moscow", Country: "RU", Region: "Moscow", Timezone: "Europe/Moscow"}}
+		if toolType == "web_search" || toolType == "web_search_2025_08_26" {
+			tool.Filters = map[string]any{"allowed_domains": []string{"example.com", "docs.example.com"}}
+		}
+		if message := (ResponseRequest{Tools: []ResponseTool{tool}}).Validate(); message != "" {
+			t.Fatalf("type %q rejected: %s", toolType, message)
+		}
+	}
+
+	for _, tools := range [][]ResponseTool{
+		{{Type: "web_search", SearchContextSize: "huge"}},
+		{{Type: "web_search", Filters: "example.com"}},
+		{{Type: "web_search", Filters: map[string]any{"blocked_domains": []string{"example.com"}}}},
+		{{Type: "web_search", Filters: map[string]any{"allowed_domains": []string{"https://example.com"}}}},
+		{{Type: "web_search", Filters: map[string]any{"allowed_domains": []string{"example.com", "example.com"}}}},
+		{{Type: "web_search_preview", Filters: map[string]any{"allowed_domains": []string{"example.com"}}}},
+		{{Type: "web_search", UserLocation: &ResponseWebSearchLocation{Type: "exact"}}},
+		{{Type: "web_search", UserLocation: &ResponseWebSearchLocation{Type: "approximate", Country: "ru"}}},
+		{{Type: "web_search", UserLocation: &ResponseWebSearchLocation{Type: "approximate", City: " Moscow"}}},
+		{{Type: "web_search", Name: "lookup"}},
+		{{Type: "web_search"}, {Type: "web_search_preview"}},
+		{{Type: "function", Name: "lookup", SearchContextSize: "low"}},
+	} {
+		if message := (ResponseRequest{Tools: tools}).Validate(); message == "" {
+			t.Fatalf("invalid web search tools accepted: %+v", tools)
 		}
 	}
 }

@@ -34,23 +34,34 @@ func TestResponsesCachePreservesEndpointOwnership(t *testing.T) {
 
 type replayUnsafeResponseClient struct{ *affinityResponseClient }
 
-func (replayUnsafeResponseClient) SupportsMCP() bool { return true }
+func (replayUnsafeResponseClient) SupportsMCP() bool               { return true }
+func (replayUnsafeResponseClient) SupportsResponseWebSearch() bool { return true }
 
 func TestResponsesWithHostedToolsBypassExactCache(t *testing.T) {
-	client := &affinityResponseClient{id: "resp-tool"}
-	router := Router{
-		endpoints: []Endpoint{{Name: "tool-endpoint", Type: "demo", Capabilities: []string{"responses", "tools", "mcp"}, Provider: replayUnsafeResponseClient{client}}},
-		modules:   modules.NewPipeline(nil), health: newEndpointHealthTracker(), cache: newExactCache(time.Hour),
-	}
-	request := openai.ResponseRequest{Model: "m", Input: "hello", Tools: []openai.ResponseTool{{Type: "mcp", ServerLabel: "documents", ServerURL: "https://documents.example.test"}}}
-	req := modules.RequestContext{CredentialID: "tenant", Request: openai.ChatCompletionRequest{Model: "m"}, ResponseRequest: &request}
-	for range 2 {
-		if _, err := router.Responses(t.Context(), req); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if client.calls != 2 {
-		t.Fatalf("hosted tool response was served from cache: calls=%d", client.calls)
+	for _, test := range []struct {
+		name string
+		tool openai.ResponseTool
+	}{
+		{name: "mcp", tool: openai.ResponseTool{Type: "mcp", ServerLabel: "documents", ServerURL: "https://documents.example.test"}},
+		{name: "web search", tool: openai.ResponseTool{Type: "web_search"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			client := &affinityResponseClient{id: "resp-tool"}
+			router := Router{
+				endpoints: []Endpoint{{Name: "tool-endpoint", Type: "demo", Capabilities: []string{"responses", "tools", "mcp", "web_search"}, Provider: replayUnsafeResponseClient{client}}},
+				modules:   modules.NewPipeline(nil), health: newEndpointHealthTracker(), cache: newExactCache(time.Hour),
+			}
+			request := openai.ResponseRequest{Model: "m", Input: "hello", Tools: []openai.ResponseTool{test.tool}}
+			req := modules.RequestContext{CredentialID: "tenant", Request: openai.ChatCompletionRequest{Model: "m"}, ResponseRequest: &request}
+			for range 2 {
+				if _, err := router.Responses(t.Context(), req); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if client.calls != 2 {
+				t.Fatalf("hosted tool response was served from cache: calls=%d", client.calls)
+			}
+		})
 	}
 }
 

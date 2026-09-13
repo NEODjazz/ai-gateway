@@ -24,12 +24,13 @@ func NewOpenRouter(baseURL, apiKey string, stream bool, rerankPath string) OpenR
 	return OpenRouter{compatible: compatible}
 }
 
-func (OpenRouter) SupportsResponses() bool        { return true }
-func (OpenRouter) SupportsTools() bool            { return true }
-func (OpenRouter) SupportsStructuredOutput() bool { return true }
-func (OpenRouter) SupportsVision() bool           { return true }
-func (OpenRouter) SupportsWebSearch() bool        { return true }
-func (OpenRouter) SupportsChatAudio() bool        { return true }
+func (OpenRouter) SupportsResponses() bool         { return true }
+func (OpenRouter) SupportsTools() bool             { return true }
+func (OpenRouter) SupportsStructuredOutput() bool  { return true }
+func (OpenRouter) SupportsVision() bool            { return true }
+func (OpenRouter) SupportsWebSearch() bool         { return true }
+func (OpenRouter) SupportsResponseWebSearch() bool { return true }
+func (OpenRouter) SupportsChatAudio() bool         { return true }
 
 func (p OpenRouter) ValidateChatParameters(request openai.ChatCompletionRequest) error {
 	return p.compatible.ValidateChatParameters(request)

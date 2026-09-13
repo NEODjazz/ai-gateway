@@ -184,7 +184,7 @@ func validateResponseTools(tools []ResponseTool) string {
 	}
 	functionNames := make(map[string]struct{}, len(tools))
 	mcpLabels := make(map[string]struct{}, len(tools))
-	hostedTypes := make(map[string]struct{}, 2)
+	hostedTypes := make(map[string]struct{}, 3)
 	for index, tool := range tools {
 		switch tool.Type {
 		case "function":
@@ -194,7 +194,7 @@ func validateResponseTools(tools []ResponseTool) string {
 			if utf8.RuneCountInString(tool.Description) > 4096 {
 				return "function tool descriptions must contain at most 4096 characters"
 			}
-			if tool.ServerLabel != "" || tool.ServerURL != "" || tool.ServerDescription != "" || len(tool.AllowedTools) > 0 || tool.RequireApproval != nil || len(tool.Headers) > 0 || len(tool.VectorStoreIDs) > 0 || tool.Container != nil || tool.Filters != nil || tool.MaxNumResults != nil || tool.RankingOptions != nil || tool.RewriteQuery != nil {
+			if tool.ServerLabel != "" || tool.ServerURL != "" || tool.ServerDescription != "" || len(tool.AllowedTools) > 0 || tool.RequireApproval != nil || len(tool.Headers) > 0 || len(tool.VectorStoreIDs) > 0 || tool.Container != nil || tool.Filters != nil || tool.MaxNumResults != nil || tool.RankingOptions != nil || tool.RewriteQuery != nil || tool.SearchContextSize != "" || tool.UserLocation != nil {
 				return "function tools contain unsupported fields"
 			}
 			if tool.Parameters != nil && !isJSONObject(tool.Parameters) {
@@ -208,7 +208,7 @@ func validateResponseTools(tools []ResponseTool) string {
 			if strings.TrimSpace(tool.ServerLabel) == "" || !validResponseMCPURL(tool.ServerURL) {
 				return "mcp tools require a server_label and safe HTTPS server_url"
 			}
-			if tool.Name != "" || tool.Description != "" || tool.Parameters != nil || tool.Strict != nil || len(tool.VectorStoreIDs) > 0 || tool.Container != nil || tool.Filters != nil || tool.MaxNumResults != nil || tool.RankingOptions != nil || tool.RewriteQuery != nil {
+			if tool.Name != "" || tool.Description != "" || tool.Parameters != nil || tool.Strict != nil || len(tool.VectorStoreIDs) > 0 || tool.Container != nil || tool.Filters != nil || tool.MaxNumResults != nil || tool.RankingOptions != nil || tool.RewriteQuery != nil || tool.SearchContextSize != "" || tool.UserLocation != nil {
 				return "mcp tools contain unsupported fields"
 			}
 			if _, duplicate := mcpLabels[tool.ServerLabel]; duplicate {
@@ -233,7 +233,7 @@ func validateResponseTools(tools []ResponseTool) string {
 				return "code_interpreter tools must be unique"
 			}
 			hostedTypes[tool.Type] = struct{}{}
-			if tool.Name != "" || tool.Description != "" || tool.Parameters != nil || tool.Strict != nil || tool.ServerLabel != "" || tool.ServerURL != "" || tool.ServerDescription != "" || len(tool.AllowedTools) > 0 || tool.RequireApproval != nil || len(tool.Headers) > 0 || len(tool.VectorStoreIDs) > 0 || tool.Filters != nil || tool.MaxNumResults != nil || tool.RankingOptions != nil || tool.RewriteQuery != nil {
+			if tool.Name != "" || tool.Description != "" || tool.Parameters != nil || tool.Strict != nil || tool.ServerLabel != "" || tool.ServerURL != "" || tool.ServerDescription != "" || len(tool.AllowedTools) > 0 || tool.RequireApproval != nil || len(tool.Headers) > 0 || len(tool.VectorStoreIDs) > 0 || tool.Filters != nil || tool.MaxNumResults != nil || tool.RankingOptions != nil || tool.RewriteQuery != nil || tool.SearchContextSize != "" || tool.UserLocation != nil {
 				return "code_interpreter tools contain unsupported fields"
 			}
 			if _, _, message := InspectResponseCodeInterpreterContainer(tool.Container); message != "" {
@@ -244,7 +244,7 @@ func validateResponseTools(tools []ResponseTool) string {
 				return "file_search tools must be unique"
 			}
 			hostedTypes[tool.Type] = struct{}{}
-			if tool.Name != "" || tool.Description != "" || tool.Parameters != nil || tool.Strict != nil || tool.ServerLabel != "" || tool.ServerURL != "" || tool.ServerDescription != "" || len(tool.AllowedTools) > 0 || tool.RequireApproval != nil || len(tool.Headers) > 0 || tool.Container != nil {
+			if tool.Name != "" || tool.Description != "" || tool.Parameters != nil || tool.Strict != nil || tool.ServerLabel != "" || tool.ServerURL != "" || tool.ServerDescription != "" || len(tool.AllowedTools) > 0 || tool.RequireApproval != nil || len(tool.Headers) > 0 || tool.Container != nil || tool.SearchContextSize != "" || tool.UserLocation != nil {
 				return "file_search tools contain unsupported fields"
 			}
 			if len(tool.VectorStoreIDs) == 0 || len(tool.VectorStoreIDs) > 1 {
@@ -263,8 +263,71 @@ func validateResponseTools(tools []ResponseTool) string {
 			if message := validateResponseFileSearchOptions(tool); message != "" {
 				return message
 			}
+		case "web_search", "web_search_2025_08_26", "web_search_preview", "web_search_preview_2025_03_11":
+			if _, duplicate := hostedTypes["web_search"]; duplicate {
+				return "web_search tools must be unique"
+			}
+			hostedTypes["web_search"] = struct{}{}
+			if tool.Name != "" || tool.Description != "" || tool.Parameters != nil || tool.Strict != nil || tool.ServerLabel != "" || tool.ServerURL != "" || tool.ServerDescription != "" || len(tool.AllowedTools) > 0 || tool.RequireApproval != nil || len(tool.Headers) > 0 || len(tool.VectorStoreIDs) > 0 || tool.Container != nil || tool.MaxNumResults != nil || tool.RankingOptions != nil || tool.RewriteQuery != nil {
+				return "web_search tools contain unsupported fields"
+			}
+			if message := validateResponseWebSearchOptions(tool); message != "" {
+				return message
+			}
 		default:
 			return "tools contain an unsupported type at index " + strconv.Itoa(index)
+		}
+	}
+	return ""
+}
+
+// IsResponseWebSearchTool reports whether a Responses tool type is a supported
+// current or preview web-search contract.
+func IsResponseWebSearchTool(toolType string) bool {
+	switch toolType {
+	case "web_search", "web_search_2025_08_26", "web_search_preview", "web_search_preview_2025_03_11":
+		return true
+	default:
+		return false
+	}
+}
+
+func validateResponseWebSearchOptions(tool ResponseTool) string {
+	switch tool.SearchContextSize {
+	case "", "low", "medium", "high":
+	default:
+		return "web_search search_context_size must be low, medium, or high"
+	}
+	if tool.Filters != nil {
+		if tool.Type == "web_search_preview" || tool.Type == "web_search_preview_2025_03_11" {
+			return "web_search preview tools do not support filters"
+		}
+		encoded, err := json.Marshal(tool.Filters)
+		if err != nil || len(encoded) > 16<<10 {
+			return "web_search filters must be a bounded object"
+		}
+		var object map[string]json.RawMessage
+		if json.Unmarshal(encoded, &object) != nil || object == nil || !onlyResponseFilterKeys(object, "allowed_domains") {
+			return "web_search filters accept only allowed_domains"
+		}
+		if raw, supplied := object["allowed_domains"]; supplied {
+			var domains []string
+			if json.Unmarshal(raw, &domains) != nil || !validNativeSearchDomains(domains) {
+				return "web_search allowed_domains contain an invalid or duplicate value"
+			}
+		}
+	}
+	if location := tool.UserLocation; location != nil {
+		if location.Type != "approximate" {
+			return "web_search user_location requires type=approximate"
+		}
+		for _, value := range []string{location.City, location.Region, location.Timezone} {
+			if strings.TrimSpace(value) != value || utf8.RuneCountInString(value) > 128 {
+				return "web_search user_location contains an invalid value"
+			}
+		}
+		if location.Country != "" && (len(location.Country) != 2 || location.Country[0] < 'A' || location.Country[0] > 'Z' || location.Country[1] < 'A' || location.Country[1] > 'Z') {
+			return "web_search user_location.country must be a two-letter uppercase country code"
 		}
 	}
 	return ""
@@ -512,6 +575,14 @@ func validateResponseToolChoice(tools []ResponseTool, choice any) string {
 		if len(object) == 1 {
 			for _, tool := range tools {
 				if tool.Type == kind {
+					return ""
+				}
+			}
+		}
+	case "web_search", "web_search_2025_08_26", "web_search_preview", "web_search_preview_2025_03_11":
+		if len(object) == 1 {
+			for _, tool := range tools {
+				if IsResponseWebSearchTool(tool.Type) {
 					return ""
 				}
 			}

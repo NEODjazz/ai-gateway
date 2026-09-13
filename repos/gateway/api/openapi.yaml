@@ -9026,6 +9026,43 @@ components:
               properties:
                 embedding_weight: {type: number, minimum: 0, maximum: 1}
                 text_weight: {type: number, minimum: 0, maximum: 1}
+    WebSearchResponseTool:
+      type: object
+      description: Provider-managed web search. Gateway authorization uses the canonical web_search tool grant, and routing requires an explicit web_search deployment capability.
+      additionalProperties: false
+      required: [type]
+      properties:
+        type: {type: string, enum: [web_search, web_search_2025_08_26]}
+        filters:
+          type: object
+          additionalProperties: false
+          properties:
+            allowed_domains:
+              type: array
+              maxItems: 20
+              uniqueItems: true
+              items: {type: string, minLength: 1, maxLength: 253}
+        search_context_size: {type: string, enum: [low, medium, high]}
+        user_location: {$ref: '#/components/schemas/ResponseWebSearchUserLocation'}
+    WebSearchPreviewResponseTool:
+      type: object
+      description: Legacy provider-managed web search contract retained for compatible upstream deployments.
+      additionalProperties: false
+      required: [type]
+      properties:
+        type: {type: string, enum: [web_search_preview, web_search_preview_2025_03_11]}
+        search_context_size: {type: string, enum: [low, medium, high]}
+        user_location: {$ref: '#/components/schemas/ResponseWebSearchUserLocation'}
+    ResponseWebSearchUserLocation:
+      type: object
+      additionalProperties: false
+      required: [type]
+      properties:
+        type: {type: string, const: approximate}
+        city: {type: string, maxLength: 128}
+        country: {type: string, pattern: '^[A-Z]{2}$'}
+        region: {type: string, maxLength: 128}
+        timezone: {type: string, maxLength: 128}
     ResponseFileSearchFilter:
       oneOf:
         - type: object
@@ -9112,6 +9149,8 @@ components:
               - $ref: '#/components/schemas/MCPResponseTool'
               - $ref: '#/components/schemas/CodeInterpreterResponseTool'
               - $ref: '#/components/schemas/FileSearchResponseTool'
+              - $ref: '#/components/schemas/WebSearchResponseTool'
+              - $ref: '#/components/schemas/WebSearchPreviewResponseTool'
         tool_choice: {}
         parallel_tool_calls: {type: boolean}
         text:
@@ -9284,6 +9323,10 @@ components:
             oneOf:
               - $ref: '#/components/schemas/FunctionResponseTool'
               - $ref: '#/components/schemas/MCPResponseTool'
+              - $ref: '#/components/schemas/CodeInterpreterResponseTool'
+              - $ref: '#/components/schemas/FileSearchResponseTool'
+              - $ref: '#/components/schemas/WebSearchResponseTool'
+              - $ref: '#/components/schemas/WebSearchPreviewResponseTool'
         tool_choice: {}
         parallel_tool_calls: {type: boolean}
         text:
@@ -9373,6 +9416,10 @@ components:
         name: {type: string}
         call_id: {type: string}
         arguments: {type: string}
+        action:
+          type: object
+          additionalProperties: true
+          description: Provider web-search action, including bounded query, page and source metadata when returned upstream.
         encrypted_content: {type: string, nullable: true}
         phase:
           type: [string, "null"]

@@ -4,11 +4,12 @@ package provider
 // responses client does not prove that an adapter preserves optional request
 // semantics.
 
-func (OpenAICompatible) SupportsTools() bool            { return true }
-func (OpenAICompatible) SupportsStructuredOutput() bool { return true }
-func (OpenAICompatible) SupportsWebSearch() bool        { return true }
-func (OpenAICompatible) SupportsChatAudio() bool        { return true }
-func (OpenAICompatible) SupportsFileInput() bool        { return true }
+func (OpenAICompatible) SupportsTools() bool             { return true }
+func (OpenAICompatible) SupportsStructuredOutput() bool  { return true }
+func (OpenAICompatible) SupportsWebSearch() bool         { return true }
+func (OpenAICompatible) SupportsResponseWebSearch() bool { return true }
+func (OpenAICompatible) SupportsChatAudio() bool         { return true }
+func (OpenAICompatible) SupportsFileInput() bool         { return true }
 func (p OpenAICompatible) SupportsAssistantPrefill() bool {
 	return p.supportsMessagePrefix
 }
@@ -47,7 +48,8 @@ func (Bedrock) SupportsPromptCache() bool { return true }
 
 // Mistral embeds the compatible adapter but rejects these optional request
 // fields in its native parameter validator.
-func (Mistral) SupportsMCP() bool         { return false }
-func (Mistral) SupportsWebSearch() bool   { return false }
-func (Mistral) SupportsChatAudio() bool   { return false }
-func (Mistral) SupportsPromptCache() bool { return false }
+func (Mistral) SupportsMCP() bool               { return false }
+func (Mistral) SupportsWebSearch() bool         { return false }
+func (Mistral) SupportsResponseWebSearch() bool { return false }
+func (Mistral) SupportsChatAudio() bool         { return false }
+func (Mistral) SupportsPromptCache() bool       { return false }

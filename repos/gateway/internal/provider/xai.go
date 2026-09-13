@@ -37,6 +37,7 @@ func (XAI) SupportsTools() bool              { return true }
 func (XAI) SupportsStructuredOutput() bool   { return true }
 func (XAI) SupportsVision() bool             { return true }
 func (XAI) SupportsWebSearch() bool          { return true }
+func (XAI) SupportsResponseWebSearch() bool  { return true }
 func (XAI) SupportsImageGeneration() bool    { return true }
 func (XAI) SupportsImageEdit() bool          { return true }
 func (XAI) SupportsAudioTranscription() bool { return true }

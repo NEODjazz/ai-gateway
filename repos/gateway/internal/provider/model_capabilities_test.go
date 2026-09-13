@@ -34,6 +34,12 @@ func TestCachedContentRequiresChat(t *testing.T) {
 	}
 }
 
+func TestWebSearchCapabilitySupportsChatOrResponses(t *testing.T) {
+	if validDeploymentCapabilities([]string{"web_search"}) || !validDeploymentCapabilities([]string{"chat", "web_search"}) || !validDeploymentCapabilities([]string{"responses", "web_search"}) {
+		t.Fatal("web search capability dependency is incorrect")
+	}
+}
+
 func TestGeminiSafetySettingsRequireChat(t *testing.T) {
 	if validDeploymentCapabilities([]string{"gemini_safety_settings"}) || !validDeploymentCapabilities([]string{"chat", "gemini_safety_settings"}) {
 		t.Fatal("Gemini safety settings capability dependency is incorrect")

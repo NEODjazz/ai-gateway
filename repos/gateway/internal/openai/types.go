@@ -776,23 +776,33 @@ type ResponseInputTokenCount struct {
 }
 
 type ResponseTool struct {
-	Type              string                    `json:"type"`
-	Name              string                    `json:"name,omitempty"`
-	Description       string                    `json:"description,omitempty"`
-	Parameters        any                       `json:"parameters,omitempty"`
-	Strict            *bool                     `json:"strict,omitempty"`
-	ServerLabel       string                    `json:"server_label,omitempty"`
-	ServerURL         string                    `json:"server_url,omitempty"`
-	ServerDescription string                    `json:"server_description,omitempty"`
-	AllowedTools      []string                  `json:"allowed_tools,omitempty"`
-	RequireApproval   any                       `json:"require_approval,omitempty"`
-	Headers           map[string]string         `json:"headers,omitempty"`
-	VectorStoreIDs    []string                  `json:"vector_store_ids,omitempty"`
-	Container         any                       `json:"container,omitempty"`
-	Filters           any                       `json:"filters,omitempty"`
-	MaxNumResults     *int                      `json:"max_num_results,omitempty"`
-	RankingOptions    *FileSearchRankingOptions `json:"ranking_options,omitempty"`
-	RewriteQuery      *bool                     `json:"rewrite_query,omitempty"`
+	Type              string                     `json:"type"`
+	Name              string                     `json:"name,omitempty"`
+	Description       string                     `json:"description,omitempty"`
+	Parameters        any                        `json:"parameters,omitempty"`
+	Strict            *bool                      `json:"strict,omitempty"`
+	ServerLabel       string                     `json:"server_label,omitempty"`
+	ServerURL         string                     `json:"server_url,omitempty"`
+	ServerDescription string                     `json:"server_description,omitempty"`
+	AllowedTools      []string                   `json:"allowed_tools,omitempty"`
+	RequireApproval   any                        `json:"require_approval,omitempty"`
+	Headers           map[string]string          `json:"headers,omitempty"`
+	VectorStoreIDs    []string                   `json:"vector_store_ids,omitempty"`
+	Container         any                        `json:"container,omitempty"`
+	Filters           any                        `json:"filters,omitempty"`
+	MaxNumResults     *int                       `json:"max_num_results,omitempty"`
+	RankingOptions    *FileSearchRankingOptions  `json:"ranking_options,omitempty"`
+	RewriteQuery      *bool                      `json:"rewrite_query,omitempty"`
+	SearchContextSize string                     `json:"search_context_size,omitempty"`
+	UserLocation      *ResponseWebSearchLocation `json:"user_location,omitempty"`
+}
+
+type ResponseWebSearchLocation struct {
+	Type     string `json:"type"`
+	City     string `json:"city,omitempty"`
+	Country  string `json:"country,omitempty"`
+	Region   string `json:"region,omitempty"`
+	Timezone string `json:"timezone,omitempty"`
 }
 
 type FileSearchRankingOptions struct {
@@ -863,6 +873,7 @@ type ResponseIncompleteDetails struct {
 type ResponseOutputItem struct {
 	Phase            *string                 `json:"phase,omitempty"`
 	EncryptedContent *string                 `json:"encrypted_content,omitempty"`
+	Action           json.RawMessage         `json:"action,omitempty"`
 	ID               string                  `json:"id,omitempty"`
 	Type             string                  `json:"type"`
 	Status           string                  `json:"status,omitempty"`

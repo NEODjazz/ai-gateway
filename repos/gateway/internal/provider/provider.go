@@ -3377,6 +3377,9 @@ func requiredResponseCapabilities(request openai.ResponseRequest, stream bool) [
 		if tool.Type == "mcp" {
 			required = append(required, "mcp")
 		}
+		if openai.IsResponseWebSearchTool(tool.Type) {
+			required = append(required, "web_search")
+		}
 	}
 	if request.Text != nil {
 		required = append(required, "structured_output")
@@ -3426,6 +3429,12 @@ func (e Endpoint) supportsCapabilities(required ...string) bool {
 	if hasCapability(required, "responses") {
 		if client, ok := e.Provider.(interface{ SupportsResponses() bool }); ok && !client.SupportsResponses() {
 			return false
+		}
+		if hasCapability(required, "web_search") {
+			client, ok := e.Provider.(interface{ SupportsResponseWebSearch() bool })
+			if !ok || !client.SupportsResponseWebSearch() {
+				return false
+			}
 		}
 	}
 	if hasCapability(required, "rerank") {

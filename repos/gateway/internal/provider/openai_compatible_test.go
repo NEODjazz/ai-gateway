@@ -38,6 +38,21 @@ func TestOpenAICompatibleForwardsBackgroundResponses(t *testing.T) {
 	}
 }
 
+func TestOpenAICompatiblePreservesWebSearchAction(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprint(w, `{"id":"resp-web","object":"response","status":"completed","model":"model","output":[{"id":"ws_1","type":"web_search_call","status":"completed","action":{"type":"search","queries":["latest news"],"sources":[{"type":"url","url":"https://example.com/news"}]}}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`)
+	}))
+	defer server.Close()
+
+	response, err := NewOpenAICompatible(server.URL, "", false).Responses(t.Context(), openai.ResponseRequest{Model: "model", Input: "latest news", Tools: []openai.ResponseTool{{Type: "web_search"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Output) != 1 || response.Output[0].Type != "web_search_call" || !json.Valid(response.Output[0].Action) || !strings.Contains(string(response.Output[0].Action), `"https://example.com/news"`) {
+		t.Fatalf("web search action was not preserved: %+v", response.Output)
+	}
+}
+
 func TestOpenAICompatibleForwardsMaxCompletionTokensWithoutLegacyParameters(t *testing.T) {
 	var upstream map[string]json.RawMessage
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -642,6 +657,7 @@ func TestOpenAICompatibleStreamsResponsesWhenEnabled(t *testing.T) {
 	maxResults := 12
 	scoreThreshold := 0.4
 	rewriteQuery := true
+	webSearch := openai.ResponseTool{Type: "web_search", Filters: map[string]any{"allowed_domains": []string{"example.com"}}, SearchContextSize: "high", UserLocation: &openai.ResponseWebSearchLocation{Type: "approximate", Country: "RU", Timezone: "Europe/Moscow"}}
 	provider := NewOpenAICompatible(server.URL, "", true)
 	response, err := provider.StreamResponses(context.Background(), openai.ResponseRequest{
 		Model: "test-model", Input: "hello", Stream: true, StreamOptions: &openai.ResponseStreamOptions{IncludeObfuscation: &includeObfuscation}, PreviousResponse: "resp-previous", SafetyIdentifier: "provider-user", PromptCacheKey: "tenant-thread",
@@ -650,6 +666,7 @@ func TestOpenAICompatibleStreamsResponsesWhenEnabled(t *testing.T) {
 			{Type: "mcp", ServerLabel: "weather-prod", ServerURL: "https://mcp.example.test", AllowedTools: []string{"forecast"}, RequireApproval: "never", Headers: map[string]string{"X-MCP-Key": "scoped"}},
 			{Type: "code_interpreter", Container: map[string]any{"type": "auto", "file_ids": []string{"file_owned"}}},
 			{Type: "file_search", VectorStoreIDs: []string{"vs_owned"}, Filters: map[string]any{"type": "eq", "key": "team", "value": "support"}, MaxNumResults: &maxResults, RankingOptions: &openai.FileSearchRankingOptions{Ranker: "auto", ScoreThreshold: &scoreThreshold}, RewriteQuery: &rewriteQuery},
+			webSearch,
 		},
 		ToolChoice: "auto", Text: map[string]any{"format": map[string]any{"type": "json_object"}, "verbosity": "high"},
 	}, func(event string, payload string) error {
@@ -670,8 +687,11 @@ func TestOpenAICompatibleStreamsResponsesWhenEnabled(t *testing.T) {
 	container, _ := upstreamRequest.Tools[2].Container.(map[string]any)
 	fileIDs, _ := container["file_ids"].([]any)
 	fileSearch := upstreamRequest.Tools[3]
+	forwardedWebSearch := upstreamRequest.Tools[4]
 	filter, _ := fileSearch.Filters.(map[string]any)
-	if upstreamRequest.PreviousResponse != "resp-previous" || upstreamRequest.SafetyIdentifier != "provider-user" || upstreamRequest.PromptCacheKey != "tenant-thread" || len(upstreamRequest.Tools) != 4 || upstreamRequest.Tools[0].Name != "weather" || upstreamRequest.Tools[1].ServerLabel != "weather-prod" || upstreamRequest.Tools[1].Headers["X-MCP-Key"] != "scoped" || len(fileIDs) != 1 || fileIDs[0] != "file_owned" || len(fileSearch.VectorStoreIDs) != 1 || fileSearch.VectorStoreIDs[0] != "vs_owned" || filter["key"] != "team" || fileSearch.MaxNumResults == nil || *fileSearch.MaxNumResults != 12 || fileSearch.RankingOptions == nil || fileSearch.RankingOptions.ScoreThreshold == nil || *fileSearch.RankingOptions.ScoreThreshold != 0.4 || fileSearch.RewriteQuery == nil || !*fileSearch.RewriteQuery || textConfig["verbosity"] != "high" {
+	webFilter, _ := forwardedWebSearch.Filters.(map[string]any)
+	webDomains, _ := webFilter["allowed_domains"].([]any)
+	if upstreamRequest.PreviousResponse != "resp-previous" || upstreamRequest.SafetyIdentifier != "provider-user" || upstreamRequest.PromptCacheKey != "tenant-thread" || len(upstreamRequest.Tools) != 5 || upstreamRequest.Tools[0].Name != "weather" || upstreamRequest.Tools[1].ServerLabel != "weather-prod" || upstreamRequest.Tools[1].Headers["X-MCP-Key"] != "scoped" || len(fileIDs) != 1 || fileIDs[0] != "file_owned" || len(fileSearch.VectorStoreIDs) != 1 || fileSearch.VectorStoreIDs[0] != "vs_owned" || filter["key"] != "team" || fileSearch.MaxNumResults == nil || *fileSearch.MaxNumResults != 12 || fileSearch.RankingOptions == nil || fileSearch.RankingOptions.ScoreThreshold == nil || *fileSearch.RankingOptions.ScoreThreshold != 0.4 || fileSearch.RewriteQuery == nil || !*fileSearch.RewriteQuery || forwardedWebSearch.SearchContextSize != "high" || forwardedWebSearch.UserLocation == nil || forwardedWebSearch.UserLocation.Country != "RU" || len(webDomains) != 1 || webDomains[0] != "example.com" || textConfig["verbosity"] != "high" {
 		t.Fatalf("responses tools/state/format were not forwarded: %+v", upstreamRequest)
 	}
 	if len(payloads) != 4 {

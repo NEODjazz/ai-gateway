@@ -561,6 +561,10 @@ type visionCaptureClient struct{ *modelCaptureProvider }
 
 func (visionCaptureClient) SupportsVision() bool { return true }
 
+type responseWebSearchCaptureClient struct{ *modelCaptureProvider }
+
+func (responseWebSearchCaptureClient) SupportsResponseWebSearch() bool { return true }
+
 func (p *modelCaptureProvider) ChatCompletions(_ context.Context, request openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
 	p.seenModel = request.Model
 	return staticProvider{content: p.content}.ChatCompletions(context.Background(), request)
@@ -1739,6 +1743,29 @@ func TestResponsesCodeInterpreterRequiresExplicitCapability(t *testing.T) {
 	}, false)
 	if strings.Join(required, ",") != "responses,tools,code_interpreter,file_search" {
 		t.Fatalf("unexpected Responses capabilities: %v", required)
+	}
+}
+
+func TestResponsesWebSearchRequiresDeclaredAndAdapterCapability(t *testing.T) {
+	required := requiredResponseCapabilities(openai.ResponseRequest{Tools: []openai.ResponseTool{{Type: "web_search"}}}, false)
+	if strings.Join(required, ",") != "responses,tools,web_search" {
+		t.Fatalf("unexpected Responses web search capabilities: %v", required)
+	}
+
+	undeclared := &modelCaptureProvider{content: "undeclared"}
+	chatOnly := &modelCaptureProvider{content: "chat-only"}
+	compatible := &modelCaptureProvider{content: "compatible"}
+	router := Router{health: newEndpointHealthTracker(), endpoints: []Endpoint{
+		{Name: "undeclared", Type: "openai-compatible", Priority: 1, Capabilities: []string{"responses", "tools"}, Provider: responseWebSearchCaptureClient{undeclared}},
+		{Name: "chat-only", Type: "anthropic", Priority: 2, Capabilities: []string{"responses", "tools", "web_search"}, Provider: chatOnly},
+		{Name: "compatible", Type: "openai-compatible", Priority: 3, Capabilities: []string{"responses", "tools", "web_search"}, Provider: responseWebSearchCaptureClient{compatible}},
+	}}
+	request := openai.ResponseRequest{Model: "model", Input: "latest news", Tools: []openai.ResponseTool{{Type: "web_search"}}}
+	if _, err := router.Responses(t.Context(), modules.RequestContext{Request: openai.ChatCompletionRequest{Model: "model"}, ResponseRequest: &request}); err != nil {
+		t.Fatal(err)
+	}
+	if undeclared.seenModel != "" || chatOnly.seenModel != "" || compatible.seenModel != "model" {
+		t.Fatalf("web search used an incompatible deployment: undeclared=%q chat-only=%q compatible=%q", undeclared.seenModel, chatOnly.seenModel, compatible.seenModel)
 	}
 }
 

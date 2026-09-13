@@ -986,7 +986,7 @@ func TestAnthropicRejectsUnsupportedResponsesToolsBeforeUpstream(t *testing.T) {
 	defer server.Close()
 
 	client := NewAnthropic(server.URL, "", true)
-	for _, toolType := range []string{"mcp", "code_interpreter", "file_search"} {
+	for _, toolType := range []string{"mcp", "code_interpreter", "file_search", "web_search", "web_search_preview"} {
 		t.Run(toolType, func(t *testing.T) {
 			request := openai.ResponseRequest{Model: "test", Input: "hello", Tools: []openai.ResponseTool{{Type: toolType}}}
 			for _, call := range []func() error{

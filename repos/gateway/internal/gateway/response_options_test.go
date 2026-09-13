@@ -186,6 +186,32 @@ func TestResponsesAuthorizesCodeInterpreterTool(t *testing.T) {
 	}
 }
 
+func TestResponsesAuthorizesWebSearchTool(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		allowed     []string
+		wantStatus  int
+		wantForward bool
+	}{
+		{name: "allowed", allowed: []string{"web_search"}, wantStatus: 200, wantForward: true},
+		{name: "denied", allowed: []string{"lookup"}, wantStatus: 403},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			upstream := &chatProvider{}
+			handler := NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}, tools: test.allowed}}), upstream)
+			out := httptest.NewRecorder()
+			handler.Responses(out, httptest.NewRequest("POST", "/v1/responses", strings.NewReader(`{"model":"m","input":"latest news","tools":[{"type":"web_search","filters":{"allowed_domains":["example.com"]},"search_context_size":"high","user_location":{"type":"approximate","country":"RU","timezone":"Europe/Moscow"}}],"tool_choice":{"type":"web_search"}}`)))
+			if out.Code != test.wantStatus {
+				t.Fatalf("status=%d body=%s", out.Code, out.Body.String())
+			}
+			forwarded := upstream.request.ResponseRequest != nil && len(upstream.request.ResponseRequest.Tools) == 1 && upstream.request.ResponseRequest.Tools[0].Type == "web_search"
+			if forwarded != test.wantForward {
+				t.Fatalf("forwarded=%t request=%+v", forwarded, upstream.request.ResponseRequest)
+			}
+		})
+	}
+}
+
 func TestResponsesRequireOwnedBuiltInToolResources(t *testing.T) {
 	identity := modules.RequestContext{CredentialID: "credential-1", UserID: "user-1"}
 	owner := fileOwnerKey(identity)

@@ -265,6 +265,17 @@ func TestManagedDeploymentAcceptsSupportedNativeCapabilities(t *testing.T) {
 	}
 }
 
+func TestManagedAnthropicRejectsResponsesWebSearchCombination(t *testing.T) {
+	router := New(Config{}).(*Router)
+	if _, err := router.CreateProvider(ManagedProvider{ID: "provider", Type: "anthropic", BaseURL: "https://provider.example", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := router.CreateModelDeployment(ModelDeployment{ID: "deployment", ProviderID: "provider", Models: []string{"model"}, Capabilities: []string{"chat", "responses", "tools", "web_search"}, Enabled: true})
+	if !errors.Is(err, ErrUnsupportedProviderCapability) {
+		t.Fatalf("unsupported Responses web search combination accepted: %v", err)
+	}
+}
+
 func TestManagedDeploymentAcceptsSupportedFeatureCapabilities(t *testing.T) {
 	tests := []struct {
 		providerType string
