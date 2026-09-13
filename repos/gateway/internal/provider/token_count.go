@@ -38,6 +38,7 @@ type TokenCountRequest struct {
 	AnthropicCacheControl      *openai.PromptCacheBreakpoint
 	AnthropicInferenceGeo      string
 	AnthropicContextManagement json.RawMessage
+	GeminiCachedContent        string
 }
 type TokenCountResult struct {
 	InputTokens         int

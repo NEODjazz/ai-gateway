@@ -18,6 +18,9 @@ func (r Router) CountTokens(ctx context.Context, req modules.RequestContext) (To
 	defer cancel()
 	candidates := r.routeCandidates(ctx, req, req.Request, requiredChatCapabilities(req.Request, false)...)
 	if len(candidates) == 0 {
+		if err := r.validateCachedContentRequestBinding(req.Request); err != nil {
+			return TokenCountResult{}, err
+		}
 		return TokenCountResult{}, fmt.Errorf("no token-count endpoint for model %q", req.Request.Model)
 	}
 	progress := newRouteProgress(candidates)
@@ -33,6 +36,9 @@ func (r Router) CountTokens(ctx context.Context, req modules.RequestContext) (To
 			return TokenCountResult{}, modules.ErrGuardrailUnavailable
 		}
 		attempt := providerAttemptContext(req, endpoint)
+		if req.Request.GeminiCachedContent != "" && cachedContentPolicyIdentity(attempt) != req.Request.GeminiCachedContentPolicy {
+			return TokenCountResult{}, ErrCachedContentPolicyChanged
+		}
 		if err := validateTokenCountRequest(attempt.Request); err != nil {
 			return TokenCountResult{}, err
 		}
@@ -47,7 +53,7 @@ func (r Router) CountTokens(ctx context.Context, req modules.RequestContext) (To
 			return TokenCountResult{}, err
 		}
 		started := time.Now()
-		result, err := counter.CountTokens(ctx, TokenCountRequest{Model: attempt.Request.Model, Messages: attempt.Request.Messages, Tools: attempt.Request.Tools, ToolChoice: attempt.Request.ToolChoice, ParallelToolCalls: attempt.Request.ParallelToolCalls, ChatGenerationOptions: attempt.Request.ChatGenerationOptions, ResponseFormat: attempt.Request.ResponseFormat, AnthropicSkills: attempt.Request.AnthropicSkills, AnthropicContainerID: attempt.Request.AnthropicContainerID, AnthropicCodeExecution: attempt.Request.AnthropicCodeExecution, AnthropicCodeExecutionType: attempt.Request.AnthropicCodeExecutionType, AnthropicToolSearch: attempt.Request.AnthropicToolSearch, AnthropicClientTools: attempt.Request.AnthropicClientTools, AnthropicClientToolsets: attempt.Request.AnthropicClientToolsets, AnthropicThinking: attempt.Request.AnthropicThinking, AnthropicCacheControl: attempt.Request.AnthropicCacheControl, AnthropicInferenceGeo: attempt.Request.AnthropicInferenceGeo, AnthropicContextManagement: attempt.Request.AnthropicContextManagement})
+		result, err := counter.CountTokens(ctx, TokenCountRequest{Model: attempt.Request.Model, Messages: attempt.Request.Messages, Tools: attempt.Request.Tools, ToolChoice: attempt.Request.ToolChoice, ParallelToolCalls: attempt.Request.ParallelToolCalls, ChatGenerationOptions: attempt.Request.ChatGenerationOptions, ResponseFormat: attempt.Request.ResponseFormat, AnthropicSkills: attempt.Request.AnthropicSkills, AnthropicContainerID: attempt.Request.AnthropicContainerID, AnthropicCodeExecution: attempt.Request.AnthropicCodeExecution, AnthropicCodeExecutionType: attempt.Request.AnthropicCodeExecutionType, AnthropicToolSearch: attempt.Request.AnthropicToolSearch, AnthropicClientTools: attempt.Request.AnthropicClientTools, AnthropicClientToolsets: attempt.Request.AnthropicClientToolsets, AnthropicThinking: attempt.Request.AnthropicThinking, AnthropicCacheControl: attempt.Request.AnthropicCacheControl, AnthropicInferenceGeo: attempt.Request.AnthropicInferenceGeo, AnthropicContextManagement: attempt.Request.AnthropicContextManagement, GeminiCachedContent: attempt.Request.GeminiCachedContent})
 		release()
 		if r.observer != nil {
 			outcome := "ok"

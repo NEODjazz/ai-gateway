@@ -17,6 +17,9 @@ func (r Router) routeCandidates(ctx context.Context, req modules.RequestContext,
 	for index := range primary {
 		primary[index].RoutingModel = request.Model
 	}
+	if request.GeminiCachedContent != "" {
+		return primary
+	}
 	group, found := r.modelGroup(request.Model)
 	if !found || len(group.Fallbacks) == 0 {
 		return primary

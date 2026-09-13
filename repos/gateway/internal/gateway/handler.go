@@ -328,6 +328,10 @@ func (h Handler) serveChatAdapted(w http.ResponseWriter, r *http.Request, reques
 				}
 				return
 			}
+			if err := h.resolveCachedContentReference(r.Context(), reqCtx, &reqCtx.Request); err != nil {
+				writeCachedContentReferenceError(w, err)
+				return
+			}
 			pipelineErr = h.pipeline.RunAfterAuthentication(r.Context(), &reqCtx)
 		}
 	} else {
@@ -1968,6 +1972,14 @@ func decodeInferenceRequest(w http.ResponseWriter, r *http.Request, target any) 
 }
 
 func writeProviderFailure(w http.ResponseWriter, err error) {
+	if errors.Is(err, provider.ErrCachedContentPolicyChanged) {
+		writeError(w, http.StatusConflict, "cached_content_policy_changed", "cached content effective policy has changed")
+		return
+	}
+	if errors.Is(err, provider.ErrCachedContentDeploymentChanged) {
+		writeError(w, http.StatusConflict, "cached_content_deployment_changed", "cached content deployment has changed")
+		return
+	}
 	if errors.Is(err, provider.ErrCompletionsUnsupported) {
 		writeProviderParameterError(w, http.StatusBadRequest, "unsupported_operation", "text completions are not supported by the selected deployment", "")
 		return

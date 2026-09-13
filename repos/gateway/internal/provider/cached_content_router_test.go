@@ -58,7 +58,7 @@ func TestCachedContentRouterRequiresCapabilityAppliesAliasAndPinsLifecycle(t *te
 		current.Request.Messages[0].Content = "masked"
 		return nil
 	})
-	if err != nil || created.Name != "cachedContents/cache-1" || binding.Endpoint != "gemini-primary" || binding.Model != "public-model" || len(binding.Deployment) != 64 {
+	if err != nil || created.Name != "cachedContents/cache-1" || binding.Endpoint != "gemini-primary" || binding.Model != "public-model" || len(binding.Deployment) != 64 || len(binding.Policy) != 64 {
 		t.Fatalf("created=%+v binding=%+v err=%v", created, binding, err)
 	}
 	if attempt == nil || attempt.Request.Model != "upstream-model" || attempt.Metadata["gateway.api_type"] != "cached_content" || attempt.Response == nil || attempt.Response.Usage.PromptTokens != 4096 || attempt.Response.Usage.PromptTokensDetails == nil || attempt.Response.Usage.PromptTokensDetails.CacheWriteTokens != 4096 {
@@ -77,6 +77,26 @@ func TestCachedContentRouterRequiresCapabilityAppliesAliasAndPinsLifecycle(t *te
 	changed.Deployment = strings.Repeat("0", 64)
 	if _, err = runtime.RetrieveCachedContent(t.Context(), changed, created.Name); !errors.Is(err, ErrCachedContentDeploymentChanged) {
 		t.Fatalf("changed deployment err=%v", err)
+	}
+}
+
+func TestCachedContentPolicyIdentityIsDeterministicAndPolicyScoped(t *testing.T) {
+	first := modules.RequestContext{Metadata: map[string]string{
+		"provider.modules.anonymizer.rules": "email,phone",
+		"provider.modules.dlp.enabled":      "true",
+		"provider.id":                       "ignored",
+	}}
+	second := modules.RequestContext{Metadata: map[string]string{
+		"provider.id":                       "different-but-ignored",
+		"provider.modules.dlp.enabled":      "true",
+		"provider.modules.anonymizer.rules": "email,phone",
+	}}
+	if cachedContentPolicyIdentity(first) != cachedContentPolicyIdentity(second) {
+		t.Fatal("equivalent effective policies produced different identities")
+	}
+	second.Metadata["provider.modules.anonymizer.rules"] = "email"
+	if cachedContentPolicyIdentity(first) == cachedContentPolicyIdentity(second) {
+		t.Fatal("policy change did not change identity")
 	}
 }
 

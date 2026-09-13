@@ -5,6 +5,16 @@ metadata:
   labels:
     {{- include "postgres.labels" . | nindent 4 }}
 data:
+  035_gateway_cached_content_policy.sql: |
+    ALTER TABLE gateway_cached_contents
+        ADD COLUMN IF NOT EXISTS policy_fingerprint CHAR(64) NOT NULL DEFAULT repeat('0',64);
+    ALTER TABLE gateway_cached_contents
+        ALTER COLUMN policy_fingerprint DROP DEFAULT;
+    ALTER TABLE gateway_cached_contents
+        DROP CONSTRAINT IF EXISTS gateway_cached_contents_policy_fingerprint_check;
+    ALTER TABLE gateway_cached_contents
+        ADD CONSTRAINT gateway_cached_contents_policy_fingerprint_check
+        CHECK (length(policy_fingerprint) = 64);
   034_gateway_cached_contents.sql: |
     CREATE TABLE IF NOT EXISTS gateway_cached_contents (
         cached_content_name TEXT NOT NULL,

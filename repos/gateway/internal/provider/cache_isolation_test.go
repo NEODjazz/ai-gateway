@@ -111,6 +111,18 @@ func TestPlainTextDocumentsBypassResponseCaches(t *testing.T) {
 	}
 }
 
+func TestGeminiCachedContentBypassesResponseCaches(t *testing.T) {
+	request := modules.RequestContext{CredentialID: "key", UserID: "user", Request: openai.ChatCompletionRequest{
+		Model: "model", Messages: []openai.Message{{Role: "user", Content: "question"}}, GeminiCachedContent: "cachedContents/owned",
+	}}
+	if providerCacheKey("chat", request) != "" {
+		t.Fatal("exact cache accepted mutable provider cached content")
+	}
+	if _, _, eligible := semanticRequest(request, Endpoint{Name: "endpoint"}); eligible {
+		t.Fatal("semantic cache accepted mutable provider cached content")
+	}
+}
+
 func TestBedrockRequestMetadataBypassesResponseCaches(t *testing.T) {
 	request := modules.RequestContext{CredentialID: "key", UserID: "user", Request: openai.ChatCompletionRequest{
 		Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}}, BedrockRequestMetadata: map[string]string{"trace": "billing-42"},

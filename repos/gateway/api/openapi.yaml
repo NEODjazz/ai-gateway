@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.402
+  version: 0.1.403
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -7034,6 +7034,11 @@ components:
       additionalProperties: false
       required: [contents]
       properties:
+        cachedContent:
+          type: string
+          pattern: '^cachedContents/[A-Za-z0-9_.-]+$'
+          maxLength: 256
+          description: Owner-scoped cached content created through this gateway. Generate, stream and token-count requests are pinned to its original deployment, credential and effective policy; its provider-reported token count enters TPM and budget reserve; response caches, mirroring and model fallback are disabled. A changed deployment or policy returns 409 and requires cached content recreation.
         serviceTier:
           type: string
           enum: [unspecified, standard, flex, priority]

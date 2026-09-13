@@ -49,5 +49,5 @@ func HasChatURLReferences(request ChatCompletionRequest) bool {
 }
 
 func HasChatResolvableReferences(request ChatCompletionRequest) bool {
-	return HasChatFileReferences(request) || HasChatURLReferences(request)
+	return HasChatFileReferences(request) || HasChatURLReferences(request) || request.GeminiCachedContent != ""
 }

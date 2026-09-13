@@ -2,8 +2,12 @@ package provider
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"log"
+	"strings"
 	"time"
 
 	"ai-gateway-gateway/internal/modules"
@@ -11,6 +15,7 @@ import (
 )
 
 var ErrCachedContentDeploymentChanged = errors.New("cached content deployment changed")
+var ErrCachedContentPolicyChanged = errors.New("cached content effective policy changed")
 
 func (r Router) CreateCachedContent(ctx context.Context, identity modules.RequestContext, request openai.ChatCompletionRequest, displayName string, expiration openai.GeminiCachedContentExpiration, admit func(context.Context, *modules.RequestContext) error) (openai.GeminiCachedContent, CachedContentBinding, error) {
 	for _, endpoint := range r.candidates(ctx, request, "cached_content") {
@@ -64,7 +69,7 @@ func (r Router) CreateCachedContent(ctx context.Context, identity modules.Reques
 		r.health.success(ctx, endpoint)
 		tokens := content.UsageMetadata.TotalTokenCount
 		attempt.Response = &openai.ChatCompletionResponse{Model: content.Model, Usage: openai.Usage{PromptTokens: tokens, TotalTokens: tokens, PromptTokensDetails: &openai.PromptTokenDetails{CacheWriteTokens: tokens}}}
-		return content, CachedContentBinding{Endpoint: endpoint.Name, Model: request.Model, Deployment: responseDeploymentIdentity(endpoint)}, nil
+		return content, CachedContentBinding{Endpoint: endpoint.Name, Model: request.Model, Deployment: responseDeploymentIdentity(endpoint), Policy: cachedContentPolicyIdentity(attempt)}, nil
 	}
 	return openai.GeminiCachedContent{}, CachedContentBinding{}, errors.New("no eligible cached content deployment")
 }
@@ -78,6 +83,29 @@ func (r Router) cachedContentClient(binding CachedContentBinding) (Endpoint, Gem
 		}
 	}
 	return Endpoint{}, nil, ErrCachedContentDeploymentChanged
+}
+
+func (r Router) validateCachedContentRequestBinding(request openai.ChatCompletionRequest) error {
+	if request.GeminiCachedContent == "" {
+		return nil
+	}
+	if len(request.GeminiCachedContentPolicy) != 64 {
+		return ErrCachedContentPolicyChanged
+	}
+	_, _, err := r.cachedContentClient(CachedContentBinding{Endpoint: request.GeminiCachedContentEndpoint, Model: request.Model, Deployment: request.GeminiCachedContentDeployment})
+	return err
+}
+
+func cachedContentPolicyIdentity(request modules.RequestContext) string {
+	policy := map[string]string{}
+	for key, value := range request.Metadata {
+		if strings.HasPrefix(key, "policy.") || strings.HasPrefix(key, "provider.modules.") || strings.HasPrefix(key, "provider.guardrail.") {
+			policy[key] = value
+		}
+	}
+	payload, _ := json.Marshal(policy)
+	digest := sha256.Sum256(payload)
+	return hex.EncodeToString(digest[:])
 }
 
 func callCachedContentLifecycle[T any](r Router, ctx context.Context, binding CachedContentBinding, operation string, call func(context.Context, GeminiCachedContentClient) (T, error)) (T, error) {

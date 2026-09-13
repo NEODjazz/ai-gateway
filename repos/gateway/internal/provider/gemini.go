@@ -182,14 +182,15 @@ type geminiResponseCandidate struct {
 	URLContext     json.RawMessage       `json:"urlContextMetadata"`
 }
 type geminiRequest struct {
-	Contents    []geminiContent              `json:"contents"`
-	System      *geminiContent               `json:"systemInstruction,omitempty"`
-	Tools       []geminiTool                 `json:"tools,omitempty"`
-	ToolConfig  map[string]any               `json:"toolConfig,omitempty"`
-	Generation  geminiGeneration             `json:"generationConfig"`
-	ServiceTier string                       `json:"serviceTier,omitempty"`
-	Store       *bool                        `json:"store,omitempty"`
-	Safety      []openai.GeminiSafetySetting `json:"safetySettings,omitempty"`
+	Contents      []geminiContent              `json:"contents"`
+	CachedContent string                       `json:"cachedContent,omitempty"`
+	System        *geminiContent               `json:"systemInstruction,omitempty"`
+	Tools         []geminiTool                 `json:"tools,omitempty"`
+	ToolConfig    map[string]any               `json:"toolConfig,omitempty"`
+	Generation    geminiGeneration             `json:"generationConfig"`
+	ServiceTier   string                       `json:"serviceTier,omitempty"`
+	Store         *bool                        `json:"store,omitempty"`
+	Safety        []openai.GeminiSafetySetting `json:"safetySettings,omitempty"`
 }
 type geminiResponse struct {
 	ID             string                    `json:"responseId"`
@@ -247,7 +248,10 @@ func (g Gemini) Responses(context.Context, openai.ResponseRequest) (openai.Respo
 }
 
 func geminiChatRequest(request openai.ChatCompletionRequest) (geminiRequest, error) {
-	result := geminiRequest{Safety: append([]openai.GeminiSafetySetting(nil), request.GeminiSafetySettings...)}
+	result := geminiRequest{Safety: append([]openai.GeminiSafetySetting(nil), request.GeminiSafetySettings...), CachedContent: request.GeminiCachedContent}
+	if result.CachedContent != "" && !validGeminiCachedContentName(result.CachedContent) {
+		return result, geminiInvalid("cached_content")
+	}
 	if err := openai.ValidateGeminiSafetySettings(request.GeminiSafetySettings); err != nil {
 		return result, geminiInvalid("safety_settings")
 	}

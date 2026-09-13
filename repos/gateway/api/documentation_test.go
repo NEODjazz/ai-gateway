@@ -107,8 +107,9 @@ func TestHelmMigrationCopiesMatchSources(t *testing.T) {
 	postgresChart := filepath.Join(root, "charts", "postgres", "templates", "migrations-configmap.yaml")
 	clickHouseChart := filepath.Join(root, "charts", "clickhouse", "templates", "migrations-configmap.yaml")
 	pairs := map[string]string{
-		filepath.Join(root, "migrations", "postgres", "007_gateway_control_plane.sql"):   postgresChart,
-		filepath.Join(root, "migrations", "postgres", "034_gateway_cached_contents.sql"): postgresChart,
+		filepath.Join(root, "migrations", "postgres", "007_gateway_control_plane.sql"):         postgresChart,
+		filepath.Join(root, "migrations", "postgres", "034_gateway_cached_contents.sql"):       postgresChart,
+		filepath.Join(root, "migrations", "postgres", "035_gateway_cached_content_policy.sql"): postgresChart,
 	}
 	for _, item := range []struct {
 		directory string

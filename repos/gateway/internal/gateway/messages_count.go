@@ -86,6 +86,10 @@ func (h Handler) countContextTokens(w http.ResponseWriter, r *http.Request, requ
 				}
 				return provider.TokenCountResult{}, false
 			}
+			if err := h.resolveCachedContentReference(r.Context(), req, &req.Request); err != nil {
+				writeCachedContentReferenceError(w, err)
+				return provider.TokenCountResult{}, false
+			}
 			pipelineErr = h.pipeline.RunTokenCountAfterAuthentication(r.Context(), &req)
 		}
 	} else {

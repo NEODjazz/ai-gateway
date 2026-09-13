@@ -2,7 +2,9 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -13,6 +15,7 @@ import (
 	"time"
 
 	"ai-gateway-gateway/internal/cachedstate"
+	"ai-gateway-gateway/internal/config"
 	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/openai"
 	"ai-gateway-gateway/internal/provider"
@@ -28,7 +31,7 @@ func (cachedContentAuthModule) Handle(_ context.Context, req *modules.RequestCon
 	}
 	req.CredentialID = "credential"
 	req.UserID = req.APIKey
-	req.AllowedModels = []string{"public-model"}
+	req.AllowedModels = []string{"public-model", "other-model"}
 	return nil
 }
 
@@ -41,6 +44,19 @@ func (m *cachedContentTransformModule) Handle(_ context.Context, req *modules.Re
 	if len(req.Request.Messages) != 0 {
 		req.Request.Messages[0].Content = "masked"
 	}
+	return nil
+}
+
+type cachedContentUsageProbe struct {
+	calls   int
+	request openai.ChatCompletionRequest
+}
+
+func (*cachedContentUsageProbe) Name() string   { return "usage-probe" }
+func (*cachedContentUsageProbe) Required() bool { return true }
+func (p *cachedContentUsageProbe) Handle(_ context.Context, req *modules.RequestContext) error {
+	p.calls++
+	p.request = req.Request
 	return nil
 }
 
@@ -209,7 +225,7 @@ func (p *gatewayCachedContentProvider) CreateCachedContent(ctx context.Context, 
 	content := openai.GeminiCachedContent{Name: name, DisplayName: displayName, Model: "models/upstream-model", CreateTime: now.Format(time.RFC3339Nano), UpdateTime: now.Format(time.RFC3339Nano), ExpireTime: expires.Format(time.RFC3339Nano), UsageMetadata: &openai.GeminiCachedContentUsage{TotalTokenCount: 17}}
 	p.contents[name] = content
 	attempt.Response = &openai.ChatCompletionResponse{Usage: openai.Usage{PromptTokens: 17, TotalTokens: 17, PromptTokensDetails: &openai.PromptTokenDetails{CacheWriteTokens: 17}}}
-	return content, provider.CachedContentBinding{Endpoint: "gemini-primary", Model: request.Model, Deployment: strings.Repeat("a", 64)}, nil
+	return content, provider.CachedContentBinding{Endpoint: "gemini-primary", Model: request.Model, Deployment: strings.Repeat("a", 64), Policy: strings.Repeat("p", 64)}, nil
 }
 
 func (p *gatewayCachedContentProvider) RetrieveCachedContent(_ context.Context, _ provider.CachedContentBinding, name string) (openai.GeminiCachedContent, error) {
@@ -372,5 +388,87 @@ func TestCachedContentListRemainsAvailableWhenProviderLifecycleIsUnavailable(t *
 	response := cachedContentRequest(handler, http.MethodGet, "/v1beta/cachedContents", "", "owner")
 	if response.Code != http.StatusOK || response.Body.String() != "{\"cachedContents\":[]}\n" {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestGenerateContentResolvesOwnedCachedContentPinsDeploymentAndReservesTokens(t *testing.T) {
+	createCalls, generateCalls, countCalls := 0, 0, 0
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/v1beta/cachedContents":
+			createCalls++
+			now := time.Now().UTC()
+			_, _ = fmt.Fprintf(w, `{"name":"cachedContents/cache-owned","model":"models/upstream-model","createTime":%q,"updateTime":%q,"expireTime":%q,"usageMetadata":{"totalTokenCount":17}}`, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano), now.Add(time.Hour).Format(time.RFC3339Nano))
+		case r.Method == http.MethodPost && r.URL.Path == "/v1beta/models/upstream-model:generateContent":
+			generateCalls++
+			var body map[string]any
+			if json.NewDecoder(r.Body).Decode(&body) != nil || body["cachedContent"] != "cachedContents/cache-owned" {
+				t.Fatalf("generate body=%#v", body)
+			}
+			_, _ = fmt.Fprint(w, `{"responseId":"response-1","modelVersion":"upstream-model","candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":20,"cachedContentTokenCount":17,"candidatesTokenCount":1,"totalTokenCount":21}}`)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1beta/models/upstream-model:streamGenerateContent":
+			generateCalls++
+			var body map[string]any
+			if json.NewDecoder(r.Body).Decode(&body) != nil || body["cachedContent"] != "cachedContents/cache-owned" {
+				t.Fatalf("stream body=%#v", body)
+			}
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = fmt.Fprint(w, "data: {\"responseId\":\"response-stream\",\"modelVersion\":\"upstream-model\",\"candidates\":[{\"index\":0,\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"ok\"}]},\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":20,\"cachedContentTokenCount\":17,\"candidatesTokenCount\":1,\"totalTokenCount\":21}}\n\n")
+		case r.Method == http.MethodPost && r.URL.Path == "/v1beta/models/upstream-model:countTokens":
+			countCalls++
+			var body struct {
+				Generate struct {
+					CachedContent string `json:"cachedContent"`
+				} `json:"generateContentRequest"`
+			}
+			if json.NewDecoder(r.Body).Decode(&body) != nil || body.Generate.CachedContent != "cachedContents/cache-owned" {
+				t.Fatalf("count body=%#v", body)
+			}
+			_, _ = fmt.Fprint(w, `{"totalTokens":18,"cachedContentTokenCount":17}`)
+		default:
+			t.Fatalf("unexpected provider request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer upstream.Close()
+	probe := &cachedContentUsageProbe{}
+	runtime := provider.New(provider.Config{Endpoints: []config.ProviderEndpointConfig{{
+		Name: "gemini-primary", Type: "gemini", BaseURL: upstream.URL, APIKey: "provider-key", Models: []string{"public-model"}, ModelAliases: map[string]string{"public-model": "upstream-model"}, Capabilities: []string{"chat", "cached_content"},
+	}}, Modules: modules.NewPipeline([]modules.Module{probe})})
+	store := &memoryCachedContentStore{records: map[string]cachedstate.Record{}}
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{cachedContentAuthModule{}}), runtime).WithCachedContentStore(store))
+	createBody := `{"model":"models/public-model","ttl":"3600s","contents":[{"parts":[{"text":"reference"}]}]}`
+	created := cachedContentRequest(handler, http.MethodPost, "/v1beta/cachedContents", createBody, "owner")
+	generateBody := `{"cachedContent":"cachedContents/cache-owned","contents":[{"parts":[{"text":"question"}]}]}`
+	generated := cachedContentRequest(handler, http.MethodPost, "/v1beta/models/public-model:generateContent", generateBody, "owner")
+	streamed := cachedContentRequest(handler, http.MethodPost, "/v1beta/models/public-model:streamGenerateContent?alt=sse", generateBody, "owner")
+	countBody := `{"generateContentRequest":{"model":"models/public-model","cachedContent":"cachedContents/cache-owned","contents":[{"parts":[{"text":"question"}]}]}}`
+	counted := cachedContentRequest(handler, http.MethodPost, "/v1beta/models/public-model:countTokens", countBody, "owner")
+	if created.Code != http.StatusOK || generated.Code != http.StatusOK || streamed.Code != http.StatusOK || counted.Code != http.StatusOK || createCalls != 1 || generateCalls != 2 || countCalls != 1 || probe.calls != 3 || probe.request.GeminiCachedContent != "cachedContents/cache-owned" || probe.request.GeminiCachedContentEndpoint != "gemini-primary" || len(probe.request.GeminiCachedContentDeployment) != 64 || len(probe.request.GeminiCachedContentPolicy) != 64 || probe.request.NativeInputTokens != 17 || openai.ChatInputTokens(probe.request) <= 17 || !strings.Contains(generated.Body.String(), `"cachedContentTokenCount":17`) || !strings.Contains(streamed.Body.String(), `"cachedContentTokenCount":17`) || strings.TrimSpace(counted.Body.String()) != `{"totalTokens":18}` {
+		t.Fatalf("create=%d/%s generated=%d/%s streamed=%d/%s counted=%d/%s calls=%d/%d/%d probe=%+v", created.Code, created.Body.String(), generated.Code, generated.Body.String(), streamed.Code, streamed.Body.String(), counted.Code, counted.Body.String(), createCalls, generateCalls, countCalls, probe.request)
+	}
+	foreign := cachedContentRequest(handler, http.MethodPost, "/v1beta/models/public-model:generateContent", generateBody, "other")
+	mismatch := cachedContentRequest(handler, http.MethodPost, "/v1beta/models/other-model:generateContent", generateBody, "owner")
+	if foreign.Code != http.StatusNotFound || mismatch.Code != http.StatusBadRequest || generateCalls != 2 {
+		t.Fatalf("foreign=%d/%s mismatch=%d/%s generateCalls=%d", foreign.Code, foreign.Body.String(), mismatch.Code, mismatch.Body.String(), generateCalls)
+	}
+	owner := fileOwnerKey(modules.RequestContext{CredentialID: "credential", UserID: "owner"})
+	store.mu.Lock()
+	record := store.records[cachedContentStoreKey(owner, "cachedContents/cache-owned")]
+	originalDeployment := record.Binding.Deployment
+	record.Binding.Deployment = strings.Repeat("0", 64)
+	store.records[cachedContentStoreKey(owner, record.Content.Name)] = record
+	store.mu.Unlock()
+	changed := cachedContentRequest(handler, http.MethodPost, "/v1beta/models/public-model:generateContent", generateBody, "owner")
+	if changed.Code != http.StatusConflict || !strings.Contains(changed.Body.String(), "cached content deployment has changed") || generateCalls != 2 {
+		t.Fatalf("changed=%d/%s generateCalls=%d", changed.Code, changed.Body.String(), generateCalls)
+	}
+	store.mu.Lock()
+	record.Binding.Deployment = originalDeployment
+	record.Binding.Policy = strings.Repeat("0", 64)
+	store.records[cachedContentStoreKey(owner, record.Content.Name)] = record
+	store.mu.Unlock()
+	changed = cachedContentRequest(handler, http.MethodPost, "/v1beta/models/public-model:generateContent", generateBody, "owner")
+	if changed.Code != http.StatusConflict || !strings.Contains(changed.Body.String(), "cached content effective policy has changed") || generateCalls != 2 {
+		t.Fatalf("policy changed=%d/%s generateCalls=%d", changed.Code, changed.Body.String(), generateCalls)
 	}
 }

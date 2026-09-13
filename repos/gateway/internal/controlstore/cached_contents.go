@@ -40,7 +40,7 @@ func (s *PostgresStore) CreateCachedContentRecord(ctx context.Context, record ca
 	if count >= ownerQuota {
 		return cachedstate.Record{}, cachedstate.ErrQuotaExceeded
 	}
-	command, err := tx.Exec(ctx, `INSERT INTO gateway_cached_contents (cached_content_name,owner_key,endpoint,model,deployment,snapshot,expires_at) VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7) ON CONFLICT DO NOTHING`, record.Content.Name, record.OwnerKey, record.Binding.Endpoint, record.Binding.Model, record.Binding.Deployment, payload, expiresAt)
+	command, err := tx.Exec(ctx, `INSERT INTO gateway_cached_contents (cached_content_name,owner_key,endpoint,model,deployment,policy_fingerprint,snapshot,expires_at) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8) ON CONFLICT DO NOTHING`, record.Content.Name, record.OwnerKey, record.Binding.Endpoint, record.Binding.Model, record.Binding.Deployment, record.Binding.Policy, payload, expiresAt)
 	if err != nil {
 		return cachedstate.Record{}, err
 	}
@@ -59,7 +59,7 @@ func (s *PostgresStore) CreateCachedContentRecord(ctx context.Context, record ca
 
 func cachedContentRecordPayload(record cachedstate.Record) ([]byte, time.Time, error) {
 	content := record.Content
-	if record.OwnerKey == "" || len(record.OwnerKey) > 256 || !validCachedContentName(content.Name) || record.Binding.Endpoint == "" || len(record.Binding.Endpoint) > 128 || record.Binding.Model == "" || len(record.Binding.Model) > 256 || len(record.Binding.Deployment) != 64 || content.Model == "" || len(content.Model) > 263 {
+	if record.OwnerKey == "" || len(record.OwnerKey) > 256 || !validCachedContentName(content.Name) || record.Binding.Endpoint == "" || len(record.Binding.Endpoint) > 128 || record.Binding.Model == "" || len(record.Binding.Model) > 256 || len(record.Binding.Deployment) != 64 || len(record.Binding.Policy) != 64 || content.Model == "" || len(content.Model) > 263 {
 		return nil, time.Time{}, cachedstate.ErrInvalid
 	}
 	return cachedContentPayload(content, record.ExpiresAt)
@@ -114,7 +114,7 @@ func getCachedContentRecord(ctx context.Context, query fineTuningQuerier, owner,
 	var record cachedstate.Record
 	var payload []byte
 	record.OwnerKey = owner
-	err := query.QueryRow(ctx, `SELECT endpoint,model,deployment,snapshot,expires_at,created_at,updated_at FROM gateway_cached_contents WHERE owner_key=$1 AND cached_content_name=$2 AND expires_at>now()`, owner, name).Scan(&record.Binding.Endpoint, &record.Binding.Model, &record.Binding.Deployment, &payload, &record.ExpiresAt, &record.CreatedAt, &record.UpdatedAt)
+	err := query.QueryRow(ctx, `SELECT endpoint,model,deployment,policy_fingerprint,snapshot,expires_at,created_at,updated_at FROM gateway_cached_contents WHERE owner_key=$1 AND cached_content_name=$2 AND expires_at>now()`, owner, name).Scan(&record.Binding.Endpoint, &record.Binding.Model, &record.Binding.Deployment, &record.Binding.Policy, &payload, &record.ExpiresAt, &record.CreatedAt, &record.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return cachedstate.Record{}, cachedstate.ErrNotFound
 	}
@@ -150,7 +150,7 @@ func (s *PostgresStore) ListCachedContentRecords(ctx context.Context, owner stri
 		}
 		cursor = &created
 	}
-	rows, err := s.pool.Query(ctx, `SELECT cached_content_name,endpoint,model,deployment,snapshot,expires_at,created_at,updated_at FROM gateway_cached_contents WHERE owner_key=$1 AND expires_at>now() AND ($2::timestamptz IS NULL OR (created_at,cached_content_name)<($2,$3)) ORDER BY created_at DESC,cached_content_name DESC LIMIT $4`, owner, cursor, cursorName, limit+1)
+	rows, err := s.pool.Query(ctx, `SELECT cached_content_name,endpoint,model,deployment,policy_fingerprint,snapshot,expires_at,created_at,updated_at FROM gateway_cached_contents WHERE owner_key=$1 AND expires_at>now() AND ($2::timestamptz IS NULL OR (created_at,cached_content_name)<($2,$3)) ORDER BY created_at DESC,cached_content_name DESC LIMIT $4`, owner, cursor, cursorName, limit+1)
 	if err != nil {
 		return nil, "", err
 	}
@@ -161,7 +161,7 @@ func (s *PostgresStore) ListCachedContentRecords(ctx context.Context, owner stri
 		var name string
 		var payload []byte
 		record.OwnerKey = owner
-		if err := rows.Scan(&name, &record.Binding.Endpoint, &record.Binding.Model, &record.Binding.Deployment, &payload, &record.ExpiresAt, &record.CreatedAt, &record.UpdatedAt); err != nil {
+		if err := rows.Scan(&name, &record.Binding.Endpoint, &record.Binding.Model, &record.Binding.Deployment, &record.Binding.Policy, &payload, &record.ExpiresAt, &record.CreatedAt, &record.UpdatedAt); err != nil {
 			return nil, "", err
 		}
 		if json.Unmarshal(payload, &record.Content) != nil || record.Content.Name != name {

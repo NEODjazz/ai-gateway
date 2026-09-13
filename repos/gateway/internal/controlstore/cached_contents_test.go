@@ -18,14 +18,14 @@ func TestPostgresCachedContentOwnershipExpiryQuotaAndPaginationIntegration(t *te
 		t.Fatal(err)
 	}
 	t.Cleanup(store.Close)
-	_, err = store.pool.Exec(t.Context(), `CREATE TABLE gateway_cached_contents (cached_content_name TEXT NOT NULL,owner_key TEXT NOT NULL,endpoint TEXT NOT NULL,model TEXT NOT NULL,deployment TEXT NOT NULL,snapshot JSONB NOT NULL,expires_at TIMESTAMPTZ NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT now(),updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),PRIMARY KEY(owner_key,cached_content_name))`)
+	_, err = store.pool.Exec(t.Context(), `CREATE TABLE gateway_cached_contents (cached_content_name TEXT NOT NULL,owner_key TEXT NOT NULL,endpoint TEXT NOT NULL,model TEXT NOT NULL,deployment TEXT NOT NULL,policy_fingerprint TEXT NOT NULL,snapshot JSONB NOT NULL,expires_at TIMESTAMPTZ NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT now(),updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),PRIMARY KEY(owner_key,cached_content_name))`)
 	if err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	record := cachedstate.Record{
 		OwnerKey: "owner-a",
-		Binding:  provider.CachedContentBinding{Endpoint: "gemini-primary", Model: "public-model", Deployment: strings.Repeat("a", 64)},
+		Binding:  provider.CachedContentBinding{Endpoint: "gemini-primary", Model: "public-model", Deployment: strings.Repeat("a", 64), Policy: strings.Repeat("p", 64)},
 		Content: openai.GeminiCachedContent{
 			Name: "cachedContents/cache-a", DisplayName: "reference", Model: "models/gemini-test",
 			CreateTime: now.Format(time.RFC3339Nano), UpdateTime: now.Format(time.RFC3339Nano), ExpireTime: now.Add(time.Hour).Format(time.RFC3339Nano),
@@ -89,7 +89,7 @@ func TestCachedContentRecordPayloadRejectsInvalidMetadata(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	valid := cachedstate.Record{
 		OwnerKey: "owner",
-		Binding:  provider.CachedContentBinding{Endpoint: "gemini", Model: "public-model", Deployment: strings.Repeat("a", 64)},
+		Binding:  provider.CachedContentBinding{Endpoint: "gemini", Model: "public-model", Deployment: strings.Repeat("a", 64), Policy: strings.Repeat("p", 64)},
 		Content: openai.GeminiCachedContent{
 			Name: "cachedContents/cache", Model: "models/gemini-test", CreateTime: now.Format(time.RFC3339Nano),
 			UpdateTime: now.Format(time.RFC3339Nano), ExpireTime: now.Add(time.Hour).Format(time.RFC3339Nano),
@@ -98,6 +98,7 @@ func TestCachedContentRecordPayloadRejectsInvalidMetadata(t *testing.T) {
 	invalid := []cachedstate.Record{
 		func() cachedstate.Record { value := valid; value.OwnerKey = ""; return value }(),
 		func() cachedstate.Record { value := valid; value.Binding.Deployment = "short"; return value }(),
+		func() cachedstate.Record { value := valid; value.Binding.Policy = "short"; return value }(),
 		func() cachedstate.Record { value := valid; value.Content.Name = "cachedContents/a/b"; return value }(),
 		func() cachedstate.Record { value := valid; value.Content.Model = "gemini-test"; return value }(),
 		func() cachedstate.Record { value := valid; value.Content.ExpireTime = "later"; return value }(),

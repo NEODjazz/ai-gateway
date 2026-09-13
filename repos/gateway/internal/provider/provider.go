@@ -106,6 +106,7 @@ type CachedContentBinding struct {
 	Endpoint   string `json:"endpoint"`
 	Model      string `json:"model"`
 	Deployment string `json:"deployment"`
+	Policy     string `json:"policy"`
 }
 
 type CachedContentProvider interface {
@@ -681,6 +682,9 @@ func (r Router) ChatCompletions(ctx context.Context, req modules.RequestContext)
 		return openai.ChatCompletionResponse{}, err
 	}
 	if len(candidates) == 0 {
+		if err := r.validateCachedContentRequestBinding(request); err != nil {
+			return openai.ChatCompletionResponse{}, err
+		}
 		return openai.ChatCompletionResponse{}, fmt.Errorf("no provider endpoint for provider=%q model=%q", request.Provider, request.Model)
 	}
 
@@ -703,6 +707,9 @@ func (r Router) ChatCompletions(ctx context.Context, req modules.RequestContext)
 			return openai.ChatCompletionResponse{}, err
 		}
 		attemptCtx := providerAttemptContext(req, endpoint)
+		if request.GeminiCachedContent != "" && cachedContentPolicyIdentity(attemptCtx) != request.GeminiCachedContentPolicy {
+			return openai.ChatCompletionResponse{}, ErrCachedContentPolicyChanged
+		}
 		r.applyCatalogPricing(ctx, &attemptCtx, endpoint, request.Model)
 		if endpoint.GuardrailPolicy != "" && !endpoint.GuardrailPolicyValid {
 			err := fmt.Errorf("%s/%s has unknown guardrail policy %q", endpoint.Type, endpoint.Name, endpoint.GuardrailPolicy)
@@ -780,7 +787,7 @@ func (r Router) ChatCompletions(ctx context.Context, req modules.RequestContext)
 				}
 			}
 		}
-		if !mirrored {
+		if !mirrored && request.GeminiCachedContent == "" {
 			r.mirrorChat(ctx, req.RequestID, attemptCtx.Request, request.Model, requiredChatCapabilities(request, false)...)
 			mirrored = true
 		}
@@ -846,6 +853,9 @@ func (r Router) StreamChatCompletions(ctx context.Context, req modules.RequestCo
 		return openai.ChatCompletionResponse{}, false, err
 	}
 	if len(candidates) == 0 {
+		if err := r.validateCachedContentRequestBinding(request); err != nil {
+			return openai.ChatCompletionResponse{}, false, err
+		}
 		// No native stream is available. The handler's normal Chat path still
 		// enforces all non-stream capabilities and can synthesize SSE on success.
 		return openai.ChatCompletionResponse{}, false, nil
@@ -893,6 +903,9 @@ func (r Router) StreamChatCompletions(ctx context.Context, req modules.RequestCo
 			return openai.ChatCompletionResponse{}, false, err
 		}
 		attemptCtx := providerAttemptContext(req, endpoint)
+		if request.GeminiCachedContent != "" && cachedContentPolicyIdentity(attemptCtx) != request.GeminiCachedContentPolicy {
+			return openai.ChatCompletionResponse{}, false, ErrCachedContentPolicyChanged
+		}
 		r.applyCatalogPricing(ctx, &attemptCtx, endpoint, request.Model)
 		if endpoint.GuardrailPolicy != "" && !endpoint.GuardrailPolicyValid {
 			err := fmt.Errorf("%s/%s has unknown guardrail policy %q", endpoint.Type, endpoint.Name, endpoint.GuardrailPolicy)
@@ -915,7 +928,7 @@ func (r Router) StreamChatCompletions(ctx context.Context, req modules.RequestCo
 			return openai.ChatCompletionResponse{}, false, err
 		}
 		lastAttempt = &attemptCtx
-		if !mirrored {
+		if !mirrored && request.GeminiCachedContent == "" {
 			r.mirrorChat(ctx, req.RequestID, attemptCtx.Request, request.Model, requiredChatCapabilities(request, true)...)
 			mirrored = true
 		}
@@ -2994,6 +3007,14 @@ func (r Router) candidatesWithCounter(ctx context.Context, request openai.ChatCo
 		if endpoint.Shadow {
 			continue
 		}
+		if request.GeminiCachedContent != "" {
+			if endpoint.Name != request.GeminiCachedContentEndpoint || responseDeploymentIdentity(endpoint) != request.GeminiCachedContentDeployment {
+				continue
+			}
+			if _, ok := endpoint.Provider.(GeminiCachedContentClient); !ok {
+				continue
+			}
+		}
 		if grouped && !groupDeployments[endpoint.Name] {
 			continue
 		}
@@ -3116,6 +3137,9 @@ func (r Router) rememberResponseAffinity(ctx context.Context, req modules.Reques
 
 func requiredChatCapabilities(request openai.ChatCompletionRequest, stream bool) []string {
 	required := []string{"chat"}
+	if request.GeminiCachedContent != "" {
+		required = append(required, "cached_content")
+	}
 	if len(request.AnthropicSkills) > 0 {
 		required = append(required, "skills")
 	}

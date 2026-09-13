@@ -20,6 +20,12 @@ type ChatCompletionRequest struct {
 	NativeInputTokens int `json:"-"`
 	// GeminiSafetySettings contains validated native safety controls.
 	GeminiSafetySettings []GeminiSafetySetting `json:"-"`
+	// GeminiCachedContent is an owner-checked native cached content resource.
+	// Endpoint and deployment pinning prevent routing it under another provider credential.
+	GeminiCachedContent           string `json:"-"`
+	GeminiCachedContentEndpoint   string `json:"-"`
+	GeminiCachedContentDeployment string `json:"-"`
+	GeminiCachedContentPolicy     string `json:"-"`
 	// GeminiCodeExecution enables the native server-side code execution tool.
 	GeminiCodeExecution bool `json:"-"`
 	// GeminiURLContext enables the native server-side URL retrieval tool.

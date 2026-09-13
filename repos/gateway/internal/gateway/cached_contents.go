@@ -19,6 +19,13 @@ import (
 
 const cachedContentOwnerQuota = 1000
 
+var (
+	errCachedContentReferenceInvalid     = errors.New("cached content reference is invalid")
+	errCachedContentReferenceNotFound    = errors.New("cached content reference not found")
+	errCachedContentReferenceUnavailable = errors.New("cached content reference storage is unavailable")
+	errCachedContentModelMismatch        = errors.New("cached content model does not match request model")
+)
+
 type cachedContentCreateRequest struct {
 	generateRequest
 	Model       string `json:"model"`
@@ -30,6 +37,48 @@ type cachedContentCreateRequest struct {
 func (h Handler) WithCachedContentStore(store cachedstate.Store) Handler {
 	h.cachedContents = store
 	return h
+}
+
+func (h Handler) resolveCachedContentReference(ctx context.Context, identity modules.RequestContext, request *openai.ChatCompletionRequest) error {
+	if request == nil || request.GeminiCachedContent == "" {
+		return nil
+	}
+	if !validCachedContentName(request.GeminiCachedContent) {
+		return errCachedContentReferenceInvalid
+	}
+	if h.cachedContents == nil {
+		return errCachedContentReferenceUnavailable
+	}
+	record, err := h.cachedContents.GetCachedContentRecord(ctx, fileOwnerKey(identity), request.GeminiCachedContent)
+	if errors.Is(err, cachedstate.ErrNotFound) {
+		return errCachedContentReferenceNotFound
+	}
+	if err != nil {
+		return errCachedContentReferenceUnavailable
+	}
+	if record.Binding.Model != request.Model {
+		return errCachedContentModelMismatch
+	}
+	if record.Content.UsageMetadata == nil || record.Content.UsageMetadata.TotalTokenCount < 0 || record.Binding.Endpoint == "" || len(record.Binding.Deployment) != 64 || len(record.Binding.Policy) != 64 {
+		return errCachedContentReferenceUnavailable
+	}
+	request.GeminiCachedContent = record.Content.Name
+	request.GeminiCachedContentEndpoint = record.Binding.Endpoint
+	request.GeminiCachedContentDeployment = record.Binding.Deployment
+	request.GeminiCachedContentPolicy = record.Binding.Policy
+	request.NativeInputTokens = openai.ReserveTokens(request.NativeInputTokens, record.Content.UsageMetadata.TotalTokenCount)
+	return nil
+}
+
+func writeCachedContentReferenceError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, errCachedContentReferenceNotFound):
+		writeError(w, http.StatusNotFound, "cached_content_not_found", "cached content not found")
+	case errors.Is(err, errCachedContentReferenceInvalid), errors.Is(err, errCachedContentModelMismatch):
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+	default:
+		writeError(w, http.StatusServiceUnavailable, "cached_content_unavailable", "cached content storage is unavailable")
+	}
 }
 
 func (h Handler) CreateCachedContent(w http.ResponseWriter, r *http.Request) {

@@ -11,12 +11,13 @@ import (
 )
 
 type generateRequest struct {
-	ServiceTier string                       `json:"serviceTier,omitempty"`
-	Store       *bool                        `json:"store,omitempty"`
-	Contents    []generateContent            `json:"contents"`
-	System      *generateContent             `json:"systemInstruction,omitempty"`
-	Safety      []openai.GeminiSafetySetting `json:"safetySettings,omitempty"`
-	Tools       []struct {
+	ServiceTier   string                       `json:"serviceTier,omitempty"`
+	Store         *bool                        `json:"store,omitempty"`
+	CachedContent string                       `json:"cachedContent,omitempty"`
+	Contents      []generateContent            `json:"contents"`
+	System        *generateContent             `json:"systemInstruction,omitempty"`
+	Safety        []openai.GeminiSafetySetting `json:"safetySettings,omitempty"`
+	Tools         []struct {
 		Functions     []generateFunction `json:"functionDeclarations,omitempty"`
 		GoogleSearch  *struct{}          `json:"googleSearch,omitempty"`
 		GoogleMaps    *struct{}          `json:"googleMaps,omitempty"`
@@ -95,7 +96,7 @@ func (r generateRequest) cachedContentChat(model string) (openai.ChatCompletionR
 }
 
 func (r generateRequest) chatWithContentRequirement(model string, stream, requireContents bool) (openai.ChatCompletionRequest, error) {
-	result := openai.ChatCompletionRequest{Model: model, Stream: stream, MaxCompletionTokens: r.Generation.MaxOutputTokens, Temperature: r.Generation.Temperature, TopP: r.Generation.TopP, Seed: r.Generation.Seed}
+	result := openai.ChatCompletionRequest{Model: model, Stream: stream, MaxCompletionTokens: r.Generation.MaxOutputTokens, Temperature: r.Generation.Temperature, TopP: r.Generation.TopP, Seed: r.Generation.Seed, GeminiCachedContent: r.CachedContent}
 	if stream {
 		result.StreamOptions = &openai.ChatStreamOptions{IncludeUsage: true}
 	}
@@ -114,8 +115,11 @@ func (r generateRequest) chatWithContentRequirement(model string, stream, requir
 		return fail("serviceTier")
 	}
 	result.Store = r.Store
-	if strings.TrimSpace(model) == "" || len(r.Contents) > 10000 || requireContents && len(r.Contents) == 0 || !requireContents && len(r.Contents) == 0 && r.System == nil && len(r.Tools) == 0 {
+	if strings.TrimSpace(model) == "" || len(r.Contents) > 10000 || requireContents && len(r.Contents) == 0 || !requireContents && len(r.Contents) == 0 && r.System == nil && len(r.Tools) == 0 || !requireContents && r.CachedContent != "" {
 		return fail("contents")
+	}
+	if r.CachedContent != "" && !validCachedContentName(r.CachedContent) {
+		return fail("cachedContent")
 	}
 	if err := openai.ValidateGeminiSafetySettings(r.Safety); err != nil {
 		return fail("safetySettings")

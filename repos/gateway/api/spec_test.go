@@ -34,7 +34,7 @@ func TestOpenAPIDocumentIsValid(t *testing.T) {
 func TestOpenAPIGenerateContentServiceControls(t *testing.T) {
 	document := loadDocument(t)
 	request := document.Components.Schemas["GenerateContentRequest"].Value
-	if request == nil || request.Properties["store"] == nil || request.Properties["serviceTier"] == nil {
+	if request == nil || request.Properties["store"] == nil || request.Properties["serviceTier"] == nil || request.Properties["cachedContent"] == nil {
 		t.Fatal("GenerateContentRequest is missing native service controls")
 	}
 	tiers := request.Properties["serviceTier"].Value.Enum
