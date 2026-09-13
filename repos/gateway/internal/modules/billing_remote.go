@@ -217,6 +217,7 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.ProviderCostUSDTicks = trustedProviderCost(req, req.VideoProviderCostUSDTicks)
 	case "cached_content":
 		request.APIType = "cached_content"
+		request.OutputTokens = 0
 	case "realtime":
 		request.APIType = "realtime"
 	}
@@ -236,14 +237,14 @@ func billingRequest(req *RequestContext) UsageRequest {
 		}
 	} else if request.APIType == "realtime" && req.Usage != nil {
 		// Realtime supplies an explicit reserve or provider-reported usage.
-	} else if request.OutputTokens == 0 && req.CompletionRequest == nil && !explicitZeroOutput {
+	} else if request.OutputTokens == 0 && req.CompletionRequest == nil && !explicitZeroOutput && request.APIType != "cached_content" {
 		request.OutputTokens = openai.DefaultOutputTokenReserve
 	}
 	if request.APIType == "fine_tuning" || request.APIType == "video" {
 		request.TotalTokens = 0
 	} else if request.APIType == "realtime" && req.Usage != nil {
 		// Preserve exact zero usage and the explicit per-response reserve.
-	} else if explicitZeroOutput {
+	} else if explicitZeroOutput || request.APIType == "cached_content" {
 		request.TotalTokens = request.InputTokens
 	} else {
 		request.TotalTokens = openai.ReserveTokens(request.InputTokens, request.OutputTokens)

@@ -32,6 +32,23 @@ func TestBillingPreservesExplicitZeroMessagesOutputReserve(t *testing.T) {
 	}
 }
 
+func TestBillingReservesOnlyCachedContentInput(t *testing.T) {
+	req := RequestContext{
+		Metadata: map[string]string{"gateway.api_type": "cached_content"},
+		Request: openai.ChatCompletionRequest{
+			Model:    "gemini",
+			Messages: []openai.Message{{Role: "user", Content: "cache this"}},
+			Tools: []openai.Tool{{Type: "function", Function: openai.FunctionDefinition{
+				Name: "lookup", Parameters: map[string]any{"type": "object", "description": strings.Repeat("schema", 100)},
+			}}},
+		},
+	}
+	reserved := billingRequest(&req)
+	if reserved.APIType != "cached_content" || reserved.InputTokens != openai.ChatInputTokens(req.Request) || reserved.InputTokens < 100 || reserved.OutputTokens != 0 || reserved.TotalTokens != reserved.InputTokens {
+		t.Fatalf("cached content reserve=%+v", reserved)
+	}
+}
+
 func TestLocalBillingUsesImageGenerationUsage(t *testing.T) {
 	response := openai.ImageGenerationResponse{Usage: &openai.ImageUsage{InputTokens: 3, OutputTokens: 9, TotalTokens: 12}}
 	req := RequestContext{ImageGenerationResponse: &response}
