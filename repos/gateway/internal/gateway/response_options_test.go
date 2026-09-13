@@ -37,6 +37,18 @@ func TestResponsesRejectsEnvelopeInvalidatedByPipeline(t *testing.T) {
 	}
 }
 
+func TestResponsesRejectsOptionsInvalidatedByPipeline(t *testing.T) {
+	handler := NewHandler(modules.NewPipeline([]modules.Module{rewriteContextModule{rewrite: func(req *modules.RequestContext) {
+		limit := 0
+		req.ResponseRequest.MaxOutputTokens = &limit
+	}}}), nil)
+	out := httptest.NewRecorder()
+	handler.Responses(out, httptest.NewRequest("POST", "/v1/responses", strings.NewReader(`{"model":"m","input":"hello"}`)))
+	if out.Code != 502 || !strings.Contains(out.Body.String(), `"module_failed"`) || !strings.Contains(out.Body.String(), "max_output_tokens") {
+		t.Fatalf("status=%d response=%s", out.Code, out.Body.String())
+	}
+}
+
 func TestResponsesRejectsInvalidOptionsBeforeExecution(t *testing.T) {
 	// No pipeline/router: an invalid request must stop before either is invoked.
 	handler := Handler{}

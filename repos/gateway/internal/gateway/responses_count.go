@@ -49,6 +49,10 @@ func (h Handler) CountResponseInputTokens(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadGateway, "module_failed", "module produced an invalid token-count request: "+message)
 		return
 	}
+	if message := responseRequest.Validate(); message != "" {
+		writeError(w, http.StatusBadGateway, "module_failed", "module produced an invalid token-count request: "+message)
+		return
+	}
 	if !h.prepareAccessGroups(w, &reqCtx) {
 		return
 	}

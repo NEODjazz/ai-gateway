@@ -77,6 +77,18 @@ func TestResponseInputTokenCountRejectsInvalidEnvelope(t *testing.T) {
 	}
 }
 
+func TestResponseInputTokenCountRejectsOptionsInvalidatedByPipeline(t *testing.T) {
+	counter := &responseInputTokenCountProvider{}
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{rewriteContextModule{rewrite: func(req *modules.RequestContext) {
+		req.ResponseRequest.Text = map[string]any{"verbosity": "invalid"}
+	}}}), counter))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/v1/responses/input_tokens", strings.NewReader(`{"model":"m","input":"x"}`)))
+	if response.Code != http.StatusBadGateway || counter.calls != 0 || !strings.Contains(response.Body.String(), `"module_failed"`) || !strings.Contains(response.Body.String(), "text.verbosity") {
+		t.Fatalf("invalid pipeline output continued: status=%d calls=%d body=%s", response.Code, counter.calls, response.Body.String())
+	}
+}
+
 func TestResponseInputTokenCountEnforcesModelAndToolACL(t *testing.T) {
 	for _, test := range []struct {
 		name string
