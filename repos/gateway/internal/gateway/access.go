@@ -163,7 +163,7 @@ func responseToolIdentifiers(tools []openai.ResponseTool) ([]string, bool) {
 	for _, tool := range tools {
 		var identifier string
 		switch tool.Type {
-		case "function":
+		case "function", "custom":
 			identifier = tool.Name
 		case "code_interpreter":
 			identifier = "code_interpreter"

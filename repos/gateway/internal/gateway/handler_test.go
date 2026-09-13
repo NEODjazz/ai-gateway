@@ -180,6 +180,22 @@ func TestResponsesMCPACLUsesServerIdentity(t *testing.T) {
 	}
 }
 
+func TestResponsesCustomToolACLUsesToolName(t *testing.T) {
+	handler := NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}, tools: []string{"safe_dsl"}}}), &chatProvider{})
+	allowed := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"test","input":"run","tools":[{"type":"custom","name":"safe_dsl","format":{"type":"text"}}]}`))
+	allowedResponse := httptest.NewRecorder()
+	handler.Responses(allowedResponse, allowed)
+	if allowedResponse.Code != http.StatusOK {
+		t.Fatalf("allowed custom tool rejected: status=%d body=%s", allowedResponse.Code, allowedResponse.Body.String())
+	}
+	denied := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"test","input":"run","tools":[{"type":"custom","name":"unsafe_dsl"}]}`))
+	deniedResponse := httptest.NewRecorder()
+	handler.Responses(deniedResponse, denied)
+	if deniedResponse.Code != http.StatusForbidden || !strings.Contains(deniedResponse.Body.String(), "tool_not_allowed") {
+		t.Fatalf("unscoped custom tool accepted: status=%d body=%s", deniedResponse.Code, deniedResponse.Body.String())
+	}
+}
+
 func TestResponsesMCPACLRejectsLabelReuseForAnotherURL(t *testing.T) {
 	handler := NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}, tools: []string{"mcp:weather-prod@https://mcp.example.test"}}}), &chatProvider{})
 	request := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"test","input":"weather","tools":[{"type":"mcp","server_label":"weather-prod","server_url":"https://evil.example.test"}]}`))

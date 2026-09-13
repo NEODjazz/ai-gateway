@@ -31,18 +31,19 @@ func NewXAI(baseURL, apiKey string, stream bool) XAI {
 	return XAI{compatible: compatible, contentClient: publichttp.NewClient(2 * time.Minute)}
 }
 
-func (XAI) SupportsResponses() bool          { return true }
-func (XAI) SupportsEmbeddings() bool         { return true }
-func (XAI) SupportsTools() bool              { return true }
-func (XAI) SupportsStructuredOutput() bool   { return true }
-func (XAI) SupportsVision() bool             { return true }
-func (XAI) SupportsWebSearch() bool          { return true }
-func (XAI) SupportsResponseWebSearch() bool  { return true }
-func (XAI) SupportsImageGeneration() bool    { return true }
-func (XAI) SupportsImageEdit() bool          { return true }
-func (XAI) SupportsAudioTranscription() bool { return true }
-func (XAI) SupportsAudioSpeech() bool        { return true }
-func (XAI) SupportsVideo() bool              { return true }
+func (XAI) SupportsResponses() bool           { return true }
+func (XAI) SupportsEmbeddings() bool          { return true }
+func (XAI) SupportsTools() bool               { return true }
+func (XAI) SupportsStructuredOutput() bool    { return true }
+func (XAI) SupportsVision() bool              { return true }
+func (XAI) SupportsWebSearch() bool           { return true }
+func (XAI) SupportsResponseWebSearch() bool   { return true }
+func (XAI) SupportsResponseCustomTools() bool { return true }
+func (XAI) SupportsImageGeneration() bool     { return true }
+func (XAI) SupportsImageEdit() bool           { return true }
+func (XAI) SupportsAudioTranscription() bool  { return true }
+func (XAI) SupportsAudioSpeech() bool         { return true }
+func (XAI) SupportsVideo() bool               { return true }
 
 func (XAI) ValidateVideoCreateParameters(request openai.VideoCreateRequest) error {
 	if param, err := validateVideoCreateRequest(request); err != nil {

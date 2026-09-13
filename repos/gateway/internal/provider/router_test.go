@@ -565,6 +565,10 @@ type responseWebSearchCaptureClient struct{ *modelCaptureProvider }
 
 func (responseWebSearchCaptureClient) SupportsResponseWebSearch() bool { return true }
 
+type responseCustomToolCaptureClient struct{ *modelCaptureProvider }
+
+func (responseCustomToolCaptureClient) SupportsResponseCustomTools() bool { return true }
+
 func (p *modelCaptureProvider) ChatCompletions(_ context.Context, request openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
 	p.seenModel = request.Model
 	return staticProvider{content: p.content}.ChatCompletions(context.Background(), request)
@@ -1766,6 +1770,29 @@ func TestResponsesWebSearchRequiresDeclaredAndAdapterCapability(t *testing.T) {
 	}
 	if undeclared.seenModel != "" || chatOnly.seenModel != "" || compatible.seenModel != "model" {
 		t.Fatalf("web search used an incompatible deployment: undeclared=%q chat-only=%q compatible=%q", undeclared.seenModel, chatOnly.seenModel, compatible.seenModel)
+	}
+}
+
+func TestResponsesCustomToolsRequireDeclaredAndAdapterCapability(t *testing.T) {
+	required := requiredResponseCapabilities(openai.ResponseRequest{Tools: []openai.ResponseTool{{Type: "custom", Name: "dsl"}}}, false)
+	if strings.Join(required, ",") != "responses,tools,custom_tools" {
+		t.Fatalf("unexpected Responses custom tool capabilities: %v", required)
+	}
+
+	undeclared := &modelCaptureProvider{content: "undeclared"}
+	unsupported := &modelCaptureProvider{content: "unsupported"}
+	supported := &modelCaptureProvider{content: "supported"}
+	router := Router{health: newEndpointHealthTracker(), endpoints: []Endpoint{
+		{Name: "undeclared", Type: "openai-compatible", Priority: 1, Capabilities: []string{"responses", "tools"}, Provider: responseCustomToolCaptureClient{undeclared}},
+		{Name: "unsupported", Type: "anthropic", Priority: 2, Capabilities: []string{"responses", "tools", "custom_tools"}, Provider: unsupported},
+		{Name: "supported", Type: "openai-compatible", Priority: 3, Capabilities: []string{"responses", "tools", "custom_tools"}, Provider: responseCustomToolCaptureClient{supported}},
+	}}
+	request := openai.ResponseRequest{Model: "model", Input: "run", Tools: []openai.ResponseTool{{Type: "custom", Name: "dsl"}}}
+	if _, err := router.Responses(t.Context(), modules.RequestContext{Request: openai.ChatCompletionRequest{Model: "model"}, ResponseRequest: &request}); err != nil {
+		t.Fatal(err)
+	}
+	if undeclared.seenModel != "" || unsupported.seenModel != "" || supported.seenModel != "model" {
+		t.Fatalf("custom tool used an incompatible deployment: undeclared=%q unsupported=%q supported=%q", undeclared.seenModel, unsupported.seenModel, supported.seenModel)
 	}
 }
 

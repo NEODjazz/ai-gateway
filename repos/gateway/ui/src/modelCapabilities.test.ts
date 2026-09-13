@@ -40,6 +40,7 @@ describe("modelCapabilityOptions", () => {
       "realtime",
       "stream",
       "tools",
+      "custom_tools",
       "structured_output",
       "mcp",
       "code_interpreter",

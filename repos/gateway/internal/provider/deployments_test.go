@@ -129,6 +129,7 @@ func TestManagedDeploymentRejectsUnsupportedProviderCapabilities(t *testing.T) {
 		{providerType: "voyage", capability: "structured_output"},
 		{providerType: "cohere", capability: "vision"},
 		{providerType: "anthropic", capability: "mcp"},
+		{providerType: "anthropic", capability: "custom_tools"},
 		{providerType: "mistral", capability: "web_search"},
 		{providerType: "openai", capability: "tool_search"},
 		{providerType: "openai", capability: "computer_toolset"},
@@ -167,6 +168,8 @@ func TestManagedDeploymentRejectsUnsupportedProviderCapabilities(t *testing.T) {
 				capabilities = []string{"video", "video_extension"}
 			case "mcp":
 				capabilities = []string{"responses", "tools", "mcp"}
+			case "custom_tools":
+				capabilities = []string{"responses", "tools", "custom_tools"}
 			}
 			_, err := router.CreateModelDeployment(ModelDeployment{ID: "deployment", ProviderID: "provider", Models: []string{"model"}, Capabilities: capabilities, Enabled: true})
 			if !errors.Is(err, ErrUnsupportedProviderCapability) {
@@ -183,6 +186,9 @@ func TestDeploymentCapabilitiesRequireRoutableBaseOperations(t *testing.T) {
 		{"structured_output"},
 		{"vision"},
 		{"mcp"},
+		{"custom_tools"},
+		{"responses", "custom_tools"},
+		{"tools", "custom_tools"},
 		{"responses", "mcp"},
 		{"chat", "mcp", "tools"},
 		{"web_search"},
@@ -224,6 +230,7 @@ func TestDeploymentCapabilitiesRequireRoutableBaseOperations(t *testing.T) {
 		{"responses", "stream"},
 		{"chat", "tools", "structured_output", "vision"},
 		{"responses", "tools", "mcp"},
+		{"responses", "tools", "custom_tools"},
 		{"responses", "background_responses"},
 		{"interactions", "tools", "structured_output", "vision"},
 		{"interactions", "interaction_agents"},
@@ -288,10 +295,10 @@ func TestManagedDeploymentAcceptsSupportedFeatureCapabilities(t *testing.T) {
 		{providerType: "bedrock", capabilities: []string{"chat", "tools", "prompt_cache", "bedrock_invoke"}},
 		{providerType: "groq", capabilities: []string{"chat", "responses", "audio_transcription", "audio_translation", "audio_speech", "stream", "tools", "structured_output", "mcp", "vision"}},
 		{providerType: "deepseek", capabilities: []string{"chat", "responses", "stream", "tools", "structured_output", "vision"}},
-		{providerType: "openrouter", capabilities: []string{"chat", "responses", "embeddings", "rerank", "image_generation", "image_edit", "audio_transcription", "audio_speech", "stream", "tools", "structured_output", "vision", "web_search", "audio"}},
+		{providerType: "openrouter", capabilities: []string{"chat", "responses", "embeddings", "rerank", "image_generation", "image_edit", "audio_transcription", "audio_speech", "stream", "tools", "custom_tools", "structured_output", "vision", "web_search", "audio"}},
 		{providerType: "mistral", capabilities: []string{"chat", "audio_transcription", "audio_speech", "tools", "structured_output", "vision", "assistant_prefill"}},
-		{providerType: "xai", capabilities: []string{"chat", "video", "video_remix", "video_extension"}},
-		{providerType: "openai-compatible", capabilities: []string{"chat", "responses", "background_responses", "audio_translation", "fine_tuning", "container", "container_files", "container_network", "tools", "structured_output", "mcp", "vision", "web_search", "audio", "file_input"}},
+		{providerType: "xai", capabilities: []string{"chat", "responses", "tools", "custom_tools", "video", "video_remix", "video_extension"}},
+		{providerType: "openai-compatible", capabilities: []string{"chat", "responses", "background_responses", "audio_translation", "fine_tuning", "container", "container_files", "container_network", "tools", "custom_tools", "structured_output", "mcp", "vision", "web_search", "audio", "file_input"}},
 	}
 	for _, test := range tests {
 		t.Run(test.providerType, func(t *testing.T) {
@@ -419,10 +426,10 @@ func TestManagedProviderCapabilityProfilesMatchAdapterOperations(t *testing.T) {
 	if !slices.Equal(profilesByType["deepseek"].Operations, []string{"chat", "responses", "stream"}) || !slices.Equal(profilesByType["deepseek"].Capabilities, []string{"chat", "responses", "stream", "tools", "structured_output", "vision"}) {
 		t.Fatalf("deepseek profile=%+v", profilesByType["deepseek"])
 	}
-	if !slices.Equal(profilesByType["xai"].Operations, []string{"chat", "responses", "embeddings", "image_generation", "image_edit", "audio_transcription", "audio_speech", "video", "video_remix", "video_extension", "stream"}) || !slices.Equal(profilesByType["xai"].Capabilities, []string{"chat", "responses", "embeddings", "image_generation", "image_edit", "audio_transcription", "audio_speech", "video", "video_remix", "video_extension", "stream", "tools", "structured_output", "vision", "web_search"}) {
+	if !slices.Equal(profilesByType["xai"].Operations, []string{"chat", "responses", "embeddings", "image_generation", "image_edit", "audio_transcription", "audio_speech", "video", "video_remix", "video_extension", "stream"}) || !slices.Equal(profilesByType["xai"].Capabilities, []string{"chat", "responses", "embeddings", "image_generation", "image_edit", "audio_transcription", "audio_speech", "video", "video_remix", "video_extension", "stream", "tools", "custom_tools", "structured_output", "vision", "web_search"}) {
 		t.Fatalf("xai profile=%+v", profilesByType["xai"])
 	}
-	if !slices.Equal(profilesByType["openrouter"].Operations, []string{"chat", "completions", "responses", "embeddings", "rerank", "image_generation", "image_edit", "audio_transcription", "audio_speech", "stream"}) || !slices.Equal(profilesByType["openrouter"].Capabilities, []string{"chat", "completions", "responses", "embeddings", "rerank", "image_generation", "image_edit", "audio_transcription", "audio_speech", "stream", "tools", "structured_output", "vision", "web_search", "audio"}) {
+	if !slices.Equal(profilesByType["openrouter"].Operations, []string{"chat", "completions", "responses", "embeddings", "rerank", "image_generation", "image_edit", "audio_transcription", "audio_speech", "stream"}) || !slices.Equal(profilesByType["openrouter"].Capabilities, []string{"chat", "completions", "responses", "embeddings", "rerank", "image_generation", "image_edit", "audio_transcription", "audio_speech", "stream", "tools", "custom_tools", "structured_output", "vision", "web_search", "audio"}) {
 		t.Fatalf("openrouter profile=%+v", profilesByType["openrouter"])
 	}
 }

@@ -34,8 +34,9 @@ func TestResponsesCachePreservesEndpointOwnership(t *testing.T) {
 
 type replayUnsafeResponseClient struct{ *affinityResponseClient }
 
-func (replayUnsafeResponseClient) SupportsMCP() bool               { return true }
-func (replayUnsafeResponseClient) SupportsResponseWebSearch() bool { return true }
+func (replayUnsafeResponseClient) SupportsMCP() bool                 { return true }
+func (replayUnsafeResponseClient) SupportsResponseWebSearch() bool   { return true }
+func (replayUnsafeResponseClient) SupportsResponseCustomTools() bool { return true }
 
 func TestResponsesWithHostedToolsBypassExactCache(t *testing.T) {
 	for _, test := range []struct {
@@ -44,11 +45,12 @@ func TestResponsesWithHostedToolsBypassExactCache(t *testing.T) {
 	}{
 		{name: "mcp", tool: openai.ResponseTool{Type: "mcp", ServerLabel: "documents", ServerURL: "https://documents.example.test"}},
 		{name: "web search", tool: openai.ResponseTool{Type: "web_search"}},
+		{name: "custom", tool: openai.ResponseTool{Type: "custom", Name: "dsl"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			client := &affinityResponseClient{id: "resp-tool"}
 			router := Router{
-				endpoints: []Endpoint{{Name: "tool-endpoint", Type: "demo", Capabilities: []string{"responses", "tools", "mcp", "web_search"}, Provider: replayUnsafeResponseClient{client}}},
+				endpoints: []Endpoint{{Name: "tool-endpoint", Type: "demo", Capabilities: []string{"responses", "tools", "mcp", "web_search", "custom_tools"}, Provider: replayUnsafeResponseClient{client}}},
 				modules:   modules.NewPipeline(nil), health: newEndpointHealthTracker(), cache: newExactCache(time.Hour),
 			}
 			request := openai.ResponseRequest{Model: "m", Input: "hello", Tools: []openai.ResponseTool{test.tool}}

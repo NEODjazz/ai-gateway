@@ -317,7 +317,9 @@ func TestDeanonymizeResponsesResponseRestoresOriginalValues(t *testing.T) {
 		OutputText: "Email: {{EMAIL_1}}",
 		Output: []openai.ResponseOutputItem{
 			{
-				Type: "message",
+				Type:      "message",
+				Arguments: `{"email":"{{EMAIL_1}}"}`,
+				Input:     "recipient={{EMAIL_1}}",
 				Content: []openai.ResponseOutputContent{
 					{Type: "output_text", Text: "Email: {{EMAIL_1}}"},
 					{Type: "refusal", Refusal: "Cannot send to {{EMAIL_1}}"},
@@ -335,6 +337,9 @@ func TestDeanonymizeResponsesResponseRestoresOriginalValues(t *testing.T) {
 	}
 	if response.Output[0].Content[1].Refusal != "Cannot send to user@example.com" {
 		t.Fatalf("refusal was not restored: %s", response.Output[0].Content[1].Refusal)
+	}
+	if response.Output[0].Arguments != `{"email":"user@example.com"}` || response.Output[0].Input != "recipient=user@example.com" {
+		t.Fatalf("tool payloads were not restored: arguments=%q input=%q", response.Output[0].Arguments, response.Output[0].Input)
 	}
 
 }

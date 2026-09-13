@@ -182,7 +182,7 @@ func validateResponseTools(tools []ResponseTool) string {
 	if len(tools) > 128 {
 		return "tools must contain at most 128 entries"
 	}
-	functionNames := make(map[string]struct{}, len(tools))
+	namedToolNames := make(map[string]struct{}, len(tools))
 	mcpLabels := make(map[string]struct{}, len(tools))
 	hostedTypes := make(map[string]struct{}, 3)
 	for index, tool := range tools {
@@ -194,21 +194,38 @@ func validateResponseTools(tools []ResponseTool) string {
 			if utf8.RuneCountInString(tool.Description) > 4096 {
 				return "function tool descriptions must contain at most 4096 characters"
 			}
-			if tool.ServerLabel != "" || tool.ServerURL != "" || tool.ServerDescription != "" || len(tool.AllowedTools) > 0 || tool.RequireApproval != nil || len(tool.Headers) > 0 || len(tool.VectorStoreIDs) > 0 || tool.Container != nil || tool.Filters != nil || tool.MaxNumResults != nil || tool.RankingOptions != nil || tool.RewriteQuery != nil || tool.SearchContextSize != "" || tool.UserLocation != nil {
+			if tool.ServerLabel != "" || tool.ServerURL != "" || tool.ServerDescription != "" || len(tool.AllowedTools) > 0 || tool.RequireApproval != nil || len(tool.Headers) > 0 || len(tool.VectorStoreIDs) > 0 || tool.Container != nil || tool.Filters != nil || tool.MaxNumResults != nil || tool.RankingOptions != nil || tool.RewriteQuery != nil || tool.SearchContextSize != "" || tool.UserLocation != nil || tool.Format != nil {
 				return "function tools contain unsupported fields"
 			}
 			if tool.Parameters != nil && !isJSONObject(tool.Parameters) {
 				return "function tool parameters must be an object"
 			}
-			if _, duplicate := functionNames[tool.Name]; duplicate {
-				return "function tool names must be unique"
+			if _, duplicate := namedToolNames[tool.Name]; duplicate {
+				return "function and custom tool names must be unique"
 			}
-			functionNames[tool.Name] = struct{}{}
+			namedToolNames[tool.Name] = struct{}{}
+		case "custom":
+			if !chatFunctionName.MatchString(tool.Name) {
+				return "custom tool names must contain 1 to 64 letters, digits, underscores, or hyphens"
+			}
+			if utf8.RuneCountInString(tool.Description) > 4096 {
+				return "custom tool descriptions must contain at most 4096 characters"
+			}
+			if tool.Parameters != nil || tool.Strict != nil || tool.ServerLabel != "" || tool.ServerURL != "" || tool.ServerDescription != "" || len(tool.AllowedTools) > 0 || tool.RequireApproval != nil || len(tool.Headers) > 0 || len(tool.VectorStoreIDs) > 0 || tool.Container != nil || tool.Filters != nil || tool.MaxNumResults != nil || tool.RankingOptions != nil || tool.RewriteQuery != nil || tool.SearchContextSize != "" || tool.UserLocation != nil {
+				return "custom tools contain unsupported fields"
+			}
+			if message := validateResponseCustomToolFormat(tool.Format); message != "" {
+				return message
+			}
+			if _, duplicate := namedToolNames[tool.Name]; duplicate {
+				return "function and custom tool names must be unique"
+			}
+			namedToolNames[tool.Name] = struct{}{}
 		case "mcp":
 			if strings.TrimSpace(tool.ServerLabel) == "" || !validResponseMCPURL(tool.ServerURL) {
 				return "mcp tools require a server_label and safe HTTPS server_url"
 			}
-			if tool.Name != "" || tool.Description != "" || tool.Parameters != nil || tool.Strict != nil || len(tool.VectorStoreIDs) > 0 || tool.Container != nil || tool.Filters != nil || tool.MaxNumResults != nil || tool.RankingOptions != nil || tool.RewriteQuery != nil || tool.SearchContextSize != "" || tool.UserLocation != nil {
+			if tool.Name != "" || tool.Description != "" || tool.Parameters != nil || tool.Strict != nil || len(tool.VectorStoreIDs) > 0 || tool.Container != nil || tool.Filters != nil || tool.MaxNumResults != nil || tool.RankingOptions != nil || tool.RewriteQuery != nil || tool.SearchContextSize != "" || tool.UserLocation != nil || tool.Format != nil {
 				return "mcp tools contain unsupported fields"
 			}
 			if _, duplicate := mcpLabels[tool.ServerLabel]; duplicate {
@@ -233,7 +250,7 @@ func validateResponseTools(tools []ResponseTool) string {
 				return "code_interpreter tools must be unique"
 			}
 			hostedTypes[tool.Type] = struct{}{}
-			if tool.Name != "" || tool.Description != "" || tool.Parameters != nil || tool.Strict != nil || tool.ServerLabel != "" || tool.ServerURL != "" || tool.ServerDescription != "" || len(tool.AllowedTools) > 0 || tool.RequireApproval != nil || len(tool.Headers) > 0 || len(tool.VectorStoreIDs) > 0 || tool.Filters != nil || tool.MaxNumResults != nil || tool.RankingOptions != nil || tool.RewriteQuery != nil || tool.SearchContextSize != "" || tool.UserLocation != nil {
+			if tool.Name != "" || tool.Description != "" || tool.Parameters != nil || tool.Strict != nil || tool.ServerLabel != "" || tool.ServerURL != "" || tool.ServerDescription != "" || len(tool.AllowedTools) > 0 || tool.RequireApproval != nil || len(tool.Headers) > 0 || len(tool.VectorStoreIDs) > 0 || tool.Filters != nil || tool.MaxNumResults != nil || tool.RankingOptions != nil || tool.RewriteQuery != nil || tool.SearchContextSize != "" || tool.UserLocation != nil || tool.Format != nil {
 				return "code_interpreter tools contain unsupported fields"
 			}
 			if _, _, message := InspectResponseCodeInterpreterContainer(tool.Container); message != "" {
@@ -244,7 +261,7 @@ func validateResponseTools(tools []ResponseTool) string {
 				return "file_search tools must be unique"
 			}
 			hostedTypes[tool.Type] = struct{}{}
-			if tool.Name != "" || tool.Description != "" || tool.Parameters != nil || tool.Strict != nil || tool.ServerLabel != "" || tool.ServerURL != "" || tool.ServerDescription != "" || len(tool.AllowedTools) > 0 || tool.RequireApproval != nil || len(tool.Headers) > 0 || tool.Container != nil || tool.SearchContextSize != "" || tool.UserLocation != nil {
+			if tool.Name != "" || tool.Description != "" || tool.Parameters != nil || tool.Strict != nil || tool.ServerLabel != "" || tool.ServerURL != "" || tool.ServerDescription != "" || len(tool.AllowedTools) > 0 || tool.RequireApproval != nil || len(tool.Headers) > 0 || tool.Container != nil || tool.SearchContextSize != "" || tool.UserLocation != nil || tool.Format != nil {
 				return "file_search tools contain unsupported fields"
 			}
 			if len(tool.VectorStoreIDs) == 0 || len(tool.VectorStoreIDs) > 1 {
@@ -268,7 +285,7 @@ func validateResponseTools(tools []ResponseTool) string {
 				return "web_search tools must be unique"
 			}
 			hostedTypes["web_search"] = struct{}{}
-			if tool.Name != "" || tool.Description != "" || tool.Parameters != nil || tool.Strict != nil || tool.ServerLabel != "" || tool.ServerURL != "" || tool.ServerDescription != "" || len(tool.AllowedTools) > 0 || tool.RequireApproval != nil || len(tool.Headers) > 0 || len(tool.VectorStoreIDs) > 0 || tool.Container != nil || tool.MaxNumResults != nil || tool.RankingOptions != nil || tool.RewriteQuery != nil {
+			if tool.Name != "" || tool.Description != "" || tool.Parameters != nil || tool.Strict != nil || tool.ServerLabel != "" || tool.ServerURL != "" || tool.ServerDescription != "" || len(tool.AllowedTools) > 0 || tool.RequireApproval != nil || len(tool.Headers) > 0 || len(tool.VectorStoreIDs) > 0 || tool.Container != nil || tool.MaxNumResults != nil || tool.RankingOptions != nil || tool.RewriteQuery != nil || tool.Format != nil {
 				return "web_search tools contain unsupported fields"
 			}
 			if message := validateResponseWebSearchOptions(tool); message != "" {
@@ -277,6 +294,28 @@ func validateResponseTools(tools []ResponseTool) string {
 		default:
 			return "tools contain an unsupported type at index " + strconv.Itoa(index)
 		}
+	}
+	return ""
+}
+
+func validateResponseCustomToolFormat(format *ResponseCustomToolFormat) string {
+	if format == nil {
+		return ""
+	}
+	switch format.Type {
+	case "text":
+		if format.Syntax != "" || format.Definition != "" {
+			return "custom text format accepts only type"
+		}
+	case "grammar":
+		if format.Syntax != "lark" && format.Syntax != "regex" {
+			return "custom grammar syntax must be lark or regex"
+		}
+		if format.Definition == "" || !utf8.ValidString(format.Definition) || len(format.Definition) > 64<<10 {
+			return "custom grammar definition must contain between 1 and 65536 UTF-8 bytes"
+		}
+	default:
+		return "custom tool format type must be text or grammar"
 	}
 	return ""
 }
@@ -593,6 +632,15 @@ func validateResponseToolChoice(tools []ResponseTool, choice any) string {
 		}
 		for _, tool := range tools {
 			if tool.Type == "function" && tool.Name == name {
+				return ""
+			}
+		}
+	case "custom":
+		if len(object) != 2 || json.Unmarshal(object["name"], &name) != nil || name == "" {
+			return "tool_choice must reference an available tool"
+		}
+		for _, tool := range tools {
+			if tool.Type == "custom" && tool.Name == name {
 				return ""
 			}
 		}

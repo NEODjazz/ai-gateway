@@ -72,6 +72,29 @@ func TestOpenAICompatiblePreservesHostedToolOutputPayloads(t *testing.T) {
 	}
 }
 
+func TestOpenAICompatibleForwardsCustomToolsAndPreservesCalls(t *testing.T) {
+	var upstream map[string]json.RawMessage
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&upstream); err != nil {
+			t.Fatal(err)
+		}
+		_, _ = fmt.Fprint(w, `{"id":"resp-custom","object":"response","status":"completed","model":"model","output":[{"id":"ct_1","type":"custom_tool_call","status":"completed","call_id":"call_1","name":"query","input":"status:open"}],"usage":{"input_tokens":4,"output_tokens":2,"total_tokens":6}}`)
+	}))
+	defer server.Close()
+
+	request := openai.ResponseRequest{Model: "model", Input: "find open items", Tools: []openai.ResponseTool{{Type: "custom", Name: "query", Format: &openai.ResponseCustomToolFormat{Type: "grammar", Syntax: "regex", Definition: `status:(open|closed)`}}}, ToolChoice: map[string]any{"type": "custom", "name": "query"}}
+	response, err := NewOpenAICompatible(server.URL, "", false).Responses(t.Context(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(upstream["tools"]), `"type":"custom"`) || !strings.Contains(string(upstream["tools"]), `"syntax":"regex"`) || !strings.Contains(string(upstream["tool_choice"]), `"name":"query"`) {
+		t.Fatalf("custom tool contract was not forwarded: %s", upstream)
+	}
+	if len(response.Output) != 1 || response.Output[0].Type != "custom_tool_call" || response.Output[0].Name != "query" || response.Output[0].CallID != "call_1" || response.Output[0].Input != "status:open" {
+		t.Fatalf("custom tool call was not preserved: %+v", response.Output)
+	}
+}
+
 func TestOpenAICompatibleStreamsHostedToolOutputPayloads(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")

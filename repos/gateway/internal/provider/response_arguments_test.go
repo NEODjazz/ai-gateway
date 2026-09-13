@@ -48,3 +48,20 @@ func TestResponseStreamFunctionDoneWithoutDeltas(t *testing.T) {
 		t.Fatalf("item=%+v", item)
 	}
 }
+
+func TestResponseStreamFinalCustomToolInput(t *testing.T) {
+	events := "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"custom_tool_call\",\"id\":\"custom\",\"call_id\":\"call-custom\",\"name\":\"query\",\"input\":\"\"}}\n\n" +
+		"data: {\"type\":\"response.custom_tool_call_input.delta\",\"output_index\":0,\"item_id\":\"custom\",\"delta\":\"partial\"}\n\n" +
+		"data: {\"type\":\"response.custom_tool_call_input.done\",\"output_index\":0,\"item_id\":\"custom\",\"input\":\"status:open\"}\n\n"
+	response, err := streamResponseData(strings.NewReader(events+responseTestTerminal), "m", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Output) != 1 {
+		t.Fatalf("output=%+v", response.Output)
+	}
+	item := response.Output[0]
+	if item.ID != "custom" || item.CallID != "call-custom" || item.Name != "query" || item.Type != "custom_tool_call" || item.Input != "status:open" {
+		t.Fatalf("item=%+v", item)
+	}
+}

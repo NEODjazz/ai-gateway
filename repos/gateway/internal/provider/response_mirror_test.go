@@ -19,8 +19,9 @@ type responseMirrorCapture struct {
 
 type mcpResponseMirrorCapture struct{ *responseMirrorCapture }
 
-func (mcpResponseMirrorCapture) SupportsMCP() bool               { return true }
-func (mcpResponseMirrorCapture) SupportsResponseWebSearch() bool { return true }
+func (mcpResponseMirrorCapture) SupportsMCP() bool                 { return true }
+func (mcpResponseMirrorCapture) SupportsResponseWebSearch() bool   { return true }
+func (mcpResponseMirrorCapture) SupportsResponseCustomTools() bool { return true }
 
 func (p *responseMirrorCapture) Responses(_ context.Context, req openai.ResponseRequest) (openai.ResponseResponse, error) {
 	p.requests <- req
@@ -133,6 +134,7 @@ func TestResponsesHostedToolsAreNotMirrored(t *testing.T) {
 	}{
 		{name: "mcp", tool: openai.ResponseTool{Type: "mcp", ServerLabel: "documents", ServerURL: "https://documents.example.test"}, capabilities: []string{"responses", "tools", "mcp"}},
 		{name: "web search", tool: openai.ResponseTool{Type: "web_search"}, capabilities: []string{"responses", "tools", "web_search"}},
+		{name: "custom", tool: openai.ResponseTool{Type: "custom", Name: "dsl"}, capabilities: []string{"responses", "tools", "custom_tools"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {

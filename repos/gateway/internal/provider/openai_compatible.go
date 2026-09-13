@@ -1330,6 +1330,21 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 				item.Arguments = arguments
 			}
 		}
+		if event == "response.custom_tool_call_input.delta" || event == "response.custom_tool_call_input.done" {
+			item := ensureResponseOutputItem(&response, outputIndex)
+			item.Type = "custom_tool_call"
+			item.Role, item.Content = "", nil
+			if id, ok := decoded["item_id"].(string); ok {
+				item.ID = id
+			}
+			if event == "response.custom_tool_call_input.delta" {
+				if delta, ok := decoded["delta"].(string); ok {
+					item.Input += delta
+				}
+			} else if input, ok := decoded["input"].(string); ok {
+				item.Input = input
+			}
+		}
 		if event == "response.refusal.delta" || event == "response.refusal.done" ||
 			event == "response.output_text.delta" || event == "response.output_text.done" {
 			contentIndex, err := boundedResponseStreamIndex(decoded, "content_index", maxResponseStreamContentParts)

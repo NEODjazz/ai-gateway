@@ -88,6 +88,10 @@ func TestTokenEstimatesIncludeFullContextAndEquivalentLimits(t *testing.T) {
 	if ResponseInputTokens(response) < 1000 {
 		t.Fatal("instructions omitted")
 	}
+	withCustomGrammar := ResponseRequest{Input: "test", Tools: []ResponseTool{{Type: "custom", Name: "dsl", Format: &ResponseCustomToolFormat{Type: "grammar", Syntax: "lark", Definition: strings.Repeat("rule: TOKEN\n", 1000)}}}}
+	if ResponseInputTokens(withCustomGrammar) <= ResponseInputTokens(ResponseRequest{Input: "test"})+1000 {
+		t.Fatal("custom tool grammar omitted from the input-token reserve")
+	}
 	native := response
 	native.NativeInputTokens = 37
 	if ResponseInputTokens(native) != ResponseInputTokens(response)+37 {

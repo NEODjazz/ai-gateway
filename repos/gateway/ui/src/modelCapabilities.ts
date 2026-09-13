@@ -37,6 +37,7 @@ export const modelCapabilityOptions: ChipOption[] = [
   { value: "realtime", label: "Realtime", description: "Bidirectional low-latency sessions" },
   { value: "stream", label: "Stream", description: "Streaming responses" },
   { value: "tools", label: "Tools", description: "Function and tool calling" },
+  { value: "custom_tools", label: "Custom tools", description: "Responses custom tools with text or grammar input" },
   { value: "structured_output", label: "Structured output", description: "Structured JSON output" },
   { value: "mcp", label: "MCP", description: "MCP tool calls" },
   { value: "code_interpreter", label: "Code interpreter", description: "Provider-managed code execution in Responses" },

@@ -7964,7 +7964,7 @@ components:
         capabilities:
           type: array
           uniqueItems: true
-          items: {type: string, enum: [chat, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, gemini_code_execution, url_context, google_maps, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, cached_content, realtime, stream, tools, structured_output, mcp, code_interpreter, file_search, vision, web_search, web_fetch, tool_search, zero_output, inference_geo, context_management, tool_result_error, document_citations, document_metadata, document_text, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
+          items: {type: string, enum: [chat, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, gemini_code_execution, url_context, google_maps, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, cached_content, realtime, stream, tools, custom_tools, structured_output, mcp, code_interpreter, file_search, vision, web_search, web_fetch, tool_search, zero_output, inference_geo, context_management, tool_result_error, document_citations, document_metadata, document_text, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
         max_input_tokens: {type: integer, minimum: 0}
         max_output_tokens: {type: integer, minimum: 0}
         input_cost_per_1m: {type: number, minimum: 0}
@@ -8949,6 +8949,29 @@ components:
           type: object
           additionalProperties: true
         strict: {type: boolean}
+    CustomResponseTool:
+      type: object
+      description: Provider-executed custom tool whose output is constrained as plain text or by a Lark/regex grammar. Gateway authorization uses the tool name, and routing requires an explicit custom_tools deployment capability.
+      additionalProperties: false
+      required: [type, name]
+      properties:
+        type: {type: string, const: custom}
+        name: {type: string, minLength: 1, maxLength: 64, pattern: '^[A-Za-z0-9_-]+$'}
+        description: {type: string, maxLength: 4096}
+        format:
+          oneOf:
+            - type: object
+              additionalProperties: false
+              required: [type]
+              properties:
+                type: {type: string, const: text}
+            - type: object
+              additionalProperties: false
+              required: [type, syntax, definition]
+              properties:
+                type: {type: string, const: grammar}
+                syntax: {type: string, enum: [lark, regex]}
+                definition: {type: string, minLength: 1, maxLength: 65536}
     MCPResponseTool:
       type: object
       description: Remote connector forwarded to the selected provider for execution. This does not reference or automatically load a registry entry. Gateway authorization checks mcp:<server_label>@<canonical-https-url>; the provider enforces connector-level allowed_tools and require_approval.
@@ -9146,6 +9169,7 @@ components:
           items:
             oneOf:
               - $ref: '#/components/schemas/FunctionResponseTool'
+              - $ref: '#/components/schemas/CustomResponseTool'
               - $ref: '#/components/schemas/MCPResponseTool'
               - $ref: '#/components/schemas/CodeInterpreterResponseTool'
               - $ref: '#/components/schemas/FileSearchResponseTool'
@@ -9322,6 +9346,7 @@ components:
           items:
             oneOf:
               - $ref: '#/components/schemas/FunctionResponseTool'
+              - $ref: '#/components/schemas/CustomResponseTool'
               - $ref: '#/components/schemas/MCPResponseTool'
               - $ref: '#/components/schemas/CodeInterpreterResponseTool'
               - $ref: '#/components/schemas/FileSearchResponseTool'
@@ -9420,6 +9445,7 @@ components:
         approval_request_id: {type: string}
         code: {type: string}
         arguments: {type: string}
+        input: {type: string, description: Raw custom-tool input produced by the model.}
         action:
           type: object
           additionalProperties: true
@@ -10571,7 +10597,7 @@ components:
           type: array
           uniqueItems: true
           description: Operations and optional request features preserved by the managed adapter.
-          items: {type: string, enum: [chat, completions, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, gemini_code_execution, url_context, google_maps, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, cached_content, realtime, stream, tools, structured_output, mcp, code_interpreter, file_search, vision, web_search, web_fetch, tool_search, zero_output, inference_geo, context_management, tool_result_error, document_citations, document_metadata, document_text, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
+          items: {type: string, enum: [chat, completions, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, gemini_code_execution, url_context, google_maps, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, cached_content, realtime, stream, tools, custom_tools, structured_output, mcp, code_interpreter, file_search, vision, web_search, web_fetch, tool_search, zero_output, inference_geo, context_management, tool_result_error, document_citations, document_metadata, document_text, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
         auth_types:
           type: array
           uniqueItems: true

@@ -795,6 +795,13 @@ type ResponseTool struct {
 	RewriteQuery      *bool                      `json:"rewrite_query,omitempty"`
 	SearchContextSize string                     `json:"search_context_size,omitempty"`
 	UserLocation      *ResponseWebSearchLocation `json:"user_location,omitempty"`
+	Format            *ResponseCustomToolFormat  `json:"format,omitempty"`
+}
+
+type ResponseCustomToolFormat struct {
+	Type       string `json:"type"`
+	Syntax     string `json:"syntax,omitempty"`
+	Definition string `json:"definition,omitempty"`
 }
 
 type ResponseWebSearchLocation struct {
@@ -890,6 +897,7 @@ type ResponseOutputItem struct {
 	ApprovalRequestID string                  `json:"approval_request_id,omitempty"`
 	Code              string                  `json:"code,omitempty"`
 	Arguments         string                  `json:"arguments,omitempty"`
+	Input             string                  `json:"input,omitempty"`
 	Content           []ResponseOutputContent `json:"content,omitempty"`
 	Summary           []ResponseOutputContent `json:"summary,omitempty"`
 }

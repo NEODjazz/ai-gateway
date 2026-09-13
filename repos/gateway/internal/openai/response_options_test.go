@@ -162,12 +162,14 @@ func TestResponseIncludeValidation(t *testing.T) {
 func TestResponseToolChoiceValidation(t *testing.T) {
 	tools := []ResponseTool{
 		{Type: "function", Name: "lookup"},
+		{Type: "custom", Name: "dsl", Format: &ResponseCustomToolFormat{Type: "grammar", Syntax: "lark", Definition: "start: /[a-z]+/"}},
 		{Type: "mcp", ServerLabel: "documents", ServerURL: "https://documents.example.test", AllowedTools: []string{"search"}},
 		{Type: "web_search", SearchContextSize: "medium"},
 	}
 	for _, choice := range []any{
 		"none", "auto", "required",
 		map[string]any{"type": "function", "name": "lookup"},
+		map[string]any{"type": "custom", "name": "dsl"},
 		map[string]any{"type": "mcp", "server_label": "documents", "name": "search"},
 		map[string]any{"type": "web_search"},
 		map[string]any{"type": "web_search_preview"},
@@ -179,6 +181,7 @@ func TestResponseToolChoiceValidation(t *testing.T) {
 	for _, choice := range []any{
 		"unknown", "required",
 		map[string]any{"type": "function", "name": "missing"},
+		map[string]any{"type": "custom", "name": "missing"},
 		map[string]any{"type": "function", "name": "lookup", "extra": true},
 		map[string]any{"type": "mcp", "server_label": "documents", "name": "write"},
 		map[string]any{"type": "mcp", "server_label": "missing", "name": "search"},
@@ -191,6 +194,35 @@ func TestResponseToolChoiceValidation(t *testing.T) {
 		}
 		if message := request.Validate(); message == "" {
 			t.Fatalf("invalid choice accepted: %#v", choice)
+		}
+	}
+}
+
+func TestResponseCustomToolValidation(t *testing.T) {
+	for _, tool := range []ResponseTool{
+		{Type: "custom", Name: "shell_command"},
+		{Type: "custom", Name: "plain", Description: "Free-form input", Format: &ResponseCustomToolFormat{Type: "text"}},
+		{Type: "custom", Name: "query", Format: &ResponseCustomToolFormat{Type: "grammar", Syntax: "lark", Definition: "start: WORD\nWORD: /[a-z]+/"}},
+		{Type: "custom", Name: "code", Format: &ResponseCustomToolFormat{Type: "grammar", Syntax: "regex", Definition: "[A-Z]{2}-[0-9]+"}},
+	} {
+		if message := (ResponseRequest{Tools: []ResponseTool{tool}}).Validate(); message != "" {
+			t.Fatalf("valid custom tool rejected: %+v: %s", tool, message)
+		}
+	}
+
+	for _, tools := range [][]ResponseTool{
+		{{Type: "custom"}},
+		{{Type: "custom", Name: "contains space"}},
+		{{Type: "custom", Name: "tool", Parameters: map[string]any{}}},
+		{{Type: "custom", Name: "tool", Format: &ResponseCustomToolFormat{Type: "json"}}},
+		{{Type: "custom", Name: "tool", Format: &ResponseCustomToolFormat{Type: "text", Syntax: "regex"}}},
+		{{Type: "custom", Name: "tool", Format: &ResponseCustomToolFormat{Type: "grammar", Syntax: "peg", Definition: "start"}}},
+		{{Type: "custom", Name: "tool", Format: &ResponseCustomToolFormat{Type: "grammar", Syntax: "regex"}}},
+		{{Type: "function", Name: "same"}, {Type: "custom", Name: "same"}},
+		{{Type: "custom", Name: "same"}, {Type: "function", Name: "same"}},
+	} {
+		if message := (ResponseRequest{Tools: tools}).Validate(); message == "" {
+			t.Fatalf("invalid custom tools accepted: %+v", tools)
 		}
 	}
 }
