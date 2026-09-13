@@ -488,7 +488,7 @@ func TestManagedProviderCapabilityProfilesExposeAllValidatedResponseOptions(t *t
 	}
 	allReasoning := []string{"none", "minimal", "low", "medium", "high", "xhigh", "max", "default"}
 	allTiers := []string{"auto", "default", "on_demand", "flex", "performance", "scale", "priority", "fast", "ultrafast", "standard_only"}
-	compatible := []string{"metadata", "top_logprobs", "truncation", "store", "include", "parallel_tool_calls", "text.verbosity", "previous_response_id", "user", "safety_identifier", "prompt_cache_key", "max_output_tokens", "max_tokens", "temperature", "top_p", "frequency_penalty", "presence_penalty", "max_tool_calls", "reasoning"}
+	compatible := []string{"metadata", "top_logprobs", "truncation", "store", "include", "parallel_tool_calls", "text.verbosity", "previous_response_id", "user", "safety_identifier", "prompt_cache_key", "prompt_cache_options", "prompt_cache_retention", "max_output_tokens", "max_tokens", "temperature", "top_p", "frequency_penalty", "presence_penalty", "max_tool_calls", "reasoning"}
 	tiered := append(append([]string(nil), compatible...), "service_tier")
 	expected := map[string]ProviderResponseParameterPolicy{
 		"demo": {}, "gemini": {}, "cohere": {}, "mistral": {}, "voyage": {}, "bedrock": {}, "opensandbox": {},

@@ -102,3 +102,20 @@ func TestStoredResponsesAreNotMirrored(t *testing.T) {
 		})
 	}
 }
+
+func TestResponsesPromptCacheComparisonIsNotMirrored(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		shadow := &responseMirrorCapture{requests: make(chan openai.ResponseRequest, 1)}
+		router := Router{health: newEndpointHealthTracker(), modules: modules.NewPipeline(nil), endpoints: []Endpoint{
+			{Name: "shadow", Models: []string{"m"}, Capabilities: []string{"responses"}, Shadow: true, MirrorPercentage: 100, MirrorTimeout: time.Second, Provider: shadow},
+		}}
+		request := openai.ResponseRequest{Model: "m", Input: "hello", PromptCacheOptions: &openai.PromptCacheOptions{ComparisonResponseID: "resp_primary"}}
+		router.mirrorResponses(t.Context(), "request", request, "m", "responses")
+		synctest.Wait()
+		select {
+		case mirrored := <-shadow.requests:
+			t.Fatalf("prompt-cache comparison sent to shadow: %+v", mirrored)
+		default:
+		}
+	})
+}

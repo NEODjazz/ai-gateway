@@ -1196,6 +1196,10 @@ func managedResponseOptionProbes() []managedResponseOptionProbe {
 		{name: "user", apply: func(request *openai.ResponseRequest) { request.User = "profile-probe" }},
 		{name: "safety_identifier", apply: func(request *openai.ResponseRequest) { request.SafetyIdentifier = "profile-probe" }},
 		{name: "prompt_cache_key", apply: func(request *openai.ResponseRequest) { request.PromptCacheKey = "profile-probe" }},
+		{name: "prompt_cache_options", apply: func(request *openai.ResponseRequest) {
+			request.PromptCacheOptions = &openai.PromptCacheOptions{Mode: "explicit", TTL: "30m", ComparisonResponseID: "resp_profile"}
+		}},
+		{name: "prompt_cache_retention", apply: func(request *openai.ResponseRequest) { request.PromptCacheRetention = "24h" }},
 		{name: "max_output_tokens", apply: func(request *openai.ResponseRequest) { value := 16; request.MaxOutputTokens = &value }},
 		{name: "max_tokens", apply: func(request *openai.ResponseRequest) { value := 16; request.MaxTokens = &value }},
 		{name: "temperature", apply: func(request *openai.ResponseRequest) { value := 0.5; request.Temperature = &value }},

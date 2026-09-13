@@ -95,6 +95,8 @@ func (g Groq) ValidateResponseParameters(request openai.ResponseRequest) error {
 		parameterCheck{"previous_response_id", request.PreviousResponse != ""},
 		parameterCheck{"safety_identifier", request.SafetyIdentifier != ""},
 		parameterCheck{"prompt_cache_key", request.PromptCacheKey != ""},
+		parameterCheck{"prompt_cache_options", request.PromptCacheOptions != nil},
+		parameterCheck{"prompt_cache_retention", request.PromptCacheRetention != ""},
 		parameterCheck{"text.verbosity", verbositySupplied},
 		parameterCheck{"top_logprobs", request.TopLogprobs != nil},
 		parameterCheck{"frequency_penalty", request.FrequencyPenalty != nil},

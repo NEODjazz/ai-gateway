@@ -115,6 +115,19 @@ func TestResponsesCacheSeparatesPromptCacheKeys(t *testing.T) {
 	}
 }
 
+func TestResponsesCacheSeparatesPromptCachePolicies(t *testing.T) {
+	request := openai.ResponseRequest{Model: "model", Input: "hello", PromptCacheOptions: &openai.PromptCacheOptions{Mode: "implicit", TTL: "30m"}, PromptCacheRetention: "in_memory"}
+	first := modules.RequestContext{CredentialID: "tenant", Request: openai.ChatCompletionRequest{Model: "model"}, ResponseRequest: &request}
+	secondRequest := request
+	secondRequest.PromptCacheOptions = &openai.PromptCacheOptions{Mode: "explicit", TTL: "30m", ComparisonResponseID: "resp_reference"}
+	secondRequest.PromptCacheRetention = "24h"
+	second := first
+	second.ResponseRequest = &secondRequest
+	if providerCacheKey("responses", first) == providerCacheKey("responses", second) {
+		t.Fatal("Responses cache shared across prompt cache policies")
+	}
+}
+
 func TestResponsesCacheSeparatesTextVerbosity(t *testing.T) {
 	request := openai.ResponseRequest{Model: "model", Input: "hello", Text: map[string]any{"verbosity": "low"}}
 	first := modules.RequestContext{CredentialID: "tenant", Request: openai.ChatCompletionRequest{Model: "model"}, ResponseRequest: &request}

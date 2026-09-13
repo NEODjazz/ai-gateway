@@ -76,8 +76,9 @@ type ChatWebSearchApproximateLocation struct {
 }
 
 type PromptCacheOptions struct {
-	Mode string `json:"mode,omitempty"`
-	TTL  string `json:"ttl,omitempty"`
+	Mode                 string `json:"mode,omitempty"`
+	TTL                  string `json:"ttl,omitempty"`
+	ComparisonResponseID string `json:"comparison_response_id,omitempty"`
 }
 
 type ChatPrediction struct {
@@ -123,13 +124,11 @@ func (o ChatGenerationOptions) Validate() string {
 		return "safety_identifier must contain at most 64 characters"
 	}
 	if o.PromptCacheOptions != nil {
-		switch o.PromptCacheOptions.Mode {
-		case "", "implicit", "explicit":
-		default:
-			return "prompt_cache_options.mode must be implicit or explicit"
+		if message := ValidatePromptCacheOptions(o.PromptCacheOptions); message != "" {
+			return message
 		}
-		if o.PromptCacheOptions.TTL != "" && o.PromptCacheOptions.TTL != "30m" {
-			return "prompt_cache_options.ttl must be 30m"
+		if o.PromptCacheOptions.ComparisonResponseID != "" {
+			return "prompt_cache_options.comparison_response_id is only supported by Responses"
 		}
 	}
 	if o.PromptCacheRetention != "" && o.PromptCacheRetention != "in_memory" && o.PromptCacheRetention != "24h" {
@@ -229,6 +228,26 @@ func (o ChatGenerationOptions) Validate() string {
 		if _, err := strconv.ParseUint(token, 10, 64); err != nil || bias < -100 || bias > 100 {
 			return "logit_bias requires nonnegative token IDs and biases between -100 and 100"
 		}
+	}
+	return ""
+}
+
+// ValidatePromptCacheOptions checks the shared Chat and Responses prompt-cache
+// controls before an adapter can forward them.
+func ValidatePromptCacheOptions(options *PromptCacheOptions) string {
+	if options == nil {
+		return ""
+	}
+	switch options.Mode {
+	case "", "implicit", "explicit":
+	default:
+		return "prompt_cache_options.mode must be implicit or explicit"
+	}
+	if options.TTL != "" && options.TTL != "30m" {
+		return "prompt_cache_options.ttl must be 30m"
+	}
+	if utf8.RuneCountInString(options.ComparisonResponseID) > 256 {
+		return "prompt_cache_options.comparison_response_id must contain at most 256 characters"
 	}
 	return ""
 }

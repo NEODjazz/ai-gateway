@@ -130,6 +130,7 @@ func (d DeepSeek) ValidateResponseParameters(request openai.ResponseRequest) err
 		parameterCheck{"metadata", request.Metadata != nil}, parameterCheck{"include", request.Include != nil},
 		parameterCheck{"store", request.Store != nil}, parameterCheck{"truncation", request.Truncation != nil},
 		parameterCheck{"safety_identifier", request.SafetyIdentifier != ""}, parameterCheck{"prompt_cache_key", request.PromptCacheKey != ""},
+		parameterCheck{"prompt_cache_options", request.PromptCacheOptions != nil}, parameterCheck{"prompt_cache_retention", request.PromptCacheRetention != ""},
 		parameterCheck{"service_tier", request.ServiceTier != ""}, parameterCheck{"previous_response_id", request.PreviousResponse != ""},
 		parameterCheck{"parallel_tool_calls", request.ParallelToolCalls != nil}, parameterCheck{"text.verbosity", verbositySupplied},
 		parameterCheck{"frequency_penalty", request.FrequencyPenalty != nil}, parameterCheck{"presence_penalty", request.PresencePenalty != nil},

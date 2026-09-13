@@ -691,6 +691,12 @@ func (x XAI) ValidateResponseParameters(request openai.ResponseRequest) error {
 	if request.SafetyIdentifier != "" {
 		return xaiUnsupportedParameter("safety_identifier")
 	}
+	if request.PromptCacheOptions != nil {
+		return xaiUnsupportedParameter("prompt_cache_options")
+	}
+	if request.PromptCacheRetention != "" {
+		return xaiUnsupportedParameter("prompt_cache_retention")
+	}
 	if request.MaxToolCalls != nil {
 		return xaiUnsupportedParameter("max_tool_calls")
 	}

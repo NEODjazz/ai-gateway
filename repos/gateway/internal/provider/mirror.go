@@ -35,8 +35,9 @@ func (r Router) mirrorChat(ctx context.Context, requestID string, request openai
 
 func (r Router) mirrorResponses(ctx context.Context, requestID string, request openai.ResponseRequest, requestedModel string, capabilities ...string) {
 	// Shadow endpoints do not own the primary endpoint's response state. Sending
-	// its ID cannot reproduce a continuation and must not create a shadow job.
-	if request.PreviousResponse != "" {
+	// its ID cannot reproduce continuity or a cache comparison and must not
+	// create a shadow job.
+	if request.PreviousResponse != "" || request.PromptCacheOptions != nil && request.PromptCacheOptions.ComparisonResponseID != "" {
 		return
 	}
 	catalog := r.catalog.Current(ctx)

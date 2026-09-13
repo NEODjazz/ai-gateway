@@ -3079,31 +3079,63 @@ func (r Router) responseCandidates(ctx context.Context, req modules.RequestConte
 		chatRequest.MaxTokens = request.MaxTokens
 	}
 	candidates := r.routeCandidates(ctx, req, chatRequest, capabilities...)
-	if r.affinity == nil || request.PreviousResponse == "" {
+	comparisonResponseID := ""
+	if request.PromptCacheOptions != nil {
+		comparisonResponseID = request.PromptCacheOptions.ComparisonResponseID
+	}
+	if request.PreviousResponse == "" && comparisonResponseID == "" {
 		return candidates, nil
 	}
-	key := affinityKey(req, request.PreviousResponse)
-	if key == "" {
-		return candidates, nil
-	}
-	endpointName, found, err := r.affinity.get(ctx, key)
-	if r.observer != nil {
-		result := "miss"
-		if err != nil {
-			result = "error"
-		} else if found {
-			result = "hit"
+	if r.affinity == nil {
+		if comparisonResponseID != "" {
+			return nil, invalidResponseComparisonReference()
 		}
-		r.observer.ObserveCache("affinity_get", result)
+		return candidates, nil
 	}
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrResponseAffinityUnavailable, err)
+	pinnedEndpoint := ""
+	for _, reference := range []struct {
+		id       string
+		required bool
+	}{{request.PreviousResponse, false}, {comparisonResponseID, true}} {
+		if reference.id == "" {
+			continue
+		}
+		key := affinityKey(req, reference.id)
+		if key == "" {
+			if reference.required {
+				return nil, invalidResponseComparisonReference()
+			}
+			continue
+		}
+		endpointName, found, err := r.affinity.get(ctx, key)
+		if r.observer != nil {
+			result := "miss"
+			if err != nil {
+				result = "error"
+			} else if found {
+				result = "hit"
+			}
+			r.observer.ObserveCache("affinity_get", result)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrResponseAffinityUnavailable, err)
+		}
+		if !found {
+			if reference.required {
+				return nil, invalidResponseComparisonReference()
+			}
+			continue
+		}
+		if pinnedEndpoint != "" && pinnedEndpoint != endpointName {
+			return nil, invalidResponseComparisonReference()
+		}
+		pinnedEndpoint = endpointName
 	}
-	if !found {
+	if pinnedEndpoint == "" {
 		return candidates, nil
 	}
 	for _, endpoint := range candidates {
-		if endpoint.Name == endpointName {
+		if endpoint.Name == pinnedEndpoint {
 			pinned := endpoint
 			pinned.FallbackStage = 0
 			// The previous response belongs to this endpoint. Model-group fallback
@@ -3111,7 +3143,14 @@ func (r Router) responseCandidates(ctx context.Context, req modules.RequestConte
 			return []Endpoint{pinned}, nil
 		}
 	}
-	return nil, fmt.Errorf("responses session endpoint %q is unavailable for previous_response_id", endpointName)
+	if comparisonResponseID != "" {
+		return nil, invalidResponseComparisonReference()
+	}
+	return nil, fmt.Errorf("responses session endpoint %q is unavailable for previous_response_id", pinnedEndpoint)
+}
+
+func invalidResponseComparisonReference() error {
+	return &Error{Class: FailureClientRequest, Provider: "openai-compatible", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "prompt_cache_options.comparison_response_id", Err: errors.New("comparison_response_id must reference a response owned by this caller on an available deployment")}
 }
 
 func (r Router) rememberResponseAffinity(ctx context.Context, req modules.RequestContext, responseID, endpoint string) {

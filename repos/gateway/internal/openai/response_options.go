@@ -19,6 +19,12 @@ func (r ResponseRequest) Validate() string {
 	if utf8.RuneCountInString(r.SafetyIdentifier) > 64 {
 		return "safety_identifier must contain at most 64 characters"
 	}
+	if message := ValidatePromptCacheOptions(r.PromptCacheOptions); message != "" {
+		return message
+	}
+	if r.PromptCacheRetention != "" && r.PromptCacheRetention != "in_memory" && r.PromptCacheRetention != "24h" {
+		return "prompt_cache_retention must be in_memory or 24h"
+	}
 	if !validServiceTier(r.ServiceTier) {
 		return "unsupported service_tier value"
 	}
