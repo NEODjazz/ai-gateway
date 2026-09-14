@@ -98,4 +98,26 @@ describe("DeploymentsPage", () => {
     await waitFor(() => expect(fetchMock.mock.calls.some(([path, options]) => String(path) === "/admin/v1/model-deployments/unused-deployment" && options?.method === "DELETE")).toBe(true));
     await waitFor(() => expect(screen.queryByText("unused-deployment")).not.toBeInTheDocument());
   });
+
+  it("shows workload identity and omits credentials for Vertex deployments", async () => {
+    const deployment = { id: "vertex-gemini", provider_id: "vertex", credential_id: "", provider_type: "vertex-gemini", upstream_model: "gemini-2.5-pro", models: ["gemini-2.5-pro"], capabilities: ["chat", "stream"], priority: 0, weight: 1, enabled: true, runtime_state: "available" };
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const path = String(input);
+      if (path.startsWith("/admin/v1/model-deployments?")) return response({ data: [deployment], total: 1 });
+      if (path === "/admin/v1/provider-capabilities") return response({ data: [{ type: "vertex-gemini", capabilities: ["chat", "stream", "tools"] }] });
+      return response({ data: [] });
+    });
+    sessionStorage.setItem("ai-gateway.admin-token", "token");
+    render(<MemoryRouter><AuthProvider><DeploymentsPage /></AuthProvider></MemoryRouter>);
+
+    expect(await screen.findByText("vertex-gemini")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Actions for vertex-gemini" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
+    const edit = await screen.findByRole("dialog", { name: "Edit vertex-gemini" });
+    expect(within(edit).queryByLabelText("Credential")).not.toBeInTheDocument();
+    await userEvent.click(within(edit).getByRole("button", { name: "Cancel" }));
+    await userEvent.click(screen.getByRole("button", { name: "Actions for vertex-gemini" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Details" }));
+    expect(await screen.findByText("GCP workload identity")).toBeInTheDocument();
+  });
 });

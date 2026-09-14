@@ -69,6 +69,51 @@ func TestManagedGeminiWorkloadAuthentication(t *testing.T) {
 	}
 }
 
+func TestManagedVertexGeminiConfiguration(t *testing.T) {
+	router := New(Config{}).(*Router)
+	baseURL := "https://us-central1-aiplatform.googleapis.com/v1/projects/project-1/locations/us-central1/publishers/google"
+	managed, err := router.CreateProvider(ManagedProvider{ID: "vertex", Type: "vertex-gemini", BaseURL: baseURL, Enabled: true})
+	if err != nil || managed.AuthType != "gcp_adc" || managed.BaseURL != baseURL {
+		t.Fatalf("provider=%+v err=%v", managed, err)
+	}
+	for _, invalid := range []ManagedProvider{
+		{ID: "bad-auth", Type: "vertex-gemini", BaseURL: baseURL, AuthType: "api_key", Enabled: true},
+		{ID: "bad-path", Type: "vertex-gemini", BaseURL: "https://us-central1-aiplatform.googleapis.com/v1", Enabled: true},
+		{ID: "bad-host", Type: "vertex-gemini", BaseURL: "https://attacker.example/v1/projects/project-1/locations/us-central1/publishers/google", Enabled: true},
+		{ID: "bad-location", Type: "vertex-gemini", BaseURL: "https://europe-west1-aiplatform.googleapis.com/v1/projects/project-1/locations/us-central1/publishers/google", Enabled: true},
+		{ID: "bad-query", Type: "vertex-gemini", BaseURL: baseURL + "?credential=secret", Enabled: true},
+	} {
+		if _, err := router.CreateProvider(invalid); !errors.Is(err, ErrInvalidProvider) {
+			t.Fatalf("invalid provider accepted: %+v err=%v", invalid, err)
+		}
+	}
+	for _, profile := range ManagedProviderCapabilityProfiles() {
+		if profile.Type != "vertex-gemini" {
+			continue
+		}
+		if len(profile.AuthTypes) != 1 || profile.AuthTypes[0] != "gcp_adc" || len(profile.Operations) != 3 || profile.Operations[0] != "chat" || profile.Operations[1] != "count_tokens" || profile.Operations[2] != "stream" {
+			t.Fatalf("profile=%+v", profile)
+		}
+		return
+	}
+	t.Fatal("Vertex Gemini capability profile is missing")
+}
+
+func TestManagedVertexGeminiDeploymentRejectsBoundCredential(t *testing.T) {
+	router := New(Config{CredentialEncryptionKey: []byte("vertex-credential-key")}).(*Router)
+	baseURL := "https://us-central1-aiplatform.googleapis.com/v1/projects/project-1/locations/us-central1/publishers/google"
+	if _, err := router.CreateProvider(ManagedProvider{ID: "vertex", Type: "vertex-gemini", BaseURL: baseURL, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := router.CreateCredential(CredentialInput{ID: "unused", ProviderID: "vertex", Secret: "unused-secret"}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := router.CreateModelDeployment(ModelDeployment{ID: "vertex-model", ProviderID: "vertex", CredentialID: "unused", Models: []string{"vertex-model"}, UpstreamModel: "gemini-2.5-pro", Capabilities: []string{"chat"}, Enabled: true})
+	if !errors.Is(err, ErrInvalidDeployment) {
+		t.Fatalf("bound credential accepted: %v", err)
+	}
+}
+
 func TestManagedOpenSandboxCapabilityAndAuthentication(t *testing.T) {
 	router := New(Config{}).(*Router)
 	managed, err := router.CreateProvider(ManagedProvider{ID: "sandbox", Type: "opensandbox", BaseURL: "https://sandbox.example", Enabled: true})

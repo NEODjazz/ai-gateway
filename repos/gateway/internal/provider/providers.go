@@ -157,7 +157,7 @@ type ProviderContainerCreateParameterPolicy struct {
 	SupportedOptions []string `json:"supported_options"`
 }
 
-var managedProviderTypes = []string{"demo", "ollama", "openai", "openai-compatible", "openrouter", "azure-openai", "anthropic", "gemini", "cohere", "mistral", "voyage", "bedrock", "groq", "deepseek", "cerebras", "nvidia-nim", "together", "xai", "opensandbox"}
+var managedProviderTypes = []string{"demo", "ollama", "openai", "openai-compatible", "openrouter", "azure-openai", "anthropic", "gemini", "vertex-gemini", "cohere", "mistral", "voyage", "bedrock", "groq", "deepseek", "cerebras", "nvidia-nim", "together", "xai", "opensandbox"}
 
 var managedOperationCapabilities = []string{
 	"chat", "completions", "responses", "interactions", "count_tokens", "embeddings", "rerank", "moderation",
@@ -300,7 +300,7 @@ func normalizeManagedProvider(input ManagedProvider) (ManagedProvider, error) {
 	input.Type = strings.ToLower(strings.TrimSpace(input.Type))
 	input.BaseURL = strings.TrimRight(strings.TrimSpace(input.BaseURL), "/")
 	input.APIVersion = strings.TrimSpace(input.APIVersion)
-	input.AuthType = normalizeAzureAuthType(input.AuthType)
+	input.AuthType = strings.ToLower(strings.TrimSpace(input.AuthType))
 	input.Region = strings.ToLower(strings.TrimSpace(input.Region))
 	if input.ID == "" || len(input.ID) > 128 || !validProviderType(input.Type) || len(input.BaseURL) > 2048 || input.RateLimitRPM < 0 || input.RateLimitRPM > 10000000 || input.RateLimitTPM < 0 || input.RateLimitTPM > 1000000000 {
 		return ManagedProvider{}, ErrInvalidProvider
@@ -312,6 +312,7 @@ func normalizeManagedProvider(input ManagedProvider) (ManagedProvider, error) {
 		}
 	}
 	if input.Type == "azure-openai" {
+		input.AuthType = normalizeAzureAuthType(input.AuthType)
 		parsed, _ := url.Parse(input.BaseURL)
 		if parsed.RawQuery != "" || parsed.Fragment != "" || !validAzureProviderVersion(input.APIVersion) || (input.AuthType != "api_key" && input.AuthType != "entra") {
 			return ManagedProvider{}, ErrInvalidProvider
@@ -319,7 +320,19 @@ func normalizeManagedProvider(input ManagedProvider) (ManagedProvider, error) {
 		input.Region = ""
 	} else if input.Type == "gemini" {
 		input.APIVersion = ""
+		if input.AuthType == "" {
+			input.AuthType = "api_key"
+		}
 		if input.AuthType != "api_key" && input.AuthType != "gcp_adc" {
+			return ManagedProvider{}, ErrInvalidProvider
+		}
+		input.Region = ""
+	} else if input.Type == "vertex-gemini" {
+		input.APIVersion = ""
+		if input.AuthType == "" {
+			input.AuthType = "gcp_adc"
+		}
+		if input.AuthType != "gcp_adc" || !validManagedVertexGeminiBaseURL(input.BaseURL) {
 			return ManagedProvider{}, ErrInvalidProvider
 		}
 		input.Region = ""
@@ -329,7 +342,7 @@ func normalizeManagedProvider(input ManagedProvider) (ManagedProvider, error) {
 		if parsed.RawQuery != "" || parsed.Fragment != "" {
 			return ManagedProvider{}, ErrInvalidProvider
 		}
-		if input.AuthType == "api_key" {
+		if input.AuthType == "" || input.AuthType == "api_key" {
 			input.AuthType = "bearer"
 		}
 		if input.AuthType != "bearer" && input.AuthType != "aws_sigv4" {
@@ -1328,6 +1341,8 @@ func managedProviderAuthTypes(providerType string) []string {
 		return []string{"api_key", "entra"}
 	case "gemini":
 		return []string{"api_key", "gcp_adc"}
+	case "vertex-gemini":
+		return []string{"gcp_adc"}
 	case "bedrock":
 		return []string{"bearer", "aws_sigv4"}
 	case "opensandbox":

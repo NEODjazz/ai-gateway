@@ -56,6 +56,9 @@ func (r *Router) DiscoverProviderModels(ctx context.Context, providerID, credent
 	if managed.Type == "demo" {
 		return []DiscoveredModel{{ID: "demo-model"}}, nil
 	}
+	if managed.Type == "vertex-gemini" {
+		return nil, ErrProviderProbeFailed
+	}
 	secret, err := r.providerCredentialSecret(managed.ID, credentialID)
 	if err != nil {
 		return nil, err

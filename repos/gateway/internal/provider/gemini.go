@@ -26,6 +26,8 @@ type Gemini struct {
 	client         *http.Client
 	authType       string
 	tokenSource    *gcpTokenSource
+	vertex         bool
+	errorProvider  string
 }
 
 func NewGemini(baseURL, apiKey string, stream bool) Gemini {
@@ -39,7 +41,7 @@ func NewGeminiWithAuth(baseURL, credential string, stream bool, authType string)
 	if authType == "" {
 		authType = "api_key"
 	}
-	return Gemini{baseURL: strings.TrimRight(baseURL, "/"), apiKey: credential, upstreamStream: stream, client: client, authType: authType, tokenSource: newGCPTokenSource()}
+	return Gemini{baseURL: strings.TrimRight(baseURL, "/"), apiKey: credential, upstreamStream: stream, client: client, authType: authType, tokenSource: newGCPTokenSource(), errorProvider: "gemini"}
 }
 
 func (g Gemini) authorize(request *http.Request) error {
@@ -654,14 +656,37 @@ func geminiBaseURL(baseURL string) string {
 	}
 	return baseURL
 }
+
+func (g Gemini) modelEndpoint(model, action string) (string, error) {
+	model = strings.TrimPrefix(model, "models/")
+	if model == "" || strings.ContainsAny(model, "/\\?#%") || model == "." || model == ".." {
+		return "", geminiInvalid("model")
+	}
+	base, err := url.Parse(g.baseURL)
+	if err != nil || (base.Scheme != "https" && base.Scheme != "http") || base.Host == "" || base.User != nil || base.RawQuery != "" || base.Fragment != "" {
+		return "", errors.New("invalid Gemini base URL")
+	}
+	baseURL := geminiBaseURL(g.baseURL)
+	if g.vertex {
+		if !validVertexGeminiBaseURL(g.baseURL) {
+			return "", errors.New("invalid Vertex Gemini base URL")
+		}
+		baseURL = strings.TrimRight(g.baseURL, "/")
+	}
+	return baseURL + "/models/" + url.PathEscape(model) + ":" + action, nil
+}
+
+func (g Gemini) providerName() string {
+	if g.errorProvider != "" {
+		return g.errorProvider
+	}
+	return "gemini"
+}
+
 func (g Gemini) generate(ctx context.Context, request openai.ChatCompletionRequest, stream bool) (*http.Response, error) {
 	body, err := geminiChatRequest(request)
 	if err != nil {
 		return nil, err
-	}
-	model := strings.TrimPrefix(request.Model, "models/")
-	if model == "" || strings.ContainsAny(model, "/\\?#%") || model == "." || model == ".." {
-		return nil, geminiInvalid("model")
 	}
 	encoded, err := json.Marshal(body)
 	if err != nil {
@@ -671,11 +696,10 @@ func (g Gemini) generate(ctx context.Context, request openai.ChatCompletionReque
 	if stream {
 		method = "streamGenerateContent"
 	}
-	base, err := url.Parse(g.baseURL)
-	if err != nil || (base.Scheme != "https" && base.Scheme != "http") || base.Host == "" || base.User != nil || base.RawQuery != "" || base.Fragment != "" {
-		return nil, errors.New("invalid Gemini base URL")
+	endpoint, err := g.modelEndpoint(request.Model, method)
+	if err != nil {
+		return nil, err
 	}
-	endpoint := geminiBaseURL(g.baseURL) + "/models/" + url.PathEscape(model) + ":" + method
 	if stream {
 		endpoint += "?alt=sse"
 	}
@@ -692,7 +716,7 @@ func (g Gemini) generate(ctx context.Context, request openai.ChatCompletionReque
 		return nil, err
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		failure := responseStatusError("gemini", response)
+		failure := responseStatusError(g.providerName(), response)
 		_ = response.Body.Close()
 		return nil, failure
 	}

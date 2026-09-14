@@ -120,6 +120,14 @@ The internal `RequestContext` is not serialized between services. Each remote
 module has a minimal typed contract; only auth receives the client bearer token,
 which gateway clears before provider-level processing.
 
+The managed `vertex-gemini` provider uses GCP workload identity and the stable
+Vertex publisher-model API for Chat Completions, streaming and native token
+counting. Its base URL is the resource prefix through `publishers/google`, for
+example `https://us-central1-aiplatform.googleapis.com/v1/projects/example/locations/us-central1/publishers/google`.
+Deployments declare supported generation features explicitly; provider model
+discovery is unavailable because the publisher-model inference resource has no
+list operation.
+
 The Budgets catalog expands current-window summaries in one bounded request.
 Budget rows link to a route-based details workspace that reads the authoritative
 policy and summary endpoints, preserves currency isolation, links identity

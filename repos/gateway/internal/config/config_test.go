@@ -83,6 +83,33 @@ func TestValidateGeminiWorkloadAuthentication(t *testing.T) {
 	}
 }
 
+func TestValidateVertexGeminiConfiguration(t *testing.T) {
+	validURL := "https://us-central1-aiplatform.googleapis.com/v1/projects/project-1/locations/us-central1/publishers/google"
+	for _, endpoint := range []ProviderEndpointConfig{
+		{Name: "vertex", Type: "vertex-gemini", BaseURL: validURL},
+		{Name: "vertex", Type: "vertex-gemini", BaseURL: validURL, AuthType: "gcp_adc"},
+	} {
+		if err := validateProviderAdmission([]ProviderEndpointConfig{endpoint}); err != nil {
+			t.Fatalf("valid Vertex Gemini configuration rejected: %v", err)
+		}
+	}
+	for _, endpoint := range []ProviderEndpointConfig{
+		{Name: "vertex", Type: "vertex-gemini", BaseURL: "https://us-central1-aiplatform.googleapis.com"},
+		{Name: "vertex", Type: "vertex-gemini", BaseURL: validURL + "/models"},
+		{Name: "vertex", Type: "vertex-gemini", BaseURL: "https://attacker.example/v1/projects/project-1/locations/us-central1/publishers/google"},
+		{Name: "vertex", Type: "vertex-gemini", BaseURL: "https://europe-west1-aiplatform.googleapis.com/v1/projects/project-1/locations/us-central1/publishers/google"},
+		{Name: "vertex", Type: "vertex-gemini", BaseURL: validURL + "?token=secret"},
+		{Name: "vertex", Type: "vertex-gemini", BaseURL: validURL, AuthType: "api_key"},
+		{Name: "vertex", Type: "vertex-gemini", BaseURL: validURL, APIKey: "unused-secret"},
+		{Name: "vertex", Type: "vertex-gemini", BaseURL: validURL, APIVersion: "v1"},
+		{Name: "vertex", Type: "vertex-gemini", BaseURL: validURL, Region: "us-central1"},
+	} {
+		if err := validateProviderAdmission([]ProviderEndpointConfig{endpoint}); err == nil {
+			t.Fatalf("invalid Vertex Gemini configuration accepted: %+v", endpoint)
+		}
+	}
+}
+
 func TestValidateBedrockSigV4Configuration(t *testing.T) {
 	valid := ProviderEndpointConfig{Name: "bedrock", Type: "bedrock", BaseURL: "https://bedrock-runtime.us-east-1.amazonaws.com", AuthType: "aws_sigv4", Region: "us-east-1", APIKey: `{"access_key_id":"AKID","secret_access_key":"secret","session_token":"token"}`}
 	if err := validateProviderAdmission([]ProviderEndpointConfig{valid}); err != nil {

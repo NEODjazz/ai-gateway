@@ -12,7 +12,7 @@ describe("ModelOnboardingPage", () => {
   it("discovers models, validates a plan and applies one atomic configuration", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, options) => {
       const path = String(input);
-      if (!options?.method && path === "/admin/v1/providers") return json({ data: [{ id: "azure", type: "openai-compatible", base_url: "https://azure.example/v1", enabled: true }] });
+      if (!options?.method && path === "/admin/v1/providers") return json({ data: [{ id: "azure", type: "openai-compatible", base_url: "https://azure.example/v1", enabled: true }, { id: "vertex", type: "vertex-gemini", base_url: "https://vertex.example/v1/projects/p/locations/l/publishers/google", enabled: true }] });
       if (!options?.method && path === "/admin/v1/credentials") return json({ data: [{ id: "azure-key", provider_id: "azure", description: "Production" }] });
       if (!options?.method && path === "/admin/v1/model-catalog") return json({ version: "v1", models: [] });
       if (!options?.method && path === "/admin/v1/model-groups") return json({ data: [] });
@@ -32,6 +32,7 @@ describe("ModelOnboardingPage", () => {
     render(<MemoryRouter initialEntries={["/model-onboarding?provider_id=azure&credential_id=azure-key"]}><AuthProvider><ModelOnboardingPage /></AuthProvider></MemoryRouter>);
 
     await screen.findByRole("option", { name: "azure — openai-compatible" });
+    expect(screen.getByRole("option", { name: "vertex — vertex-gemini" })).toBeInTheDocument();
     expect(screen.getByLabelText("Credential")).toHaveValue("azure-key");
     await userEvent.click(screen.getByRole("button", { name: "Test & discover models" }));
     expect(await screen.findByText("gpt-a")).toBeInTheDocument();
@@ -62,7 +63,8 @@ describe("ModelOnboardingPage", () => {
       if (String(input) === "/admin/v1/provider-capabilities") return json({ data: [
         { type: "azure-openai", operations: ["chat"], auth_types: ["api_key", "entra"] },
         { type: "gemini", operations: ["chat"], auth_types: ["api_key", "gcp_adc"] },
-        { type: "bedrock", operations: ["chat"], auth_types: ["bearer", "aws_sigv4"] }
+        { type: "bedrock", operations: ["chat"], auth_types: ["bearer", "aws_sigv4"] },
+        { type: "vertex-gemini", operations: ["chat", "count_tokens", "stream"], auth_types: ["gcp_adc"] }
       ] });
       return json({ data: [] });
     });
@@ -77,6 +79,7 @@ describe("ModelOnboardingPage", () => {
     expect(screen.getByRole("option", { name: "cerebras" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "nvidia-nim" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "together" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "vertex-gemini" })).toBeInTheDocument();
     await userEvent.selectOptions(screen.getByLabelText("Provider type"), "gemini");
     expect(screen.getByLabelText("Provider type")).toHaveValue("gemini");
     expect(screen.queryByLabelText("Azure API version")).not.toBeInTheDocument();
@@ -91,6 +94,36 @@ describe("ModelOnboardingPage", () => {
     await userEvent.selectOptions(screen.getByLabelText("Provider type"), "bedrock");
     expect(screen.getByLabelText("Bedrock authentication")).toHaveValue("bearer");
     expect(screen.getByLabelText("AWS region")).toBeInTheDocument();
+  });
+
+  it("onboards a Vertex model manually without credentials or discovery", async () => {
+    const calls: Array<{ path: string; method?: string; body?: Record<string, unknown> }> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, options) => {
+      const path = String(input);
+      const body = options?.body ? JSON.parse(String(options.body)) as Record<string, unknown> : undefined;
+      calls.push({ path, method: options?.method, body });
+      if (!options?.method && path === "/admin/v1/providers") return json({ data: [{ id: "vertex", type: "vertex-gemini", base_url: "https://us-central1-aiplatform.googleapis.com/v1/projects/project-1/locations/us-central1/publishers/google", auth_type: "gcp_adc", enabled: true }] });
+      if (!options?.method && path === "/admin/v1/credentials") return json({ data: [{ id: "unused", provider_id: "vertex" }] });
+      if (!options?.method && path === "/admin/v1/model-catalog") return json({ version: "v1", models: [] });
+      if (!options?.method && path === "/admin/v1/model-groups") return json({ data: [] });
+      if (!options?.method && path === "/admin/v1/provider-capabilities") return json({ data: [{ type: "vertex-gemini", operations: ["chat", "count_tokens", "stream"], capabilities: ["chat", "stream", "tools"] }] });
+      if (path === "/admin/v1/model-onboarding/plan") return json({ revision: 3, catalog_version: "v1", deployments: body?.deployments, model_groups: body?.model_groups, changes: [] });
+      return json({ error: { message: `Unexpected ${path}` } }, 500);
+    });
+    sessionStorage.setItem("ai-gateway.admin-token", "token");
+    render(<MemoryRouter initialEntries={["/model-onboarding?provider_id=vertex"]}><AuthProvider><ModelOnboardingPage /></AuthProvider></MemoryRouter>);
+
+    await screen.findByRole("option", { name: "vertex — vertex-gemini" });
+    expect(screen.queryByLabelText("Credential")).not.toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText("Upstream model"), "gemini-2.5-pro");
+    await userEvent.click(screen.getByRole("button", { name: "Configure model" }));
+    expect(await screen.findByText("Configured model")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Review 1 model(s)" }));
+    await screen.findByText("Review onboarding plan");
+
+    expect(calls.some((call) => call.path.endsWith("/test") || call.path.endsWith("/discover-models"))).toBe(false);
+    const plan = calls.find((call) => call.path === "/admin/v1/model-onboarding/plan")?.body as { deployments?: Array<Record<string, unknown>> };
+    expect(plan.deployments?.[0]).toMatchObject({ provider_id: "vertex", credential_id: "", upstream_model: "gemini-2.5-pro", capabilities: ["chat", "stream"] });
   });
 
   it("preserves Gemini workload authentication when creating a provider", async () => {

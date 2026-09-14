@@ -7,7 +7,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
@@ -27,18 +26,19 @@ func (g Gemini) CountTokens(ctx context.Context, request TokenCountRequest) (Tok
 	if model == "" || strings.ContainsAny(model, "/\\?#%") || model == "." || model == ".." {
 		return TokenCountResult{}, geminiInvalid("model")
 	}
-	base, err := url.Parse(g.baseURL)
-	if err != nil || (base.Scheme != "http" && base.Scheme != "https") || base.Host == "" || base.User != nil || base.RawQuery != "" || base.Fragment != "" {
-		return TokenCountResult{}, errors.New("invalid Gemini base URL")
-	}
 	// The full native request includes system instructions and tool declarations;
 	// sending only contents would undercount those parts of the context.
-	body, err := json.Marshal(struct {
-		Request any `json:"generateContentRequest"`
-	}{struct {
-		Model string `json:"model"`
-		geminiRequest
-	}{"models/" + model, native}})
+	var body []byte
+	if g.vertex {
+		body, err = json.Marshal(native)
+	} else {
+		body, err = json.Marshal(struct {
+			Request any `json:"generateContentRequest"`
+		}{struct {
+			Model string `json:"model"`
+			geminiRequest
+		}{"models/" + model, native}})
+	}
 	if err != nil {
 		return TokenCountResult{}, err
 	}
@@ -47,7 +47,10 @@ func (g Gemini) CountTokens(ctx context.Context, request TokenCountRequest) (Tok
 	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	endpoint := geminiBaseURL(g.baseURL) + "/models/" + url.PathEscape(model) + ":countTokens"
+	endpoint, err := g.modelEndpoint(request.Model, "countTokens")
+	if err != nil {
+		return TokenCountResult{}, err
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return TokenCountResult{}, err
@@ -62,7 +65,7 @@ func (g Gemini) CountTokens(ctx context.Context, request TokenCountRequest) (Tok
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return TokenCountResult{}, responseStatusError("gemini", response)
+		return TokenCountResult{}, responseStatusError(g.providerName(), response)
 	}
 	payload, err := io.ReadAll(io.LimitReader(response.Body, (64<<10)+1))
 	if err != nil {
@@ -80,5 +83,5 @@ func (g Gemini) CountTokens(ctx context.Context, request TokenCountRequest) (Tok
 	if result.TotalTokens == nil || *result.TotalTokens < 0 {
 		return TokenCountResult{}, errors.New("invalid provider token count")
 	}
-	return TokenCountResult{InputTokens: *result.TotalTokens, Model: request.Model, Source: "gemini"}, nil
+	return TokenCountResult{InputTokens: *result.TotalTokens, Model: request.Model, Source: g.providerName()}, nil
 }

@@ -31,6 +31,7 @@ function records<T>(payload: unknown): T[] {
 function status(value: unknown) {
   if (value === "available") return <span className="status enabled">Available</span>;
   if (value === "unavailable") return <span className="status disabled">Unavailable</span>;
+  if (value === "manual") return <span className="muted">Manual deployment</span>;
   return <span className="muted">Not tested</span>;
 }
 
@@ -86,7 +87,7 @@ export function ProvidersPage() {
       ...provider,
       credential_count: credentials.filter((credential) => credential.provider_id === provider.id).length,
       deployment_count: deployments.filter((deployment) => deployment.provider_id === provider.id).length,
-      connection_status: probe?.status || "",
+      connection_status: probe?.status || (provider.type === "vertex-gemini" ? "manual" : ""),
       last_latency: probe ? `${probe.latency_ms.toLocaleString("en-US")} ms` : "—"
     };
   }), [credentials, deployments, probes, providers]);
@@ -140,8 +141,10 @@ export function ProvidersPage() {
     {loading ? <LoadingState /> : <ManagedDataTable rows={rows} columns={columns} primaryAction={<GatewayButton size="l" onClick={() => setEditing(null)}>Create Provider</GatewayButton>} onRefresh={load} searchPlaceholder="Search providers" defaultHidden={["last_latency"]} actions={(row) => {
       const provider = providers.find((item) => item.id === row.id)!;
       return <ActionsMenu label={`Actions for ${provider.id}`} items={[
-        { label: "Test connection", onSelect: () => openConnection(provider, "test") },
-        { label: "Discover models", onSelect: () => openConnection(provider, "discover") },
+        ...(provider.type === "vertex-gemini" ? [] : [
+          { label: "Test connection", onSelect: () => openConnection(provider, "test") },
+          { label: "Discover models", onSelect: () => openConnection(provider, "discover") }
+        ]),
         { label: "Edit", onSelect: () => setEditing(provider) },
         { label: "Delete", tone: "danger", onSelect: () => void deleteProvider(provider) }
       ]} />;

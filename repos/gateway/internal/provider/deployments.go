@@ -466,6 +466,9 @@ func (r *Router) endpointForManagedDeployment(deployment ModelDeployment, manage
 }
 
 func (r *Router) endpointForManagedDeploymentWithSecret(deployment ModelDeployment, managed ManagedProvider, secret string) (Endpoint, error) {
+	if managed.Type == "vertex-gemini" && deployment.CredentialID != "" {
+		return Endpoint{}, ErrInvalidDeployment
+	}
 	providerConfig := config.ProviderEndpointConfig{Type: managed.Type, BaseURL: managed.BaseURL, APIKey: secret, Stream: hasCapability(deployment.Capabilities, "stream"), APIVersion: managed.APIVersion, AuthType: managed.AuthType, Region: managed.Region}
 	client := providerFor(providerConfig)
 	if managed.Type == "bedrock" && managed.AuthType == "aws_sigv4" {
@@ -514,7 +517,7 @@ func supportsManagedAdapterCapability(endpoint Endpoint, capability string) bool
 		_, ok := endpoint.Provider.(InteractionClient)
 		return ok && endpoint.Type == "gemini"
 	case "gemini_safety_settings":
-		return endpoint.Type == "gemini"
+		return endpoint.Type == "gemini" || endpoint.Type == "vertex-gemini"
 	case "background_interactions":
 		_, creates := endpoint.Provider.(InteractionClient)
 		_, lifecycle := endpoint.Provider.(InteractionResourceClient)
@@ -673,10 +676,10 @@ func supportsManagedAdapterCapability(endpoint Endpoint, capability string) bool
 		return ok && client.SupportsTextDocuments()
 	case "gemini_code_execution":
 		client, ok := endpoint.Provider.(interface{ SupportsCodeExecution() bool })
-		return endpoint.Type == "gemini" && ok && client.SupportsCodeExecution()
+		return (endpoint.Type == "gemini" || endpoint.Type == "vertex-gemini") && ok && client.SupportsCodeExecution()
 	case "url_context":
 		client, ok := endpoint.Provider.(interface{ SupportsURLContext() bool })
-		return endpoint.Type == "gemini" && ok && client.SupportsURLContext()
+		return (endpoint.Type == "gemini" || endpoint.Type == "vertex-gemini") && ok && client.SupportsURLContext()
 	case "google_maps":
 		client, ok := endpoint.Provider.(interface{ SupportsGoogleMaps() bool })
 		return endpoint.Type == "gemini" && ok && client.SupportsGoogleMaps()
@@ -693,7 +696,7 @@ func supportsManagedAdapterCapability(endpoint Endpoint, capability string) bool
 		client, ok := endpoint.Provider.(interface{ SupportsVideoInput() bool })
 		return ok && client.SupportsVideoInput()
 	case "file_input":
-		if endpoint.Type != "openai" && endpoint.Type != "openai-compatible" && endpoint.Type != "azure-openai" && endpoint.Type != "gemini" && endpoint.Type != "anthropic" {
+		if endpoint.Type != "openai" && endpoint.Type != "openai-compatible" && endpoint.Type != "azure-openai" && endpoint.Type != "gemini" && endpoint.Type != "vertex-gemini" && endpoint.Type != "anthropic" {
 			return false
 		}
 		client, ok := endpoint.Provider.(interface{ SupportsFileInput() bool })

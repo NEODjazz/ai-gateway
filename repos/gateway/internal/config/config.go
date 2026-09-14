@@ -441,6 +441,20 @@ func validateProviderAdmission(endpoints []ProviderEndpointConfig) error {
 			if endpoint.APIVersion != "" || endpoint.Region != "" {
 				result = errors.Join(result, fmt.Errorf("provider %q api_version or region is unsupported for Gemini", name))
 			}
+		} else if endpoint.Type == "vertex-gemini" {
+			authType := strings.ToLower(strings.TrimSpace(endpoint.AuthType))
+			if authType != "" && authType != "gcp_adc" {
+				result = errors.Join(result, fmt.Errorf("provider %q auth_type must be gcp_adc", name))
+			}
+			if strings.TrimSpace(endpoint.APIKey) != "" {
+				result = errors.Join(result, fmt.Errorf("provider %q api_key is unsupported with workload identity", name))
+			}
+			if endpoint.APIVersion != "" || endpoint.Region != "" {
+				result = errors.Join(result, fmt.Errorf("provider %q api_version or region is unsupported for Vertex Gemini", name))
+			}
+			if !validVertexGeminiURL(endpoint.BaseURL) {
+				result = errors.Join(result, fmt.Errorf("provider %q has invalid Vertex Gemini base_url", name))
+			}
 		} else if endpoint.Type == "bedrock" {
 			if parsed, err := url.Parse(endpoint.BaseURL); err != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
 				result = errors.Join(result, fmt.Errorf("provider %q base_url must not contain query or fragment", name))
@@ -466,6 +480,30 @@ func validateProviderAdmission(endpoints []ProviderEndpointConfig) error {
 		}
 	}
 	return result
+}
+
+func validVertexGeminiURL(value string) bool {
+	parsed, err := url.ParseRequestURI(strings.TrimRight(strings.TrimSpace(value), "/"))
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.RawPath != "" {
+		return false
+	}
+	parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
+	if len(parts) != 7 || parts[0] != "v1" || parts[1] != "projects" || parts[3] != "locations" || parts[5] != "publishers" || parts[6] != "google" {
+		return false
+	}
+	return parsed.Scheme == "https" && strings.EqualFold(parsed.Host, parts[4]+"-aiplatform.googleapis.com") && validVertexResourceSegment(parts[2]) && validVertexResourceSegment(parts[4])
+}
+
+func validVertexResourceSegment(value string) bool {
+	if value == "" || value == "." || value == ".." || len(value) > 128 {
+		return false
+	}
+	for _, character := range value {
+		if (character < 'a' || character > 'z') && (character < 'A' || character > 'Z') && (character < '0' || character > '9') && character != '-' && character != '_' && character != '.' && character != ':' {
+			return false
+		}
+	}
+	return true
 }
 
 func validAWSCredentialJSON(raw string) bool {

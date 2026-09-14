@@ -161,6 +161,29 @@ describe("ProvidersPage", () => {
     expect(JSON.parse(created.body!)).toEqual({ id: "google-gemini", type: "gemini", base_url: "https://generativelanguage.googleapis.com", auth_type: "gcp_adc", rate_limit_rpm: 0, rate_limit_tpm: 0, enabled: true });
   });
 
+  it("configures Vertex Gemini without advertising unavailable discovery", async () => {
+    const calls: Array<{ path: string; method?: string; body?: string }> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, options) => {
+      const path = String(input); calls.push({ path, method: options?.method, body: String(options?.body || "") });
+      if (path === "/admin/v1/providers" && options?.method === "POST") return json({ id: "vertex", type: "vertex-gemini", base_url: "https://us-central1-aiplatform.googleapis.com/v1/projects/project-1/locations/us-central1/publishers/google", auth_type: "gcp_adc", enabled: true }, 201);
+      if (path === "/admin/v1/providers") return json({ data: [{ id: "vertex", type: "vertex-gemini", base_url: "https://us-central1-aiplatform.googleapis.com/v1/projects/project-1/locations/us-central1/publishers/google", auth_type: "gcp_adc", enabled: true }] });
+      if (path === "/admin/v1/provider-capabilities") return json({ data: [{ type: "vertex-gemini", auth_types: ["gcp_adc"] }] });
+      return json({ data: [] });
+    });
+    sessionStorage.setItem("ai-gateway.admin-token", "token");
+    render(<MemoryRouter><AuthProvider><ProvidersPage /></AuthProvider></MemoryRouter>);
+    expect(await screen.findByText("Manual deployment")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Actions for vertex" }));
+    expect(screen.queryByRole("menuitem", { name: "Test connection" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Discover models" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
+    const form = screen.getByRole("dialog", { name: "Edit Provider" });
+    expect(within(form).getByLabelText("Authentication")).toHaveValue("gcp_adc");
+    expect(within(form).getByRole("option", { name: "gcp_adc" })).toBeInTheDocument();
+    expect(within(form).queryByRole("option", { name: "api_key" })).not.toBeInTheDocument();
+    expect(calls.some((call) => call.path.endsWith("/test") || call.path.endsWith("/discover-models"))).toBe(false);
+  });
+
   it("configures a native sandbox endpoint with API key authentication", async () => {
     const calls: Array<{ path: string; method?: string; body?: string }> = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, options) => {
