@@ -59,6 +59,9 @@ func (r ResponseRequest) Validate() string {
 	if message := validateResponseTools(r.Tools); message != "" {
 		return message
 	}
+	if _, message := InspectResponseComputerCallOutputs(r.Input); message != "" {
+		return message
+	}
 	if message := validateResponseToolChoice(r.Tools, r.ToolChoice); message != "" {
 		return message
 	}
@@ -301,6 +304,14 @@ func validateResponseTools(tools []ResponseTool) string {
 			}
 			if message := validateResponseImageGenerationOptions(tool); message != "" {
 				return message
+			}
+		case "computer":
+			if _, duplicate := hostedTypes[tool.Type]; duplicate {
+				return "computer tools must be unique"
+			}
+			hostedTypes[tool.Type] = struct{}{}
+			if responseToolHasHostedImageFields(tool) || tool.Name != "" || tool.Description != "" || tool.Parameters != nil || tool.Strict != nil || tool.ServerLabel != "" || tool.ServerURL != "" || tool.ServerDescription != "" || len(tool.AllowedTools) > 0 || tool.RequireApproval != nil || len(tool.Headers) > 0 || len(tool.VectorStoreIDs) > 0 || tool.Container != nil || tool.Filters != nil || tool.MaxNumResults != nil || tool.RankingOptions != nil || tool.RewriteQuery != nil || tool.SearchContextSize != "" || tool.UserLocation != nil || tool.Format != nil {
+				return "computer tools contain unsupported fields"
 			}
 		default:
 			return "tools contain an unsupported type at index " + strconv.Itoa(index)
@@ -691,7 +702,7 @@ func validateResponseToolChoice(tools []ResponseTool, choice any) string {
 		return "tool_choice must be a supported string or object"
 	}
 	switch kind {
-	case "code_interpreter", "file_search", "image_generation":
+	case "code_interpreter", "file_search", "image_generation", "computer":
 		if len(object) == 1 {
 			for _, tool := range tools {
 				if tool.Type == kind {

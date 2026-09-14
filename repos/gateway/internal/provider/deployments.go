@@ -366,6 +366,9 @@ func validDeploymentCapabilities(capabilities []string) bool {
 	if seen["response_image_generation"] && (!seen["responses"] || !seen["tools"]) {
 		return false
 	}
+	if seen["response_computer"] && (!seen["responses"] || !seen["tools"]) {
+		return false
+	}
 	for _, capability := range []string{"web_fetch", "tool_search", "memory_tool", "bash_tool", "text_editor_tool", "computer_toolset", "browser_toolset", "thinking", "zero_output", "inference_geo", "context_management", "tool_result_error", "document_citations", "document_metadata", "document_text", "audio", "audio_input", "video_input", "prompt_cache", "assistant_prefill", "gemini_code_execution", "url_context", "google_maps"} {
 		if seen[capability] && !seen["chat"] {
 			return false
@@ -403,7 +406,7 @@ func ValidModelCapability(capability string) bool {
 	case "chat", "responses", "interactions", "interaction_agents", "interaction_environment_reuse", "gemini_safety_settings", "background_interactions", "embeddings", "rerank", "moderation",
 		"image_generation", "image_edit", "image_variation",
 		"audio_transcription", "audio_translation", "audio_speech", "ocr", "search", "skills", "fine_tuning", "video", "video_remix", "video_extension", "container", "container_files", "container_network", "cached_content", "sandbox", "realtime",
-		"stream", "tools", "custom_tools", "response_image_generation", "structured_output", "mcp", "vision",
+		"stream", "tools", "custom_tools", "response_image_generation", "response_computer", "structured_output", "mcp", "vision",
 		"web_search", "web_fetch", "tool_search", "memory_tool", "bash_tool", "text_editor_tool", "computer_toolset", "browser_toolset", "thinking", "zero_output", "inference_geo", "context_management", "tool_result_error", "document_citations", "document_metadata", "document_text", "audio", "audio_input", "video_input", "prompt_cache", "assistant_prefill", "background_responses", "file_input", "bedrock_invoke", "gemini_code_execution", "url_context", "google_maps":
 		return true
 	default:
@@ -599,6 +602,9 @@ func supportsManagedAdapterCapability(endpoint Endpoint, capability string) bool
 	case "response_image_generation":
 		client, ok := endpoint.Provider.(interface{ SupportsResponseImageGeneration() bool })
 		return ok && client.SupportsResponseImageGeneration()
+	case "response_computer":
+		client, ok := endpoint.Provider.(interface{ SupportsResponseComputer() bool })
+		return ok && client.SupportsResponseComputer()
 	case "structured_output":
 		client, ok := endpoint.Provider.(interface{ SupportsStructuredOutput() bool })
 		return ok && client.SupportsStructuredOutput()

@@ -74,7 +74,7 @@ func EstimateContextTokens(value any) int {
 	scrub = func(v any) any {
 		switch x := v.(type) {
 		case map[string]any:
-			if x["type"] == "image_url" || x["type"] == "input_image" {
+			if x["type"] == "image_url" || x["type"] == "input_image" || x["type"] == "computer_screenshot" {
 				images++
 				return "image"
 			}

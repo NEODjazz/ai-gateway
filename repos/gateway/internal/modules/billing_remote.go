@@ -423,6 +423,10 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.ProviderCostUSDTicks = trustedProviderCost(req, req.ResponsesResponse.Usage.ProviderCostUSDTicks)
 		request.OutputImages = responseOutputImageCount(*req.ResponsesResponse)
 		request.ToolRequests, request.SearchRequests = responseOutputToolUsage(*req.ResponsesResponse)
+		if req.ResponseRequest != nil {
+			outputs, _ := openai.InspectResponseComputerCallOutputs(req.ResponseRequest.Input)
+			request.ToolRequests += len(outputs)
+		}
 		request.SearchRequestsEstimated = false
 		request.UsageEstimated = request.TotalTokens == 0
 		if details := req.ResponsesResponse.Usage.InputTokensDetails; details != nil {
@@ -582,7 +586,7 @@ func responseToolUsageReserve(request openai.ResponseRequest) (toolRequests, sea
 	var hosted, search bool
 	for _, tool := range request.Tools {
 		switch tool.Type {
-		case "code_interpreter", "file_search", "mcp":
+		case "code_interpreter", "file_search", "mcp", "computer":
 			hosted = true
 		case "web_search", "web_search_preview":
 			search = true

@@ -95,6 +95,51 @@ func TestOpenAICompatibleForwardsCustomToolsAndPreservesCalls(t *testing.T) {
 	}
 }
 
+func TestOpenAICompatibleForwardsComputerLoopAndPreservesActions(t *testing.T) {
+	var upstream map[string]json.RawMessage
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&upstream); err != nil {
+			t.Fatal(err)
+		}
+		_, _ = fmt.Fprint(w, `{"id":"resp-computer","object":"response","status":"completed","model":"model","output":[{"id":"computer_1","type":"computer_call","status":"completed","call_id":"call_2","actions":[{"type":"click","button":"left","x":12,"y":34},{"type":"screenshot"}],"pending_safety_checks":[{"id":"check_1","code":"domain"}]}],"usage":{"input_tokens":4,"output_tokens":2,"total_tokens":6}}`)
+	}))
+	defer server.Close()
+
+	input := []any{map[string]any{
+		"type": "computer_call_output", "call_id": "call_1",
+		"output": map[string]any{"type": "computer_screenshot", "image_url": "data:image/png;base64,iVBORw0KGgo="},
+	}}
+	request := openai.ResponseRequest{Model: "model", PreviousResponse: "resp_previous", Input: input, Tools: []openai.ResponseTool{{Type: "computer"}}, ToolChoice: map[string]any{"type": "computer"}}
+	response, err := NewOpenAICompatible(server.URL, "", false).Responses(t.Context(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(upstream["tools"]) != `[{"type":"computer"}]` || !strings.Contains(string(upstream["input"]), `"computer_call_output"`) || string(upstream["tool_choice"]) != `{"type":"computer"}` {
+		t.Fatalf("computer loop was not forwarded: %s", upstream)
+	}
+	if len(response.Output) != 1 || response.Output[0].CallID != "call_2" || len(response.Output[0].Actions) != 2 || len(response.Output[0].PendingSafetyChecks) != 1 {
+		t.Fatalf("computer output was not preserved: %+v", response.Output)
+	}
+}
+
+func TestOpenAICompatibleStreamsComputerActions(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "event: response.created\n"+`data: {"type":"response.created","response":{"id":"resp-computer","object":"response","status":"in_progress","model":"model","output":[]}}`+"\n\n")
+		_, _ = fmt.Fprint(w, "event: response.output_item.done\n"+`data: {"type":"response.output_item.done","output_index":0,"item":{"id":"computer_1","type":"computer_call","status":"completed","call_id":"call_1","actions":[{"type":"move","x":4,"y":5}],"pending_safety_checks":[]}}`+"\n\n")
+		_, _ = fmt.Fprint(w, "event: response.completed\n"+`data: {"type":"response.completed","response":{"id":"resp-computer","object":"response","status":"completed","model":"model","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}`+"\n\n")
+	}))
+	defer server.Close()
+
+	response, err := NewOpenAICompatible(server.URL, "", true).StreamResponses(t.Context(), openai.ResponseRequest{Model: "model", Input: "open", Stream: true, Tools: []openai.ResponseTool{{Type: "computer"}}}, func(string, string) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Output) != 1 || response.Output[0].CallID != "call_1" || len(response.Output[0].Actions) != 1 {
+		t.Fatalf("streamed computer output was not preserved: %+v", response.Output)
+	}
+}
+
 func TestOpenAICompatibleForwardsResponseImageGenerationAndPreservesResult(t *testing.T) {
 	var upstream map[string]json.RawMessage
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

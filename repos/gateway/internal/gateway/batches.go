@@ -212,6 +212,18 @@ func (h Handler) decodeBatchItems(w http.ResponseWriter, ctx context.Context, id
 			if !h.authorizeResponseToolResources(w, ctx, &itemIdentity, &request) {
 				return nil, errBatchResponseWritten
 			}
+			if err := h.resolveResponseComputerScreenshots(ctx, itemIdentity, &request); err != nil {
+				if errors.Is(err, errResponseComputerFileStorageUnavailable) {
+					writeError(w, http.StatusServiceUnavailable, "file_storage_unavailable", err.Error())
+				} else {
+					writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+				}
+				return nil, errBatchResponseWritten
+			}
+			normalized, err = json.Marshal(request)
+			if err != nil || len(normalized) > batchMaxLineBytes {
+				return nil, fmt.Errorf("line %d: resolved Responses request exceeds the 4 MiB limit", lineNumber)
+			}
 		}
 		if !h.authorizeBatchModel(w, identity, model) {
 			return nil, errBatchResponseWritten
@@ -365,7 +377,7 @@ func validateBatchBody(endpoint string, body []byte) ([]byte, string, []string, 
 		}
 		model = request.Model
 		var valid bool
-		tools, valid = responseToolIdentifiers(request.Tools)
+		tools, valid = responseRequestToolIdentifiers(request)
 		if !valid {
 			return nil, "", nil, errors.New("tools contain an invalid function name")
 		}

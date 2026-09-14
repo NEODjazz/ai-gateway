@@ -9,6 +9,7 @@ func (OpenAICompatible) SupportsStructuredOutput() bool    { return true }
 func (OpenAICompatible) SupportsWebSearch() bool           { return true }
 func (OpenAICompatible) SupportsResponseWebSearch() bool   { return true }
 func (OpenAICompatible) SupportsResponseCustomTools() bool { return true }
+func (OpenAICompatible) SupportsResponseComputer() bool    { return true }
 func (OpenAICompatible) SupportsResponseImageGeneration() bool {
 	return true
 }
@@ -56,6 +57,7 @@ func (Mistral) SupportsMCP() bool                 { return false }
 func (Mistral) SupportsWebSearch() bool           { return false }
 func (Mistral) SupportsResponseWebSearch() bool   { return false }
 func (Mistral) SupportsResponseCustomTools() bool { return false }
+func (Mistral) SupportsResponseComputer() bool    { return false }
 func (Mistral) SupportsResponseImageGeneration() bool {
 	return false
 }

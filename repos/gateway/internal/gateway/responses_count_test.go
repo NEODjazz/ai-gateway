@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"ai-gateway-gateway/internal/containerstate"
+	"ai-gateway-gateway/internal/filestate"
 	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/openai"
 	"ai-gateway-gateway/internal/provider"
@@ -118,6 +119,19 @@ func TestResponseInputTokenCountRejectsUnresolvedBuiltInToolResources(t *testing
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/v1/responses/input_tokens", strings.NewReader(`{"model":"m","input":"x","tools":[{"type":"file_search","vector_store_ids":["vs_missing"]}]}`)))
 	if response.Code != http.StatusServiceUnavailable || counter.calls != 0 || !strings.Contains(response.Body.String(), "vector_store_unavailable") {
 		t.Fatalf("unresolved resource reached provider: status=%d calls=%d body=%s", response.Code, counter.calls, response.Body.String())
+	}
+}
+
+func TestResponseInputTokenCountRequiresOwnedComputerScreenshot(t *testing.T) {
+	counter := &responseInputTokenCountProvider{}
+	files := &memoryFileStore{files: map[string]filestate.File{"file_screen": {ID: "file_screen", OwnerKey: "foreign"}}}
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{&lifecycleAuthModule{allowedModels: []string{"*"}, allowedTools: []string{"computer"}}}), counter).
+		WithFileStore(files, FileRuntimeConfig{MaxBytes: 1 << 20, OwnerQuotaBytes: 1 << 20}))
+	response := httptest.NewRecorder()
+	body := `{"model":"m","input":[{"type":"computer_call_output","call_id":"call_1","output":{"type":"computer_screenshot","file_id":"file_screen"}}]}`
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/v1/responses/input_tokens", strings.NewReader(body)))
+	if response.Code != http.StatusBadRequest || counter.calls != 0 || !strings.Contains(response.Body.String(), "computer screenshot file is unavailable") {
+		t.Fatalf("foreign screenshot reached token counter: status=%d calls=%d body=%s", response.Code, counter.calls, response.Body.String())
 	}
 }
 

@@ -2,8 +2,12 @@ package gateway
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"strings"
 
 	"ai-gateway-gateway/internal/containerstate"
 	"ai-gateway-gateway/internal/filestate"
@@ -12,8 +16,99 @@ import (
 	"ai-gateway-gateway/internal/vectorstate"
 )
 
+var errResponseComputerFileStorageUnavailable = errors.New("computer screenshot file storage is unavailable")
+
+func responseComputerOutputsHaveFiles(outputs []openai.ResponseComputerCallOutput) bool {
+	for _, output := range outputs {
+		if output.FileID != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func (h Handler) resolveResponseComputerScreenshots(ctx context.Context, identity modules.RequestContext, request *openai.ResponseRequest) error {
+	if request == nil {
+		return errors.New("computer screenshot request is unavailable")
+	}
+	outputs, message := openai.InspectResponseComputerCallOutputs(request.Input)
+	if message != "" {
+		return errors.New(message)
+	}
+	if !responseComputerOutputsHaveFiles(outputs) {
+		return nil
+	}
+	if h.files == nil {
+		return errResponseComputerFileStorageUnavailable
+	}
+	encoded, err := json.Marshal(request.Input)
+	if err != nil {
+		return errors.New("computer screenshot input is invalid")
+	}
+	var items []any
+	if json.Unmarshal(encoded, &items) != nil {
+		return errors.New("computer screenshot input is invalid")
+	}
+	owner := fileOwnerKey(identity)
+	for _, value := range items {
+		item, ok := value.(map[string]any)
+		if !ok || item["type"] != "computer_call_output" {
+			continue
+		}
+		screenshot, ok := item["output"].(map[string]any)
+		if !ok || screenshot["type"] != "computer_screenshot" {
+			return errors.New("computer_call_output.output must be a computer_screenshot object")
+		}
+		fileID, _ := screenshot["file_id"].(string)
+		if fileID == "" {
+			continue
+		}
+		file, err := h.files.Get(ctx, owner, fileID, true)
+		if err != nil {
+			if errors.Is(err, filestate.ErrUnavailable) {
+				return errResponseComputerFileStorageUnavailable
+			}
+			return errors.New("computer screenshot file is unavailable")
+		}
+		mediaType := strings.ToLower(strings.TrimSpace(strings.SplitN(file.ContentType, ";", 2)[0]))
+		if mediaType == "" {
+			mediaType = strings.ToLower(strings.TrimSpace(strings.SplitN(http.DetectContentType(file.Content), ";", 2)[0]))
+		}
+		imageURL := "data:" + mediaType + ";base64," + base64.StdEncoding.EncodeToString(file.Content)
+		if _, err := openai.ParseDataImageURL(imageURL); err != nil {
+			return fmt.Errorf("computer screenshot file is not a supported image: %w", err)
+		}
+		delete(screenshot, "file_id")
+		screenshot["image_url"] = imageURL
+	}
+	request.Input = items
+	return nil
+}
+
 func (h Handler) authorizeResponseToolResources(w http.ResponseWriter, ctx context.Context, identity *modules.RequestContext, request *openai.ResponseRequest) bool {
 	owner := fileOwnerKey(*identity)
+	computerOutputs, message := openai.InspectResponseComputerCallOutputs(request.Input)
+	if message != "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", message)
+		return false
+	}
+	for _, output := range computerOutputs {
+		if output.FileID == "" {
+			continue
+		}
+		if h.files == nil {
+			writeError(w, http.StatusServiceUnavailable, "file_storage_unavailable", "file storage is unavailable")
+			return false
+		}
+		if _, err := h.files.Get(ctx, owner, output.FileID, false); err != nil {
+			if errors.Is(err, filestate.ErrUnavailable) {
+				writeError(w, http.StatusServiceUnavailable, "file_storage_unavailable", "file storage is unavailable")
+			} else {
+				writeError(w, http.StatusBadRequest, "invalid_request", "computer screenshot file is unavailable")
+			}
+			return false
+		}
+	}
 	for _, tool := range request.Tools {
 		switch tool.Type {
 		case "code_interpreter":
@@ -95,6 +190,9 @@ func (h Handler) authorizeResponseToolResources(w http.ResponseWriter, ctx conte
 				}
 				return false
 			}
+		case "computer":
+			// computer_call_output file references are resolved before policy
+			// modules run; the tool itself has no additional server resource.
 		}
 	}
 	return true

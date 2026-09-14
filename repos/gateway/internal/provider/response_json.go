@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"ai-gateway-gateway/internal/openai"
 )
@@ -42,6 +44,12 @@ func decodeResponseJSON(reader io.Reader) (openai.ResponseResponse, error) {
 
 func validateResponseOutputItems(items []openai.ResponseOutputItem) error {
 	for _, item := range items {
+		if item.Type == "computer_call" {
+			if err := validateResponseComputerCall(item); err != nil {
+				return err
+			}
+			continue
+		}
 		if item.Type != "image_generation_call" {
 			continue
 		}
@@ -61,4 +69,127 @@ func validateResponseOutputItems(items []openai.ResponseOutputItem) error {
 		}
 	}
 	return nil
+}
+
+func validateResponseComputerCall(item openai.ResponseOutputItem) error {
+	if strings.TrimSpace(item.CallID) != item.CallID || item.CallID == "" || utf8.RuneCountInString(item.CallID) > 512 {
+		return errors.New("provider computer call has an invalid call_id")
+	}
+	if item.Status != "" && item.Status != "in_progress" && item.Status != "completed" && item.Status != "incomplete" {
+		return errors.New("provider computer call has an invalid status")
+	}
+	hasAction := len(item.Action) != 0 && string(item.Action) != "null"
+	hasActions := len(item.Actions) != 0
+	if hasAction == hasActions {
+		return errors.New("provider computer call requires exactly one of action or actions")
+	}
+	actions := item.Actions
+	if hasAction {
+		actions = []json.RawMessage{item.Action}
+	}
+	if len(actions) > 128 {
+		return errors.New("provider computer call contains too many actions")
+	}
+	for _, action := range actions {
+		if err := validateResponseComputerAction(action); err != nil {
+			return err
+		}
+	}
+	if len(item.PendingSafetyChecks) > 128 {
+		return errors.New("provider computer call contains too many pending safety checks")
+	}
+	seen := make(map[string]struct{}, len(item.PendingSafetyChecks))
+	for _, raw := range item.PendingSafetyChecks {
+		var check map[string]json.RawMessage
+		if json.Unmarshal(raw, &check) != nil || check == nil {
+			return errors.New("provider computer call contains an invalid safety check")
+		}
+		var id string
+		if json.Unmarshal(check["id"], &id) != nil || strings.TrimSpace(id) != id || id == "" || utf8.RuneCountInString(id) > 512 {
+			return errors.New("provider computer call safety check has an invalid id")
+		}
+		if _, duplicate := seen[id]; duplicate {
+			return errors.New("provider computer call contains duplicate safety checks")
+		}
+		seen[id] = struct{}{}
+	}
+	return nil
+}
+
+func validateResponseComputerAction(raw json.RawMessage) error {
+	var action map[string]json.RawMessage
+	if json.Unmarshal(raw, &action) != nil || action == nil {
+		return errors.New("provider computer call contains an invalid action")
+	}
+	var actionType string
+	if json.Unmarshal(action["type"], &actionType) != nil {
+		return errors.New("provider computer call action is missing type")
+	}
+	requireCoordinates := func(names ...string) bool {
+		for _, name := range names {
+			if !responseComputerInteger(action[name]) {
+				return false
+			}
+		}
+		return true
+	}
+	switch actionType {
+	case "click", "double_click":
+		if !requireCoordinates("x", "y") {
+			return errors.New("provider computer pointer action has invalid coordinates")
+		}
+		var button string
+		if json.Unmarshal(action["button"], &button) != nil || button != "left" && button != "right" && button != "wheel" && button != "back" && button != "forward" {
+			return errors.New("provider computer pointer action has an invalid button")
+		}
+	case "move":
+		if !requireCoordinates("x", "y") {
+			return errors.New("provider computer pointer action has invalid coordinates")
+		}
+	case "scroll":
+		if !requireCoordinates("x", "y", "scroll_x", "scroll_y") {
+			return errors.New("provider computer scroll action has invalid coordinates")
+		}
+	case "drag":
+		var path []map[string]json.RawMessage
+		if json.Unmarshal(action["path"], &path) != nil || len(path) == 0 || len(path) > 1024 {
+			return errors.New("provider computer drag action has an invalid path")
+		}
+		for _, point := range path {
+			if !responseComputerInteger(point["x"]) || !responseComputerInteger(point["y"]) {
+				return errors.New("provider computer drag action has invalid coordinates")
+			}
+		}
+	case "keypress":
+		var keys []string
+		if json.Unmarshal(action["keys"], &keys) != nil || len(keys) == 0 || len(keys) > 32 {
+			return errors.New("provider computer keypress action has invalid keys")
+		}
+		for _, key := range keys {
+			if strings.TrimSpace(key) == "" || utf8.RuneCountInString(key) > 64 {
+				return errors.New("provider computer keypress action has invalid keys")
+			}
+		}
+	case "type":
+		var text string
+		if json.Unmarshal(action["text"], &text) != nil || len(text) > 1<<20 || !utf8.ValidString(text) {
+			return errors.New("provider computer type action has invalid text")
+		}
+	case "wait", "screenshot":
+	default:
+		return errors.New("provider computer call contains an unsupported action type")
+	}
+	return nil
+}
+
+func responseComputerInteger(raw json.RawMessage) bool {
+	if len(raw) == 0 {
+		return false
+	}
+	value := string(raw)
+	if strings.ContainsAny(value, ".eE") {
+		return false
+	}
+	_, err := strconv.ParseInt(value, 10, 64)
+	return err == nil
 }

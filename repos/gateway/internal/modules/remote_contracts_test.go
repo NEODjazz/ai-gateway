@@ -602,6 +602,34 @@ func TestResponsesHostedToolBillingReserveAndSettlement(t *testing.T) {
 	}
 }
 
+func TestResponsesComputerBillingAccountsForExecutedClientActions(t *testing.T) {
+	maxToolCalls := 5
+	req := &RequestContext{
+		Request: openai.ChatCompletionRequest{Model: "model"},
+		ResponseRequest: &openai.ResponseRequest{
+			Model: "model", MaxToolCalls: &maxToolCalls,
+			Tools: []openai.ResponseTool{{Type: "computer"}},
+			Input: []any{map[string]any{
+				"type": "computer_call_output", "call_id": "call_1",
+				"output": map[string]any{"type": "computer_screenshot", "image_url": "data:image/png;base64,iVBORw0KGgo="},
+			}},
+		},
+	}
+	reserved := billingRequest(req)
+	if reserved.ToolRequests != 5 {
+		t.Fatalf("Responses computer reserve=%+v", reserved)
+	}
+	req.ResponsesResponse = &openai.ResponseResponse{
+		ID: "resp_computer", Model: "model", Status: "completed",
+		Output: []openai.ResponseOutputItem{{Type: "computer_call", CallID: "call_2", Actions: []json.RawMessage{json.RawMessage(`{"type":"wait"}`)}}},
+		Usage:  openai.ResponseUsage{InputTokens: 7, OutputTokens: 11, TotalTokens: 18},
+	}
+	settled := billingRequest(req)
+	if settled.ToolRequests != 1 || settled.TotalTokens != 18 {
+		t.Fatalf("Responses computer settlement=%+v", settled)
+	}
+}
+
 func TestResponsesWebSearchBillingUsesConservativeDefaultReserve(t *testing.T) {
 	req := &RequestContext{
 		Request:         openai.ChatCompletionRequest{Model: "model"},

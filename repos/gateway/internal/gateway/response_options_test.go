@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -208,6 +209,100 @@ func TestResponsesAuthorizesWebSearchTool(t *testing.T) {
 			forwarded := upstream.request.ResponseRequest != nil && len(upstream.request.ResponseRequest.Tools) == 1 && upstream.request.ResponseRequest.Tools[0].Type == "web_search"
 			if forwarded != test.wantForward {
 				t.Fatalf("forwarded=%t request=%+v", forwarded, upstream.request.ResponseRequest)
+			}
+		})
+	}
+}
+
+func TestResponsesAuthorizesComputerTool(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		allowed     []string
+		wantStatus  int
+		wantForward bool
+	}{
+		{name: "allowed", allowed: []string{"computer"}, wantStatus: http.StatusOK, wantForward: true},
+		{name: "denied", allowed: []string{"lookup"}, wantStatus: http.StatusForbidden},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			upstream := &chatProvider{}
+			handler := NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}, tools: test.allowed}}), upstream)
+			out := httptest.NewRecorder()
+			handler.Responses(out, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"m","input":"open settings","tools":[{"type":"computer"}],"tool_choice":{"type":"computer"}}`)))
+			if out.Code != test.wantStatus {
+				t.Fatalf("status=%d body=%s", out.Code, out.Body.String())
+			}
+			forwarded := upstream.request.ResponseRequest != nil && len(upstream.request.ResponseRequest.Tools) == 1 && upstream.request.ResponseRequest.Tools[0].Type == "computer"
+			if forwarded != test.wantForward {
+				t.Fatalf("forwarded=%t request=%+v", forwarded, upstream.request.ResponseRequest)
+			}
+		})
+	}
+}
+
+func TestResponsesAuthorizesComputerContinuationInput(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		allowed    []string
+		wantStatus int
+	}{
+		{name: "allowed", allowed: []string{"computer"}, wantStatus: http.StatusOK},
+		{name: "denied", allowed: []string{"lookup"}, wantStatus: http.StatusForbidden},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			upstream := &chatProvider{}
+			handler := NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}, tools: test.allowed}}), upstream)
+			body := `{"model":"m","previous_response_id":"resp_1","input":[{"type":"computer_call_output","call_id":"call_1","output":{"type":"computer_screenshot","image_url":"data:image/png;base64,iVBORw0KGgo="}}]}`
+			out := httptest.NewRecorder()
+			handler.Responses(out, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(body)))
+			if out.Code != test.wantStatus {
+				t.Fatalf("status=%d body=%s", out.Code, out.Body.String())
+			}
+		})
+	}
+}
+
+func TestResponsesResolveOwnedComputerScreenshotBeforePolicy(t *testing.T) {
+	identity := modules.RequestContext{CredentialID: "credential", UserID: "user"}
+	owner := fileOwnerKey(identity)
+	png := []byte("\x89PNG\r\n\x1a\ncontent")
+	for _, test := range []struct {
+		name       string
+		fileOwner  string
+		wantStatus int
+		wantPolicy int
+	}{
+		{name: "owned", fileOwner: owner, wantStatus: http.StatusOK, wantPolicy: 1},
+		{name: "foreign", fileOwner: "foreign", wantStatus: http.StatusBadRequest},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			upstream := &chatProvider{}
+			policy := &lifecycleBillingModule{}
+			files := &memoryFileStore{files: map[string]filestate.File{"file_screen": {
+				ID: "file_screen", OwnerKey: test.fileOwner, Filename: "screen.png", Purpose: "vision", ContentType: "image/png", Bytes: int64(len(png)), Content: png,
+			}}}
+			handler := NewHandler(modules.NewPipeline([]modules.Module{
+				&lifecycleAuthModule{allowedModels: []string{"*"}, allowedTools: []string{"computer"}}, policy,
+			}), upstream).WithFileStore(files, FileRuntimeConfig{MaxBytes: 1 << 20, OwnerQuotaBytes: 1 << 20})
+			body := `{"model":"m","previous_response_id":"resp_1","tools":[{"type":"computer"}],"input":[{"type":"computer_call_output","call_id":"call_1","output":{"type":"computer_screenshot","file_id":"file_screen","detail":"original"}}]}`
+			out := httptest.NewRecorder()
+			handler.Responses(out, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(body)))
+			if out.Code != test.wantStatus || policy.calls != test.wantPolicy {
+				t.Fatalf("status=%d policy=%d body=%s", out.Code, policy.calls, out.Body.String())
+			}
+			if test.wantStatus != http.StatusOK {
+				if upstream.request.ResponseRequest != nil {
+					t.Fatal("foreign screenshot reached provider")
+				}
+				return
+			}
+			encoded, err := json.Marshal(upstream.request.ResponseRequest.Input)
+			if err != nil || strings.Contains(string(encoded), "file_screen") || !strings.Contains(string(encoded), "data:image/png;base64,") {
+				t.Fatalf("screenshot was not resolved: input=%s err=%v", encoded, err)
+			}
+			attachments, err := openai.ResponseImageAttachments(upstream.request.ResponseRequest.Input)
+			if err != nil || len(attachments) != 1 {
+				t.Fatalf("resolved screenshot did not reach image policy path: attachments=%+v err=%v", attachments, err)
 			}
 		})
 	}

@@ -48,6 +48,33 @@ func TestResponsesRejectsInvalidImageGenerationResults(t *testing.T) {
 	}
 }
 
+func TestResponsesValidateComputerCalls(t *testing.T) {
+	valid := []string{
+		`{"type":"computer_call","call_id":"call_1","status":"completed","actions":[{"type":"click","button":"left","x":10,"y":20},{"type":"keypress","keys":["CTRL","L"]},{"type":"type","text":"example.test"},{"type":"wait"}],"pending_safety_checks":[{"id":"check_1","code":"domain"}]}`,
+		`{"type":"computer_call","call_id":"call_2","action":{"type":"drag","path":[{"x":1,"y":2},{"x":3,"y":4}]}}`,
+	}
+	for _, output := range valid {
+		document := `{"id":"r","object":"response","model":"m","status":"completed","output":[` + output + `],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`
+		response, err := decodeResponseJSON(strings.NewReader(document))
+		if err != nil || len(response.Output) != 1 || response.Output[0].CallID == "" {
+			t.Fatalf("valid computer output rejected: output=%s response=%+v err=%v", output, response, err)
+		}
+	}
+	for _, output := range []string{
+		`{"type":"computer_call","actions":[{"type":"wait"}]}`,
+		`{"type":"computer_call","call_id":"call","actions":[]}`,
+		`{"type":"computer_call","call_id":"call","action":{"type":"wait"},"actions":[{"type":"wait"}]}`,
+		`{"type":"computer_call","call_id":"call","actions":[{"type":"click","x":1.5,"y":2}]}`,
+		`{"type":"computer_call","call_id":"call","actions":[{"type":"unknown"}]}`,
+		`{"type":"computer_call","call_id":"call","actions":[{"type":"wait"}],"pending_safety_checks":[{"id":"same"},{"id":"same"}]}`,
+	} {
+		document := `{"id":"r","object":"response","model":"m","status":"completed","output":[` + output + `],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`
+		if _, err := decodeResponseJSON(strings.NewReader(document)); err == nil {
+			t.Fatalf("invalid computer output accepted: %s", output)
+		}
+	}
+}
+
 func TestResponsesJSONReadLimitAndErrors(t *testing.T) {
 	reader := &embeddingLimitReader{}
 	if _, err := decodeResponseJSON(reader); err == nil || reader.read != maxResponseJSONBytes+1 {

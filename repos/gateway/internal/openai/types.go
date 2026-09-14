@@ -894,29 +894,31 @@ type ResponseIncompleteDetails struct {
 }
 
 type ResponseOutputItem struct {
-	Phase             *string                 `json:"phase,omitempty"`
-	EncryptedContent  *string                 `json:"encrypted_content,omitempty"`
-	Action            json.RawMessage         `json:"action,omitempty"`
-	Outputs           []json.RawMessage       `json:"outputs,omitempty"`
-	Results           []json.RawMessage       `json:"results,omitempty"`
-	Tools             []json.RawMessage       `json:"tools,omitempty"`
-	Output            json.RawMessage         `json:"output,omitempty"`
-	Error             json.RawMessage         `json:"error,omitempty"`
-	ID                string                  `json:"id,omitempty"`
-	Type              string                  `json:"type"`
-	Status            string                  `json:"status,omitempty"`
-	Role              string                  `json:"role,omitempty"`
-	Name              string                  `json:"name,omitempty"`
-	CallID            string                  `json:"call_id,omitempty"`
-	ContainerID       string                  `json:"container_id,omitempty"`
-	ServerLabel       string                  `json:"server_label,omitempty"`
-	ApprovalRequestID string                  `json:"approval_request_id,omitempty"`
-	Code              string                  `json:"code,omitempty"`
-	Arguments         string                  `json:"arguments,omitempty"`
-	Input             string                  `json:"input,omitempty"`
-	Result            json.RawMessage         `json:"result,omitempty"`
-	Content           []ResponseOutputContent `json:"content,omitempty"`
-	Summary           []ResponseOutputContent `json:"summary,omitempty"`
+	Phase               *string                 `json:"phase,omitempty"`
+	EncryptedContent    *string                 `json:"encrypted_content,omitempty"`
+	Action              json.RawMessage         `json:"action,omitempty"`
+	Actions             []json.RawMessage       `json:"actions,omitempty"`
+	PendingSafetyChecks []json.RawMessage       `json:"pending_safety_checks,omitempty"`
+	Outputs             []json.RawMessage       `json:"outputs,omitempty"`
+	Results             []json.RawMessage       `json:"results,omitempty"`
+	Tools               []json.RawMessage       `json:"tools,omitempty"`
+	Output              json.RawMessage         `json:"output,omitempty"`
+	Error               json.RawMessage         `json:"error,omitempty"`
+	ID                  string                  `json:"id,omitempty"`
+	Type                string                  `json:"type"`
+	Status              string                  `json:"status,omitempty"`
+	Role                string                  `json:"role,omitempty"`
+	Name                string                  `json:"name,omitempty"`
+	CallID              string                  `json:"call_id,omitempty"`
+	ContainerID         string                  `json:"container_id,omitempty"`
+	ServerLabel         string                  `json:"server_label,omitempty"`
+	ApprovalRequestID   string                  `json:"approval_request_id,omitempty"`
+	Code                string                  `json:"code,omitempty"`
+	Arguments           string                  `json:"arguments,omitempty"`
+	Input               string                  `json:"input,omitempty"`
+	Result              json.RawMessage         `json:"result,omitempty"`
+	Content             []ResponseOutputContent `json:"content,omitempty"`
+	Summary             []ResponseOutputContent `json:"summary,omitempty"`
 }
 
 type ResponseOutputContent struct {

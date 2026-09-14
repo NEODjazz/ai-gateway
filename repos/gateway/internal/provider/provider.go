@@ -3358,15 +3358,17 @@ func bindChatAudioHistory(request openai.ChatCompletionRequest, candidates []End
 
 func requiredResponseCapabilities(request openai.ResponseRequest, stream bool) []string {
 	required := []string{"responses"}
+	computerOutputs, _ := openai.InspectResponseComputerCallOutputs(request.Input)
 	if request.Background {
 		required = append(required, "background_responses")
 	}
 	if stream {
 		required = append(required, "stream")
 	}
-	if len(request.Tools) > 0 {
+	if len(request.Tools) > 0 || len(computerOutputs) > 0 {
 		required = append(required, "tools")
 	}
+	computerRequired := len(computerOutputs) > 0
 	for _, tool := range request.Tools {
 		if tool.Type == "code_interpreter" {
 			required = append(required, "code_interpreter")
@@ -3383,14 +3385,20 @@ func requiredResponseCapabilities(request openai.ResponseRequest, stream bool) [
 		if tool.Type == "image_generation" {
 			required = append(required, "response_image_generation")
 		}
+		if tool.Type == "computer" {
+			computerRequired = true
+		}
 		if openai.IsResponseWebSearchTool(tool.Type) {
 			required = append(required, "web_search")
 		}
 	}
+	if computerRequired {
+		required = append(required, "response_computer")
+	}
 	if request.Text != nil {
 		required = append(required, "structured_output")
 	}
-	if openai.HasResponseImages(request) {
+	if openai.HasResponsePromptImages(request) {
 		required = append(required, "vision")
 	}
 	if openai.HasResponseAudio(request) {
@@ -3451,6 +3459,12 @@ func (e Endpoint) supportsCapabilities(required ...string) bool {
 		if hasCapability(required, "response_image_generation") {
 			client, ok := e.Provider.(interface{ SupportsResponseImageGeneration() bool })
 			if !ok || !client.SupportsResponseImageGeneration() {
+				return false
+			}
+		}
+		if hasCapability(required, "response_computer") {
+			client, ok := e.Provider.(interface{ SupportsResponseComputer() bool })
+			if !ok || !client.SupportsResponseComputer() {
 				return false
 			}
 		}

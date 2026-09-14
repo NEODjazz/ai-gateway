@@ -64,7 +64,7 @@ func (h Handler) CountResponseInputTokens(w http.ResponseWriter, r *http.Request
 	if !h.prepareAccessGroups(w, &reqCtx) {
 		return
 	}
-	toolIdentifiers, validTools := responseToolIdentifiers(responseRequest.Tools)
+	toolIdentifiers, validTools := responseRequestToolIdentifiers(responseRequest)
 	if !h.authorizeTools(w, reqCtx, toolIdentifiers, validTools) ||
 		!h.authorizeResponseToolResources(w, r.Context(), &reqCtx, &responseRequest) ||
 		!h.authorizeAccess(w, r.Context(), reqCtx, responseRequest.Model, openai.ResponseInputTokens(responseRequest)) {

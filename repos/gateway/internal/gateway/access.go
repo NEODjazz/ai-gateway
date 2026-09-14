@@ -173,6 +173,8 @@ func responseToolIdentifiers(tools []openai.ResponseTool) ([]string, bool) {
 			identifier = "web_search"
 		case "image_generation":
 			identifier = "image_generation"
+		case "computer":
+			identifier = "computer"
 		case "mcp":
 			var valid bool
 			identifier, valid = mcpToolIdentifier(tool)
@@ -188,6 +190,26 @@ func responseToolIdentifiers(tools []openai.ResponseTool) ([]string, bool) {
 		identifiers = append(identifiers, identifier)
 	}
 	return identifiers, true
+}
+
+func responseRequestToolIdentifiers(request openai.ResponseRequest) ([]string, bool) {
+	identifiers, valid := responseToolIdentifiers(request.Tools)
+	if !valid {
+		return nil, false
+	}
+	outputs, message := openai.InspectResponseComputerCallOutputs(request.Input)
+	if message != "" {
+		return nil, false
+	}
+	if len(outputs) == 0 {
+		return identifiers, true
+	}
+	for _, identifier := range identifiers {
+		if identifier == "computer" {
+			return identifiers, true
+		}
+	}
+	return append(identifiers, "computer"), true
 }
 
 func (h Handler) authorizeTools(w http.ResponseWriter, req modules.RequestContext, identifiers []string, valid bool) bool {

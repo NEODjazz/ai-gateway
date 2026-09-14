@@ -25,6 +25,7 @@ func (mcpResponseMirrorCapture) SupportsResponseCustomTools() bool { return true
 func (mcpResponseMirrorCapture) SupportsResponseImageGeneration() bool {
 	return true
 }
+func (mcpResponseMirrorCapture) SupportsResponseComputer() bool { return true }
 
 func (p *responseMirrorCapture) Responses(_ context.Context, req openai.ResponseRequest) (openai.ResponseResponse, error) {
 	p.requests <- req
@@ -139,6 +140,7 @@ func TestResponsesHostedToolsAreNotMirrored(t *testing.T) {
 		{name: "web search", tool: openai.ResponseTool{Type: "web_search"}, capabilities: []string{"responses", "tools", "web_search"}},
 		{name: "custom", tool: openai.ResponseTool{Type: "custom", Name: "dsl"}, capabilities: []string{"responses", "tools", "custom_tools"}},
 		{name: "image generation", tool: openai.ResponseTool{Type: "image_generation"}, capabilities: []string{"responses", "tools", "response_image_generation"}},
+		{name: "computer", tool: openai.ResponseTool{Type: "computer"}, capabilities: []string{"responses", "tools", "response_computer"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {

@@ -156,6 +156,20 @@ func imageAttachments(value any) ([]ImageAttachment, error) {
 		case map[string]any:
 			typeName, _ := typed["type"].(string)
 			switch typeName {
+			case "computer_screenshot":
+				if _, hasFile := typed["file_id"]; hasFile {
+					return nil
+				}
+				value, ok := typed["image_url"].(string)
+				if !ok {
+					return fmt.Errorf("%w: computer_screenshot.image_url is required", ErrInvalidImage)
+				}
+				attachment, err := ParseDataImageURL(value)
+				if err != nil {
+					return err
+				}
+				attachments = append(attachments, attachment)
+				return nil
 			case "image_url":
 				image, ok := typed["image_url"].(map[string]any)
 				if !ok {
@@ -277,10 +291,36 @@ func HasResponseImages(request ResponseRequest) bool {
 	return err == nil && len(attachments) > 0
 }
 
+// HasResponsePromptImages reports general vision input separately from
+// computer-loop screenshots, whose support is covered by response_computer.
+func HasResponsePromptImages(request ResponseRequest) bool {
+	found := false
+	var walk func(any)
+	walk = func(value any) {
+		switch typed := value.(type) {
+		case []any:
+			for _, item := range typed {
+				walk(item)
+			}
+		case map[string]any:
+			typeName, _ := typed["type"].(string)
+			if typeName == "image_url" || typeName == "input_image" {
+				found = true
+				return
+			}
+			for _, nested := range typed {
+				walk(nested)
+			}
+		}
+	}
+	walk(request.Input)
+	return found
+}
+
 func IsMediaContent(value map[string]any) bool {
 	typeName, _ := value["type"].(string)
 	switch typeName {
-	case "image_url", "input_image", "image", "input_audio", "audio", "input_video", "video", "input_file", "file":
+	case "image_url", "input_image", "image", "computer_screenshot", "input_audio", "audio", "input_video", "video", "input_file", "file":
 		return true
 	default:
 		return false

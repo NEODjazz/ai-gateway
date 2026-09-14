@@ -21,6 +21,7 @@ describe("modelCapabilityOptions", () => {
       "moderation",
       "image_generation",
       "response_image_generation",
+      "response_computer",
       "image_edit",
       "image_variation",
       "audio_transcription",
