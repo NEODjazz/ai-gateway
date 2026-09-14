@@ -163,6 +163,11 @@ jobs:
         shell: bash
         run: |
           if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes --title "$GITHUB_REF_NAME"
+            notes_file=".github/release-notes/${GITHUB_REF_NAME}.md"
+            if [[ -f "$notes_file" ]]; then
+              gh release create "$GITHUB_REF_NAME" --verify-tag --notes-file "$notes_file" --title "$GITHUB_REF_NAME"
+            else
+              gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes --title "$GITHUB_REF_NAME"
+            fi
           fi
           gh release upload "$GITHUB_REF_NAME" dist/*.tgz --clobber

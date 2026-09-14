@@ -2,5 +2,5 @@ apiVersion: v2
 name: clickhouse
 description: ClickHouse storage for AI Gateway usage events
 type: application
-version: 0.1.2
+version: 0.2.0
 appVersion: "24.8"
