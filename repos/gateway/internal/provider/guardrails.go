@@ -190,9 +190,8 @@ type AnonymizationSetting struct {
 
 func basicAnonymizationRules() []string {
 	return []string{
-		"address_ru", "api_key", "bank_card", "domain_user", "email", "inn_context",
-		"jwt", "passport_ru_context", "password", "person_context", "phone", "private_key",
-		"security_key", "social_login", "user_id",
+		"address_ru", "api_key", "bank_card", "email", "inn", "jwt", "passport_ru",
+		"phone", "person_ru", "secret",
 	}
 }
 

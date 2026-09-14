@@ -1,10 +1,14 @@
 package provider
 
 import (
+	"context"
 	"reflect"
+	"strings"
 	"testing"
 
 	"ai-gateway-gateway/internal/config"
+	"ai-gateway-gateway/internal/modules"
+	"ai-gateway-gateway/internal/openai"
 )
 
 func TestRuntimeGuardrailPolicyChangesEndpointChecks(t *testing.T) {
@@ -62,5 +66,29 @@ func TestOutputDLPRequiresInputDLP(t *testing.T) {
 	router := New(Config{}).(*Router)
 	if _, err := router.UpdateGuardrailPolicy("invalid", GuardrailPolicy{OutputDLP: true, AV: true, Enabled: true}); err == nil {
 		t.Fatal("output DLP policy without DLP was accepted")
+	}
+}
+
+func TestAnonymizationBasicRuleSetIsCompatibleWithBuiltinAnonymizer(t *testing.T) {
+	mode, rules, _ := ResolveAnonymization(AnonymizationSetting{Mode: "basic"})
+	if mode != "custom" || len(rules) == 0 {
+		t.Fatalf("unexpected resolved basic anonymization: mode=%q rules=%v", mode, rules)
+	}
+
+	req := modules.RequestContext{
+		Metadata: map[string]string{
+			"provider.modules.anonymizer.mode":  mode,
+			"provider.modules.anonymizer.rules": strings.Join(rules, ","),
+		},
+		Request: openai.ChatCompletionRequest{Messages: []openai.Message{{Role: "user", Content: "user@example.com password=qwerty123"}}},
+	}
+
+	module := modules.NewAnonymizerModule(true, rules...)
+	if err := module.Handle(context.Background(), &req); err != nil {
+		t.Fatalf("anonymizer failed to accept resolved basic rules: %v", err)
+	}
+	content := openai.ContentText(req.Request.Messages[0].Content)
+	if !strings.Contains(content, "{{EMAIL_1}}") || !strings.Contains(content, "{{SECRET_1}}") {
+		t.Fatalf("basic anonymization is not working for resolved rules: %q", content)
 	}
 }
