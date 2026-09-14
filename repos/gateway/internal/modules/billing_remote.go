@@ -428,6 +428,8 @@ func billingRequest(req *RequestContext) UsageRequest {
 			request.ToolRequests += len(outputs)
 			shellOutputs, _ := openai.InspectResponseShellCallOutputs(req.ResponseRequest.Input)
 			request.ToolRequests += len(shellOutputs)
+			patchOutputs, _ := openai.InspectResponseApplyPatchCallOutputs(req.ResponseRequest.Input)
+			request.ToolRequests += len(patchOutputs)
 		}
 		request.SearchRequestsEstimated = false
 		request.UsageEstimated = request.TotalTokens == 0
@@ -588,7 +590,7 @@ func responseToolUsageReserve(request openai.ResponseRequest) (toolRequests, sea
 	var hosted, search bool
 	for _, tool := range request.Tools {
 		switch tool.Type {
-		case "code_interpreter", "file_search", "mcp", "computer", "shell":
+		case "code_interpreter", "file_search", "mcp", "computer", "shell", "apply_patch":
 			hosted = true
 		case "web_search", "web_search_preview":
 			search = true
@@ -613,7 +615,7 @@ func responseToolUsageReserve(request openai.ResponseRequest) (toolRequests, sea
 func responseOutputToolUsage(response openai.ResponseResponse) (toolRequests, searchRequests int) {
 	for _, item := range response.Output {
 		switch item.Type {
-		case "code_interpreter_call", "file_search_call", "mcp_call", "shell_call_output":
+		case "code_interpreter_call", "file_search_call", "mcp_call", "shell_call_output", "apply_patch_call_output":
 			toolRequests++
 		case "web_search_call":
 			searchRequests++

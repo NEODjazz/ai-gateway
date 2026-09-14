@@ -79,6 +79,14 @@ and token-accounting path; provider commands and captured output pass output DLP
 Programmatic callers, inline skills and container network policy are rejected
 until their complete lifecycle is configured.
 
+Responses also supports direct `apply_patch` tool loops on deployments that
+explicitly declare `response_apply_patch`. Provider patch calls are validated
+as bounded create, update or delete operations with canonical workspace-relative
+paths. Patch diffs and result text pass the normal policy, token-accounting and
+billing paths. The gateway forwards patch instructions and results but never
+modifies files itself. Programmatic callers require their separate program
+lifecycle and are rejected until that lifecycle is configured.
+
 The Batches API accepts owner-scoped JSONL Files for Chat Completions, Messages,
 Responses, Response Compaction, Completions, Embeddings, Rerank, Search, Image Generation,
 Image Edit, Image Variation, Audio Transcription, Audio Translation, Text-to-Speech,

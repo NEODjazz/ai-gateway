@@ -899,6 +899,7 @@ type ResponseOutputItem struct {
 	Phase               *string                 `json:"phase,omitempty"`
 	EncryptedContent    *string                 `json:"encrypted_content,omitempty"`
 	Action              json.RawMessage         `json:"action,omitempty"`
+	Operation           json.RawMessage         `json:"operation,omitempty"`
 	Environment         json.RawMessage         `json:"environment,omitempty"`
 	Caller              json.RawMessage         `json:"caller,omitempty"`
 	Actions             []json.RawMessage       `json:"actions,omitempty"`

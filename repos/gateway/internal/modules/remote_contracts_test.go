@@ -575,6 +575,7 @@ func TestResponsesHostedToolBillingReserveAndSettlement(t *testing.T) {
 				{Type: "function", Name: "client_function"},
 				{Type: "custom", Name: "client_custom"},
 				{Type: "shell"},
+				{Type: "apply_patch"},
 			},
 		},
 	}
@@ -594,12 +595,13 @@ func TestResponsesHostedToolBillingReserveAndSettlement(t *testing.T) {
 			{Type: "function_call", Status: "completed"},
 			{Type: "custom_tool_call", Status: "completed"},
 			{Type: "shell_call_output", CallID: "shell_1", Status: "completed", Output: json.RawMessage(`[{"stdout":"ok","stderr":"","outcome":{"type":"exit","exit_code":0}}]`)},
+			{Type: "apply_patch_call_output", CallID: "patch_1", Status: "completed", Output: json.RawMessage(`"updated"`)},
 			{Type: "image_generation_call", Status: "completed", Result: json.RawMessage(`"aW1hZ2U="`)},
 		},
 		Usage: openai.ResponseUsage{InputTokens: 7, OutputTokens: 11, TotalTokens: 18},
 	}
 	settled := billingRequest(req)
-	if settled.Phase != "commit" || settled.ToolRequests != 4 || settled.SearchRequests != 2 || settled.SearchRequestsEstimated || settled.OutputImages != 1 || settled.TotalTokens != 18 || settled.UsageEstimated {
+	if settled.Phase != "commit" || settled.ToolRequests != 5 || settled.SearchRequests != 2 || settled.SearchRequestsEstimated || settled.OutputImages != 1 || settled.TotalTokens != 18 || settled.UsageEstimated {
 		t.Fatalf("Responses hosted tool settlement=%+v", settled)
 	}
 }
@@ -657,6 +659,33 @@ func TestResponsesShellBillingAccountsForExecutedClientCalls(t *testing.T) {
 	settled := billingRequest(req)
 	if settled.ToolRequests != 1 || settled.TotalTokens != 18 {
 		t.Fatalf("Responses shell settlement=%+v", settled)
+	}
+}
+
+func TestResponsesApplyPatchBillingAccountsForExecutedClientCalls(t *testing.T) {
+	maxToolCalls := 3
+	req := &RequestContext{
+		Request: openai.ChatCompletionRequest{Model: "model"},
+		ResponseRequest: &openai.ResponseRequest{
+			Model: "model", MaxToolCalls: &maxToolCalls,
+			Tools: []openai.ResponseTool{{Type: "apply_patch"}},
+			Input: []any{map[string]any{
+				"type": "apply_patch_call_output", "call_id": "call_1", "status": "completed", "output": "updated",
+			}},
+		},
+	}
+	reserved := billingRequest(req)
+	if reserved.ToolRequests != 3 {
+		t.Fatalf("Responses apply patch reserve=%+v", reserved)
+	}
+	req.ResponsesResponse = &openai.ResponseResponse{
+		ID: "resp_patch", Model: "model", Status: "completed",
+		Output: []openai.ResponseOutputItem{{Type: "apply_patch_call", CallID: "call_2", Status: "completed", Operation: json.RawMessage(`{"type":"delete_file","path":"tmp/old.txt"}`)}},
+		Usage:  openai.ResponseUsage{InputTokens: 7, OutputTokens: 11, TotalTokens: 18},
+	}
+	settled := billingRequest(req)
+	if settled.ToolRequests != 1 || settled.TotalTokens != 18 {
+		t.Fatalf("Responses apply patch settlement=%+v", settled)
 	}
 }
 

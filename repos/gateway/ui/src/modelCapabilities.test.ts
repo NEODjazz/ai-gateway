@@ -23,6 +23,7 @@ describe("modelCapabilityOptions", () => {
       "response_image_generation",
       "response_computer",
       "response_shell",
+      "response_apply_patch",
       "image_edit",
       "image_variation",
       "audio_transcription",

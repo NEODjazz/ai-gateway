@@ -177,6 +177,8 @@ func responseToolIdentifiers(tools []openai.ResponseTool) ([]string, bool) {
 			identifier = "computer"
 		case "shell":
 			identifier = "shell"
+		case "apply_patch":
+			identifier = "apply_patch"
 		case "mcp":
 			var valid bool
 			identifier, valid = mcpToolIdentifier(tool)
@@ -219,18 +221,33 @@ func responseRequestToolIdentifiers(request openai.ResponseRequest) ([]string, b
 	if message != "" {
 		return nil, false
 	}
-	if len(shellOutputs) == 0 {
-		return identifiers, true
-	}
 	found := false
-	for _, identifier := range identifiers {
-		if identifier == "shell" {
-			found = true
-			break
+	if len(shellOutputs) > 0 {
+		for _, identifier := range identifiers {
+			if identifier == "shell" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			identifiers = append(identifiers, "shell")
 		}
 	}
-	if !found {
-		identifiers = append(identifiers, "shell")
+	patchOutputs, message := openai.InspectResponseApplyPatchCallOutputs(request.Input)
+	if message != "" {
+		return nil, false
+	}
+	found = false
+	if len(patchOutputs) > 0 {
+		for _, identifier := range identifiers {
+			if identifier == "apply_patch" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			identifiers = append(identifiers, "apply_patch")
+		}
 	}
 	return identifiers, true
 }

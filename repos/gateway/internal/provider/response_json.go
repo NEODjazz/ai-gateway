@@ -60,6 +60,16 @@ func validateResponseOutputItems(items []openai.ResponseOutputItem) error {
 				return errors.New("provider " + message)
 			}
 			continue
+		case "apply_patch_call":
+			if message := openai.ValidateResponseApplyPatchCall(item); message != "" {
+				return errors.New(message)
+			}
+			continue
+		case "apply_patch_call_output":
+			if _, message := openai.InspectResponseApplyPatchCallOutputs([]openai.ResponseOutputItem{item}); message != "" {
+				return errors.New("provider " + message)
+			}
+			continue
 		}
 		if item.Type != "image_generation_call" {
 			continue

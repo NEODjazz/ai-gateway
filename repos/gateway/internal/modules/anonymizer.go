@@ -262,6 +262,9 @@ func DeanonymizeResponsesResponse(req *RequestContext, response *openai.Response
 		openai.TransformResponseShellText(&response.Output[outputIndex], func(value string) string {
 			return DeanonymizeText(value, req.AnonymizationValues)
 		})
+		openai.TransformResponseApplyPatchText(&response.Output[outputIndex], func(value string) string {
+			return DeanonymizeText(value, req.AnonymizationValues)
+		})
 		for contentIndex := range response.Output[outputIndex].Content {
 			response.Output[outputIndex].Content[contentIndex].Text = DeanonymizeText(response.Output[outputIndex].Content[contentIndex].Text, req.AnonymizationValues)
 			response.Output[outputIndex].Content[contentIndex].Refusal = DeanonymizeText(response.Output[outputIndex].Content[contentIndex].Refusal, req.AnonymizationValues)

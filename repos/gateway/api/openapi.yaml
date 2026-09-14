@@ -2667,7 +2667,7 @@ paths:
       operationId: createResponse
       tags: [Inference]
       summary: Create a Responses API response
-      description: Supports function tools, explicitly scoped MCP connectors, provider-managed code interpreter and file search, structured output, previous-response affinity, SSE, durable background execution, inline images and bounded inline PDF file_data. Code interpreter files and file-search vector stores must belong to the authenticated credential and user; routing requires explicit code_interpreter or file_search deployment capabilities. PDF bytes are signature-validated, projected to configured scanners and require an explicit file_input deployment capability. Background requests require store=true, stream=false, and an explicit background_responses deployment capability; billing settlement is resumed from PostgreSQL after process restarts. MCP definitions are forwarded to an upstream provider that must support remote MCP; the gateway does not execute MCP calls. Routing requires explicit mcp capability. Tool authorization checks connector identity (label and canonical URL), not individual remote tool names.
+      description: Supports function tools, explicitly scoped MCP connectors, provider-managed code interpreter and file search, direct computer, shell and apply-patch continuations, structured output, previous-response affinity, SSE, durable background execution, inline images and bounded inline PDF file_data. Code interpreter files and file-search vector stores must belong to the authenticated credential and user; routing requires explicit tool-specific deployment capabilities. PDF bytes are signature-validated, projected to configured scanners and require an explicit file_input deployment capability. Background requests require store=true, stream=false, and an explicit background_responses deployment capability; billing settlement is resumed from PostgreSQL after process restarts. MCP definitions are forwarded to an upstream provider that must support remote MCP; the gateway does not execute MCP calls. Tool authorization checks canonical tool identities, and the gateway never executes client-side computer, shell or patch instructions.
       requestBody:
         required: true
         content:
@@ -7964,7 +7964,7 @@ components:
         capabilities:
           type: array
           uniqueItems: true
-          items: {type: string, enum: [chat, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, gemini_code_execution, url_context, google_maps, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, cached_content, realtime, stream, tools, custom_tools, response_image_generation, response_computer, response_shell, structured_output, mcp, code_interpreter, file_search, vision, web_search, web_fetch, tool_search, zero_output, inference_geo, context_management, tool_result_error, document_citations, document_metadata, document_text, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
+          items: {type: string, enum: [chat, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, gemini_code_execution, url_context, google_maps, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, cached_content, realtime, stream, tools, custom_tools, response_image_generation, response_computer, response_shell, response_apply_patch, structured_output, mcp, code_interpreter, file_search, vision, web_search, web_fetch, tool_search, zero_output, inference_geo, context_management, tool_result_error, document_citations, document_metadata, document_text, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
         max_input_tokens: {type: integer, minimum: 0}
         max_output_tokens: {type: integer, minimum: 0}
         input_cost_per_1m: {type: number, minimum: 0}
@@ -9082,6 +9082,36 @@ components:
                     properties:
                       type: {type: string, const: exit}
                       exit_code: {type: integer, format: int64}
+    ApplyPatchResponseTool:
+      type: object
+      description: Provider apply-patch tool. Gateway authorization uses the apply_patch grant, routing requires an explicit response_apply_patch deployment capability, and the gateway never modifies files itself.
+      additionalProperties: false
+      required: [type]
+      properties:
+        type: {type: string, const: apply_patch}
+        allowed_callers:
+          type: array
+          maxItems: 1
+          uniqueItems: true
+          items: {type: string, const: direct}
+    ApplyPatchCallOutput:
+      type: object
+      description: Result of a client-executed patch call. Optional output text is included in token accounting and input policy processing.
+      additionalProperties: false
+      required: [type, call_id, status]
+      properties:
+        type: {type: string, const: apply_patch_call_output}
+        id: {type: string, minLength: 1, maxLength: 512}
+        call_id: {type: string, minLength: 1, maxLength: 512}
+        created_by: {type: string, minLength: 1, maxLength: 512}
+        status: {type: string, enum: [completed, failed]}
+        output: {type: string, maxLength: 1048576}
+        caller:
+          type: object
+          additionalProperties: false
+          required: [type]
+          properties:
+            type: {type: string, const: direct}
     ComputerCallOutput:
       type: object
       description: Result of executing a provider-requested computer action. A gateway file_id is resolved only after authentication and must belong to the same credential and user.
@@ -9310,6 +9340,7 @@ components:
                   - {$ref: '#/components/schemas/InputImageContentPart'}
                   - {$ref: '#/components/schemas/ComputerCallOutput'}
                   - {$ref: '#/components/schemas/ShellCallOutput'}
+                  - {$ref: '#/components/schemas/ApplyPatchCallOutput'}
                   - type: object
                     additionalProperties: true
         instructions: {type: string}
@@ -9323,6 +9354,7 @@ components:
               - $ref: '#/components/schemas/ImageGenerationResponseTool'
               - $ref: '#/components/schemas/ComputerResponseTool'
               - $ref: '#/components/schemas/ShellResponseTool'
+              - $ref: '#/components/schemas/ApplyPatchResponseTool'
               - $ref: '#/components/schemas/MCPResponseTool'
               - $ref: '#/components/schemas/CodeInterpreterResponseTool'
               - $ref: '#/components/schemas/FileSearchResponseTool'
@@ -9492,6 +9524,7 @@ components:
                   - {$ref: '#/components/schemas/InputImageContentPart'}
                   - {$ref: '#/components/schemas/ComputerCallOutput'}
                   - {$ref: '#/components/schemas/ShellCallOutput'}
+                  - {$ref: '#/components/schemas/ApplyPatchCallOutput'}
                   - type: object
                     additionalProperties: true
         instructions: {type: string}
@@ -9505,6 +9538,7 @@ components:
               - $ref: '#/components/schemas/ImageGenerationResponseTool'
               - $ref: '#/components/schemas/ComputerResponseTool'
               - $ref: '#/components/schemas/ShellResponseTool'
+              - $ref: '#/components/schemas/ApplyPatchResponseTool'
               - $ref: '#/components/schemas/MCPResponseTool'
               - $ref: '#/components/schemas/CodeInterpreterResponseTool'
               - $ref: '#/components/schemas/FileSearchResponseTool'
@@ -9613,6 +9647,7 @@ components:
           type: object
           additionalProperties: true
           description: Provider web-search action, including bounded query, page and source metadata when returned upstream.
+        operation: {type: object, additionalProperties: true, description: "Validated create_file, update_file, or delete_file patch operation."}
         environment: {type: object, additionalProperties: true}
         caller: {type: object, additionalProperties: true}
         created_by: {type: string}
@@ -10773,7 +10808,7 @@ components:
           type: array
           uniqueItems: true
           description: Operations and optional request features preserved by the managed adapter.
-          items: {type: string, enum: [chat, completions, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, gemini_code_execution, url_context, google_maps, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, cached_content, realtime, stream, tools, custom_tools, response_image_generation, response_computer, response_shell, structured_output, mcp, code_interpreter, file_search, vision, web_search, web_fetch, tool_search, zero_output, inference_geo, context_management, tool_result_error, document_citations, document_metadata, document_text, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
+          items: {type: string, enum: [chat, completions, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, gemini_code_execution, url_context, google_maps, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, cached_content, realtime, stream, tools, custom_tools, response_image_generation, response_computer, response_shell, response_apply_patch, structured_output, mcp, code_interpreter, file_search, vision, web_search, web_fetch, tool_search, zero_output, inference_geo, context_management, tool_result_error, document_citations, document_metadata, document_text, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
         auth_types:
           type: array
           uniqueItems: true

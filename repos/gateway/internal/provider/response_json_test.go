@@ -104,6 +104,34 @@ func TestResponsesValidateShellCallsAndOutputs(t *testing.T) {
 	}
 }
 
+func TestResponsesValidateApplyPatchCallsAndOutputs(t *testing.T) {
+	valid := []string{
+		`{"type":"apply_patch_call","id":"patch_1","call_id":"call_1","status":"completed","operation":{"type":"update_file","path":"docs/readme.md","diff":"@@ -1 +1 @@\n-old\n+new"},"caller":{"type":"direct"}}`,
+		`{"type":"apply_patch_call","id":"patch_2","call_id":"call_2","status":"in_progress","operation":{"type":"delete_file","path":"tmp/old.txt"}}`,
+		`{"type":"apply_patch_call_output","id":"out_1","call_id":"call_1","status":"completed","output":"updated"}`,
+	}
+	for _, output := range valid {
+		document := `{"id":"r","object":"response","model":"m","status":"completed","output":[` + output + `],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`
+		response, err := decodeResponseJSON(strings.NewReader(document))
+		if err != nil || len(response.Output) != 1 || response.Output[0].CallID == "" {
+			t.Fatalf("valid apply patch output rejected: output=%s response=%+v err=%v", output, response, err)
+		}
+	}
+	invalid := []string{
+		`{"type":"apply_patch_call","id":"patch","status":"completed","operation":{"type":"delete_file","path":"file"}}`,
+		`{"type":"apply_patch_call","id":"patch","call_id":"call","status":"completed","operation":{"type":"delete_file","path":"../secret"}}`,
+		`{"type":"apply_patch_call","id":"patch","call_id":"call","status":"completed","operation":{"type":"create_file","path":"file"}}`,
+		`{"type":"apply_patch_call","id":"patch","call_id":"call","status":"incomplete","operation":{"type":"delete_file","path":"file"}}`,
+		`{"type":"apply_patch_call_output","id":"out","call_id":"call","status":"in_progress"}`,
+	}
+	for _, output := range invalid {
+		document := `{"id":"r","object":"response","model":"m","status":"completed","output":[` + output + `],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`
+		if _, err := decodeResponseJSON(strings.NewReader(document)); err == nil {
+			t.Fatalf("invalid apply patch output accepted: %s", output)
+		}
+	}
+}
+
 func TestResponsesJSONReadLimitAndErrors(t *testing.T) {
 	reader := &embeddingLimitReader{}
 	if _, err := decodeResponseJSON(reader); err == nil || reader.read != maxResponseJSONBytes+1 {

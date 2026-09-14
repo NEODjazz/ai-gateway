@@ -581,6 +581,10 @@ type responseShellCaptureClient struct{ *modelCaptureProvider }
 
 func (responseShellCaptureClient) SupportsResponseShell() bool { return true }
 
+type responseApplyPatchCaptureClient struct{ *modelCaptureProvider }
+
+func (responseApplyPatchCaptureClient) SupportsResponseApplyPatch() bool { return true }
+
 func (p *modelCaptureProvider) ChatCompletions(_ context.Context, request openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
 	p.seenModel = request.Model
 	return staticProvider{content: p.content}.ChatCompletions(context.Background(), request)
@@ -1894,6 +1898,38 @@ func TestResponsesShellContinuationRequiresShellCapability(t *testing.T) {
 	}}}
 	if required := requiredResponseCapabilities(request, false); strings.Join(required, ",") != "responses,tools,response_shell" {
 		t.Fatalf("unexpected shell continuation capabilities: %v", required)
+	}
+}
+
+func TestResponsesApplyPatchRequiresDeclaredAndAdapterCapability(t *testing.T) {
+	required := requiredResponseCapabilities(openai.ResponseRequest{Tools: []openai.ResponseTool{{Type: "apply_patch"}}}, false)
+	if strings.Join(required, ",") != "responses,tools,response_apply_patch" {
+		t.Fatalf("unexpected Responses apply patch capabilities: %v", required)
+	}
+
+	undeclared := &modelCaptureProvider{content: "undeclared"}
+	unsupported := &modelCaptureProvider{content: "unsupported"}
+	supported := &modelCaptureProvider{content: "supported"}
+	router := Router{health: newEndpointHealthTracker(), endpoints: []Endpoint{
+		{Name: "undeclared", Type: "openai-compatible", Priority: 1, Capabilities: []string{"responses", "tools"}, Provider: responseApplyPatchCaptureClient{undeclared}},
+		{Name: "unsupported", Type: "anthropic", Priority: 2, Capabilities: []string{"responses", "tools", "response_apply_patch"}, Provider: unsupported},
+		{Name: "supported", Type: "openai-compatible", Priority: 3, Capabilities: []string{"responses", "tools", "response_apply_patch"}, Provider: responseApplyPatchCaptureClient{supported}},
+	}}
+	request := openai.ResponseRequest{Model: "model", Input: "update file", Tools: []openai.ResponseTool{{Type: "apply_patch"}}}
+	if _, err := router.Responses(t.Context(), modules.RequestContext{Request: openai.ChatCompletionRequest{Model: "model"}, ResponseRequest: &request}); err != nil {
+		t.Fatal(err)
+	}
+	if undeclared.seenModel != "" || unsupported.seenModel != "" || supported.seenModel != "model" {
+		t.Fatalf("apply patch used an incompatible deployment: undeclared=%q unsupported=%q supported=%q", undeclared.seenModel, unsupported.seenModel, supported.seenModel)
+	}
+}
+
+func TestResponsesApplyPatchContinuationRequiresCapability(t *testing.T) {
+	request := openai.ResponseRequest{Input: []any{map[string]any{
+		"type": "apply_patch_call_output", "call_id": "call_1", "status": "completed", "output": "updated",
+	}}}
+	if required := requiredResponseCapabilities(request, false); strings.Join(required, ",") != "responses,tools,response_apply_patch" {
+		t.Fatalf("unexpected apply patch continuation capabilities: %v", required)
 	}
 }
 

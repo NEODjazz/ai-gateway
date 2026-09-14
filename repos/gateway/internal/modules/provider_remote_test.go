@@ -14,13 +14,15 @@ import (
 	"ai-gateway-gateway/internal/openai"
 )
 
-func TestResponseScanPayloadIncludesShellCommandsAndOutput(t *testing.T) {
+func TestResponseScanPayloadIncludesShellAndPatchText(t *testing.T) {
 	req := &RequestContext{ResponsesResponse: &openai.ResponseResponse{Output: []openai.ResponseOutputItem{
 		{Type: "shell_call", Action: json.RawMessage(`{"commands":["echo sensitive"]}`)},
 		{Type: "shell_call_output", Output: json.RawMessage(`[{"stdout":"sensitive output","stderr":"warning","outcome":{"type":"exit","exit_code":0}}]`)},
+		{Type: "apply_patch_call", Operation: json.RawMessage(`{"type":"update_file","path":"private/customer.txt","diff":"+sensitive patch"}`)},
+		{Type: "apply_patch_call_output", Output: json.RawMessage(`"patch failed with sensitive error"`)},
 	}}}
 	payload, err := scanResponsePayload(req)
-	if err != nil || !strings.Contains(payload, "echo sensitive") || !strings.Contains(payload, "sensitive output") || !strings.Contains(payload, "warning") {
+	if err != nil || !strings.Contains(payload, "echo sensitive") || !strings.Contains(payload, "sensitive output") || !strings.Contains(payload, "warning") || !strings.Contains(payload, "private/customer.txt") || !strings.Contains(payload, "sensitive patch") || !strings.Contains(payload, "sensitive error") {
 		t.Fatalf("payload=%q err=%v", payload, err)
 	}
 }

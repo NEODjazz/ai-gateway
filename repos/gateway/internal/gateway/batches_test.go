@@ -56,6 +56,26 @@ func TestBatchIdentityPreservesAnonymizationPolicy(t *testing.T) {
 	}
 }
 
+func TestBatchResponsesAuthorizesApplyPatch(t *testing.T) {
+	payload := []byte(`{"custom_id":"item-1","method":"POST","url":"/v1/responses","body":{"model":"model","input":"update","tools":[{"type":"apply_patch"}]}}` + "\n")
+	for _, test := range []struct {
+		name    string
+		allowed []string
+		wantErr bool
+	}{
+		{name: "allowed", allowed: []string{"apply_patch"}},
+		{name: "denied", allowed: []string{"lookup"}, wantErr: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			handler := NewHandler(modules.NewPipeline(nil), &batchProvider{models: []string{"model"}})
+			items, err := handler.decodeBatchItems(httptest.NewRecorder(), context.Background(), modules.RequestContext{CredentialID: "key", AllowedModels: []string{"*"}, AllowedTools: test.allowed}, "/v1/responses", payload)
+			if (err != nil) != test.wantErr || (!test.wantErr && len(items) != 1) {
+				t.Fatalf("items=%+v err=%v", items, err)
+			}
+		})
+	}
+}
+
 func newMemoryBatchStore() *memoryBatchStore {
 	return &memoryBatchStore{batches: map[string]batchstate.Batch{}, items: map[string]map[int]batchstate.Item{}, jobs: map[string]asyncstate.Job{}}
 }

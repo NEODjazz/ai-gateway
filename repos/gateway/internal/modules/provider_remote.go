@@ -406,6 +406,9 @@ func scanResponsePayload(req *RequestContext) (string, error) {
 			if err := appendText("shell: ", openai.ResponseShellText(item)); err != nil {
 				return "", err
 			}
+			if err := appendText("patch: ", openai.ResponseApplyPatchText(item)); err != nil {
+				return "", err
+			}
 			for _, content := range append(append([]openai.ResponseOutputContent(nil), item.Content...), item.Summary...) {
 				if err := appendText("output: ", content.Text); err != nil {
 					return "", err

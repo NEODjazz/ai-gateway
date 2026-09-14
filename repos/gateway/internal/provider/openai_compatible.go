@@ -1345,6 +1345,22 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 				item.Input = input
 			}
 		}
+		if event == "response.apply_patch_call_operation_diff.delta" || event == "response.apply_patch_call_operation_diff.done" {
+			item := ensureResponseOutputItem(&response, outputIndex)
+			var value string
+			field := "delta"
+			replace := false
+			if event == "response.apply_patch_call_operation_diff.done" {
+				field, replace = "diff", true
+			}
+			var ok bool
+			if value, ok = decoded[field].(string); !ok {
+				return errors.New("Responses apply_patch diff event is missing text")
+			}
+			if message := openai.UpdateResponseApplyPatchDiff(item, value, replace); message != "" {
+				return errors.New(message)
+			}
+		}
 		if event == "response.refusal.delta" || event == "response.refusal.done" ||
 			event == "response.output_text.delta" || event == "response.output_text.done" {
 			contentIndex, err := boundedResponseStreamIndex(decoded, "content_index", maxResponseStreamContentParts)
@@ -1474,7 +1490,11 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 			if err := json.Unmarshal(marshaled, &snapshot); err != nil {
 				return err
 			}
-			if err := validateResponseOutputItems([]openai.ResponseOutputItem{snapshot}); err != nil {
+			if event == "response.output_item.added" && snapshot.Type == "apply_patch_call" {
+				if message := openai.ValidateResponseApplyPatchCallPartial(snapshot); message != "" {
+					return errors.New(message)
+				}
+			} else if err := validateResponseOutputItems([]openai.ResponseOutputItem{snapshot}); err != nil {
 				return err
 			}
 			*ensureResponseOutputItem(&response, outputIndex) = snapshot

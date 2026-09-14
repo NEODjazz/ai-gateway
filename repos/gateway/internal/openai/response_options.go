@@ -65,6 +65,9 @@ func (r ResponseRequest) Validate() string {
 	if _, message := InspectResponseShellCallOutputs(r.Input); message != "" {
 		return message
 	}
+	if _, message := InspectResponseApplyPatchCallOutputs(r.Input); message != "" {
+		return message
+	}
 	if message := validateResponseToolChoice(r.Tools, r.ToolChoice); message != "" {
 		return message
 	}
@@ -328,6 +331,17 @@ func validateResponseTools(tools []ResponseTool) string {
 				return message
 			}
 			if _, _, _, message := InspectResponseShellEnvironment(tool.Environment); message != "" {
+				return message
+			}
+		case "apply_patch":
+			if _, duplicate := hostedTypes[tool.Type]; duplicate {
+				return "apply_patch tools must be unique"
+			}
+			hostedTypes[tool.Type] = struct{}{}
+			if responseToolHasHostedImageFields(tool) || tool.Name != "" || tool.Description != "" || tool.Parameters != nil || tool.Strict != nil || tool.ServerLabel != "" || tool.ServerURL != "" || tool.ServerDescription != "" || len(tool.AllowedTools) > 0 || tool.RequireApproval != nil || len(tool.Headers) > 0 || len(tool.VectorStoreIDs) > 0 || tool.Container != nil || tool.Environment != nil || tool.Filters != nil || tool.MaxNumResults != nil || tool.RankingOptions != nil || tool.RewriteQuery != nil || tool.SearchContextSize != "" || tool.UserLocation != nil || tool.Format != nil {
+				return "apply_patch tools contain unsupported fields"
+			}
+			if message := validateResponseApplyPatchAllowedCallers(tool.AllowedCallers); message != "" {
 				return message
 			}
 		default:
@@ -719,7 +733,7 @@ func validateResponseToolChoice(tools []ResponseTool, choice any) string {
 		return "tool_choice must be a supported string or object"
 	}
 	switch kind {
-	case "code_interpreter", "file_search", "image_generation", "computer", "shell":
+	case "code_interpreter", "file_search", "image_generation", "computer", "shell", "apply_patch":
 		if len(object) == 1 {
 			for _, tool := range tools {
 				if tool.Type == kind {

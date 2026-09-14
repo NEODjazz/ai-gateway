@@ -20,6 +20,7 @@ export const modelCapabilityOptions: ChipOption[] = [
   { value: "response_image_generation", label: "Responses image generation", description: "Run provider-hosted image generation from Responses" },
   { value: "response_computer", label: "Responses computer", description: "Continue owner-isolated computer interaction loops in Responses" },
   { value: "response_shell", label: "Responses shell", description: "Route validated shell execution loops to compatible Responses deployments" },
+  { value: "response_apply_patch", label: "Responses apply patch", description: "Continue validated file-patch tool loops in Responses" },
   { value: "image_edit", label: "Image editing", description: "Edit uploaded images from prompts" },
   { value: "image_variation", label: "Image variations", description: "Create variations of uploaded images" },
   { value: "audio_transcription", label: "Audio transcription", description: "Transcribe uploaded audio" },

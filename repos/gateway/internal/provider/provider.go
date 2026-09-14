@@ -3360,17 +3360,19 @@ func requiredResponseCapabilities(request openai.ResponseRequest, stream bool) [
 	required := []string{"responses"}
 	computerOutputs, _ := openai.InspectResponseComputerCallOutputs(request.Input)
 	shellOutputs, _ := openai.InspectResponseShellCallOutputs(request.Input)
+	patchOutputs, _ := openai.InspectResponseApplyPatchCallOutputs(request.Input)
 	if request.Background {
 		required = append(required, "background_responses")
 	}
 	if stream {
 		required = append(required, "stream")
 	}
-	if len(request.Tools) > 0 || len(computerOutputs) > 0 || len(shellOutputs) > 0 {
+	if len(request.Tools) > 0 || len(computerOutputs) > 0 || len(shellOutputs) > 0 || len(patchOutputs) > 0 {
 		required = append(required, "tools")
 	}
 	computerRequired := len(computerOutputs) > 0
 	shellRequired := len(shellOutputs) > 0
+	patchRequired := len(patchOutputs) > 0
 	for _, tool := range request.Tools {
 		if tool.Type == "code_interpreter" {
 			required = append(required, "code_interpreter")
@@ -3393,6 +3395,9 @@ func requiredResponseCapabilities(request openai.ResponseRequest, stream bool) [
 		if tool.Type == "shell" {
 			shellRequired = true
 		}
+		if tool.Type == "apply_patch" {
+			patchRequired = true
+		}
 		if openai.IsResponseWebSearchTool(tool.Type) {
 			required = append(required, "web_search")
 		}
@@ -3402,6 +3407,9 @@ func requiredResponseCapabilities(request openai.ResponseRequest, stream bool) [
 	}
 	if shellRequired {
 		required = append(required, "response_shell")
+	}
+	if patchRequired {
+		required = append(required, "response_apply_patch")
 	}
 	if request.Text != nil {
 		required = append(required, "structured_output")
@@ -3479,6 +3487,12 @@ func (e Endpoint) supportsCapabilities(required ...string) bool {
 		if hasCapability(required, "response_shell") {
 			client, ok := e.Provider.(interface{ SupportsResponseShell() bool })
 			if !ok || !client.SupportsResponseShell() {
+				return false
+			}
+		}
+		if hasCapability(required, "response_apply_patch") {
+			client, ok := e.Provider.(interface{ SupportsResponseApplyPatch() bool })
+			if !ok || !client.SupportsResponseApplyPatch() {
 				return false
 			}
 		}
@@ -3623,11 +3637,11 @@ func supportsCatalogCapabilities(catalog modelcatalog.Catalog, endpoint Endpoint
 }
 
 func requiresExplicitEndpointCapability(required []string) bool {
-	return hasCapability(required, "interactions") || hasCapability(required, "interaction_agents") || hasCapability(required, "interaction_environment_reuse") || hasCapability(required, "gemini_safety_settings") || hasCapability(required, "gemini_code_execution") || hasCapability(required, "url_context") || hasCapability(required, "google_maps") || hasCapability(required, "background_interactions") || hasCapability(required, "mcp") || hasCapability(required, "custom_tools") || hasCapability(required, "response_image_generation") || hasCapability(required, "response_computer") || hasCapability(required, "response_shell") || hasCapability(required, "vision") || hasCapability(required, "rerank") || hasCapability(required, "moderation") || hasCapability(required, "image_generation") || hasCapability(required, "image_edit") || hasCapability(required, "image_variation") || hasCapability(required, "audio_transcription") || hasCapability(required, "audio_translation") || hasCapability(required, "audio_speech") || hasCapability(required, "ocr") || hasCapability(required, "search") || hasCapability(required, "fine_tuning") || hasCapability(required, "video") || hasCapability(required, "video_remix") || hasCapability(required, "video_extension") || hasCapability(required, "container") || hasCapability(required, "container_files") || hasCapability(required, "container_network") || hasCapability(required, "cached_content") || hasCapability(required, "video_input") || hasCapability(required, "realtime") || hasCapability(required, "web_search") || hasCapability(required, "web_fetch") || hasCapability(required, "tool_search") || hasCapability(required, "thinking") || hasCapability(required, "zero_output") || hasCapability(required, "inference_geo") || hasCapability(required, "context_management") || hasCapability(required, "tool_result_error") || hasCapability(required, "document_citations") || hasCapability(required, "document_metadata") || hasCapability(required, "document_text") || hasCapability(required, "audio") || hasCapability(required, "audio_input") || hasCapability(required, "prompt_cache") || hasCapability(required, "assistant_prefill") || hasCapability(required, "background_responses") || hasCapability(required, "file_input") || hasCapability(required, "bedrock_invoke")
+	return hasCapability(required, "interactions") || hasCapability(required, "interaction_agents") || hasCapability(required, "interaction_environment_reuse") || hasCapability(required, "gemini_safety_settings") || hasCapability(required, "gemini_code_execution") || hasCapability(required, "url_context") || hasCapability(required, "google_maps") || hasCapability(required, "background_interactions") || hasCapability(required, "mcp") || hasCapability(required, "custom_tools") || hasCapability(required, "response_image_generation") || hasCapability(required, "response_computer") || hasCapability(required, "response_shell") || hasCapability(required, "response_apply_patch") || hasCapability(required, "vision") || hasCapability(required, "rerank") || hasCapability(required, "moderation") || hasCapability(required, "image_generation") || hasCapability(required, "image_edit") || hasCapability(required, "image_variation") || hasCapability(required, "audio_transcription") || hasCapability(required, "audio_translation") || hasCapability(required, "audio_speech") || hasCapability(required, "ocr") || hasCapability(required, "search") || hasCapability(required, "fine_tuning") || hasCapability(required, "video") || hasCapability(required, "video_remix") || hasCapability(required, "video_extension") || hasCapability(required, "container") || hasCapability(required, "container_files") || hasCapability(required, "container_network") || hasCapability(required, "cached_content") || hasCapability(required, "video_input") || hasCapability(required, "realtime") || hasCapability(required, "web_search") || hasCapability(required, "web_fetch") || hasCapability(required, "tool_search") || hasCapability(required, "thinking") || hasCapability(required, "zero_output") || hasCapability(required, "inference_geo") || hasCapability(required, "context_management") || hasCapability(required, "tool_result_error") || hasCapability(required, "document_citations") || hasCapability(required, "document_metadata") || hasCapability(required, "document_text") || hasCapability(required, "audio") || hasCapability(required, "audio_input") || hasCapability(required, "prompt_cache") || hasCapability(required, "assistant_prefill") || hasCapability(required, "background_responses") || hasCapability(required, "file_input") || hasCapability(required, "bedrock_invoke")
 }
 
 func hasExplicitEndpointCapabilities(available []string, required []string) bool {
-	for _, capability := range []string{"interactions", "interaction_agents", "interaction_environment_reuse", "gemini_safety_settings", "gemini_code_execution", "url_context", "google_maps", "background_interactions", "mcp", "custom_tools", "response_image_generation", "response_computer", "response_shell", "vision", "rerank", "moderation", "image_generation", "image_edit", "image_variation", "audio_transcription", "audio_translation", "audio_speech", "ocr", "search", "fine_tuning", "video", "video_remix", "video_extension", "container", "container_files", "container_network", "cached_content", "video_input", "realtime", "web_search", "web_fetch", "tool_search", "thinking", "zero_output", "inference_geo", "context_management", "tool_result_error", "document_citations", "document_metadata", "document_text", "audio", "audio_input", "prompt_cache", "assistant_prefill", "background_responses", "file_input", "bedrock_invoke"} {
+	for _, capability := range []string{"interactions", "interaction_agents", "interaction_environment_reuse", "gemini_safety_settings", "gemini_code_execution", "url_context", "google_maps", "background_interactions", "mcp", "custom_tools", "response_image_generation", "response_computer", "response_shell", "response_apply_patch", "vision", "rerank", "moderation", "image_generation", "image_edit", "image_variation", "audio_transcription", "audio_translation", "audio_speech", "ocr", "search", "fine_tuning", "video", "video_remix", "video_extension", "container", "container_files", "container_network", "cached_content", "video_input", "realtime", "web_search", "web_fetch", "tool_search", "thinking", "zero_output", "inference_geo", "context_management", "tool_result_error", "document_citations", "document_metadata", "document_text", "audio", "audio_input", "prompt_cache", "assistant_prefill", "background_responses", "file_input", "bedrock_invoke"} {
 		if hasCapability(required, capability) && !hasCapability(available, capability) {
 			return false
 		}

@@ -320,6 +320,30 @@ func TestResponsesAuthorizesShellToolAndContinuationInput(t *testing.T) {
 	}
 }
 
+func TestResponsesAuthorizesApplyPatchToolAndContinuationInput(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		allowed    []string
+		body       string
+		wantStatus int
+	}{
+		{name: "tool allowed", allowed: []string{"apply_patch"}, body: `{"model":"m","input":"update docs","tools":[{"type":"apply_patch"}],"tool_choice":{"type":"apply_patch"}}`, wantStatus: http.StatusOK},
+		{name: "tool denied", allowed: []string{"lookup"}, body: `{"model":"m","input":"update docs","tools":[{"type":"apply_patch"}]}`, wantStatus: http.StatusForbidden},
+		{name: "continuation allowed", allowed: []string{"apply_patch"}, body: `{"model":"m","previous_response_id":"resp_1","input":[{"type":"apply_patch_call_output","call_id":"call_1","status":"completed","output":"updated"}]}`, wantStatus: http.StatusOK},
+		{name: "continuation denied", allowed: []string{"lookup"}, body: `{"model":"m","previous_response_id":"resp_1","input":[{"type":"apply_patch_call_output","call_id":"call_1","status":"failed","output":"conflict"}]}`, wantStatus: http.StatusForbidden},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			upstream := &chatProvider{}
+			handler := NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}, tools: test.allowed}}), upstream)
+			out := httptest.NewRecorder()
+			handler.Responses(out, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(test.body)))
+			if out.Code != test.wantStatus {
+				t.Fatalf("status=%d body=%s", out.Code, out.Body.String())
+			}
+		})
+	}
+}
+
 func TestResponsesRequireOwnedShellAutoFiles(t *testing.T) {
 	identity := modules.RequestContext{CredentialID: "credential-1", UserID: "user-1"}
 	owner := fileOwnerKey(identity)

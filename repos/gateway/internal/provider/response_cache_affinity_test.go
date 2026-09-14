@@ -42,6 +42,9 @@ func (replayUnsafeResponseClient) SupportsResponseImageGeneration() bool {
 }
 func (replayUnsafeResponseClient) SupportsResponseComputer() bool { return true }
 func (replayUnsafeResponseClient) SupportsResponseShell() bool    { return true }
+func (replayUnsafeResponseClient) SupportsResponseApplyPatch() bool {
+	return true
+}
 
 func TestResponsesWithHostedToolsBypassExactCache(t *testing.T) {
 	for _, test := range []struct {
@@ -54,11 +57,12 @@ func TestResponsesWithHostedToolsBypassExactCache(t *testing.T) {
 		{name: "image generation", tool: openai.ResponseTool{Type: "image_generation"}},
 		{name: "computer", tool: openai.ResponseTool{Type: "computer"}},
 		{name: "shell", tool: openai.ResponseTool{Type: "shell"}},
+		{name: "apply patch", tool: openai.ResponseTool{Type: "apply_patch"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			client := &affinityResponseClient{id: "resp-tool"}
 			router := Router{
-				endpoints: []Endpoint{{Name: "tool-endpoint", Type: "demo", Capabilities: []string{"responses", "tools", "mcp", "web_search", "custom_tools", "response_image_generation", "response_computer", "response_shell"}, Provider: replayUnsafeResponseClient{client}}},
+				endpoints: []Endpoint{{Name: "tool-endpoint", Type: "demo", Capabilities: []string{"responses", "tools", "mcp", "web_search", "custom_tools", "response_image_generation", "response_computer", "response_shell", "response_apply_patch"}, Provider: replayUnsafeResponseClient{client}}},
 				modules:   modules.NewPipeline(nil), health: newEndpointHealthTracker(), cache: newExactCache(time.Hour),
 			}
 			request := openai.ResponseRequest{Model: "m", Input: "hello", Tools: []openai.ResponseTool{test.tool}}

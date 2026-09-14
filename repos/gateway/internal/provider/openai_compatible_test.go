@@ -189,6 +189,54 @@ func TestOpenAICompatibleStreamsShellCalls(t *testing.T) {
 	}
 }
 
+func TestOpenAICompatibleForwardsApplyPatchLoopAndPreservesCalls(t *testing.T) {
+	var upstream map[string]json.RawMessage
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&upstream); err != nil {
+			t.Fatal(err)
+		}
+		_, _ = fmt.Fprint(w, `{"id":"resp-patch","object":"response","status":"completed","model":"model","output":[{"id":"patch_2","type":"apply_patch_call","status":"completed","call_id":"call_2","operation":{"type":"update_file","path":"docs/readme.md","diff":"@@ -1 +1 @@\n-old\n+new"},"caller":{"type":"direct"}}],"usage":{"input_tokens":4,"output_tokens":2,"total_tokens":6}}`)
+	}))
+	defer server.Close()
+
+	input := []any{map[string]any{"type": "apply_patch_call_output", "call_id": "call_1", "status": "completed", "output": "updated"}}
+	request := openai.ResponseRequest{
+		Model: "model", PreviousResponse: "resp_previous", Input: input,
+		Tools: []openai.ResponseTool{{Type: "apply_patch", AllowedCallers: []string{"direct"}}}, ToolChoice: map[string]any{"type": "apply_patch"},
+	}
+	response, err := NewOpenAICompatible(server.URL, "", false).Responses(t.Context(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(upstream["tools"]), `"type":"apply_patch"`) || !strings.Contains(string(upstream["input"]), `"apply_patch_call_output"`) || string(upstream["tool_choice"]) != `{"type":"apply_patch"}` {
+		t.Fatalf("apply patch loop was not forwarded: %s", upstream)
+	}
+	if len(response.Output) != 1 || response.Output[0].CallID != "call_2" || !strings.Contains(string(response.Output[0].Operation), `"path":"docs/readme.md"`) {
+		t.Fatalf("apply patch output was not preserved: %+v", response.Output)
+	}
+}
+
+func TestOpenAICompatibleStreamsApplyPatchCalls(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "event: response.created\n"+`data: {"type":"response.created","response":{"id":"resp-patch","object":"response","status":"in_progress","model":"model","output":[]}}`+"\n\n")
+		_, _ = fmt.Fprint(w, "event: response.output_item.added\n"+`data: {"type":"response.output_item.added","output_index":0,"item":{"id":"patch_1","type":"apply_patch_call","status":"in_progress","call_id":"call_1","operation":{"type":"update_file","path":"docs/readme.md","diff":""},"caller":{"type":"direct"}}}`+"\n\n")
+		_, _ = fmt.Fprint(w, "event: response.apply_patch_call_operation_diff.delta\n"+`data: {"type":"response.apply_patch_call_operation_diff.delta","output_index":0,"item_id":"patch_1","delta":"@@ -1 +1 @@\n-old\n"}`+"\n\n")
+		_, _ = fmt.Fprint(w, "event: response.apply_patch_call_operation_diff.delta\n"+`data: {"type":"response.apply_patch_call_operation_diff.delta","output_index":0,"item_id":"patch_1","delta":"+new"}`+"\n\n")
+		_, _ = fmt.Fprint(w, "event: response.apply_patch_call_operation_diff.done\n"+`data: {"type":"response.apply_patch_call_operation_diff.done","output_index":0,"item_id":"patch_1","diff":"@@ -1 +1 @@\n-old\n+new"}`+"\n\n")
+		_, _ = fmt.Fprint(w, "event: response.completed\n"+`data: {"type":"response.completed","response":{"id":"resp-patch","object":"response","status":"completed","model":"model","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}`+"\n\n")
+	}))
+	defer server.Close()
+
+	response, err := NewOpenAICompatible(server.URL, "", true).StreamResponses(t.Context(), openai.ResponseRequest{Model: "model", Input: "remove file", Stream: true, Tools: []openai.ResponseTool{{Type: "apply_patch"}}}, func(string, string) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Output) != 1 || response.Output[0].CallID != "call_1" || openai.ResponseApplyPatchText(response.Output[0]) != "docs/readme.md\n@@ -1 +1 @@\n-old\n+new" {
+		t.Fatalf("streamed apply patch output was not preserved: %+v", response.Output)
+	}
+}
+
 func TestOpenAICompatibleForwardsResponseImageGenerationAndPreservesResult(t *testing.T) {
 	var upstream map[string]json.RawMessage
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

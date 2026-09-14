@@ -327,6 +327,8 @@ func TestDeanonymizeResponsesResponseRestoresOriginalValues(t *testing.T) {
 			},
 			{Type: "shell_call", Action: json.RawMessage(`{"commands":["echo {{EMAIL_1}}"]}`)},
 			{Type: "shell_call_output", Output: json.RawMessage(`[{"stdout":"{{EMAIL_1}}","stderr":"","outcome":{"type":"exit","exit_code":0}}]`)},
+			{Type: "apply_patch_call", Operation: json.RawMessage(`{"type":"update_file","path":"docs/{{EMAIL_1}}.md","diff":"+{{EMAIL_1}}"}`)},
+			{Type: "apply_patch_call_output", Output: json.RawMessage(`"updated {{EMAIL_1}}"`)},
 		},
 	}
 
@@ -345,6 +347,12 @@ func TestDeanonymizeResponsesResponseRestoresOriginalValues(t *testing.T) {
 	}
 	if openai.ResponseShellText(response.Output[1]) != "echo user@example.com" || openai.ResponseShellText(response.Output[2]) != "user@example.com\n" {
 		t.Fatalf("shell payloads were not restored: action=%s output=%s", response.Output[1].Action, response.Output[2].Output)
+	}
+	if patchText := openai.ResponseApplyPatchText(response.Output[3]); !strings.Contains(patchText, "docs/user@example.com.md") || !strings.Contains(patchText, "+user@example.com") {
+		t.Fatalf("patch call was not restored: operation=%s", response.Output[3].Operation)
+	}
+	if patchOutput := openai.ResponseApplyPatchText(response.Output[4]); patchOutput != "updated user@example.com" {
+		t.Fatalf("patch output was not restored: output=%s", response.Output[4].Output)
 	}
 
 }
