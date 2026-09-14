@@ -9,8 +9,8 @@ describe("ResourceForm", () => {
     expect(screen.getByLabelText("Tags")).toHaveClass("g-text-input__control");
     expect(screen.getByLabelText("Enabled")).toHaveClass("g-checkbox__control");
     expect(screen.getByLabelText("Metadata")).toHaveClass("g-text-area__control");
-    await userEvent.type(screen.getByLabelText("Tags"), "one, two");
-    await userEvent.clear(screen.getByLabelText("Limit")); await userEvent.type(screen.getByLabelText("Limit"), "7");
+    fireEvent.change(screen.getByLabelText("Tags"), { target: { value: "one, two" } });
+    fireEvent.change(screen.getByLabelText("Limit"), { target: { value: "7" } });
     await userEvent.click(screen.getByLabelText("Enabled"));
     fireEvent.change(screen.getByLabelText("Metadata"), { target: { value: '{"safe":true}' } });
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
