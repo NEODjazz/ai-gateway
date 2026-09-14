@@ -1,6 +1,9 @@
 package modules
 
-import "strings"
+import (
+	"net/url"
+	"strings"
+)
 
 func Auth(required bool, url string) Module {
 	if url != "" {
@@ -45,5 +48,22 @@ func AV(required bool, url string) Module {
 }
 
 func endpoint(baseURL string, path string) string {
-	return strings.TrimRight(baseURL, "/") + path
+	parsed, err := url.Parse(baseURL)
+	if err != nil {
+		return strings.TrimRight(baseURL, "/") + path
+	}
+
+	basePath := strings.TrimRight(parsed.Path, "/")
+	pathSuffix := strings.TrimRight(path, "/")
+	if strings.HasSuffix(basePath, pathSuffix) {
+		parsed.Path = basePath
+		return parsed.String()
+	}
+
+	if basePath == "" {
+		parsed.Path = path
+		return parsed.String()
+	}
+	parsed.Path = basePath + path
+	return parsed.String()
 }
