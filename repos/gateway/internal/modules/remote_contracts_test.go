@@ -574,6 +574,7 @@ func TestResponsesHostedToolBillingReserveAndSettlement(t *testing.T) {
 				{Type: "mcp", ServerLabel: "documents", ServerURL: "https://mcp.example.test"},
 				{Type: "function", Name: "client_function"},
 				{Type: "custom", Name: "client_custom"},
+				{Type: "shell"},
 			},
 		},
 	}
@@ -592,12 +593,13 @@ func TestResponsesHostedToolBillingReserveAndSettlement(t *testing.T) {
 			{Type: "mcp_list_tools", Status: "completed"},
 			{Type: "function_call", Status: "completed"},
 			{Type: "custom_tool_call", Status: "completed"},
+			{Type: "shell_call_output", CallID: "shell_1", Status: "completed", Output: json.RawMessage(`[{"stdout":"ok","stderr":"","outcome":{"type":"exit","exit_code":0}}]`)},
 			{Type: "image_generation_call", Status: "completed", Result: json.RawMessage(`"aW1hZ2U="`)},
 		},
 		Usage: openai.ResponseUsage{InputTokens: 7, OutputTokens: 11, TotalTokens: 18},
 	}
 	settled := billingRequest(req)
-	if settled.Phase != "commit" || settled.ToolRequests != 3 || settled.SearchRequests != 2 || settled.SearchRequestsEstimated || settled.OutputImages != 1 || settled.TotalTokens != 18 || settled.UsageEstimated {
+	if settled.Phase != "commit" || settled.ToolRequests != 4 || settled.SearchRequests != 2 || settled.SearchRequestsEstimated || settled.OutputImages != 1 || settled.TotalTokens != 18 || settled.UsageEstimated {
 		t.Fatalf("Responses hosted tool settlement=%+v", settled)
 	}
 }
@@ -627,6 +629,34 @@ func TestResponsesComputerBillingAccountsForExecutedClientActions(t *testing.T) 
 	settled := billingRequest(req)
 	if settled.ToolRequests != 1 || settled.TotalTokens != 18 {
 		t.Fatalf("Responses computer settlement=%+v", settled)
+	}
+}
+
+func TestResponsesShellBillingAccountsForExecutedClientCalls(t *testing.T) {
+	maxToolCalls := 3
+	req := &RequestContext{
+		Request: openai.ChatCompletionRequest{Model: "model"},
+		ResponseRequest: &openai.ResponseRequest{
+			Model: "model", MaxToolCalls: &maxToolCalls,
+			Tools: []openai.ResponseTool{{Type: "shell"}},
+			Input: []any{map[string]any{
+				"type": "shell_call_output", "call_id": "call_1",
+				"output": []any{map[string]any{"stdout": "ok", "stderr": "", "outcome": map[string]any{"type": "exit", "exit_code": 0}}},
+			}},
+		},
+	}
+	reserved := billingRequest(req)
+	if reserved.ToolRequests != 3 {
+		t.Fatalf("Responses shell reserve=%+v", reserved)
+	}
+	req.ResponsesResponse = &openai.ResponseResponse{
+		ID: "resp_shell", Model: "model", Status: "completed",
+		Output: []openai.ResponseOutputItem{{Type: "shell_call", CallID: "call_2", Status: "completed", Action: json.RawMessage(`{"commands":["pwd"]}`)}},
+		Usage:  openai.ResponseUsage{InputTokens: 7, OutputTokens: 11, TotalTokens: 18},
+	}
+	settled := billingRequest(req)
+	if settled.ToolRequests != 1 || settled.TotalTokens != 18 {
+		t.Fatalf("Responses shell settlement=%+v", settled)
 	}
 }
 

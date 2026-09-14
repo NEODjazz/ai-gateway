@@ -14,6 +14,17 @@ import (
 	"ai-gateway-gateway/internal/openai"
 )
 
+func TestResponseScanPayloadIncludesShellCommandsAndOutput(t *testing.T) {
+	req := &RequestContext{ResponsesResponse: &openai.ResponseResponse{Output: []openai.ResponseOutputItem{
+		{Type: "shell_call", Action: json.RawMessage(`{"commands":["echo sensitive"]}`)},
+		{Type: "shell_call_output", Output: json.RawMessage(`[{"stdout":"sensitive output","stderr":"warning","outcome":{"type":"exit","exit_code":0}}]`)},
+	}}}
+	payload, err := scanResponsePayload(req)
+	if err != nil || !strings.Contains(payload, "echo sensitive") || !strings.Contains(payload, "sensitive output") || !strings.Contains(payload, "warning") {
+		t.Fatalf("payload=%q err=%v", payload, err)
+	}
+}
+
 func TestProviderRemoteModuleSkipsDisabledProvider(t *testing.T) {
 	called := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

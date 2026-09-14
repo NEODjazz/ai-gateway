@@ -785,10 +785,12 @@ type ResponseTool struct {
 	ServerURL         string                     `json:"server_url,omitempty"`
 	ServerDescription string                     `json:"server_description,omitempty"`
 	AllowedTools      []string                   `json:"allowed_tools,omitempty"`
+	AllowedCallers    []string                   `json:"allowed_callers,omitempty"`
 	RequireApproval   any                        `json:"require_approval,omitempty"`
 	Headers           map[string]string          `json:"headers,omitempty"`
 	VectorStoreIDs    []string                   `json:"vector_store_ids,omitempty"`
 	Container         any                        `json:"container,omitempty"`
+	Environment       any                        `json:"environment,omitempty"`
 	Filters           any                        `json:"filters,omitempty"`
 	MaxNumResults     *int                       `json:"max_num_results,omitempty"`
 	RankingOptions    *FileSearchRankingOptions  `json:"ranking_options,omitempty"`
@@ -897,6 +899,8 @@ type ResponseOutputItem struct {
 	Phase               *string                 `json:"phase,omitempty"`
 	EncryptedContent    *string                 `json:"encrypted_content,omitempty"`
 	Action              json.RawMessage         `json:"action,omitempty"`
+	Environment         json.RawMessage         `json:"environment,omitempty"`
+	Caller              json.RawMessage         `json:"caller,omitempty"`
 	Actions             []json.RawMessage       `json:"actions,omitempty"`
 	PendingSafetyChecks []json.RawMessage       `json:"pending_safety_checks,omitempty"`
 	Outputs             []json.RawMessage       `json:"outputs,omitempty"`
@@ -910,6 +914,8 @@ type ResponseOutputItem struct {
 	Role                string                  `json:"role,omitempty"`
 	Name                string                  `json:"name,omitempty"`
 	CallID              string                  `json:"call_id,omitempty"`
+	CreatedBy           string                  `json:"created_by,omitempty"`
+	MaxOutputLength     *int                    `json:"max_output_length,omitempty"`
 	ContainerID         string                  `json:"container_id,omitempty"`
 	ServerLabel         string                  `json:"server_label,omitempty"`
 	ApprovalRequestID   string                  `json:"approval_request_id,omitempty"`

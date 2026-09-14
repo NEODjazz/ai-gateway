@@ -132,6 +132,7 @@ func TestManagedDeploymentRejectsUnsupportedProviderCapabilities(t *testing.T) {
 		{providerType: "anthropic", capability: "custom_tools"},
 		{providerType: "anthropic", capability: "response_image_generation"},
 		{providerType: "anthropic", capability: "response_computer"},
+		{providerType: "anthropic", capability: "response_shell"},
 		{providerType: "mistral", capability: "web_search"},
 		{providerType: "openai", capability: "tool_search"},
 		{providerType: "openai", capability: "computer_toolset"},
@@ -176,6 +177,8 @@ func TestManagedDeploymentRejectsUnsupportedProviderCapabilities(t *testing.T) {
 				capabilities = []string{"responses", "tools", "response_image_generation"}
 			case "response_computer":
 				capabilities = []string{"responses", "tools", "response_computer"}
+			case "response_shell":
+				capabilities = []string{"responses", "tools", "response_shell"}
 			}
 			_, err := router.CreateModelDeployment(ModelDeployment{ID: "deployment", ProviderID: "provider", Models: []string{"model"}, Capabilities: capabilities, Enabled: true})
 			if !errors.Is(err, ErrUnsupportedProviderCapability) {
@@ -201,6 +204,9 @@ func TestDeploymentCapabilitiesRequireRoutableBaseOperations(t *testing.T) {
 		{"response_computer"},
 		{"responses", "response_computer"},
 		{"tools", "response_computer"},
+		{"response_shell"},
+		{"responses", "response_shell"},
+		{"tools", "response_shell"},
 		{"responses", "mcp"},
 		{"chat", "mcp", "tools"},
 		{"web_search"},
@@ -245,6 +251,7 @@ func TestDeploymentCapabilitiesRequireRoutableBaseOperations(t *testing.T) {
 		{"responses", "tools", "custom_tools"},
 		{"responses", "tools", "response_image_generation"},
 		{"responses", "tools", "response_computer"},
+		{"responses", "tools", "response_shell"},
 		{"responses", "background_responses"},
 		{"interactions", "tools", "structured_output", "vision"},
 		{"interactions", "interaction_agents"},
@@ -312,7 +319,7 @@ func TestManagedDeploymentAcceptsSupportedFeatureCapabilities(t *testing.T) {
 		{providerType: "openrouter", capabilities: []string{"chat", "responses", "embeddings", "rerank", "image_generation", "image_edit", "audio_transcription", "audio_speech", "stream", "tools", "custom_tools", "structured_output", "vision", "web_search", "audio"}},
 		{providerType: "mistral", capabilities: []string{"chat", "audio_transcription", "audio_speech", "tools", "structured_output", "vision", "assistant_prefill"}},
 		{providerType: "xai", capabilities: []string{"chat", "responses", "tools", "custom_tools", "video", "video_remix", "video_extension"}},
-		{providerType: "openai-compatible", capabilities: []string{"chat", "responses", "background_responses", "audio_translation", "fine_tuning", "container", "container_files", "container_network", "tools", "custom_tools", "response_computer", "structured_output", "mcp", "vision", "web_search", "audio", "file_input"}},
+		{providerType: "openai-compatible", capabilities: []string{"chat", "responses", "background_responses", "audio_translation", "fine_tuning", "container", "container_files", "container_network", "tools", "custom_tools", "response_computer", "response_shell", "structured_output", "mcp", "vision", "web_search", "audio", "file_input"}},
 	}
 	for _, test := range tests {
 		t.Run(test.providerType, func(t *testing.T) {

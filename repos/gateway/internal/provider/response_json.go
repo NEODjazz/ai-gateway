@@ -44,9 +44,20 @@ func decodeResponseJSON(reader io.Reader) (openai.ResponseResponse, error) {
 
 func validateResponseOutputItems(items []openai.ResponseOutputItem) error {
 	for _, item := range items {
-		if item.Type == "computer_call" {
+		switch item.Type {
+		case "computer_call":
 			if err := validateResponseComputerCall(item); err != nil {
 				return err
+			}
+			continue
+		case "shell_call":
+			if err := validateResponseShellCall(item); err != nil {
+				return err
+			}
+			continue
+		case "shell_call_output":
+			if _, message := openai.InspectResponseShellCallOutputs([]openai.ResponseOutputItem{item}); message != "" {
+				return errors.New("provider " + message)
 			}
 			continue
 		}
@@ -66,6 +77,41 @@ func validateResponseOutputItems(items []openai.ResponseOutputItem) error {
 		decoder := base64.NewDecoder(base64.StdEncoding.Strict(), strings.NewReader(encoded))
 		if _, err := io.Copy(io.Discard, decoder); err != nil {
 			return errors.New("provider image generation result is malformed base64")
+		}
+	}
+	return nil
+}
+
+func validateResponseShellCall(item openai.ResponseOutputItem) error {
+	if strings.TrimSpace(item.CallID) != item.CallID || item.CallID == "" || utf8.RuneCountInString(item.CallID) > 512 {
+		return errors.New("provider shell call has an invalid call_id")
+	}
+	if item.ID != "" && (strings.TrimSpace(item.ID) != item.ID || utf8.RuneCountInString(item.ID) > 512) {
+		return errors.New("provider shell call has an invalid id")
+	}
+	if item.CreatedBy != "" && (strings.TrimSpace(item.CreatedBy) != item.CreatedBy || utf8.RuneCountInString(item.CreatedBy) > 512) {
+		return errors.New("provider shell call has an invalid created_by")
+	}
+	status, _ := json.Marshal(item.Status)
+	if message := openai.ValidateResponseShellStatus(status, "provider shell call status"); message != "" {
+		return errors.New(message)
+	}
+	if message := openai.ValidateResponseShellCallAction(item.Action); message != "" {
+		return errors.New(message)
+	}
+	if len(item.Caller) > 0 && string(item.Caller) != "null" {
+		if message := openai.ValidateResponseShellCaller(item.Caller, "provider shell call caller"); message != "" {
+			return errors.New(message)
+		}
+	}
+	if len(item.Environment) > 0 && string(item.Environment) != "null" {
+		var environment any
+		if json.Unmarshal(item.Environment, &environment) != nil {
+			return errors.New("provider shell call has an invalid environment")
+		}
+		kind, _, _, message := openai.InspectResponseShellEnvironment(environment)
+		if message != "" || kind == "container_auto" {
+			return errors.New("provider shell call has an invalid environment")
 		}
 	}
 	return nil

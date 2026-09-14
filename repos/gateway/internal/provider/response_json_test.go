@@ -75,6 +75,35 @@ func TestResponsesValidateComputerCalls(t *testing.T) {
 	}
 }
 
+func TestResponsesValidateShellCallsAndOutputs(t *testing.T) {
+	valid := []string{
+		`{"type":"shell_call","id":"sh_1","call_id":"call_1","status":"completed","action":{"commands":["pwd","ls -la"],"max_output_length":4096,"timeout_ms":30000},"environment":{"type":"local"},"caller":{"type":"direct"}}`,
+		`{"type":"shell_call","call_id":"call_2","status":"in_progress","action":{"commands":["go test ./..."]},"environment":{"type":"container_reference","container_id":"cntr_1"},"caller":{"type":"direct"}}`,
+		`{"type":"shell_call_output","id":"sho_1","call_id":"call_1","status":"completed","output":[{"stdout":"ok\n","stderr":"","outcome":{"type":"exit","exit_code":0}}]}`,
+	}
+	for _, output := range valid {
+		document := `{"id":"r","object":"response","model":"m","status":"completed","output":[` + output + `],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`
+		response, err := decodeResponseJSON(strings.NewReader(document))
+		if err != nil || len(response.Output) != 1 || response.Output[0].CallID == "" {
+			t.Fatalf("valid shell output rejected: output=%s response=%+v err=%v", output, response, err)
+		}
+	}
+	invalid := []string{
+		`{"type":"shell_call","status":"completed","action":{"commands":["pwd"]}}`,
+		`{"type":"shell_call","call_id":"call","status":"completed","action":{"commands":[]}}`,
+		`{"type":"shell_call","call_id":"call","status":"completed","action":{"commands":["pwd"],"timeout_ms":600001}}`,
+		`{"type":"shell_call","call_id":"call","status":"completed","action":{"commands":["pwd"]},"environment":{"type":"container_auto"}}`,
+		`{"type":"shell_call","call_id":"call","status":"completed","action":{"commands":["pwd"]},"caller":{"type":"program"}}`,
+		`{"type":"shell_call_output","call_id":"call","status":"completed","output":[{"stdout":"ok","stderr":"","outcome":{"type":"exit"}}]}`,
+	}
+	for _, output := range invalid {
+		document := `{"id":"r","object":"response","model":"m","status":"completed","output":[` + output + `],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`
+		if _, err := decodeResponseJSON(strings.NewReader(document)); err == nil {
+			t.Fatalf("invalid shell output accepted: %s", output)
+		}
+	}
+}
+
 func TestResponsesJSONReadLimitAndErrors(t *testing.T) {
 	reader := &embeddingLimitReader{}
 	if _, err := decodeResponseJSON(reader); err == nil || reader.read != maxResponseJSONBytes+1 {

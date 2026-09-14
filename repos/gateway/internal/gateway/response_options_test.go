@@ -67,6 +67,40 @@ func TestResponsesReuseOnlyOwnedBoundContainer(t *testing.T) {
 	}
 }
 
+func TestResponsesReuseOnlyOwnedShellContainer(t *testing.T) {
+	identity := modules.RequestContext{CredentialID: "credential-1", UserID: "user-1"}
+	owner := fileOwnerKey(identity)
+	binding := provider.ContainerBinding{Endpoint: "bound-endpoint", Model: "m", Deployment: "deployment-v1"}
+	for _, test := range []struct {
+		name        string
+		recordOwner string
+		wantStatus  int
+	}{
+		{name: "owned", recordOwner: owner, wantStatus: http.StatusOK},
+		{name: "foreign", recordOwner: "foreign", wantStatus: http.StatusBadRequest},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			upstream := &chatProvider{}
+			record := containerstate.Record{OwnerKey: test.recordOwner, Binding: binding, Container: openai.Container{ID: "cntr_owned"}}
+			containers := &memoryContainerStore{records: map[string]containerstate.Record{containerKey(test.recordOwner, "cntr_owned"): record}}
+			handler := NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}, tools: []string{"shell"}}}), upstream).WithContainerStore(containers)
+			body := `{"model":"m","input":"continue","tools":[{"type":"shell","environment":{"type":"container_reference","container_id":"cntr_owned"}}]}`
+			out := httptest.NewRecorder()
+			handler.Responses(out, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(body)))
+			if out.Code != test.wantStatus {
+				t.Fatalf("status=%d body=%s", out.Code, out.Body.String())
+			}
+			if test.wantStatus == http.StatusOK {
+				if upstream.request.Metadata[modules.MetadataResponseContainerEndpoint] != binding.Endpoint || upstream.request.Metadata[modules.MetadataResponseContainerDeployment] != binding.Deployment || upstream.request.Metadata[modules.MetadataResponseContainerModel] != binding.Model {
+					t.Fatalf("shell container binding was not propagated: %+v", upstream.request.Metadata)
+				}
+			} else if upstream.request.ResponseRequest != nil {
+				t.Fatal("foreign shell container reached provider")
+			}
+		})
+	}
+}
+
 func TestResponsesRejectsEnvelopeInvalidatedByPipeline(t *testing.T) {
 	handler := NewHandler(modules.NewPipeline([]modules.Module{rewriteContextModule{rewrite: func(req *modules.RequestContext) {
 		req.ResponseRequest.Model = ""
@@ -257,6 +291,59 @@ func TestResponsesAuthorizesComputerContinuationInput(t *testing.T) {
 			handler.Responses(out, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(body)))
 			if out.Code != test.wantStatus {
 				t.Fatalf("status=%d body=%s", out.Code, out.Body.String())
+			}
+		})
+	}
+}
+
+func TestResponsesAuthorizesShellToolAndContinuationInput(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		allowed    []string
+		body       string
+		wantStatus int
+	}{
+		{name: "tool allowed", allowed: []string{"shell"}, body: `{"model":"m","input":"list files","tools":[{"type":"shell","environment":{"type":"local"}}],"tool_choice":{"type":"shell"}}`, wantStatus: http.StatusOK},
+		{name: "tool denied", allowed: []string{"lookup"}, body: `{"model":"m","input":"list files","tools":[{"type":"shell"}]}`, wantStatus: http.StatusForbidden},
+		{name: "continuation allowed", allowed: []string{"shell"}, body: `{"model":"m","previous_response_id":"resp_1","input":[{"type":"shell_call_output","call_id":"call_1","output":[{"stdout":"ok\\n","stderr":"","outcome":{"type":"exit","exit_code":0}}]}]}`, wantStatus: http.StatusOK},
+		{name: "continuation denied", allowed: []string{"lookup"}, body: `{"model":"m","previous_response_id":"resp_1","input":[{"type":"shell_call_output","call_id":"call_1","output":[{"stdout":"ok\\n","stderr":"","outcome":{"type":"exit","exit_code":0}}]}]}`, wantStatus: http.StatusForbidden},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			upstream := &chatProvider{}
+			handler := NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}, tools: test.allowed}}), upstream)
+			out := httptest.NewRecorder()
+			handler.Responses(out, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(test.body)))
+			if out.Code != test.wantStatus {
+				t.Fatalf("status=%d body=%s", out.Code, out.Body.String())
+			}
+		})
+	}
+}
+
+func TestResponsesRequireOwnedShellAutoFiles(t *testing.T) {
+	identity := modules.RequestContext{CredentialID: "credential-1", UserID: "user-1"}
+	owner := fileOwnerKey(identity)
+	for _, test := range []struct {
+		name       string
+		fileOwner  string
+		wantStatus int
+	}{
+		{name: "owned", fileOwner: owner, wantStatus: http.StatusOK},
+		{name: "foreign", fileOwner: "foreign", wantStatus: http.StatusBadRequest},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			upstream := &chatProvider{}
+			files := &memoryFileStore{files: map[string]filestate.File{"file_owned": {ID: "file_owned", OwnerKey: test.fileOwner}}}
+			handler := NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}, tools: []string{"shell"}}}), upstream).
+				WithFileStore(files, FileRuntimeConfig{MaxBytes: 1 << 20, OwnerQuotaBytes: 1 << 20})
+			body := `{"model":"m","input":"inspect","tools":[{"type":"shell","environment":{"type":"container_auto","file_ids":["file_owned"]}}]}`
+			out := httptest.NewRecorder()
+			handler.Responses(out, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(body)))
+			if out.Code != test.wantStatus {
+				t.Fatalf("status=%d body=%s", out.Code, out.Body.String())
+			}
+			if (upstream.request.ResponseRequest != nil) != (test.wantStatus == http.StatusOK) {
+				t.Fatalf("unexpected provider execution: request=%+v", upstream.request.ResponseRequest)
 			}
 		})
 	}

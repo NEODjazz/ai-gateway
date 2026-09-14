@@ -71,6 +71,14 @@ Concurrent subscriptions, stream duration and polling frequency are limited by
 `A2A_SUBSCRIPTION_LIMIT`, `A2A_SUBSCRIPTION_DURATION_SECONDS` and
 `A2A_SUBSCRIPTION_POLL_MILLISECONDS`.
 
+Responses supports direct `shell` tool loops on deployments that explicitly
+declare `response_shell`. The gateway validates and forwards local, automatic
+container and owner-scoped existing-container environments, but never executes
+commands itself. Client `shell_call_output` text passes the normal input policy
+and token-accounting path; provider commands and captured output pass output DLP.
+Programmatic callers, inline skills and container network policy are rejected
+until their complete lifecycle is configured.
+
 The Batches API accepts owner-scoped JSONL Files for Chat Completions, Messages,
 Responses, Response Compaction, Completions, Embeddings, Rerank, Search, Image Generation,
 Image Edit, Image Variation, Audio Transcription, Audio Translation, Text-to-Speech,

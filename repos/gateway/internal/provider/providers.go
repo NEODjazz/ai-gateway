@@ -166,7 +166,7 @@ var managedOperationCapabilities = []string{
 }
 
 var managedFeatureCapabilities = []string{
-	"tools", "custom_tools", "response_image_generation", "response_computer", "structured_output", "mcp", "code_interpreter", "file_search", "vision", "web_search", "tool_search", "audio_input", "video_input",
+	"tools", "custom_tools", "response_image_generation", "response_computer", "response_shell", "structured_output", "mcp", "code_interpreter", "file_search", "vision", "web_search", "tool_search", "audio_input", "video_input",
 	"web_fetch", "audio", "prompt_cache", "assistant_prefill", "memory_tool", "bash_tool", "text_editor_tool", "computer_toolset", "browser_toolset", "thinking", "zero_output", "inference_geo", "context_management", "tool_result_error", "document_citations", "document_metadata", "document_text",
 	"background_responses", "background_interactions", "file_input", "interaction_agents", "interaction_environment_reuse", "gemini_safety_settings", "gemini_code_execution", "url_context", "google_maps",
 }

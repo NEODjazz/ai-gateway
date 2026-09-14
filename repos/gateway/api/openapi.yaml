@@ -7964,7 +7964,7 @@ components:
         capabilities:
           type: array
           uniqueItems: true
-          items: {type: string, enum: [chat, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, gemini_code_execution, url_context, google_maps, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, cached_content, realtime, stream, tools, custom_tools, response_image_generation, response_computer, structured_output, mcp, code_interpreter, file_search, vision, web_search, web_fetch, tool_search, zero_output, inference_geo, context_management, tool_result_error, document_citations, document_metadata, document_text, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
+          items: {type: string, enum: [chat, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, gemini_code_execution, url_context, google_maps, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, cached_content, realtime, stream, tools, custom_tools, response_image_generation, response_computer, response_shell, structured_output, mcp, code_interpreter, file_search, vision, web_search, web_fetch, tool_search, zero_output, inference_geo, context_management, tool_result_error, document_citations, document_metadata, document_text, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
         max_input_tokens: {type: integer, minimum: 0}
         max_output_tokens: {type: integer, minimum: 0}
         input_cost_per_1m: {type: number, minimum: 0}
@@ -9004,6 +9004,84 @@ components:
       required: [type]
       properties:
         type: {type: string, const: computer}
+    ShellResponseTool:
+      type: object
+      description: Provider shell tool. Gateway authorization uses the shell grant, routing requires an explicit response_shell deployment capability, and tenant-owned resources are checked before provider execution. The gateway never executes commands itself.
+      additionalProperties: false
+      required: [type]
+      properties:
+        type: {type: string, const: shell}
+        allowed_callers:
+          type: array
+          maxItems: 1
+          uniqueItems: true
+          items: {type: string, const: direct}
+        environment:
+          oneOf:
+            - type: object
+              additionalProperties: false
+              required: [type]
+              properties:
+                type: {type: string, const: local}
+            - type: object
+              additionalProperties: false
+              required: [type, container_id]
+              properties:
+                type: {type: string, const: container_reference}
+                container_id: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}
+            - type: object
+              additionalProperties: false
+              required: [type]
+              properties:
+                type: {type: string, const: container_auto}
+                memory_limit: {type: string, enum: [1g, 4g, 16g, 64g]}
+                file_ids:
+                  type: array
+                  maxItems: 20
+                  uniqueItems: true
+                  items: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}
+    ShellCallOutput:
+      type: object
+      description: Captured output from a client-executed shell call. Text is included in token accounting and input policy processing.
+      additionalProperties: false
+      required: [type, call_id, output]
+      properties:
+        type: {type: string, const: shell_call_output}
+        id: {type: string, minLength: 1, maxLength: 512}
+        call_id: {type: string, minLength: 1, maxLength: 512}
+        created_by: {type: string, minLength: 1, maxLength: 512}
+        max_output_length: {type: integer, minimum: 1, maximum: 8388608}
+        status: {type: string, enum: [in_progress, completed, incomplete]}
+        caller:
+          type: object
+          additionalProperties: false
+          required: [type]
+          properties:
+            type: {type: string, const: direct}
+        output:
+          type: array
+          minItems: 1
+          maxItems: 128
+          items:
+            type: object
+            additionalProperties: false
+            required: [stdout, stderr, outcome]
+            properties:
+              stdout: {type: string}
+              stderr: {type: string}
+              outcome:
+                oneOf:
+                  - type: object
+                    additionalProperties: false
+                    required: [type]
+                    properties:
+                      type: {type: string, const: timeout}
+                  - type: object
+                    additionalProperties: false
+                    required: [type, exit_code]
+                    properties:
+                      type: {type: string, const: exit}
+                      exit_code: {type: integer, format: int64}
     ComputerCallOutput:
       type: object
       description: Result of executing a provider-requested computer action. A gateway file_id is resolved only after authentication and must belong to the same credential and user.
@@ -9231,6 +9309,7 @@ components:
                   - {$ref: '#/components/schemas/TextContentPart'}
                   - {$ref: '#/components/schemas/InputImageContentPart'}
                   - {$ref: '#/components/schemas/ComputerCallOutput'}
+                  - {$ref: '#/components/schemas/ShellCallOutput'}
                   - type: object
                     additionalProperties: true
         instructions: {type: string}
@@ -9243,6 +9322,7 @@ components:
               - $ref: '#/components/schemas/CustomResponseTool'
               - $ref: '#/components/schemas/ImageGenerationResponseTool'
               - $ref: '#/components/schemas/ComputerResponseTool'
+              - $ref: '#/components/schemas/ShellResponseTool'
               - $ref: '#/components/schemas/MCPResponseTool'
               - $ref: '#/components/schemas/CodeInterpreterResponseTool'
               - $ref: '#/components/schemas/FileSearchResponseTool'
@@ -9411,6 +9491,7 @@ components:
                   - {$ref: '#/components/schemas/TextContentPart'}
                   - {$ref: '#/components/schemas/InputImageContentPart'}
                   - {$ref: '#/components/schemas/ComputerCallOutput'}
+                  - {$ref: '#/components/schemas/ShellCallOutput'}
                   - type: object
                     additionalProperties: true
         instructions: {type: string}
@@ -9423,6 +9504,7 @@ components:
               - $ref: '#/components/schemas/CustomResponseTool'
               - $ref: '#/components/schemas/ImageGenerationResponseTool'
               - $ref: '#/components/schemas/ComputerResponseTool'
+              - $ref: '#/components/schemas/ShellResponseTool'
               - $ref: '#/components/schemas/MCPResponseTool'
               - $ref: '#/components/schemas/CodeInterpreterResponseTool'
               - $ref: '#/components/schemas/FileSearchResponseTool'
@@ -9531,6 +9613,10 @@ components:
           type: object
           additionalProperties: true
           description: Provider web-search action, including bounded query, page and source metadata when returned upstream.
+        environment: {type: object, additionalProperties: true}
+        caller: {type: object, additionalProperties: true}
+        created_by: {type: string}
+        max_output_length: {type: integer, minimum: 1, maximum: 8388608}
         actions:
           type: array
           maxItems: 128
@@ -10687,7 +10773,7 @@ components:
           type: array
           uniqueItems: true
           description: Operations and optional request features preserved by the managed adapter.
-          items: {type: string, enum: [chat, completions, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, gemini_code_execution, url_context, google_maps, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, cached_content, realtime, stream, tools, custom_tools, response_image_generation, response_computer, structured_output, mcp, code_interpreter, file_search, vision, web_search, web_fetch, tool_search, zero_output, inference_geo, context_management, tool_result_error, document_citations, document_metadata, document_text, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
+          items: {type: string, enum: [chat, completions, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, gemini_code_execution, url_context, google_maps, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, cached_content, realtime, stream, tools, custom_tools, response_image_generation, response_computer, response_shell, structured_output, mcp, code_interpreter, file_search, vision, web_search, web_fetch, tool_search, zero_output, inference_geo, context_management, tool_result_error, document_citations, document_metadata, document_text, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
         auth_types:
           type: array
           uniqueItems: true

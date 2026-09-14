@@ -122,6 +122,37 @@ func TestOpenAICompatibleForwardsComputerLoopAndPreservesActions(t *testing.T) {
 	}
 }
 
+func TestOpenAICompatibleForwardsShellLoopAndPreservesCalls(t *testing.T) {
+	var upstream map[string]json.RawMessage
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&upstream); err != nil {
+			t.Fatal(err)
+		}
+		_, _ = fmt.Fprint(w, `{"id":"resp-shell","object":"response","status":"completed","model":"model","output":[{"id":"shell_2","type":"shell_call","status":"completed","call_id":"call_2","action":{"commands":["pwd"],"timeout_ms":30000},"environment":{"type":"local"},"caller":{"type":"direct"}}],"usage":{"input_tokens":4,"output_tokens":2,"total_tokens":6}}`)
+	}))
+	defer server.Close()
+
+	input := []any{map[string]any{
+		"type": "shell_call_output", "call_id": "call_1",
+		"output": []any{map[string]any{"stdout": "ok\n", "stderr": "", "outcome": map[string]any{"type": "exit", "exit_code": 0}}},
+	}}
+	request := openai.ResponseRequest{
+		Model: "model", PreviousResponse: "resp_previous", Input: input,
+		Tools:      []openai.ResponseTool{{Type: "shell", AllowedCallers: []string{"direct"}, Environment: map[string]any{"type": "local"}}},
+		ToolChoice: map[string]any{"type": "shell"},
+	}
+	response, err := NewOpenAICompatible(server.URL, "", false).Responses(t.Context(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(upstream["tools"]), `"type":"shell"`) || !strings.Contains(string(upstream["tools"]), `"allowed_callers":["direct"]`) || !strings.Contains(string(upstream["input"]), `"shell_call_output"`) || string(upstream["tool_choice"]) != `{"type":"shell"}` {
+		t.Fatalf("shell loop was not forwarded: %s", upstream)
+	}
+	if len(response.Output) != 1 || response.Output[0].CallID != "call_2" || !strings.Contains(string(response.Output[0].Action), `"commands":["pwd"]`) || !strings.Contains(string(response.Output[0].Environment), `"type":"local"`) {
+		t.Fatalf("shell output was not preserved: %+v", response.Output)
+	}
+}
+
 func TestOpenAICompatibleStreamsComputerActions(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -137,6 +168,24 @@ func TestOpenAICompatibleStreamsComputerActions(t *testing.T) {
 	}
 	if len(response.Output) != 1 || response.Output[0].CallID != "call_1" || len(response.Output[0].Actions) != 1 {
 		t.Fatalf("streamed computer output was not preserved: %+v", response.Output)
+	}
+}
+
+func TestOpenAICompatibleStreamsShellCalls(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "event: response.created\n"+`data: {"type":"response.created","response":{"id":"resp-shell","object":"response","status":"in_progress","model":"model","output":[]}}`+"\n\n")
+		_, _ = fmt.Fprint(w, "event: response.output_item.done\n"+`data: {"type":"response.output_item.done","output_index":0,"item":{"id":"shell_1","type":"shell_call","status":"completed","call_id":"call_1","action":{"commands":["pwd"],"timeout_ms":30000},"environment":{"type":"local"},"caller":{"type":"direct"}}}`+"\n\n")
+		_, _ = fmt.Fprint(w, "event: response.completed\n"+`data: {"type":"response.completed","response":{"id":"resp-shell","object":"response","status":"completed","model":"model","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}`+"\n\n")
+	}))
+	defer server.Close()
+
+	response, err := NewOpenAICompatible(server.URL, "", true).StreamResponses(t.Context(), openai.ResponseRequest{Model: "model", Input: "run", Stream: true, Tools: []openai.ResponseTool{{Type: "shell"}}}, func(string, string) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Output) != 1 || response.Output[0].CallID != "call_1" || openai.ResponseShellText(response.Output[0]) != "pwd" || !strings.Contains(string(response.Output[0].Environment), `"type":"local"`) {
+		t.Fatalf("streamed shell output was not preserved: %+v", response.Output)
 	}
 }
 

@@ -153,6 +153,25 @@ func TestResponseInputTokenCountUsesOwnedContainerBinding(t *testing.T) {
 	}
 }
 
+func TestResponseInputTokenCountUsesOwnedShellContainerBinding(t *testing.T) {
+	counter := &responseInputTokenCountProvider{}
+	identity := modules.RequestContext{CredentialID: "credential-1", UserID: "user-1"}
+	owner := fileOwnerKey(identity)
+	binding := provider.ContainerBinding{Endpoint: "bound-endpoint", Model: "m", Deployment: "deployment-v1"}
+	record := containerstate.Record{OwnerKey: owner, Binding: binding, Container: openai.Container{ID: "cntr_owned"}}
+	containers := &memoryContainerStore{records: map[string]containerstate.Record{containerKey(owner, "cntr_owned"): record}}
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}, tools: []string{"shell"}}}), counter).WithContainerStore(containers))
+	response := httptest.NewRecorder()
+	body := `{"model":"m","input":"x","tools":[{"type":"shell","environment":{"type":"container_reference","container_id":"cntr_owned"}}]}`
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/v1/responses/input_tokens", strings.NewReader(body)))
+	if response.Code != http.StatusOK || counter.calls != 1 {
+		t.Fatalf("status=%d calls=%d body=%s", response.Code, counter.calls, response.Body.String())
+	}
+	if counter.request.Metadata[modules.MetadataResponseContainerEndpoint] != binding.Endpoint || counter.request.Metadata[modules.MetadataResponseContainerDeployment] != binding.Deployment || counter.request.Metadata[modules.MetadataResponseContainerModel] != binding.Model {
+		t.Fatalf("shell container binding was not propagated: %+v", counter.request.Metadata)
+	}
+}
+
 func TestResponseInputTokenCountRejectsGenerationOnlyFields(t *testing.T) {
 	counter := &responseInputTokenCountProvider{}
 	handler := Routes(NewHandler(modules.NewPipeline(nil), counter))

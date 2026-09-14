@@ -346,7 +346,7 @@ func TransformTextContent(value any, transform func(string) string) any {
 			return typed
 		}
 		for key, nested := range typed {
-			if key == "type" || key == "role" || key == "name" || key == "id" || key == "phase" || key == "encrypted_content" || key == "call_id" || key == "tool_call_id" || key == "prompt_cache_breakpoint" {
+			if key == "type" || key == "role" || key == "name" || key == "id" || key == "created_by" || key == "phase" || key == "encrypted_content" || key == "call_id" || key == "tool_call_id" || key == "prompt_cache_breakpoint" {
 				continue
 			}
 			typed[key] = TransformTextContent(nested, transform)
@@ -373,7 +373,7 @@ func TextOnlyProjection(value any) any {
 		}
 		projected := make(map[string]any, len(typed))
 		for key, nested := range typed {
-			if key == "phase" || key == "encrypted_content" || key == "call_id" || key == "tool_call_id" {
+			if key == "created_by" || key == "phase" || key == "encrypted_content" || key == "call_id" || key == "tool_call_id" {
 				continue
 			}
 			projected[key] = TextOnlyProjection(nested)
@@ -434,7 +434,7 @@ func MergeTextProjection(original any, transformed any) any {
 		}
 		merged := make(map[string]any, len(typed))
 		for key, value := range typed {
-			if key == "type" || key == "role" || key == "name" || key == "id" || key == "phase" || key == "encrypted_content" || key == "call_id" || key == "tool_call_id" {
+			if key == "type" || key == "role" || key == "name" || key == "id" || key == "created_by" || key == "phase" || key == "encrypted_content" || key == "call_id" || key == "tool_call_id" {
 				merged[key] = value
 				continue
 			}

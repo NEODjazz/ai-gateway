@@ -577,6 +577,10 @@ type responseComputerCaptureClient struct{ *modelCaptureProvider }
 
 func (responseComputerCaptureClient) SupportsResponseComputer() bool { return true }
 
+type responseShellCaptureClient struct{ *modelCaptureProvider }
+
+func (responseShellCaptureClient) SupportsResponseShell() bool { return true }
+
 func (p *modelCaptureProvider) ChatCompletions(_ context.Context, request openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
 	p.seenModel = request.Model
 	return staticProvider{content: p.content}.ChatCompletions(context.Background(), request)
@@ -1857,6 +1861,39 @@ func TestResponsesComputerContinuationRequiresComputerCapability(t *testing.T) {
 	}}}
 	if required := requiredResponseCapabilities(request, false); strings.Join(required, ",") != "responses,tools,response_computer" {
 		t.Fatalf("unexpected computer continuation capabilities: %v", required)
+	}
+}
+
+func TestResponsesShellRequiresDeclaredAndAdapterCapability(t *testing.T) {
+	required := requiredResponseCapabilities(openai.ResponseRequest{Tools: []openai.ResponseTool{{Type: "shell"}}}, false)
+	if strings.Join(required, ",") != "responses,tools,response_shell" {
+		t.Fatalf("unexpected Responses shell capabilities: %v", required)
+	}
+
+	undeclared := &modelCaptureProvider{content: "undeclared"}
+	unsupported := &modelCaptureProvider{content: "unsupported"}
+	supported := &modelCaptureProvider{content: "supported"}
+	router := Router{health: newEndpointHealthTracker(), endpoints: []Endpoint{
+		{Name: "undeclared", Type: "openai-compatible", Priority: 1, Capabilities: []string{"responses", "tools"}, Provider: responseShellCaptureClient{undeclared}},
+		{Name: "unsupported", Type: "anthropic", Priority: 2, Capabilities: []string{"responses", "tools", "response_shell"}, Provider: unsupported},
+		{Name: "supported", Type: "openai-compatible", Priority: 3, Capabilities: []string{"responses", "tools", "response_shell"}, Provider: responseShellCaptureClient{supported}},
+	}}
+	request := openai.ResponseRequest{Model: "model", Input: "list files", Tools: []openai.ResponseTool{{Type: "shell"}}}
+	if _, err := router.Responses(t.Context(), modules.RequestContext{Request: openai.ChatCompletionRequest{Model: "model"}, ResponseRequest: &request}); err != nil {
+		t.Fatal(err)
+	}
+	if undeclared.seenModel != "" || unsupported.seenModel != "" || supported.seenModel != "model" {
+		t.Fatalf("shell tool used an incompatible deployment: undeclared=%q unsupported=%q supported=%q", undeclared.seenModel, unsupported.seenModel, supported.seenModel)
+	}
+}
+
+func TestResponsesShellContinuationRequiresShellCapability(t *testing.T) {
+	request := openai.ResponseRequest{Input: []any{map[string]any{
+		"type": "shell_call_output", "call_id": "call_1",
+		"output": []any{map[string]any{"stdout": "ok", "stderr": "", "outcome": map[string]any{"type": "exit", "exit_code": 0}}},
+	}}}
+	if required := requiredResponseCapabilities(request, false); strings.Join(required, ",") != "responses,tools,response_shell" {
+		t.Fatalf("unexpected shell continuation capabilities: %v", required)
 	}
 }
 

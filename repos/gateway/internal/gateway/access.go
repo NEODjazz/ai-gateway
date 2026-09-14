@@ -175,6 +175,8 @@ func responseToolIdentifiers(tools []openai.ResponseTool) ([]string, bool) {
 			identifier = "image_generation"
 		case "computer":
 			identifier = "computer"
+		case "shell":
+			identifier = "shell"
 		case "mcp":
 			var valid bool
 			identifier, valid = mcpToolIdentifier(tool)
@@ -197,19 +199,40 @@ func responseRequestToolIdentifiers(request openai.ResponseRequest) ([]string, b
 	if !valid {
 		return nil, false
 	}
-	outputs, message := openai.InspectResponseComputerCallOutputs(request.Input)
+	computerOutputs, message := openai.InspectResponseComputerCallOutputs(request.Input)
 	if message != "" {
 		return nil, false
 	}
-	if len(outputs) == 0 {
-		return identifiers, true
-	}
-	for _, identifier := range identifiers {
-		if identifier == "computer" {
-			return identifiers, true
+	if len(computerOutputs) > 0 {
+		found := false
+		for _, identifier := range identifiers {
+			if identifier == "computer" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			identifiers = append(identifiers, "computer")
 		}
 	}
-	return append(identifiers, "computer"), true
+	shellOutputs, message := openai.InspectResponseShellCallOutputs(request.Input)
+	if message != "" {
+		return nil, false
+	}
+	if len(shellOutputs) == 0 {
+		return identifiers, true
+	}
+	found := false
+	for _, identifier := range identifiers {
+		if identifier == "shell" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		identifiers = append(identifiers, "shell")
+	}
+	return identifiers, true
 }
 
 func (h Handler) authorizeTools(w http.ResponseWriter, req modules.RequestContext, identifiers []string, valid bool) bool {

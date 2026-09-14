@@ -550,6 +550,39 @@ func TestBatchResponsesPersistReusableContainerBinding(t *testing.T) {
 	}
 }
 
+func TestBatchResponsesPersistReusableShellContainerBinding(t *testing.T) {
+	store := newMemoryBatchStore()
+	files := &memoryFileStore{files: map[string]filestate.File{}}
+	owner := fileOwnerKey(modules.RequestContext{CredentialID: "credential", UserID: "user"})
+	payload := []byte(`{"custom_id":"one","method":"POST","url":"/v1/responses","body":{"model":"model-a","input":"continue","tools":[{"type":"shell","environment":{"type":"container_reference","container_id":"cntr_owned"}}]}}` + "\n")
+	files.files["file_input"] = filestate.File{ID: "file_input", OwnerKey: owner, Filename: "input.jsonl", Purpose: "batch", ContentType: "application/jsonl", Bytes: int64(len(payload)), Content: payload}
+	binding := providerpkg.ContainerBinding{Endpoint: "bound", Model: "model-a", Deployment: "deployment-v1"}
+	record := containerstate.Record{OwnerKey: owner, Binding: binding, Container: openai.Container{ID: "cntr_owned"}}
+	containers := &memoryContainerStore{records: map[string]containerstate.Record{containerKey(owner, "cntr_owned"): record}}
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{&lifecycleAuthModule{allowedModels: []string{"model-a"}, allowedTools: []string{"shell"}}}), &batchProvider{models: []string{"model-a"}}).
+		WithFileStore(files, FileRuntimeConfig{MaxBytes: 4 << 20, OwnerQuotaBytes: 64 << 20}).
+		WithContainerStore(containers).
+		WithBatchStore(store, store))
+	request := httptest.NewRequest(http.MethodPost, "/v1/batches", strings.NewReader(`{"input_file_id":"file_input","endpoint":"/v1/responses","completion_window":"24h"}`))
+	request.Header.Set("Authorization", "Bearer key")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	var created openai.Batch
+	if json.Unmarshal(response.Body.Bytes(), &created) != nil {
+		t.Fatal("invalid batch response")
+	}
+	store.mu.Lock()
+	item := store.items[created.ID][0]
+	store.mu.Unlock()
+	var itemIdentity modules.RequestContext
+	if json.Unmarshal(item.Identity, &itemIdentity) != nil || itemIdentity.Metadata[modules.MetadataResponseContainerEndpoint] != binding.Endpoint || itemIdentity.Metadata[modules.MetadataResponseContainerDeployment] != binding.Deployment {
+		t.Fatalf("shell container binding was not persisted: %+v", itemIdentity.Metadata)
+	}
+}
+
 func TestBatchResponsesResolveOwnedComputerScreenshot(t *testing.T) {
 	store := newMemoryBatchStore()
 	files := &memoryFileStore{files: map[string]filestate.File{}}

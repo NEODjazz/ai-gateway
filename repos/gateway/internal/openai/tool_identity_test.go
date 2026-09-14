@@ -3,7 +3,7 @@ package openai
 import "testing"
 
 func TestToolIdentitySurvivesTextProcessing(t *testing.T) {
-	for _, key := range []string{"call_id", "tool_call_id"} {
+	for _, key := range []string{"call_id", "tool_call_id", "created_by"} {
 		input := func() map[string]any {
 			return map[string]any{"type": "function_call_output", key: "call1234567890", "output": "sensitive text"}
 		}

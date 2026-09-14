@@ -62,6 +62,9 @@ func (r ResponseRequest) Validate() string {
 	if _, message := InspectResponseComputerCallOutputs(r.Input); message != "" {
 		return message
 	}
+	if _, message := InspectResponseShellCallOutputs(r.Input); message != "" {
+		return message
+	}
 	if message := validateResponseToolChoice(r.Tools, r.ToolChoice); message != "" {
 		return message
 	}
@@ -197,7 +200,7 @@ func validateResponseTools(tools []ResponseTool) string {
 			if utf8.RuneCountInString(tool.Description) > 4096 {
 				return "function tool descriptions must contain at most 4096 characters"
 			}
-			if responseToolHasHostedImageFields(tool) || tool.ServerLabel != "" || tool.ServerURL != "" || tool.ServerDescription != "" || len(tool.AllowedTools) > 0 || tool.RequireApproval != nil || len(tool.Headers) > 0 || len(tool.VectorStoreIDs) > 0 || tool.Container != nil || tool.Filters != nil || tool.MaxNumResults != nil || tool.RankingOptions != nil || tool.RewriteQuery != nil || tool.SearchContextSize != "" || tool.UserLocation != nil || tool.Format != nil {
+			if responseToolHasHostedImageFields(tool) || tool.ServerLabel != "" || tool.ServerURL != "" || tool.ServerDescription != "" || len(tool.AllowedTools) > 0 || len(tool.AllowedCallers) > 0 || tool.RequireApproval != nil || len(tool.Headers) > 0 || len(tool.VectorStoreIDs) > 0 || tool.Container != nil || tool.Environment != nil || tool.Filters != nil || tool.MaxNumResults != nil || tool.RankingOptions != nil || tool.RewriteQuery != nil || tool.SearchContextSize != "" || tool.UserLocation != nil || tool.Format != nil {
 				return "function tools contain unsupported fields"
 			}
 			if tool.Parameters != nil && !isJSONObject(tool.Parameters) {
@@ -214,7 +217,7 @@ func validateResponseTools(tools []ResponseTool) string {
 			if utf8.RuneCountInString(tool.Description) > 4096 {
 				return "custom tool descriptions must contain at most 4096 characters"
 			}
-			if responseToolHasHostedImageFields(tool) || tool.Parameters != nil || tool.Strict != nil || tool.ServerLabel != "" || tool.ServerURL != "" || tool.ServerDescription != "" || len(tool.AllowedTools) > 0 || tool.RequireApproval != nil || len(tool.Headers) > 0 || len(tool.VectorStoreIDs) > 0 || tool.Container != nil || tool.Filters != nil || tool.MaxNumResults != nil || tool.RankingOptions != nil || tool.RewriteQuery != nil || tool.SearchContextSize != "" || tool.UserLocation != nil {
+			if responseToolHasHostedImageFields(tool) || tool.Parameters != nil || tool.Strict != nil || tool.ServerLabel != "" || tool.ServerURL != "" || tool.ServerDescription != "" || len(tool.AllowedTools) > 0 || len(tool.AllowedCallers) > 0 || tool.RequireApproval != nil || len(tool.Headers) > 0 || len(tool.VectorStoreIDs) > 0 || tool.Container != nil || tool.Environment != nil || tool.Filters != nil || tool.MaxNumResults != nil || tool.RankingOptions != nil || tool.RewriteQuery != nil || tool.SearchContextSize != "" || tool.UserLocation != nil {
 				return "custom tools contain unsupported fields"
 			}
 			if message := validateResponseCustomToolFormat(tool.Format); message != "" {
@@ -228,7 +231,7 @@ func validateResponseTools(tools []ResponseTool) string {
 			if strings.TrimSpace(tool.ServerLabel) == "" || !validResponseMCPURL(tool.ServerURL) {
 				return "mcp tools require a server_label and safe HTTPS server_url"
 			}
-			if responseToolHasHostedImageFields(tool) || tool.Name != "" || tool.Description != "" || tool.Parameters != nil || tool.Strict != nil || len(tool.VectorStoreIDs) > 0 || tool.Container != nil || tool.Filters != nil || tool.MaxNumResults != nil || tool.RankingOptions != nil || tool.RewriteQuery != nil || tool.SearchContextSize != "" || tool.UserLocation != nil || tool.Format != nil {
+			if responseToolHasHostedImageFields(tool) || tool.Name != "" || tool.Description != "" || tool.Parameters != nil || tool.Strict != nil || len(tool.AllowedCallers) > 0 || len(tool.VectorStoreIDs) > 0 || tool.Container != nil || tool.Environment != nil || tool.Filters != nil || tool.MaxNumResults != nil || tool.RankingOptions != nil || tool.RewriteQuery != nil || tool.SearchContextSize != "" || tool.UserLocation != nil || tool.Format != nil {
 				return "mcp tools contain unsupported fields"
 			}
 			if _, duplicate := mcpLabels[tool.ServerLabel]; duplicate {
@@ -253,7 +256,7 @@ func validateResponseTools(tools []ResponseTool) string {
 				return "code_interpreter tools must be unique"
 			}
 			hostedTypes[tool.Type] = struct{}{}
-			if responseToolHasHostedImageFields(tool) || tool.Name != "" || tool.Description != "" || tool.Parameters != nil || tool.Strict != nil || tool.ServerLabel != "" || tool.ServerURL != "" || tool.ServerDescription != "" || len(tool.AllowedTools) > 0 || tool.RequireApproval != nil || len(tool.Headers) > 0 || len(tool.VectorStoreIDs) > 0 || tool.Filters != nil || tool.MaxNumResults != nil || tool.RankingOptions != nil || tool.RewriteQuery != nil || tool.SearchContextSize != "" || tool.UserLocation != nil || tool.Format != nil {
+			if responseToolHasHostedImageFields(tool) || tool.Name != "" || tool.Description != "" || tool.Parameters != nil || tool.Strict != nil || tool.ServerLabel != "" || tool.ServerURL != "" || tool.ServerDescription != "" || len(tool.AllowedTools) > 0 || len(tool.AllowedCallers) > 0 || tool.RequireApproval != nil || len(tool.Headers) > 0 || len(tool.VectorStoreIDs) > 0 || tool.Environment != nil || tool.Filters != nil || tool.MaxNumResults != nil || tool.RankingOptions != nil || tool.RewriteQuery != nil || tool.SearchContextSize != "" || tool.UserLocation != nil || tool.Format != nil {
 				return "code_interpreter tools contain unsupported fields"
 			}
 			if _, _, message := InspectResponseCodeInterpreterContainer(tool.Container); message != "" {
@@ -264,7 +267,7 @@ func validateResponseTools(tools []ResponseTool) string {
 				return "file_search tools must be unique"
 			}
 			hostedTypes[tool.Type] = struct{}{}
-			if responseToolHasHostedImageFields(tool) || tool.Name != "" || tool.Description != "" || tool.Parameters != nil || tool.Strict != nil || tool.ServerLabel != "" || tool.ServerURL != "" || tool.ServerDescription != "" || len(tool.AllowedTools) > 0 || tool.RequireApproval != nil || len(tool.Headers) > 0 || tool.Container != nil || tool.SearchContextSize != "" || tool.UserLocation != nil || tool.Format != nil {
+			if responseToolHasHostedImageFields(tool) || tool.Name != "" || tool.Description != "" || tool.Parameters != nil || tool.Strict != nil || tool.ServerLabel != "" || tool.ServerURL != "" || tool.ServerDescription != "" || len(tool.AllowedTools) > 0 || len(tool.AllowedCallers) > 0 || tool.RequireApproval != nil || len(tool.Headers) > 0 || tool.Container != nil || tool.Environment != nil || tool.SearchContextSize != "" || tool.UserLocation != nil || tool.Format != nil {
 				return "file_search tools contain unsupported fields"
 			}
 			if len(tool.VectorStoreIDs) == 0 || len(tool.VectorStoreIDs) > 1 {
@@ -288,7 +291,7 @@ func validateResponseTools(tools []ResponseTool) string {
 				return "web_search tools must be unique"
 			}
 			hostedTypes["web_search"] = struct{}{}
-			if responseToolHasHostedImageFields(tool) || tool.Name != "" || tool.Description != "" || tool.Parameters != nil || tool.Strict != nil || tool.ServerLabel != "" || tool.ServerURL != "" || tool.ServerDescription != "" || len(tool.AllowedTools) > 0 || tool.RequireApproval != nil || len(tool.Headers) > 0 || len(tool.VectorStoreIDs) > 0 || tool.Container != nil || tool.MaxNumResults != nil || tool.RankingOptions != nil || tool.RewriteQuery != nil || tool.Format != nil {
+			if responseToolHasHostedImageFields(tool) || tool.Name != "" || tool.Description != "" || tool.Parameters != nil || tool.Strict != nil || tool.ServerLabel != "" || tool.ServerURL != "" || tool.ServerDescription != "" || len(tool.AllowedTools) > 0 || len(tool.AllowedCallers) > 0 || tool.RequireApproval != nil || len(tool.Headers) > 0 || len(tool.VectorStoreIDs) > 0 || tool.Container != nil || tool.Environment != nil || tool.MaxNumResults != nil || tool.RankingOptions != nil || tool.RewriteQuery != nil || tool.Format != nil {
 				return "web_search tools contain unsupported fields"
 			}
 			if message := validateResponseWebSearchOptions(tool); message != "" {
@@ -299,7 +302,7 @@ func validateResponseTools(tools []ResponseTool) string {
 				return "image_generation tools must be unique"
 			}
 			hostedTypes[tool.Type] = struct{}{}
-			if tool.Name != "" || tool.Description != "" || tool.Parameters != nil || tool.Strict != nil || tool.ServerLabel != "" || tool.ServerURL != "" || tool.ServerDescription != "" || len(tool.AllowedTools) > 0 || tool.RequireApproval != nil || len(tool.Headers) > 0 || len(tool.VectorStoreIDs) > 0 || tool.Container != nil || tool.Filters != nil || tool.MaxNumResults != nil || tool.RankingOptions != nil || tool.RewriteQuery != nil || tool.SearchContextSize != "" || tool.UserLocation != nil || tool.Format != nil {
+			if tool.Name != "" || tool.Description != "" || tool.Parameters != nil || tool.Strict != nil || tool.ServerLabel != "" || tool.ServerURL != "" || tool.ServerDescription != "" || len(tool.AllowedTools) > 0 || len(tool.AllowedCallers) > 0 || tool.RequireApproval != nil || len(tool.Headers) > 0 || len(tool.VectorStoreIDs) > 0 || tool.Container != nil || tool.Environment != nil || tool.Filters != nil || tool.MaxNumResults != nil || tool.RankingOptions != nil || tool.RewriteQuery != nil || tool.SearchContextSize != "" || tool.UserLocation != nil || tool.Format != nil {
 				return "image_generation tools contain unsupported fields"
 			}
 			if message := validateResponseImageGenerationOptions(tool); message != "" {
@@ -310,8 +313,22 @@ func validateResponseTools(tools []ResponseTool) string {
 				return "computer tools must be unique"
 			}
 			hostedTypes[tool.Type] = struct{}{}
-			if responseToolHasHostedImageFields(tool) || tool.Name != "" || tool.Description != "" || tool.Parameters != nil || tool.Strict != nil || tool.ServerLabel != "" || tool.ServerURL != "" || tool.ServerDescription != "" || len(tool.AllowedTools) > 0 || tool.RequireApproval != nil || len(tool.Headers) > 0 || len(tool.VectorStoreIDs) > 0 || tool.Container != nil || tool.Filters != nil || tool.MaxNumResults != nil || tool.RankingOptions != nil || tool.RewriteQuery != nil || tool.SearchContextSize != "" || tool.UserLocation != nil || tool.Format != nil {
+			if responseToolHasHostedImageFields(tool) || tool.Name != "" || tool.Description != "" || tool.Parameters != nil || tool.Strict != nil || tool.ServerLabel != "" || tool.ServerURL != "" || tool.ServerDescription != "" || len(tool.AllowedTools) > 0 || len(tool.AllowedCallers) > 0 || tool.RequireApproval != nil || len(tool.Headers) > 0 || len(tool.VectorStoreIDs) > 0 || tool.Container != nil || tool.Environment != nil || tool.Filters != nil || tool.MaxNumResults != nil || tool.RankingOptions != nil || tool.RewriteQuery != nil || tool.SearchContextSize != "" || tool.UserLocation != nil || tool.Format != nil {
 				return "computer tools contain unsupported fields"
+			}
+		case "shell":
+			if _, duplicate := hostedTypes[tool.Type]; duplicate {
+				return "shell tools must be unique"
+			}
+			hostedTypes[tool.Type] = struct{}{}
+			if responseToolHasHostedImageFields(tool) || tool.Name != "" || tool.Description != "" || tool.Parameters != nil || tool.Strict != nil || tool.ServerLabel != "" || tool.ServerURL != "" || tool.ServerDescription != "" || len(tool.AllowedTools) > 0 || tool.RequireApproval != nil || len(tool.Headers) > 0 || len(tool.VectorStoreIDs) > 0 || tool.Container != nil || tool.Filters != nil || tool.MaxNumResults != nil || tool.RankingOptions != nil || tool.RewriteQuery != nil || tool.SearchContextSize != "" || tool.UserLocation != nil || tool.Format != nil {
+				return "shell tools contain unsupported fields"
+			}
+			if message := validateResponseShellAllowedCallers(tool.AllowedCallers); message != "" {
+				return message
+			}
+			if _, _, _, message := InspectResponseShellEnvironment(tool.Environment); message != "" {
+				return message
 			}
 		default:
 			return "tools contain an unsupported type at index " + strconv.Itoa(index)
@@ -702,7 +719,7 @@ func validateResponseToolChoice(tools []ResponseTool, choice any) string {
 		return "tool_choice must be a supported string or object"
 	}
 	switch kind {
-	case "code_interpreter", "file_search", "image_generation", "computer":
+	case "code_interpreter", "file_search", "image_generation", "computer", "shell":
 		if len(object) == 1 {
 			for _, tool := range tools {
 				if tool.Type == kind {

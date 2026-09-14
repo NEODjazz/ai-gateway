@@ -11,7 +11,7 @@ func TestCapabilityContractIsSharedByDeploymentsAndOnboarding(t *testing.T) {
 		"chat", "responses", "interactions", "embeddings", "rerank", "moderation",
 		"image_generation", "image_edit", "image_variation",
 		"audio_transcription", "audio_translation", "audio_speech", "ocr", "search", "skills", "fine_tuning", "video", "video_remix", "video_extension", "container", "container_files", "container_network", "cached_content", "sandbox", "realtime",
-		"stream", "tools", "custom_tools", "response_image_generation", "response_computer", "structured_output", "mcp", "vision",
+		"stream", "tools", "custom_tools", "response_image_generation", "response_computer", "response_shell", "structured_output", "mcp", "vision",
 		"web_search", "web_fetch", "tool_search", "memory_tool", "bash_tool", "text_editor_tool", "computer_toolset", "browser_toolset", "thinking", "zero_output", "inference_geo", "context_management", "tool_result_error", "document_citations", "document_metadata", "document_text", "audio", "audio_input", "video_input", "prompt_cache", "assistant_prefill", "background_responses", "background_interactions", "file_input", "bedrock_invoke", "interaction_agents", "interaction_environment_reuse", "gemini_safety_settings", "gemini_code_execution", "url_context", "google_maps",
 	}
 	if !validDeploymentCapabilities(capabilities) {
@@ -70,6 +70,17 @@ func TestResponseComputerCapabilityRequiresResponsesAndTools(t *testing.T) {
 	}
 	if !validDeploymentCapabilities([]string{"responses", "tools", "response_computer"}) {
 		t.Fatal("Responses computer rejected with Responses and tools")
+	}
+}
+
+func TestResponseShellCapabilityRequiresResponsesAndTools(t *testing.T) {
+	for _, capabilities := range [][]string{{"response_shell"}, {"responses", "response_shell"}, {"tools", "response_shell"}, {"chat", "tools", "response_shell"}} {
+		if validDeploymentCapabilities(capabilities) {
+			t.Fatalf("Responses shell accepted without Responses and tools: %v", capabilities)
+		}
+	}
+	if !validDeploymentCapabilities([]string{"responses", "tools", "response_shell"}) {
+		t.Fatal("Responses shell rejected with Responses and tools")
 	}
 }
 

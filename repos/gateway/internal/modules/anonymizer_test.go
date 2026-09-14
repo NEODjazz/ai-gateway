@@ -325,6 +325,8 @@ func TestDeanonymizeResponsesResponseRestoresOriginalValues(t *testing.T) {
 					{Type: "refusal", Refusal: "Cannot send to {{EMAIL_1}}"},
 				},
 			},
+			{Type: "shell_call", Action: json.RawMessage(`{"commands":["echo {{EMAIL_1}}"]}`)},
+			{Type: "shell_call_output", Output: json.RawMessage(`[{"stdout":"{{EMAIL_1}}","stderr":"","outcome":{"type":"exit","exit_code":0}}]`)},
 		},
 	}
 
@@ -340,6 +342,9 @@ func TestDeanonymizeResponsesResponseRestoresOriginalValues(t *testing.T) {
 	}
 	if response.Output[0].Arguments != `{"email":"user@example.com"}` || response.Output[0].Input != "recipient=user@example.com" {
 		t.Fatalf("tool payloads were not restored: arguments=%q input=%q", response.Output[0].Arguments, response.Output[0].Input)
+	}
+	if openai.ResponseShellText(response.Output[1]) != "echo user@example.com" || openai.ResponseShellText(response.Output[2]) != "user@example.com\n" {
+		t.Fatalf("shell payloads were not restored: action=%s output=%s", response.Output[1].Action, response.Output[2].Output)
 	}
 
 }
