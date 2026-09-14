@@ -123,7 +123,7 @@ func normalizeGuardrailPolicy(name string, policy GuardrailPolicy) (GuardrailPol
 	if !validAnonymizationRuleNames(policy.AnonymizationRules) {
 		return GuardrailPolicy{}, ErrInvalidGuardrailPolicy
 	}
-	policy.AnonymizationRules = normalizedAnonymizationRules(policy.AnonymizationRules)
+	policy.AnonymizationRules = normalizedAnonymizationRuleSet(policy.AnonymizationRules)
 	if name == "" || len(name) > 128 || len(policy.Description) > 1024 || (!policy.DLP && !policy.AV && policy.Anonymization == "") || (policy.OutputDLP && !policy.DLP) || !validAnonymizationPolicy(policy) {
 		return GuardrailPolicy{}, ErrInvalidGuardrailPolicy
 	}
@@ -182,6 +182,46 @@ func normalizedAnonymizationRules(values []string) []string {
 	return result
 }
 
+func normalizedAnonymizationRuleSet(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		rule := strings.ToLower(strings.TrimSpace(value))
+		if rule == "" || len(rule) > 128 {
+			continue
+		}
+		if aliased, ok := anonymizationRuleAlias(rule); ok {
+			rule = aliased
+		}
+		if _, found := seen[rule]; found {
+			continue
+		}
+		seen[rule] = struct{}{}
+		result = append(result, rule)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func anonymizationRuleAlias(rule string) (string, bool) {
+	switch rule {
+	case "person_context":
+		return "person_ru", true
+	case "passport_ru_context":
+		return "passport_ru", true
+	case "inn_context":
+		return "inn", true
+	case "password":
+		return "secret", true
+	case "private_key":
+		return "api_key", true
+	case "security_key":
+		return "api_key", true
+	default:
+		return rule, false
+	}
+}
+
 type AnonymizationSetting struct {
 	Profile string
 	Mode    string
@@ -215,7 +255,7 @@ func ResolveAnonymization(settings ...AnonymizationSetting) (mode string, rules,
 		case "basic":
 			selected = append(selected, basicAnonymizationRules()...)
 		case "custom":
-			selected = append(selected, setting.Rules...)
+			selected = append(selected, normalizedAnonymizationRuleSet(setting.Rules)...)
 		}
 	}
 	profiles = normalizedAnonymizationRules(profiles)

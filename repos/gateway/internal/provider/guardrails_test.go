@@ -60,6 +60,11 @@ func TestAnonymizationPolicyValidationAndComposition(t *testing.T) {
 	if mode != "strict" {
 		t.Fatalf("safe default=%q", mode)
 	}
+
+	mode, rules, _ = ResolveAnonymization(AnonymizationSetting{Mode: "custom", Rules: []string{"Person_Context", "inn_context", "password", "api_key"}})
+	if mode != "custom" || !reflect.DeepEqual(rules, []string{"api_key", "inn", "person_ru", "secret"}) {
+		t.Fatalf("legacy rule aliases were not normalized: mode=%q rules=%v", mode, rules)
+	}
 }
 
 func TestOutputDLPRequiresInputDLP(t *testing.T) {
