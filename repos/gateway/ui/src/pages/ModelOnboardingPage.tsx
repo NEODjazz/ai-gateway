@@ -129,8 +129,9 @@ export function ModelOnboardingPage() {
       if (selected.providerType === "vertex-gemini") {
         const upstream = manualModel.trim();
         if (!upstream) throw new Error("Enter an upstream model");
+        const capabilities = upstream.toLowerCase().includes("embedding") ? ["embeddings"] : defaultModelCapabilities(selected.providerType);
         setCredentialID("");
-        setCandidates([{ upstream, selected: true, publicModel: upstream, deploymentID: safeID(`${selected.providerID}-${upstream}`), capabilities: defaultModelCapabilities(selected.providerType), inputCost: "", outputCost: "", currency: "USD" }]);
+        setCandidates([{ upstream, selected: true, publicModel: upstream, deploymentID: safeID(`${selected.providerID}-${upstream}`), capabilities, inputCost: "", outputCost: "", currency: "USD" }]);
         setStep(2);
         return;
       }

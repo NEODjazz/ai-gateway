@@ -115,7 +115,7 @@ describe("ModelOnboardingPage", () => {
 
     await screen.findByRole("option", { name: "vertex — vertex-gemini" });
     expect(screen.queryByLabelText("Credential")).not.toBeInTheDocument();
-    await userEvent.type(screen.getByLabelText("Upstream model"), "gemini-2.5-pro");
+    await userEvent.type(screen.getByLabelText("Upstream model"), "gemini-embedding-001");
     await userEvent.click(screen.getByRole("button", { name: "Configure model" }));
     expect(await screen.findByText("Configured model")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Review 1 model(s)" }));
@@ -123,7 +123,7 @@ describe("ModelOnboardingPage", () => {
 
     expect(calls.some((call) => call.path.endsWith("/test") || call.path.endsWith("/discover-models"))).toBe(false);
     const plan = calls.find((call) => call.path === "/admin/v1/model-onboarding/plan")?.body as { deployments?: Array<Record<string, unknown>> };
-    expect(plan.deployments?.[0]).toMatchObject({ provider_id: "vertex", credential_id: "", upstream_model: "gemini-2.5-pro", capabilities: ["chat", "stream"] });
+    expect(plan.deployments?.[0]).toMatchObject({ provider_id: "vertex", credential_id: "", upstream_model: "gemini-embedding-001", capabilities: ["embeddings"] });
   });
 
   it("preserves Gemini workload authentication when creating a provider", async () => {

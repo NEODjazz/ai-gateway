@@ -9790,7 +9790,10 @@ components:
           propertyNames: {maxLength: 64}
           additionalProperties: {type: string, maxLength: 512}
           description: Provider metadata supported by native Mistral deployments and rejected by other adapters.
-        input_type: {type: string, enum: [search_document, search_query, classification, clustering], description: Required by the native Cohere embedding adapter and rejected by adapters that do not support it.}
+        input_type:
+          type: string
+          enum: [search_document, search_query, classification, clustering]
+          description: Required by the native Cohere embedding adapter, optional for Vertex Gemini task mapping and rejected by adapters that do not support it.
         encoding_format: {type: string, enum: [float, base64]}
         dimensions: {type: integer, minimum: 1}
         output_dtype: {type: string, enum: [float, int8, uint8, binary, ubinary], description: Native Mistral output representation; rejected by other adapters. Binary dimensions must be divisible by 8.}

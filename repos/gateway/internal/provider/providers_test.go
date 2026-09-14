@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 
 	"ai-gateway-gateway/internal/config"
@@ -91,7 +92,7 @@ func TestManagedVertexGeminiConfiguration(t *testing.T) {
 		if profile.Type != "vertex-gemini" {
 			continue
 		}
-		if len(profile.AuthTypes) != 1 || profile.AuthTypes[0] != "gcp_adc" || len(profile.Operations) != 3 || profile.Operations[0] != "chat" || profile.Operations[1] != "count_tokens" || profile.Operations[2] != "stream" {
+		if len(profile.AuthTypes) != 1 || profile.AuthTypes[0] != "gcp_adc" || !slices.Equal(profile.Operations, []string{"chat", "count_tokens", "embeddings", "stream"}) {
 			t.Fatalf("profile=%+v", profile)
 		}
 		return

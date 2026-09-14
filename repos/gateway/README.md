@@ -121,9 +121,9 @@ module has a minimal typed contract; only auth receives the client bearer token,
 which gateway clears before provider-level processing.
 
 The managed `vertex-gemini` provider uses GCP workload identity and the stable
-Vertex publisher-model API for Chat Completions, streaming and native token
-counting. Its base URL is the resource prefix through `publishers/google`, for
-example `https://us-central1-aiplatform.googleapis.com/v1/projects/example/locations/us-central1/publishers/google`.
+Vertex publisher-model API for Chat Completions, streaming, text embeddings and
+native token counting. Its base URL is the resource prefix through
+`publishers/google`, for example `https://us-central1-aiplatform.googleapis.com/v1/projects/example/locations/us-central1/publishers/google`.
 Deployments declare supported generation features explicitly; provider model
 discovery is unavailable because the publisher-model inference resource has no
 list operation.
