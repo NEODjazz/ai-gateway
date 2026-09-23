@@ -606,6 +606,42 @@ func TestResponsesHostedToolBillingReserveAndSettlement(t *testing.T) {
 	}
 }
 
+func TestResponsesBillingUsesExactXAIHostedToolCount(t *testing.T) {
+	reportedTools := 5
+	providerCost := int64(37_756_000)
+	req := &RequestContext{
+		Request:         openai.ChatCompletionRequest{Model: "model"},
+		ResponseRequest: &openai.ResponseRequest{Model: "model", Input: "research"},
+		ResponsesResponse: &openai.ResponseResponse{
+			Model: "model", Status: "completed",
+			Output: []openai.ResponseOutputItem{{Type: "mcp_call", Status: "completed"}, {Type: "web_search_call", Status: "completed"}},
+			Usage:  openai.ResponseUsage{InputTokens: 2, OutputTokens: 1, TotalTokens: 3, NumServerSideToolsUsed: &reportedTools, ProviderCostUSDTicks: &providerCost},
+		},
+		Metadata: map[string]string{"provider.endpoint.type": "xai"},
+	}
+	settled := billingRequest(req)
+	if settled.ToolRequests != 5 || settled.SearchRequests != 1 || settled.ProviderCostUSDTicks == nil || *settled.ProviderCostUSDTicks != providerCost {
+		t.Fatalf("xAI settlement=%+v", settled)
+	}
+	req.Metadata["provider.endpoint.type"] = "openai-compatible"
+	settled = billingRequest(req)
+	if settled.ToolRequests != 1 || settled.SearchRequests != 1 || settled.ProviderCostUSDTicks != nil {
+		t.Fatalf("compatible settlement trusted xAI counters: %+v", settled)
+	}
+	req.Metadata["provider.endpoint.type"] = "xai"
+	req.ResponsesResponse.Usage.NumServerSideToolsUsed = nil
+	settled = billingRequest(req)
+	if settled.ToolRequests != 1 || settled.SearchRequests != 1 {
+		t.Fatalf("missing xAI counter failed to fall back to output items: %+v", settled)
+	}
+	reportedTools = 0
+	req.ResponsesResponse.Usage.NumServerSideToolsUsed = &reportedTools
+	settled = billingRequest(req)
+	if settled.ToolRequests != 1 || settled.SearchRequests != 1 {
+		t.Fatalf("reported xAI count hid visible tool execution: %+v", settled)
+	}
+}
+
 func TestResponsesComputerBillingAccountsForExecutedClientActions(t *testing.T) {
 	maxToolCalls := 5
 	req := &RequestContext{

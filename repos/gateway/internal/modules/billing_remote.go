@@ -424,6 +424,9 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.ProviderCostUSDTicks = trustedProviderCost(req, req.ResponsesResponse.Usage.ProviderCostUSDTicks)
 		request.OutputImages = responseOutputImageCount(*req.ResponsesResponse)
 		request.ToolRequests, request.SearchRequests = responseOutputToolUsage(*req.ResponsesResponse)
+		if metadataValue(req.Metadata, "provider.endpoint.type") == "xai" && req.ResponsesResponse.Usage.NumServerSideToolsUsed != nil {
+			request.ToolRequests = max(request.ToolRequests, *req.ResponsesResponse.Usage.NumServerSideToolsUsed)
+		}
 		if req.ResponseRequest != nil {
 			outputs, _ := openai.InspectResponseComputerCallOutputs(req.ResponseRequest.Input)
 			request.ToolRequests += len(outputs)
