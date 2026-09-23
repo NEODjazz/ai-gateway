@@ -55,12 +55,13 @@ func decodeResponseJSON(reader io.Reader) (openai.ResponseResponse, error) {
 
 func validateResponseConfigurationPayload(payload []byte, response *openai.ResponseResponse) error {
 	var wire struct {
-		Reasoning          json.RawMessage `json:"reasoning"`
-		Text               json.RawMessage `json:"text"`
-		Tools              json.RawMessage `json:"tools"`
-		ToolChoice         json.RawMessage `json:"tool_choice"`
-		PromptCacheOptions json.RawMessage `json:"prompt_cache_options"`
-		Moderation         json.RawMessage `json:"moderation"`
+		Reasoning              json.RawMessage `json:"reasoning"`
+		Text                   json.RawMessage `json:"text"`
+		Tools                  json.RawMessage `json:"tools"`
+		ToolChoice             json.RawMessage `json:"tool_choice"`
+		PromptCacheOptions     json.RawMessage `json:"prompt_cache_options"`
+		Moderation             json.RawMessage `json:"moderation"`
+		PromptCacheDiagnostics json.RawMessage `json:"prompt_cache_diagnostics"`
 	}
 	if err := json.Unmarshal(payload, &wire); err != nil {
 		return err
@@ -93,6 +94,11 @@ func validateResponseConfigurationPayload(payload []byte, response *openai.Respo
 	if len(wire.Moderation) > 0 && string(wire.Moderation) != "null" {
 		if err := decodeStrictResponseConfiguration(wire.Moderation, &response.Moderation); err != nil {
 			return errors.New("provider returned invalid response moderation results")
+		}
+	}
+	if len(wire.PromptCacheDiagnostics) > 0 && string(wire.PromptCacheDiagnostics) != "null" {
+		if err := decodeStrictResponseConfiguration(wire.PromptCacheDiagnostics, &response.PromptCacheDiagnostics); err != nil {
+			return errors.New("provider returned invalid prompt_cache_diagnostics")
 		}
 	}
 	if message := openai.ValidateResponseConfiguration(response.Tools, response.ToolChoice, response.Reasoning, response.Text); message != "" {
@@ -133,6 +139,9 @@ func validateResponseControls(response openai.ResponseResponse) error {
 		return errors.New("provider returned invalid instructions: " + message)
 	}
 	if err := validateResponseModeration(response.Moderation); err != nil {
+		return err
+	}
+	if err := validateResponsePromptCacheDiagnostics(response.PromptCacheDiagnostics); err != nil {
 		return err
 	}
 	if response.MaxOutputTokens != nil && *response.MaxOutputTokens <= 0 {
@@ -180,6 +189,33 @@ func validateResponseModeration(moderation *openai.ResponseModeration) error {
 		}); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func validateResponsePromptCacheDiagnostics(diagnostics *openai.ResponsePromptCacheDiagnostics) error {
+	if diagnostics == nil {
+		return nil
+	}
+	switch diagnostics.Type {
+	case "cache_hit", "comparison_response_not_found", "unavailable":
+		if diagnostics.Reason != "" || diagnostics.CacheMissedTokens != nil || diagnostics.ComparisonReusableTokens != nil {
+			return errors.New("provider returned inconsistent prompt_cache_diagnostics")
+		}
+	case "cache_miss":
+		validReasons := map[string]bool{
+			"model_changed": true, "prompt_cache_key_changed": true, "service_tier_changed": true,
+			"tools_changed": true, "text_format_changed": true, "reasoning_effort_changed": true,
+			"verbosity_changed": true, "context_compacted": true, "input_changed": true,
+		}
+		if !validReasons[diagnostics.Reason] || diagnostics.CacheMissedTokens == nil || *diagnostics.CacheMissedTokens < 0 {
+			return errors.New("provider returned invalid prompt cache miss diagnostics")
+		}
+		if diagnostics.ComparisonReusableTokens != nil && (*diagnostics.ComparisonReusableTokens < 0 || *diagnostics.CacheMissedTokens > *diagnostics.ComparisonReusableTokens) {
+			return errors.New("provider returned invalid prompt cache diagnostic token counts")
+		}
+	default:
+		return errors.New("provider returned unknown prompt_cache_diagnostics type")
 	}
 	return nil
 }

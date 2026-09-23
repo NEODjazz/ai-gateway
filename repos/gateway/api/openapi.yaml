@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.433
+  version: 0.1.434
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -10081,6 +10081,7 @@ components:
         prompt_cache_key: {type: string, maxLength: 64}
         prompt_cache_options: {$ref: '#/components/schemas/ResponseRequest/properties/prompt_cache_options'}
         prompt_cache_retention: {type: string, enum: [in_memory, 24h], deprecated: true}
+        prompt_cache_diagnostics: {$ref: '#/components/schemas/ResponsePromptCacheDiagnostics'}
         citations:
           type: array
           maxItems: 1024
@@ -10134,6 +10135,21 @@ components:
             maxItems: 2
             uniqueItems: true
             items: {type: string, enum: [text, image]}
+    ResponsePromptCacheDiagnostics:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [type]
+          properties:
+            type: {type: string, enum: [cache_hit, comparison_response_not_found, unavailable]}
+        - type: object
+          additionalProperties: false
+          required: [type, reason, cache_missed_tokens]
+          properties:
+            type: {type: string, const: cache_miss}
+            reason: {type: string, enum: [model_changed, prompt_cache_key_changed, service_tier_changed, tools_changed, text_format_changed, reasoning_effort_changed, verbosity_changed, context_compacted, input_changed]}
+            cache_missed_tokens: {type: integer, minimum: 0}
+            comparison_reusable_tokens: {type: integer, minimum: 0}
     ResponseInputItemList:
       type: object
       required: [object, data, has_more]

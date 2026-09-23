@@ -939,8 +939,9 @@ type ResponseResponse struct {
 	Instructions        any                        `json:"instructions,omitempty"`
 	Moderation          *ResponseModeration        `json:"moderation,omitempty"`
 
-	PromptCacheOptions   *PromptCacheOptions `json:"prompt_cache_options,omitempty"`
-	PromptCacheRetention string              `json:"prompt_cache_retention,omitempty"`
+	PromptCacheOptions     *PromptCacheOptions             `json:"prompt_cache_options,omitempty"`
+	PromptCacheRetention   string                          `json:"prompt_cache_retention,omitempty"`
+	PromptCacheDiagnostics *ResponsePromptCacheDiagnostics `json:"prompt_cache_diagnostics,omitempty"`
 }
 
 type ResponseModeration struct {
@@ -955,6 +956,13 @@ type ResponseModerationResult struct {
 	Categories                map[string]*bool    `json:"categories"`
 	CategoryScores            map[string]float64  `json:"category_scores"`
 	CategoryAppliedInputTypes map[string][]string `json:"category_applied_input_types"`
+}
+
+type ResponsePromptCacheDiagnostics struct {
+	Type                     string `json:"type"`
+	Reason                   string `json:"reason,omitempty"`
+	CacheMissedTokens        *int   `json:"cache_missed_tokens,omitempty"`
+	ComparisonReusableTokens *int   `json:"comparison_reusable_tokens,omitempty"`
 }
 
 type ResponseInputItemList struct {

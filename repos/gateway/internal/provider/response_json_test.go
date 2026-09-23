@@ -274,6 +274,52 @@ func TestResponsesPreserveAndValidateModerationResults(t *testing.T) {
 	}
 }
 
+func TestResponsesPreserveAndValidatePromptCacheDiagnostics(t *testing.T) {
+	for _, diagnostics := range []string{
+		`{"type":"cache_hit"}`,
+		`{"type":"comparison_response_not_found"}`,
+		`{"type":"unavailable"}`,
+		`{"type":"cache_miss","reason":"tools_changed","cache_missed_tokens":0,"comparison_reusable_tokens":12}`,
+	} {
+		for _, stream := range []bool{false, true} {
+			t.Run(fmt.Sprintf("diagnostics=%s/stream=%v", diagnostics, stream), func(t *testing.T) {
+				document := `{"id":"r","object":"response","model":"m","status":"completed","prompt_cache_diagnostics":` + diagnostics + `}`
+				var response openai.ResponseResponse
+				var err error
+				if stream {
+					response, err = streamResponseData(strings.NewReader("data: {\"type\":\"response.completed\",\"response\":"+document+"}\n\n"), "m", func(string, string) error { return nil })
+				} else {
+					response, err = decodeResponseJSON(strings.NewReader(document))
+				}
+				if err != nil || response.PromptCacheDiagnostics == nil || response.PromptCacheDiagnostics.Type == "" {
+					t.Fatalf("response=%+v err=%v", response, err)
+				}
+			})
+		}
+	}
+
+	for _, diagnostics := range []string{
+		`{"type":"unknown"}`,
+		`{"type":"cache_hit","reason":"tools_changed"}`,
+		`{"type":"cache_hit","cache_missed_tokens":0}`,
+		`{"type":"cache_miss","reason":"unknown","cache_missed_tokens":1}`,
+		`{"type":"cache_miss","reason":"tools_changed"}`,
+		`{"type":"cache_miss","reason":"tools_changed","cache_missed_tokens":-1}`,
+		`{"type":"cache_miss","reason":"tools_changed","cache_missed_tokens":2,"comparison_reusable_tokens":1}`,
+		`{"type":"cache_miss","reason":"tools_changed","cache_missed_tokens":1,"unknown":true}`,
+	} {
+		document := `{"id":"r","object":"response","model":"m","prompt_cache_diagnostics":` + diagnostics + `}`
+		if _, err := decodeResponseJSON(strings.NewReader(document)); err == nil {
+			t.Fatalf("invalid prompt cache diagnostics accepted: %s", diagnostics)
+		}
+		callbacks := 0
+		wire := "data: {\"type\":\"response.completed\",\"response\":" + document + "}\n\n"
+		if _, err := streamResponseData(strings.NewReader(wire), "m", func(string, string) error { callbacks++; return nil }); err == nil || callbacks != 0 {
+			t.Fatalf("invalid prompt cache diagnostics delivered: diagnostics=%s err=%v callbacks=%d", diagnostics, err, callbacks)
+		}
+	}
+}
+
 func TestResponsesPreserveAndValidateGenerationSettings(t *testing.T) {
 	for _, stream := range []bool{false, true} {
 		t.Run(fmt.Sprintf("stream=%v", stream), func(t *testing.T) {
