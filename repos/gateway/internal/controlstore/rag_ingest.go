@@ -22,6 +22,9 @@ func (s *PostgresStore) IngestRAG(ctx context.Context, request ragstate.IngestRe
 		vectorstate.ValidateAttributes(request.Attributes) != "" {
 		return ragstate.IngestResult{}, vectorstate.ErrInvalid
 	}
+	if !request.ChunkingStrategy.Valid() {
+		return ragstate.IngestResult{}, vectorstate.ErrInvalid
+	}
 	if createFile {
 		file := request.File
 		if file.ID == "" || file.OwnerKey != request.OwnerKey || file.Filename == "" || file.Purpose != "assistants" || file.ContentType == "" || file.Bytes < 1 || file.Bytes != int64(len(file.Content)) ||
@@ -150,7 +153,7 @@ func (s *PostgresStore) IngestRAG(ctx context.Context, request ragstate.IngestRe
 	if usedBytes < 0 || file.Bytes < 0 || usedBytes > request.VectorStoreBytes || file.Bytes > request.VectorStoreBytes-usedBytes {
 		return ragstate.IngestResult{}, vectorstate.ErrByteQuotaExceeded
 	}
-	command, err := tx.Exec(ctx, `INSERT INTO gateway_vector_store_files (vector_store_id,file_id,owner_key,attributes) VALUES ($1,$2,$3,$4::jsonb) ON CONFLICT DO NOTHING`, request.VectorStoreID, request.FileID, request.OwnerKey, string(attributes))
+	command, err := tx.Exec(ctx, `INSERT INTO gateway_vector_store_files (vector_store_id,file_id,owner_key,attributes,chunking_type,max_chunk_size_tokens,chunk_overlap_tokens) VALUES ($1,$2,$3,$4::jsonb,$5,$6,$7) ON CONFLICT DO NOTHING`, request.VectorStoreID, request.FileID, request.OwnerKey, string(attributes), request.ChunkingStrategy.Type, nullableChunkingValue(request.ChunkingStrategy.Type, request.ChunkingStrategy.MaxChunkSizeTokens), nullableChunkingValue(request.ChunkingStrategy.Type, request.ChunkingStrategy.ChunkOverlapTokens))
 	if err != nil {
 		return ragstate.IngestResult{}, err
 	}

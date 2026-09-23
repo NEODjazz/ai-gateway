@@ -43,7 +43,7 @@ func (s *ragIngestRecorder) IngestRAG(_ context.Context, request ragstate.Ingest
 		store.FileCount = 1
 		store.UsageBytes = file.Bytes
 	}
-	attachment := vectorstate.File{VectorStoreID: store.ID, FileID: file.ID, OwnerKey: request.OwnerKey, Status: "completed", Bytes: file.Bytes, Attributes: request.Attributes, CreatedAt: now}
+	attachment := vectorstate.File{VectorStoreID: store.ID, FileID: file.ID, OwnerKey: request.OwnerKey, Status: "completed", Bytes: file.Bytes, Attributes: request.Attributes, ChunkingStrategy: request.ChunkingStrategy, CreatedAt: now}
 	return ragstate.IngestResult{File: file, VectorStore: store, Attachment: attachment}, nil
 }
 
@@ -59,7 +59,7 @@ func TestRAGIngestAtomicallyCreatesInlineFileStoreAndAttachment(t *testing.T) {
 	files := &memoryFileStore{files: map[string]filestate.File{}}
 	store := &ragIngestRecorder{memoryVectorStore: &memoryVectorStore{stores: map[string]vectorstate.VectorStore{}, files: map[string]vectorstate.File{}}}
 	handler := newRAGIngestHandler("user", files, store)
-	body := `{"file":{"filename":"guide.md","content":"IyBHdWlkZQ==","content_type":"text/markdown"},"vector_store":{"name":"Guides","metadata":{"region":"eu"}},"attributes":{"category":"manual"},"chunking_strategy":{"type":"auto"}}`
+	body := `{"file":{"filename":"guide.md","content":"IyBHdWlkZQ==","content_type":"text/markdown"},"vector_store":{"name":"Guides","metadata":{"region":"eu"}},"attributes":{"category":"manual"},"chunking_strategy":{"type":"static","static":{"max_chunk_size_tokens":800,"chunk_overlap_tokens":200}}}`
 	request := httptest.NewRequest(http.MethodPost, "/v1/rag/ingest", strings.NewReader(body))
 	request.Header.Set("Authorization", "Bearer key")
 	response := httptest.NewRecorder()
@@ -70,6 +70,9 @@ func TestRAGIngestAtomicallyCreatesInlineFileStoreAndAttachment(t *testing.T) {
 	}
 	if store.request.File == nil || store.request.File.ID == "" || string(store.request.File.Content) != "# Guide" || store.request.File.Purpose != "assistants" || store.request.VectorStore == nil || store.request.VectorStore.ID == "" || store.request.VectorStore.Metadata["region"] != "eu" || store.request.Attributes["category"] != "manual" {
 		t.Fatalf("request=%+v", store.request)
+	}
+	if strategy := store.request.ChunkingStrategy; strategy.Type != "static" || strategy.MaxChunkSizeTokens != 800 || strategy.ChunkOverlapTokens != 200 || !strings.Contains(response.Body.String(), `"chunking_strategy":{"static":{"chunk_overlap_tokens":200,"max_chunk_size_tokens":800},"type":"static"}`) {
+		t.Fatalf("chunking strategy=%+v body=%s", strategy, response.Body.String())
 	}
 }
 

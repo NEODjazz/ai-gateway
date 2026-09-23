@@ -2066,3 +2066,13 @@ client-side.
 ## Native Gemini MCP execution
 
 Remote MCP execution is registry-backed and fail closed. Requests carry only server IDs; the gateway resolves URLs and bearer credentials after authentication, requires an explicit per-server provider-execution opt-in and connector grant, and accepts Streamable HTTP only. Resolved requests bypass response caches and retain provider token accounting through native count and inference paths.
+
+## Vector-store chunking persistence
+
+Vector-store attachments persist their effective `auto` or `static` chunking
+strategy in PostgreSQL. Single-file attachment, atomic file batches, and RAG
+ingestion write the same representation. Content retrieval and synchronous
+search read that stored strategy after a restart, preventing chunk boundaries
+from changing because request-local state was lost. The database constraint
+rejects static sizes outside 100 to 4096 estimated tokens and overlap above half
+the configured chunk size.

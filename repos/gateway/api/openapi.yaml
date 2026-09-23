@@ -1954,7 +1954,7 @@ paths:
       operationId: attachVectorStoreFile
       tags: [Vector stores]
       summary: Attach an owned file to an owned vector store
-      description: Atomically verifies file and vector-store ownership in PostgreSQL, enforces the configured per-store file-count and byte quotas, and refreshes last-active expiry. Auto chunking is explicit; valid static token-based chunking fails with a capability error before storage.
+      description: Atomically verifies file and vector-store ownership in PostgreSQL, enforces the configured per-store file-count and byte quotas, refreshes last-active expiry, and persists the selected auto or static chunking strategy. Static chunk sizes use the gateway's conservative token estimator and apply during content retrieval and synchronous search.
       security: [{bearerAuth: []}]
       requestBody:
         required: true
@@ -6176,7 +6176,7 @@ components:
               - {type: boolean}
           maxProperties: 16
         chunking_strategy:
-          $ref: '#/components/schemas/VectorStoreAutoChunkingStrategy'
+          $ref: '#/components/schemas/VectorStoreChunkingStrategy'
     VectorStoreChunkingStrategy:
       oneOf:
         - $ref: '#/components/schemas/VectorStoreAutoChunkingStrategy'
@@ -6188,6 +6188,7 @@ components:
       properties:
         type: {type: string, const: auto}
     VectorStoreStaticChunkingStrategy:
+      description: Static chunking uses the gateway's conservative token estimator. chunk_overlap_tokens must not exceed half of max_chunk_size_tokens.
       type: object
       additionalProperties: false
       required: [type, static]

@@ -2217,11 +2217,14 @@ overflow-safe aggregate byte limit configured by `VECTOR_STORE_FILE_QUOTA` and
 `VECTOR_STORE_BYTE_QUOTA`. Each attachment can persist up to 16 string, finite
 number, or boolean attributes. Keys are limited to 64 characters and string
 values to 512 characters.
-The optional `chunking_strategy` accepts `{"type":"auto"}`, which is also
-returned for every attachment. A structurally valid static token strategy is
-rejected with `422 vector_store_chunking_unsupported` before storage because
-this runtime does not bind a provider tokenizer during file ingestion. Invalid
-token ranges or overlap greater than half the chunk size return `400`.
+The optional `chunking_strategy` accepts `{"type":"auto"}` or a static
+strategy with `max_chunk_size_tokens` from 100 to 4096 and
+`chunk_overlap_tokens` no greater than half the chunk size. The selected policy
+is persisted per attachment and is applied consistently by parsed-content
+retrieval and synchronous vector search. Static boundaries use the gateway's
+conservative context-token estimator, so they are stable across deployments but
+may leave more unused space than a provider-specific tokenizer. Invalid token
+ranges or overlap greater than half the chunk size return `400`.
 Expired source files do not consume either limit.
 `POST /v1/vector_stores/{id}/files/{file_id}` atomically replaces the complete
 attribute map for an owned attachment; an empty object clears it.

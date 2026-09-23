@@ -47,7 +47,7 @@ func (h Handler) AttachVectorStoreFile(w http.ResponseWriter, r *http.Request) {
 	if !validateVectorStoreChunkingStrategy(w, input.ChunkingStrategy) {
 		return
 	}
-	file, err := h.vectorStores.AttachVectorStoreFile(r.Context(), fileOwnerKey(req), r.PathValue("id"), input.FileID, normalizedVectorStoreAttributes(input.Attributes), h.vectorStoreConfig.FileQuota, h.vectorStoreConfig.ByteQuota)
+	file, err := h.vectorStores.AttachVectorStoreFile(r.Context(), fileOwnerKey(req), r.PathValue("id"), input.FileID, normalizedVectorStoreAttributes(input.Attributes), normalizedVectorStoreChunkingStrategy(input.ChunkingStrategy), h.vectorStoreConfig.FileQuota, h.vectorStoreConfig.ByteQuota)
 	if err != nil {
 		writeVectorStoreFileError(w, err)
 		return
@@ -193,7 +193,7 @@ func (h Handler) GetVectorStoreFileContent(w http.ResponseWriter, r *http.Reques
 		writeVectorSearchError(w, errVectorSearchUnsupportedFile)
 		return
 	}
-	texts := splitVectorSearchText(string(file.Content))
+	texts := splitVectorSearchTextWithStrategy(string(file.Content), attached.ChunkingStrategy)
 	if len(texts) == 0 {
 		writeVectorSearchError(w, errVectorSearchEmpty)
 		return
@@ -266,7 +266,7 @@ func publicVectorStoreFile(file vectorstate.File) map[string]any {
 		"id": file.FileID, "object": "vector_store.file", "usage_bytes": file.Bytes,
 		"created_at": file.CreatedAt.Unix(), "vector_store_id": file.VectorStoreID,
 		"status": file.Status, "last_error": nil, "attributes": normalizedVectorStoreAttributes(file.Attributes),
-		"chunking_strategy": publicVectorStoreChunkingStrategy(),
+		"chunking_strategy": publicVectorStoreChunkingStrategy(file.ChunkingStrategy),
 	}
 }
 
