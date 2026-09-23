@@ -255,6 +255,9 @@ func bedrockInvalid(param string) error {
 }
 
 func (b Bedrock) ValidateChatParameters(request openai.ChatCompletionRequest) error {
+	if err := rejectChatModeration("bedrock", request); err != nil {
+		return err
+	}
 	if err := validateChatReasoningContent("bedrock", request.Messages, false); err != nil {
 		return err
 	}

@@ -229,6 +229,9 @@ func semanticRequest(req modules.RequestContext, endpoint Endpoint) (string, str
 	if request.Store != nil && *request.Store {
 		return "", "", false
 	}
+	if request.Moderation != nil {
+		return "", "", false
+	}
 	if request.GeminiCachedContent != "" {
 		return "", "", false
 	}

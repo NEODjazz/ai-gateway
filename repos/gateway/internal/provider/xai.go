@@ -618,6 +618,9 @@ func (XAI) ValidateImageEditParameters(request openai.ImageEditRequest) error {
 }
 
 func (x XAI) ValidateChatParameters(request openai.ChatCompletionRequest) error {
+	if err := rejectChatModeration("xai", request); err != nil {
+		return err
+	}
 	if !validXAIServiceTier(request.ServiceTier) {
 		return xaiParameterError("service_tier", "service_tier must be default or priority")
 	}

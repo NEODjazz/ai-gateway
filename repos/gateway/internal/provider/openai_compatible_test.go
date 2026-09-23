@@ -787,6 +787,26 @@ func TestOpenAICompatibleDoesNotForwardStreamWhenDisabled(t *testing.T) {
 	}
 }
 
+func TestOpenAICompatibleForwardsChatModeration(t *testing.T) {
+	var upstreamRequest openAICompatibleChatRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&upstreamRequest); err != nil {
+			t.Fatal(err)
+		}
+		_ = json.NewEncoder(w).Encode(openai.ChatCompletionResponse{ID: "chat-moderated", Object: "chat.completion", Model: "test-model", Choices: []openai.Choice{{Index: 0, Message: openai.Message{Role: "assistant", Content: "ok"}, FinishReason: "stop"}}})
+	}))
+	defer server.Close()
+
+	moderation := &openai.ProviderModeration{Model: "omni-moderation-latest", Policy: &openai.ProviderModerationPolicy{Input: &openai.ProviderModerationRule{Mode: "block"}, Output: &openai.ProviderModerationRule{Mode: "score"}}}
+	_, err := NewOpenAICompatible(server.URL, "", false).ChatCompletions(t.Context(), openai.ChatCompletionRequest{ChatGenerationOptions: openai.ChatGenerationOptions{Moderation: moderation}, Model: "test-model", Messages: []openai.Message{{Role: "user", Content: "hello"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if upstreamRequest.Moderation == nil || upstreamRequest.Moderation.Model != moderation.Model || upstreamRequest.Moderation.Policy == nil || upstreamRequest.Moderation.Policy.Input == nil || upstreamRequest.Moderation.Policy.Input.Mode != "block" || upstreamRequest.Moderation.Policy.Output == nil || upstreamRequest.Moderation.Policy.Output.Mode != "score" {
+		t.Fatalf("chat moderation was not forwarded: %+v", upstreamRequest.Moderation)
+	}
+}
+
 func TestOpenAICompatibleCollectsChatStreamWhenEnabled(t *testing.T) {
 	var upstreamRequest openAICompatibleChatRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -918,7 +938,7 @@ func TestOpenAICompatibleStreamsResponsesWhenEnabled(t *testing.T) {
 	webSearch := openai.ResponseTool{Type: "web_search", Filters: map[string]any{"allowed_domains": []string{"example.com"}}, SearchContextSize: "high", UserLocation: &openai.ResponseWebSearchLocation{Type: "approximate", Country: "RU", Timezone: "Europe/Moscow"}}
 	provider := NewOpenAICompatible(server.URL, "", true)
 	response, err := provider.StreamResponses(context.Background(), openai.ResponseRequest{
-		Model: "test-model", Input: "hello", Stream: true, StreamOptions: &openai.ResponseStreamOptions{IncludeObfuscation: &includeObfuscation}, PreviousResponse: "resp-previous", SafetyIdentifier: "provider-user", PromptCacheKey: "tenant-thread", PromptCacheOptions: &openai.PromptCacheOptions{Prewarm: &prewarm}, ContextManagement: []openai.ResponseContextEntry{{Type: "compaction", CompactThreshold: &compactThreshold}}, Moderation: &openai.ResponseModeration{Model: "moderation", Policy: &openai.ResponseModerationPolicy{Input: &openai.ResponseModerationRule{Mode: "block"}}},
+		Model: "test-model", Input: "hello", Stream: true, StreamOptions: &openai.ResponseStreamOptions{IncludeObfuscation: &includeObfuscation}, PreviousResponse: "resp-previous", SafetyIdentifier: "provider-user", PromptCacheKey: "tenant-thread", PromptCacheOptions: &openai.PromptCacheOptions{Prewarm: &prewarm}, ContextManagement: []openai.ResponseContextEntry{{Type: "compaction", CompactThreshold: &compactThreshold}}, Moderation: &openai.ProviderModeration{Model: "moderation", Policy: &openai.ProviderModerationPolicy{Input: &openai.ProviderModerationRule{Mode: "block"}}},
 		Tools: []openai.ResponseTool{
 			{Type: "function", Name: "weather", Parameters: map[string]any{"type": "object"}},
 			{Type: "mcp", ServerLabel: "weather-prod", ServerURL: "https://mcp.example.test", AllowedTools: []string{"forecast"}, RequireApproval: "never", Headers: map[string]string{"X-MCP-Key": "scoped"}},
@@ -990,7 +1010,7 @@ func TestOpenAICompatibleForwardsResponseCacheIdentifiers(t *testing.T) {
 	prewarm := true
 	cacheOptions := &openai.PromptCacheOptions{Mode: "explicit", TTL: "30m", ComparisonResponseID: "resp_baseline", Prewarm: &prewarm}
 	threshold := 1000
-	if _, err := provider.Responses(context.Background(), openai.ResponseRequest{Model: "test-model", Input: input, SafetyIdentifier: "provider-user", PromptCacheKey: "tenant-thread", PromptCacheOptions: cacheOptions, PromptCacheRetention: "24h", ContextManagement: []openai.ResponseContextEntry{{Type: "compaction", CompactThreshold: &threshold}}, Moderation: &openai.ResponseModeration{Model: "moderation", Policy: &openai.ResponseModerationPolicy{Output: &openai.ResponseModerationRule{Mode: "score"}}}}); err != nil {
+	if _, err := provider.Responses(context.Background(), openai.ResponseRequest{Model: "test-model", Input: input, SafetyIdentifier: "provider-user", PromptCacheKey: "tenant-thread", PromptCacheOptions: cacheOptions, PromptCacheRetention: "24h", ContextManagement: []openai.ResponseContextEntry{{Type: "compaction", CompactThreshold: &threshold}}, Moderation: &openai.ProviderModeration{Model: "moderation", Policy: &openai.ProviderModerationPolicy{Output: &openai.ProviderModerationRule{Mode: "score"}}}}); err != nil {
 		t.Fatal(err)
 	}
 	if upstreamRequest.SafetyIdentifier != "provider-user" || upstreamRequest.PromptCacheKey != "tenant-thread" || upstreamRequest.PromptCacheOptions == nil || upstreamRequest.PromptCacheOptions.Mode != "explicit" || upstreamRequest.PromptCacheOptions.TTL != "30m" || upstreamRequest.PromptCacheOptions.ComparisonResponseID != "resp_baseline" || upstreamRequest.PromptCacheOptions.Prewarm == nil || !*upstreamRequest.PromptCacheOptions.Prewarm || upstreamRequest.PromptCacheRetention != "24h" {

@@ -251,6 +251,9 @@ func geminiInvalid(param string) error {
 }
 
 func (Gemini) ValidateChatParameters(request openai.ChatCompletionRequest) error {
+	if err := rejectChatModeration("gemini", request); err != nil {
+		return err
+	}
 	if err := validateChatReasoningContent("gemini", request.Messages, false); err != nil {
 		return err
 	}

@@ -1204,7 +1204,7 @@ func managedResponseOptionProbes() []managedResponseOptionProbe {
 			request.ContextManagement = []openai.ResponseContextEntry{{Type: "compaction", CompactThreshold: &threshold}}
 		}},
 		{name: "moderation", apply: func(request *openai.ResponseRequest) {
-			request.Moderation = &openai.ResponseModeration{Model: "omni-moderation-latest", Policy: &openai.ResponseModerationPolicy{Input: &openai.ResponseModerationRule{Mode: "block"}}}
+			request.Moderation = &openai.ProviderModeration{Model: "omni-moderation-latest", Policy: &openai.ProviderModerationPolicy{Input: &openai.ProviderModerationRule{Mode: "block"}}}
 		}},
 		{name: "top_logprobs", apply: func(request *openai.ResponseRequest) { value := 1; request.TopLogprobs = &value }},
 		{name: "truncation", apply: func(request *openai.ResponseRequest) { value := "auto"; request.Truncation = &value }},
@@ -1299,6 +1299,9 @@ func managedChatOptionProbes() []managedChatOptionProbe {
 		{name: "audio", apply: func(request *openai.ChatCompletionRequest) {
 			request.Modalities = []string{"audio"}
 			request.Audio = &openai.ChatAudioOptions{Format: "wav", Voice: openai.ChatAudioVoice{Name: "alloy"}}
+		}},
+		{name: "moderation", apply: func(request *openai.ChatCompletionRequest) {
+			request.Moderation = &openai.ProviderModeration{Model: "omni-moderation-latest", Policy: &openai.ProviderModerationPolicy{Input: &openai.ProviderModerationRule{Mode: "block"}}}
 		}},
 		{name: "safe_prompt", apply: setBool(func(request *openai.ChatCompletionRequest) **bool { return &request.SafePrompt }, true)},
 		{name: "n", apply: func(request *openai.ChatCompletionRequest) { value := 2; request.N = &value }},

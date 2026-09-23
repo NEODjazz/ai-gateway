@@ -736,7 +736,14 @@ func (r Router) ChatCompletions(ctx context.Context, req modules.RequestContext)
 		started := time.Now()
 		lastAttempt = &attemptCtx
 		cacheKey := providerCacheKey("chat", attemptCtx)
-		if payload, found, cacheErr := r.cacheGet(ctx, cacheKey); found {
+		replaySafe := chatReplaySafe(attemptCtx.Request)
+		var payload []byte
+		var found bool
+		var cacheErr error
+		if replaySafe {
+			payload, found, cacheErr = r.cacheGet(ctx, cacheKey)
+		}
+		if found {
 			if response, ok := decodeCached[openai.ChatCompletionResponse](payload); ok {
 				attemptCtx.Metadata["provider.cache.status"] = "hit"
 				attemptCtx.Metadata["provider.cache.kind"] = "exact"
@@ -756,7 +763,7 @@ func (r Router) ChatCompletions(ctx context.Context, req modules.RequestContext)
 			log.Printf("provider cache get failed: %v", cacheErr)
 		}
 		semanticScope, semanticVector := "", []float64(nil)
-		if scope, text, eligible := semanticRequest(attemptCtx, endpoint); eligible && r.semantic != nil {
+		if scope, text, eligible := semanticRequest(attemptCtx, endpoint); replaySafe && eligible && r.semantic != nil {
 			vector, embedErr := r.semantic.embedder.embed(ctx, text)
 			if embedErr != nil {
 				if r.observer != nil {
@@ -789,7 +796,7 @@ func (r Router) ChatCompletions(ctx context.Context, req modules.RequestContext)
 				}
 			}
 		}
-		if !mirrored && request.GeminiCachedContent == "" {
+		if !mirrored && request.GeminiCachedContent == "" && replaySafe {
 			r.mirrorChat(ctx, req.RequestID, attemptCtx.Request, request.Model, requiredChatCapabilities(request, false)...)
 			mirrored = true
 		}
@@ -801,7 +808,7 @@ func (r Router) ChatCompletions(ctx context.Context, req modules.RequestContext)
 			response.ProviderEndpoint = endpoint.Name
 			attemptCtx.Metadata["provider.cache.status"] = "miss"
 			var cachePayload []byte
-			if !chatResponseHasNativeContent(response) {
+			if replaySafe && !chatResponseHasNativeContent(response) {
 				cachePayload, _ = json.Marshal(response)
 			}
 			mergeChatUsage(&response, attemptCtx.Usage)
@@ -930,7 +937,7 @@ func (r Router) StreamChatCompletions(ctx context.Context, req modules.RequestCo
 			return openai.ChatCompletionResponse{}, false, err
 		}
 		lastAttempt = &attemptCtx
-		if !mirrored && request.GeminiCachedContent == "" {
+		if !mirrored && request.GeminiCachedContent == "" && chatReplaySafe(attemptCtx.Request) {
 			r.mirrorChat(ctx, req.RequestID, attemptCtx.Request, request.Model, requiredChatCapabilities(request, true)...)
 			mirrored = true
 		}

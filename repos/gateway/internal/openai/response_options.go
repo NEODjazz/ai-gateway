@@ -67,7 +67,7 @@ func (r ResponseRequest) Validate() string {
 			return "context_management compact_threshold must be positive"
 		}
 	}
-	if message := validateResponseModeration(r.Moderation); message != "" {
+	if message := validateProviderModeration(r.Moderation); message != "" {
 		return message
 	}
 	if message := validateResponseIncludes(r.Include); message != "" {
@@ -138,7 +138,7 @@ func (r ResponseRequest) Validate() string {
 	return ""
 }
 
-func validateResponseModeration(moderation *ResponseModeration) string {
+func validateProviderModeration(moderation *ProviderModeration) string {
 	if moderation == nil {
 		return ""
 	}
@@ -148,7 +148,7 @@ func validateResponseModeration(moderation *ResponseModeration) string {
 	if moderation.Policy == nil {
 		return ""
 	}
-	for _, rule := range []*ResponseModerationRule{moderation.Policy.Input, moderation.Policy.Output} {
+	for _, rule := range []*ProviderModerationRule{moderation.Policy.Input, moderation.Policy.Output} {
 		if rule != nil && rule.Mode != "score" && rule.Mode != "block" {
 			return "moderation policy mode must be score or block"
 		}

@@ -70,22 +70,22 @@ func TestResponseContextManagementValidation(t *testing.T) {
 	}
 }
 
-func TestResponseModerationValidation(t *testing.T) {
-	valid := ResponseRequest{Moderation: &ResponseModeration{
+func TestProviderModerationValidation(t *testing.T) {
+	valid := ResponseRequest{Moderation: &ProviderModeration{
 		Model: "omni-moderation-latest",
-		Policy: &ResponseModerationPolicy{
-			Input:  &ResponseModerationRule{Mode: "block"},
-			Output: &ResponseModerationRule{Mode: "score"},
+		Policy: &ProviderModerationPolicy{
+			Input:  &ProviderModerationRule{Mode: "block"},
+			Output: &ProviderModerationRule{Mode: "score"},
 		},
 	}}
 	if message := valid.Validate(); message != "" {
 		t.Fatalf("valid moderation rejected: %s", message)
 	}
-	for _, moderation := range []*ResponseModeration{
+	for _, moderation := range []*ProviderModeration{
 		{},
 		{Model: strings.Repeat("м", 257)},
-		{Model: "moderation", Policy: &ResponseModerationPolicy{Input: &ResponseModerationRule{Mode: "allow"}}},
-		{Model: "moderation", Policy: &ResponseModerationPolicy{Output: &ResponseModerationRule{}}},
+		{Model: "moderation", Policy: &ProviderModerationPolicy{Input: &ProviderModerationRule{Mode: "allow"}}},
+		{Model: "moderation", Policy: &ProviderModerationPolicy{Output: &ProviderModerationRule{}}},
 	} {
 		if message := (ResponseRequest{Moderation: moderation}).Validate(); message == "" {
 			t.Fatalf("invalid moderation accepted: %+v", moderation)

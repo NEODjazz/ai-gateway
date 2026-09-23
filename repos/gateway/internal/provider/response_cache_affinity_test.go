@@ -217,7 +217,7 @@ func TestResponsesContextManagementIsNotReplaySafe(t *testing.T) {
 }
 
 func TestResponsesModerationIsNotReplaySafe(t *testing.T) {
-	request := openai.ResponseRequest{Model: "m", Input: "hello", Moderation: &openai.ResponseModeration{Model: "moderation"}}
+	request := openai.ResponseRequest{Model: "m", Input: "hello", Moderation: &openai.ProviderModeration{Model: "moderation"}}
 	if responseReplaySafe(request) {
 		t.Fatal("provider-moderated request was considered replay safe")
 	}

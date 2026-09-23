@@ -161,6 +161,9 @@ func decodeTogetherImageResponse(reader io.Reader, request openai.ImageGeneratio
 }
 
 func (t Together) ValidateChatParameters(request openai.ChatCompletionRequest) error {
+	if err := rejectChatModeration("together", request); err != nil {
+		return err
+	}
 	if request.ReasoningEffort != "" {
 		allowed := map[string]bool{}
 		switch request.Model {

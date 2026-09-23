@@ -26,9 +26,16 @@ func rejectParameters(adapter string, checks ...parameterCheck) error {
 	return nil
 }
 
+func rejectChatModeration(adapter string, request openai.ChatCompletionRequest) error {
+	return rejectParameters(adapter, parameterCheck{"moderation", request.Moderation != nil})
+}
+
 var errUnsupportedServiceTier = errors.New("service_tier is not supported by this adapter")
 
 func (Anthropic) ValidateChatParameters(request openai.ChatCompletionRequest) error {
+	if err := rejectChatModeration("anthropic", request); err != nil {
+		return err
+	}
 	if err := validateChatReasoningContent("anthropic", request.Messages, false); err != nil {
 		return err
 	}
@@ -136,6 +143,9 @@ func (Ollama) ValidateResponseParameters(request openai.ResponseRequest) error {
 }
 
 func (Ollama) ValidateChatParameters(request openai.ChatCompletionRequest) error {
+	if err := rejectChatModeration("ollama", request); err != nil {
+		return err
+	}
 	if err := validateChatReasoningContent("ollama", request.Messages, true); err != nil {
 		return err
 	}
@@ -314,6 +324,7 @@ func rejectGenerationOptions(adapter string, options openai.ChatGenerationOption
 		parameterCheck{"store", options.Store != nil},
 		parameterCheck{"modalities", options.Modalities != nil},
 		parameterCheck{"audio", options.Audio != nil},
+		parameterCheck{"moderation", options.Moderation != nil},
 		parameterCheck{"reasoning_effort", options.ReasoningEffort != ""},
 		parameterCheck{"safe_prompt", options.SafePrompt != nil},
 		parameterCheck{"n", options.N != nil},
@@ -341,6 +352,9 @@ func rejectGenerationOptions(adapter string, options openai.ChatGenerationOption
 }
 
 func (Demo) ValidateChatParameters(request openai.ChatCompletionRequest) error {
+	if err := rejectChatModeration("demo", request); err != nil {
+		return err
+	}
 	if err := validateChatReasoningContent("demo", request.Messages, false); err != nil {
 		return err
 	}

@@ -11,6 +11,9 @@ import (
 )
 
 func (r Router) mirrorChat(ctx context.Context, requestID string, request openai.ChatCompletionRequest, requestedModel string, capabilities ...string) {
+	if !chatReplaySafe(request) {
+		return
+	}
 	catalog := r.catalog.Current(ctx)
 	for _, endpoint := range r.shadowEndpoints(catalog, requestedModel, capabilities...) {
 		if !mirrorSample(requestID, requestedModel, endpoint) {

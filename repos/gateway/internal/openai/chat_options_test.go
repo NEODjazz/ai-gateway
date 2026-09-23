@@ -14,6 +14,10 @@ func TestChatGenerationOptionValidation(t *testing.T) {
 	}{
 		{`{}`, true},
 		{`{"modalities":["text"]}`, true},
+		{`{"moderation":{"model":"omni-moderation-latest","policy":{"input":{"mode":"block"},"output":{"mode":"score"}}}}`, true},
+		{`{"moderation":{}}`, false},
+		{`{"moderation":{"model":"moderation","policy":{"input":{"mode":"allow"}}}}`, false},
+		{`{"moderation":{"model":"moderation","policy":{"output":{}}}}`, false},
 		{`{"modalities":[]}`, false},
 		{`{"modalities":["audio"]}`, false},
 		{`{"modalities":["text","text"]}`, false},

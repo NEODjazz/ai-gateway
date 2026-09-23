@@ -28,6 +28,9 @@ func (Groq) SupportsStructuredOutput() bool   { return true }
 func (Groq) SupportsVision() bool             { return true }
 
 func (g Groq) ValidateChatParameters(request openai.ChatCompletionRequest) error {
+	if err := rejectChatModeration("groq", request); err != nil {
+		return err
+	}
 	if err := rejectParameters("groq",
 		parameterCheck{"metadata", request.Metadata != nil},
 		parameterCheck{"modalities", request.Modalities != nil}, parameterCheck{"audio", request.Audio != nil},

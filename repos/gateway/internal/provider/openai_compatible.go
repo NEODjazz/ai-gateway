@@ -83,7 +83,7 @@ func (r openAICompatibleChatRequest) MarshalJSON() ([]byte, error) {
 type openAICompatibleResponseRequest struct {
 	Metadata             map[string]string             `json:"metadata,omitempty"`
 	ContextManagement    []openai.ResponseContextEntry `json:"context_management,omitempty"`
-	Moderation           *openai.ResponseModeration    `json:"moderation,omitempty"`
+	Moderation           *openai.ProviderModeration    `json:"moderation,omitempty"`
 	TopLogprobs          *int                          `json:"top_logprobs,omitempty"`
 	Truncation           *string                       `json:"truncation,omitempty"`
 	Reasoning            *openai.ResponseReasoning     `json:"reasoning,omitempty"`

@@ -32,6 +32,9 @@ func (Cerebras) Responses(context.Context, openai.ResponseRequest) (openai.Respo
 }
 
 func (c Cerebras) ValidateChatParameters(request openai.ChatCompletionRequest) error {
+	if err := rejectChatModeration("cerebras", request); err != nil {
+		return err
+	}
 	if err := rejectLegacyFunctionCalling("cerebras", request); err != nil {
 		return err
 	}

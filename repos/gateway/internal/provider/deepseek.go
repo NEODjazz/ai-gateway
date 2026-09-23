@@ -26,6 +26,9 @@ func (DeepSeek) SupportsStructuredOutput() bool { return true }
 func (DeepSeek) SupportsVision() bool           { return true }
 
 func (d DeepSeek) ValidateChatParameters(request openai.ChatCompletionRequest) error {
+	if err := rejectChatModeration("deepseek", request); err != nil {
+		return err
+	}
 	if err := rejectLegacyFunctionCalling("deepseek", request); err != nil {
 		return err
 	}

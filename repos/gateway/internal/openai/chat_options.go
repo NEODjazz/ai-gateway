@@ -17,6 +17,7 @@ type ChatGenerationOptions struct {
 	Store                *bool                 `json:"store,omitempty"`
 	Modalities           []string              `json:"modalities,omitempty"`
 	Audio                *ChatAudioOptions     `json:"audio,omitempty"`
+	Moderation           *ProviderModeration   `json:"moderation,omitempty"`
 	ReasoningEffort      string                `json:"reasoning_effort,omitempty"`
 	SafePrompt           *bool                 `json:"safe_prompt,omitempty"`
 	N                    *int                  `json:"n,omitempty"`
@@ -95,6 +96,9 @@ type ChatPrediction struct {
 
 func (o ChatGenerationOptions) Validate() string {
 	if message := ValidateMetadata(o.Metadata); message != "" {
+		return message
+	}
+	if message := validateProviderModeration(o.Moderation); message != "" {
 		return message
 	}
 	if o.N != nil && (*o.N < 1 || *o.N > 128) {

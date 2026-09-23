@@ -8774,6 +8774,10 @@ components:
           items: {type: string, enum: [text, audio]}
           description: Native Gemini accepts text-only output; compatible deployment support is provider-specific.
         audio: {$ref: '#/components/schemas/ChatAudioOptions'}
+        moderation:
+          allOf:
+            - $ref: '#/components/schemas/ProviderModeration'
+          description: Provider-side input and output moderation for compatible, OpenAI, and Azure OpenAI deployments. Requests bypass gateway response caches and shadow execution.
         reasoning_effort: {type: string, enum: [none, minimal, low, medium, high, xhigh, max, default], description: Native Gemini maps minimal through high to thinkingConfig.thinkingLevel; native Ollama maps none to think=false; available levels depend on the selected model.}
         safe_prompt: {type: boolean, description: Enables provider-managed prompt safety for native Mistral Chat deployments; rejected by other adapters.}
         n: {type: integer, minimum: 1, maximum: 128, default: 1, description: Native Gemini supports values up to 20; compatible deployment limits are provider-specific.}
@@ -9403,12 +9407,24 @@ components:
             oneOf:
               - $ref: '#/components/schemas/TextContentPart'
               - $ref: '#/components/schemas/InputImageContentPart'
-    ResponseModerationRule:
+    ProviderModerationRule:
       type: object
       additionalProperties: false
       required: [mode]
       properties:
         mode: {type: string, enum: [score, block]}
+    ProviderModeration:
+      type: object
+      additionalProperties: false
+      required: [model]
+      properties:
+        model: {type: string, minLength: 1, maxLength: 256}
+        policy:
+          type: object
+          additionalProperties: false
+          properties:
+            input: {$ref: '#/components/schemas/ProviderModerationRule'}
+            output: {$ref: '#/components/schemas/ProviderModerationRule'}
     ResponseRequest:
       description: Supply at most one non-null output limit, max_output_tokens or max_tokens.
       type: object
@@ -9433,18 +9449,9 @@ components:
               type: {type: string, const: compaction}
               compact_threshold: {type: integer, minimum: 1, description: Provider token threshold at which server-side compaction may run.}
         moderation:
-          type: object
+          allOf:
+            - $ref: '#/components/schemas/ProviderModeration'
           description: Provider-side input and output moderation. Requests bypass gateway response caches and shadow execution.
-          additionalProperties: false
-          required: [model]
-          properties:
-            model: {type: string, minLength: 1, maxLength: 256}
-            policy:
-              type: object
-              additionalProperties: false
-              properties:
-                input: {$ref: '#/components/schemas/ResponseModerationRule'}
-                output: {$ref: '#/components/schemas/ResponseModerationRule'}
         reasoning:
           type: object
           additionalProperties: false

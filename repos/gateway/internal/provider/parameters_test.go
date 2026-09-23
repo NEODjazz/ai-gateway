@@ -308,8 +308,8 @@ func TestNativeAdaptersRejectResponseContextManagement(t *testing.T) {
 	}
 }
 
-func TestNativeAdaptersRejectResponseModeration(t *testing.T) {
-	request := openai.ResponseRequest{Model: "model", Input: "hello", Moderation: &openai.ResponseModeration{Model: "moderation"}}
+func TestNativeAdaptersRejectResponsesProviderModeration(t *testing.T) {
+	request := openai.ResponseRequest{Model: "model", Input: "hello", Moderation: &openai.ProviderModeration{Model: "moderation"}}
 	for name, validate := range map[string]func(openai.ResponseRequest) error{
 		"anthropic": (Anthropic{}).ValidateResponseParameters,
 		"deepseek":  (DeepSeek{}).ValidateResponseParameters,
@@ -317,6 +317,31 @@ func TestNativeAdaptersRejectResponseModeration(t *testing.T) {
 		"groq":      (Groq{}).ValidateResponseParameters,
 		"ollama":    (Ollama{}).ValidateResponseParameters,
 		"xai":       (XAI{}).ValidateResponseParameters,
+	} {
+		t.Run(name, func(t *testing.T) {
+			assertUnsupportedParameter(t, validate(request), "moderation")
+		})
+	}
+}
+
+func TestNativeAdaptersRejectChatProviderModeration(t *testing.T) {
+	request := openai.ChatCompletionRequest{ChatGenerationOptions: openai.ChatGenerationOptions{Moderation: &openai.ProviderModeration{Model: "moderation"}}, Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}}}
+	for name, validate := range map[string]func(openai.ChatCompletionRequest) error{
+		"anthropic":  (Anthropic{}).ValidateChatParameters,
+		"bedrock":    (Bedrock{}).ValidateChatParameters,
+		"cerebras":   (Cerebras{}).ValidateChatParameters,
+		"cohere":     (Cohere{}).ValidateChatParameters,
+		"deepseek":   (DeepSeek{}).ValidateChatParameters,
+		"demo":       (Demo{}).ValidateChatParameters,
+		"gemini":     (Gemini{}).ValidateChatParameters,
+		"groq":       (Groq{}).ValidateChatParameters,
+		"mistral":    (Mistral{}).ValidateChatParameters,
+		"nvidia-nim": (NVIDIANIM{}).ValidateChatParameters,
+		"ollama":     (Ollama{}).ValidateChatParameters,
+		"openrouter": (OpenRouter{}).ValidateChatParameters,
+		"together":   (Together{}).ValidateChatParameters,
+		"vertex":     (VertexGemini{}).ValidateChatParameters,
+		"xai":        (XAI{}).ValidateChatParameters,
 	} {
 		t.Run(name, func(t *testing.T) {
 			assertUnsupportedParameter(t, validate(request), "moderation")
