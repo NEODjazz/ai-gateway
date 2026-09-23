@@ -2333,3 +2333,18 @@ ID `sha256:1b41dec02b9b5c79cfcd8f78a83e3d4531096cab3577691e08e60397f1504090`.
 Gateway Helm revision 595 completed successfully. Pod
 `ai-gateway-gateway-86c8bbc88b-nt8wk` became Ready with zero restarts, and
 direct service liveness and readiness both returned 204.
+
+## DeepSeek Responses nested input content
+
+Source `b4fc28f` extends native DeepSeek Responses validation to content parts
+inside messages and tool outputs. Only provider-supported text and image parts
+are accepted, while unsupported file parts and unknown types fail before
+provider execution. Reasoning input rejects unsupported summaries and encrypted
+content and accepts plain reasoning text. Provider regressions and the full race
+suite, vet and build passed.
+
+Rancher Desktop built `ai-gateway-gateway:deepseek-parts-b4fc28f5` with image
+ID `sha256:272929d6846f0b2654480d509dc26d3c59a5e9c57535209f9e9a14a432a2a81a`.
+Gateway Helm revision 596 completed successfully. Pod
+`ai-gateway-gateway-777c9b58f9-db9km` became Ready with zero restarts, and
+direct service liveness and readiness both returned 204.
