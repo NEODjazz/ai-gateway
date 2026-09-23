@@ -42,12 +42,12 @@ func TestXAIChatAndResponsesContracts(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatal(err)
 		}
-		if body["model"] != "grok" || body["service_tier"] != "priority" {
+		if body["model"] != "grok-4.7" || body["service_tier"] != "priority" {
 			t.Fatalf("request=%#v", body)
 		}
 		switch r.URL.Path {
 		case "/v1/chat/completions":
-			if body["reasoning_effort"] != "xhigh" || body["logprobs"] != true {
+			if body["reasoning_effort"] != "xhigh" {
 				t.Fatalf("chat request=%#v", body)
 			}
 			_, _ = fmt.Fprint(w, `{"id":"chat","object":"chat.completion","model":"grok","service_tier":"priority","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}`)
@@ -64,10 +64,9 @@ func TestXAIChatAndResponsesContracts(t *testing.T) {
 	defer server.Close()
 
 	client := NewXAI(server.URL+"/v1", "xai-key", true)
-	logprobs := true
 	chat, err := client.ChatCompletions(t.Context(), openai.ChatCompletionRequest{
-		Model: "grok", Messages: []openai.Message{{Role: "user", Content: "hello"}},
-		ChatGenerationOptions: openai.ChatGenerationOptions{ReasoningEffort: "xhigh", Logprobs: &logprobs, ServiceTier: "priority"},
+		Model: "grok-4.7", Messages: []openai.Message{{Role: "user", Content: "hello"}},
+		ChatGenerationOptions: openai.ChatGenerationOptions{ReasoningEffort: "xhigh", ServiceTier: "priority"},
 	})
 	if err != nil || chat.Usage.TotalTokens != 3 || chat.ServiceTier != "priority" {
 		t.Fatalf("chat=%+v err=%v", chat, err)
@@ -80,7 +79,7 @@ func TestXAIChatAndResponsesContracts(t *testing.T) {
 	temperature := 0.7
 	topP := 0.9
 	response, err := client.Responses(t.Context(), openai.ResponseRequest{
-		Model: "grok", Input: "hello", ServiceTier: "priority", PromptCacheKey: "conversation",
+		Model: "grok-4.7", Input: "hello", ServiceTier: "priority", PromptCacheKey: "conversation",
 		Reasoning: &openai.ResponseReasoning{Effort: &effort}, Text: map[string]any{"format": map[string]any{"type": "text"}}, Tools: []openai.ResponseTool{{Type: "function", Name: "lookup", Parameters: map[string]any{"type": "object"}}}, ToolChoice: "auto", MaxOutputTokens: &maxOutputTokens, MaxToolCalls: &maxToolCalls, ParallelToolCalls: &parallelToolCalls, Temperature: &temperature, TopP: &topP, Store: &store, PreviousResponse: "resp_prior",
 	})
 	if err != nil || response.CreatedAt != 100 || response.CompletedAt != 101 || response.Background == nil || *response.Background || response.Store == nil || *response.Store || response.PreviousResponseID == nil || *response.PreviousResponseID != "resp_prior" || response.ServiceTier != "priority" || response.MaxOutputTokens == nil || *response.MaxOutputTokens != 64 || response.MaxToolCalls == nil || *response.MaxToolCalls != 3 || response.ParallelToolCalls == nil || *response.ParallelToolCalls || response.Temperature == nil || *response.Temperature != 0.7 || response.TopP == nil || *response.TopP != 0.9 || response.TopLogprobs == nil || *response.TopLogprobs != 0 || response.FrequencyPenalty == nil || *response.FrequencyPenalty != 0 || response.PresencePenalty == nil || *response.PresencePenalty != 0 || response.Truncation == nil || *response.Truncation != "disabled" || response.Reasoning == nil || response.Reasoning.Effort == nil || *response.Reasoning.Effort != "high" || len(response.Tools) != 1 || response.Tools[0].Name != "lookup" || response.Text == nil || response.ToolChoice != "auto" || !slices.Equal(response.Citations, []string{"https://x.ai/news", "https://x.com/xai/status/1"}) || response.Usage.TotalTokens != 3 || response.OutputText != "ok" || response.Usage.NumSourcesUsed == nil || *response.Usage.NumSourcesUsed != 4 || response.Usage.NumServerSideToolsUsed == nil || *response.Usage.NumServerSideToolsUsed != 2 || response.Usage.ServerSideToolUsageDetails == nil || response.Usage.ServerSideToolUsageDetails.XPostsFetched == nil || *response.Usage.ServerSideToolUsageDetails.XPostsFetched != 6 || response.Usage.ServerSideToolUsageDetails.XUsersFetched == nil || *response.Usage.ServerSideToolUsageDetails.XUsersFetched != 1 {
@@ -140,7 +139,7 @@ func TestXAIChatParameterPolicy(t *testing.T) {
 	falseLogprobs := false
 	topEight := 8
 	topNine := 9
-	if err := client.ValidateChatParameters(openai.ChatCompletionRequest{ChatGenerationOptions: openai.ChatGenerationOptions{ReasoningEffort: "none", Logprobs: &logprobs, TopLogprobs: &topEight}}); err != nil {
+	if err := client.ValidateChatParameters(openai.ChatCompletionRequest{ChatGenerationOptions: openai.ChatGenerationOptions{Logprobs: &logprobs, TopLogprobs: &topEight}}); err != nil {
 		t.Fatalf("valid parameters: %v", err)
 	}
 	tests := []struct {
@@ -163,6 +162,66 @@ func TestXAIChatParameterPolicy(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestXAIReasoningEffortIsModelScoped(t *testing.T) {
+	client := NewXAI("http://unused.invalid", "", false)
+	tests := []struct {
+		model, effort   string
+		chat, responses bool
+	}{
+		{model: "grok-4.5", effort: "low", chat: true, responses: true},
+		{model: "grok-4.5", effort: "xhigh"},
+		{model: "grok-4.6", effort: "xhigh", chat: true, responses: true},
+		{model: "grok-4.7-latest", effort: "xhigh", chat: true, responses: true},
+		{model: "grok-4.7", effort: "none"},
+		{model: "grok-4.20-multi-agent", effort: "xhigh", responses: true},
+		{model: "unknown", effort: "high"},
+	}
+	for _, test := range tests {
+		t.Run(test.model+"/"+test.effort, func(t *testing.T) {
+			chat := openai.ChatCompletionRequest{Model: test.model, Messages: []openai.Message{{Role: "user", Content: "hello"}}, ChatGenerationOptions: openai.ChatGenerationOptions{ReasoningEffort: test.effort}}
+			chatErr := client.ValidateChatParameters(chat)
+			if test.chat && chatErr != nil || !test.chat && !xaiFailure(chatErr, "reasoning_effort", "invalid_request") {
+				t.Fatalf("chat err=%v expected support=%v", chatErr, test.chat)
+			}
+			responses := openai.ResponseRequest{Model: test.model, Input: "hello", Reasoning: &openai.ResponseReasoning{Effort: &test.effort}}
+			responseErr := client.ValidateResponseParameters(responses)
+			if test.responses && responseErr != nil || !test.responses && !xaiFailure(responseErr, "reasoning.effort", "invalid_request") {
+				t.Fatalf("Responses err=%v expected support=%v", responseErr, test.responses)
+			}
+		})
+	}
+}
+
+func TestXAICapabilityProfilePublishesReasoningByModel(t *testing.T) {
+	for _, profile := range ManagedProviderCapabilityProfiles() {
+		if profile.Type != "xai" {
+			continue
+		}
+		if len(profile.ChatParameters.ReasoningEffort) != 0 || len(profile.ResponseParameters.ReasoningEffort) != 0 {
+			t.Fatalf("provider-wide reasoning policy=%+v %+v", profile.ChatParameters, profile.ResponseParameters)
+		}
+		wantChat := []ProviderChatModelParameterPolicy{
+			{Model: "grok-4.5", SupportedOptions: []string{"reasoning_effort"}, ReasoningEffort: []string{"low", "medium", "high"}, ReasoningFormat: []string{}},
+			{Model: "grok-4.6", SupportedOptions: []string{"reasoning_effort"}, ReasoningEffort: []string{"low", "medium", "high", "xhigh"}, ReasoningFormat: []string{}},
+			{Model: "grok-4.7", SupportedOptions: []string{"reasoning_effort"}, ReasoningEffort: []string{"low", "medium", "high", "xhigh"}, ReasoningFormat: []string{}},
+		}
+		if fmt.Sprint(profile.ChatModelParameters) != fmt.Sprint(wantChat) {
+			t.Fatalf("chat model policies=%+v want=%+v", profile.ChatModelParameters, wantChat)
+		}
+		wantResponses := []ProviderResponseModelParameterPolicy{
+			{Model: "grok-4.5", SupportedOptions: []string{"reasoning"}, ReasoningEffort: []string{"low", "medium", "high"}},
+			{Model: "grok-4.6", SupportedOptions: []string{"reasoning"}, ReasoningEffort: []string{"low", "medium", "high", "xhigh"}},
+			{Model: "grok-4.7", SupportedOptions: []string{"reasoning"}, ReasoningEffort: []string{"low", "medium", "high", "xhigh"}},
+			{Model: "grok-4.20-multi-agent", SupportedOptions: []string{"reasoning"}, ReasoningEffort: []string{"low", "medium", "high", "xhigh"}},
+		}
+		if fmt.Sprint(profile.ResponseModelParameters) != fmt.Sprint(wantResponses) {
+			t.Fatalf("Responses model policies=%+v want=%+v", profile.ResponseModelParameters, wantResponses)
+		}
+		return
+	}
+	t.Fatal("xAI profile is missing")
 }
 
 func TestXAIResponseResourceLifecycle(t *testing.T) {

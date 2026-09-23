@@ -534,7 +534,7 @@ func TestManagedProviderCapabilityProfilesExposeValidatedChatParameters(t *testi
 		"cohere":            {ReasoningEffort: []string{}, Logprobs: []string{"false", "true"}, ServiceTier: []string{}},
 		"mistral":           {ReasoningEffort: []string{"none", "minimal", "low", "medium", "high", "xhigh"}, Logprobs: []string{}, ServiceTier: []string{}},
 		"deepseek":          {ReasoningEffort: []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"}, Thinking: []string{"enabled", "disabled"}, Logprobs: []string{"false", "true"}, ServiceTier: []string{}},
-		"xai":               {ReasoningEffort: []string{"none", "low", "medium", "high", "xhigh"}, Logprobs: []string{"false", "true"}, ServiceTier: []string{"default", "priority"}},
+		"xai":               {ReasoningEffort: []string{}, Logprobs: []string{"false", "true"}, ServiceTier: []string{"default", "priority"}},
 		"groq":              {ReasoningEffort: []string{}, ReasoningFormat: []string{}, CitationOptions: []string{"enabled", "disabled"}, Logprobs: []string{}, ServiceTier: []string{"auto", "on_demand", "flex", "performance"}},
 		"openrouter":        {ReasoningEffort: allReasoning, Logprobs: []string{"false", "true"}, ServiceTier: allTiers},
 		"openai-compatible": {ReasoningEffort: allReasoning, Logprobs: []string{"false", "true"}, ServiceTier: []string{}},
@@ -572,7 +572,7 @@ func TestManagedProviderCapabilityProfilesExposeAllValidatedChatOptions(t *testi
 		"bedrock":           {"service_tier"},
 		"groq":              {"user", "citation_options", "service_tier"},
 		"deepseek":          {"user", "logprobs", "top_logprobs", "reasoning_effort", "thinking"},
-		"xai":               {"n", "prompt_cache_key", "user", "web_search_options", "logprobs", "top_logprobs", "frequency_penalty", "presence_penalty", "reasoning_effort", "service_tier"},
+		"xai":               {"n", "prompt_cache_key", "user", "web_search_options", "logprobs", "top_logprobs", "frequency_penalty", "presence_penalty", "service_tier"},
 	}
 	for providerType, want := range expected {
 		if got, found := byType[providerType]; !found || !slices.Equal(got, want) {
@@ -615,7 +615,7 @@ func TestManagedProviderCapabilityProfilesExposeAllValidatedResponseOptions(t *t
 		"anthropic":         {SupportedOptions: []string{"parallel_tool_calls", "max_output_tokens", "max_tokens", "temperature", "top_p"}},
 		"groq":              {SupportedOptions: []string{"metadata", "parallel_tool_calls", "user", "max_output_tokens", "max_tokens", "temperature", "top_p", "service_tier"}, ServiceTier: []string{"auto", "default", "flex"}},
 		"deepseek":          {SupportedOptions: []string{"top_logprobs", "user", "max_output_tokens", "max_tokens", "temperature", "top_p", "reasoning"}, ReasoningEffort: []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"}},
-		"xai":               {SupportedOptions: []string{"store", "include", "parallel_tool_calls", "previous_response_id", "user", "prompt_cache_key", "max_output_tokens", "max_tokens", "temperature", "top_p", "max_tool_calls", "reasoning", "service_tier"}, ReasoningEffort: []string{"none", "low", "medium", "high", "xhigh"}, ServiceTier: []string{"default", "priority"}},
+		"xai":               {SupportedOptions: []string{"store", "include", "parallel_tool_calls", "previous_response_id", "user", "prompt_cache_key", "max_output_tokens", "max_tokens", "temperature", "top_p", "max_tool_calls", "service_tier"}, ServiceTier: []string{"default", "priority"}},
 	}
 	for providerType, want := range expected {
 		got, found := byType[providerType]
