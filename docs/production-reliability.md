@@ -2130,3 +2130,20 @@ Gateway Helm revision 583 completed successfully. Pod
 liveness and readiness returned 204, OpenAPI 0.1.464 was served, and the live
 provider-capability endpoint reported `fast` and `ultrafast` for managed OpenAI
 Chat and Responses without executing model inference.
+
+## Native Groq service-tier request contract
+
+Source `4cbff5f` limits native Groq Chat requests to the documented input values
+`auto`, `on_demand`, `flex` and `performance`. The provider-reported `default`
+value remains valid in responses and in the separate Responses API request
+contract, but Chat now rejects it before provider execution. The runtime-derived
+capability profile and OpenAPI description publish the same distinction. Provider
+and OpenAPI tests, vet, build and the full race suite passed.
+
+Rancher Desktop built `ai-gateway-gateway:groq-tiers-4cbff5fb` with image ID
+`sha256:8c0b134ee567acdec84c1c44a4dae9a97077923d701117795ba7c6e99245a071`.
+Gateway Helm revision 584 completed successfully. Pod
+`ai-gateway-gateway-56c4f54c77-6957p` became Ready with zero restarts. Live
+liveness and readiness returned 204, OpenAPI 0.1.465 was served, and the live
+provider-capability endpoint reported the four Chat request tiers while retaining
+`auto`, `default` and `flex` for Responses.
