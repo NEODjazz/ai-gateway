@@ -99,7 +99,7 @@ func TestGroqResponsesMapsSupportedContract(t *testing.T) {
 		if body["model"] != "model" || body["input"] != "hello" || body["instructions"] != "be brief" || body["max_output_tokens"] != float64(64) || body["service_tier"] != "flex" || body["user"] != "tenant-user" || body["store"] != false || body["parallel_tool_calls"] != true || body["metadata"].(map[string]any)["ticket"] != "42" || body["text"] == nil {
 			t.Fatalf("request=%#v", body)
 		}
-		_, _ = fmt.Fprint(w, `{"id":"response","object":"response","status":"completed","model":"model","output":[{"id":"message","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"ok","annotations":[]}]}],"usage":{"input_tokens":2,"input_tokens_details":{"cached_tokens":1},"output_tokens":1,"output_tokens_details":{"cached_tokens":1,"reasoning_tokens":0},"total_tokens":3}}`)
+		_, _ = fmt.Fprint(w, `{"id":"response","object":"response","status":"completed","model":"model","output":[{"id":"message","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"ok","annotations":[]}]}],"usage":{"input_tokens":2,"input_tokens_details":{"cached_tokens":1,"reasoning_tokens":1},"output_tokens":1,"output_tokens_details":{"cached_tokens":1,"reasoning_tokens":0},"total_tokens":3}}`)
 	}))
 	defer server.Close()
 
@@ -117,7 +117,7 @@ func TestGroqResponsesMapsSupportedContract(t *testing.T) {
 			{Type: "mcp", ServerLabel: "catalog", ServerURL: "https://mcp.example.test", RequireApproval: "never"},
 		},
 	})
-	if err != nil || response.Usage.TotalTokens != 3 || response.OutputText != "ok" || response.Usage.OutputTokensDetails == nil || response.Usage.OutputTokensDetails.CachedTokens != 1 {
+	if err != nil || response.Usage.TotalTokens != 3 || response.OutputText != "ok" || response.Usage.InputTokensDetails == nil || response.Usage.InputTokensDetails.ReasoningTokens != 1 || response.Usage.OutputTokensDetails == nil || response.Usage.OutputTokensDetails.CachedTokens != 1 {
 		t.Fatalf("response=%+v err=%v", response, err)
 	}
 }

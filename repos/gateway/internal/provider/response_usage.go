@@ -18,7 +18,7 @@ func validateResponseUsage(usage openai.ResponseUsage) error {
 		return errors.New("Responses token usage exceeds integer range")
 	}
 	if details := usage.InputTokensDetails; details != nil {
-		if details.CachedTokens < 0 || details.CacheWriteTokens < 0 || details.CacheCreationTokens < 0 || details.AudioTokens < 0 || details.ImageTokens < 0 || details.TextTokens < 0 {
+		if details.CachedTokens < 0 || details.CacheWriteTokens < 0 || details.CacheCreationTokens < 0 || details.AudioTokens < 0 || details.ImageTokens < 0 || details.ReasoningTokens < 0 || details.TextTokens < 0 {
 			return errors.New("invalid negative Responses input token details")
 		}
 	}

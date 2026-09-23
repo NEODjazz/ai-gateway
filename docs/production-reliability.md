@@ -13,7 +13,8 @@ identities used for policy and billing. Provider-reported thinking-token details
 are accepted only when nonnegative and no greater than total output tokens.
 Compatible Responses also preserves nonnegative provider-reported cached output
 token details for JSON and terminal SSE usage without adding them to aggregate
-output or total tokens.
+output or total tokens. Provider-reported Responses input reasoning details follow
+the same rule and remain separate from aggregate input and total tokens.
 
 Explicit prompt-cache breakpoints are limited to four across Chat messages and
 tools. They are part of token reservation and exact cache identity. Semantic

@@ -1969,13 +1969,14 @@ unsupported-adapter rejection. Fields follow the
 
 Responses usage now retains optional `output_tokens_details.reasoning_tokens` and
 `output_tokens_details.cached_tokens`, using the existing completion-token detail
-type. Negative values are rejected
-before forwarding a native SSE event or returning decoded JSON. This detail is
-not added to `output_tokens` or `total_tokens`; those reported counters remain
-unchanged. Tests cover positive/zero details, negative rejection and unchanged
-totals for JSON and native streaming. The OpenAPI response schema includes the
-optional detail object. As with existing token detail types, zero-valued members
-may be omitted when serialized while retaining the detail object.
+type, plus compatible `input_tokens_details.reasoning_tokens`. Negative values
+are rejected before forwarding a native SSE event or returning decoded JSON.
+This detail is not added to `output_tokens` or `total_tokens`; those reported
+counters remain unchanged. Tests cover positive/zero details, negative rejection
+and unchanged totals for JSON and native streaming. The OpenAPI response schema
+includes the optional detail object. As with existing token detail types,
+zero-valued members may be omitted when serialized while retaining the detail
+object.
 
 ### Responses annotations
 

@@ -81,3 +81,28 @@ func TestResponsesOutputCachedUsagePreserved(t *testing.T) {
 		})
 	}
 }
+
+func TestResponsesInputReasoningUsagePreserved(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprintf("stream=%v", stream), func(t *testing.T) {
+			body := `{"id":"r","status":"completed","usage":{"input_tokens":4,"input_tokens_details":{"reasoning_tokens":2},"output_tokens":3,"total_tokens":7}}`
+			var response openai.ResponseResponse
+			var err error
+			if stream {
+				response, err = streamResponseData(strings.NewReader("data: {\"type\":\"response.completed\",\"response\":"+body+"}\n\n"), "m", func(string, string) error { return nil })
+			} else {
+				response, err = decodeResponseJSON(strings.NewReader(body))
+			}
+			if err != nil || response.Usage.InputTokensDetails == nil || response.Usage.InputTokensDetails.ReasoningTokens != 2 {
+				t.Fatalf("response=%+v err=%v", response, err)
+			}
+			encoded, err := json.Marshal(response)
+			if err != nil || !strings.Contains(string(encoded), `"reasoning_tokens":2`) {
+				t.Fatalf("encoded=%s err=%v", encoded, err)
+			}
+			if response.Usage.InputTokens != 4 || response.Usage.TotalTokens != 7 {
+				t.Fatalf("reasoning detail changed totals: %+v", response.Usage)
+			}
+		})
+	}
+}

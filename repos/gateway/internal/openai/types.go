@@ -1024,6 +1024,7 @@ type InputTokenDetails struct {
 	CacheCreationTokens int `json:"cache_creation_tokens,omitempty"`
 	AudioTokens         int `json:"audio_tokens,omitempty"`
 	ImageTokens         int `json:"image_tokens,omitempty"`
+	ReasoningTokens     int `json:"reasoning_tokens,omitempty"`
 	TextTokens          int `json:"text_tokens,omitempty"`
 }
 
