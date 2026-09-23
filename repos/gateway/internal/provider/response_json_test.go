@@ -72,6 +72,30 @@ func TestResponsesRejectsMissingOutputContentTypeBeforeDelivery(t *testing.T) {
 	}
 }
 
+func TestResponsesRejectsUnsupportedOutputContentTypeBeforeDelivery(t *testing.T) {
+	for name, output := range map[string]string{
+		"message content":   `{"type":"message","content":[{"type":"input_text","text":"unexpected"}]}`,
+		"reasoning summary": `{"type":"reasoning","summary":[{"type":"output_text","text":"unexpected"}]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			document := `{"id":"r","object":"response","model":"m","status":"completed","output":[` + output + `]}`
+			if _, err := decodeResponseJSON(strings.NewReader(document)); err == nil {
+				t.Fatalf("unsupported JSON output content accepted: %s", output)
+			}
+			callbacks := 0
+			wire := "data: {\"type\":\"response.completed\",\"response\":" + document + "}\n\n"
+			if _, err := streamResponseData(strings.NewReader(wire), "m", func(string, string) error { callbacks++; return nil }); err == nil || callbacks != 0 {
+				t.Fatalf("unsupported SSE output content delivered: err=%v callbacks=%d", err, callbacks)
+			}
+		})
+	}
+
+	valid := `{"id":"r","output":[{"type":"message","content":[{"type":"output_text","text":"ok"},{"type":"refusal","refusal":"no"}]},{"type":"reasoning","summary":[{"type":"summary_text","text":"summary"}]}]}`
+	if _, err := decodeResponseJSON(strings.NewReader(valid)); err != nil {
+		t.Fatalf("supported output content rejected: %v", err)
+	}
+}
+
 func TestResponsesRejectsInvalidJSONDocuments(t *testing.T) {
 	for _, body := range []string{"null", `{"id":"r"} {"id":"second"}`, `{"id":"r"} trailing`, `{"id":`} {
 		t.Run(body, func(t *testing.T) {

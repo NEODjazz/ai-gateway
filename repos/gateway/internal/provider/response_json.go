@@ -454,6 +454,20 @@ func validateResponseOutputItemsAllowSparse(items []openai.ResponseOutputItem, a
 				}
 			}
 		}
+		if item.Type == "message" {
+			for _, part := range item.Content {
+				if part.Type != "" && part.Type != "output_text" && part.Type != "refusal" {
+					return errors.New("provider returned unsupported response message content type")
+				}
+			}
+		}
+		if item.Type == "reasoning" {
+			for _, part := range item.Summary {
+				if part.Type != "" && part.Type != "summary_text" {
+					return errors.New("provider returned unsupported response reasoning summary type")
+				}
+			}
+		}
 		switch item.Type {
 		case "computer_call":
 			if err := validateResponseComputerCall(item); err != nil {

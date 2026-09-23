@@ -1907,6 +1907,12 @@ Responses. A final response output snapshot replaces previously assembled text,
 including when the snapshot contains an empty output array. Top-level text is
 still accepted as a fallback when no nonempty structured text is available.
 
+Known output content unions are validated before delivery: message content accepts
+only `output_text` and `refusal`, while reasoning summaries accept only
+`summary_text`. Unsupported discriminators fail the provider response instead of
+being partially decoded and silently discarded. This validation applies equally
+to JSON results and terminal SSE snapshots.
+
 Regression tests cover interleaved messages and parts, text completion events,
 empty and populated terminal snapshots, invalid content indices and JSON text
 aggregation. The tests also reproduced the earlier behavior through a temporary
