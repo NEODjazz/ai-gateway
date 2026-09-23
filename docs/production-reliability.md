@@ -2498,3 +2498,18 @@ Rancher Desktop built `ai-gateway-gateway:groq-tools-4e2a6783` with image ID
 Gateway Helm revision 606 completed successfully. Pod
 `ai-gateway-gateway-8685749d55-789g2` became Ready with zero restarts, and
 direct service liveness and readiness both returned 204.
+
+## xAI Responses server-tool usage settlement
+
+Source `a86cefc4` uses xAI's reported server-side tool execution count for
+settled `tool_requests` when it exceeds the count visible in Responses output
+items. Visible calls remain the lower bound, and compatible providers continue
+using output-item counts. Search calls and xAI's exact reported cost remain
+separately attributed. Regression tests, the full Go test and race suites, vet
+and build passed; no live provider credential was used.
+
+Rancher Desktop built `ai-gateway-gateway:xai-tools-a86cefc4` with image ID
+`sha256:51084771ce2a71012010babdb2512552b0be1040425d612685d12b2b95f071af`.
+Gateway Helm revision 607 completed successfully. Pod
+`ai-gateway-gateway-5b6b5d476d-nmzvh` became Ready with zero restarts, and
+direct service liveness and readiness both returned 204.
