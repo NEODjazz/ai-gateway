@@ -110,6 +110,7 @@ func (m AnonymizerModule) Handle(_ context.Context, req *RequestContext) error {
 	m.rules = rules
 	for index := range req.Request.Messages {
 		req.Request.Messages[index].Content = m.anonymizeAny(req, req.Request.Messages[index].Content)
+		req.Request.Messages[index].ReasoningContent = m.anonymize(req, req.Request.Messages[index].ReasoningContent)
 		for metadataIndex := range req.Request.Messages[index].AnthropicDocumentMetadata {
 			metadata := &req.Request.Messages[index].AnthropicDocumentMetadata[metadataIndex]
 			metadata.Title = m.anonymize(req, metadata.Title)
@@ -226,6 +227,7 @@ func DeanonymizeResponse(req *RequestContext, response *openai.ChatCompletionRes
 	for index := range response.Choices {
 		message := &response.Choices[index].Message
 		message.Content = DeanonymizeAny(message.Content, req.AnonymizationValues)
+		message.ReasoningContent = DeanonymizeText(message.ReasoningContent, req.AnonymizationValues)
 		if message.Refusal != nil {
 			value := DeanonymizeText(*message.Refusal, req.AnonymizationValues)
 			message.Refusal = &value

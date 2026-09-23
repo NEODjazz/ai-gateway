@@ -107,6 +107,26 @@ func TestAnonymizerMasksSensitiveData(t *testing.T) {
 	}
 }
 
+func TestAnonymizerMasksUnsignedReasoningWithoutChangingSignedBlocks(t *testing.T) {
+	module := NewAnonymizerModule(true, RuleEmail)
+	req := RequestContext{Request: openai.ChatCompletionRequest{Messages: []openai.Message{{
+		Role:             "assistant",
+		ReasoningContent: "contact user@example.com",
+		Reasoning:        []openai.ReasoningBlock{{Type: "thinking", Thinking: "signed user@example.com", Signature: "opaque-signature"}},
+	}}}}
+
+	if err := module.Handle(context.Background(), &req); err != nil {
+		t.Fatal(err)
+	}
+	message := req.Request.Messages[0]
+	if message.ReasoningContent != "contact {{EMAIL_1}}" {
+		t.Fatalf("reasoning content was not anonymized: %q", message.ReasoningContent)
+	}
+	if message.Reasoning[0].Thinking != "signed user@example.com" || message.Reasoning[0].Signature != "opaque-signature" {
+		t.Fatalf("signed reasoning block was changed: %+v", message.Reasoning[0])
+	}
+}
+
 func TestAnonymizerMasksEmbeddingInput(t *testing.T) {
 	request := openai.EmbeddingRequest{Model: "embed", Input: []string{"send to user@example.com", "call +1 202-555-0123"}}
 	req := RequestContext{EmbeddingRequest: &request}
@@ -278,9 +298,10 @@ func TestDeanonymizeResponseRestoresOriginalValues(t *testing.T) {
 		Choices: []openai.Choice{
 			{
 				Message: openai.Message{
-					Role:          "assistant",
-					Content:       "I will use {{EMAIL_1}} and {{PHONE_1}}.",
-					NativeContent: []json.RawMessage{json.RawMessage(`{"type":"text","text":"Native {{EMAIL_1}}"}`)},
+					Role:             "assistant",
+					Content:          "I will use {{EMAIL_1}} and {{PHONE_1}}.",
+					ReasoningContent: "Plan for {{EMAIL_1}}.",
+					NativeContent:    []json.RawMessage{json.RawMessage(`{"type":"text","text":"Native {{EMAIL_1}}"}`)},
 				},
 			},
 		},
@@ -297,6 +318,9 @@ func TestDeanonymizeResponseRestoresOriginalValues(t *testing.T) {
 	}
 	if !strings.Contains(string(response.Choices[0].Message.NativeContent[0]), "user@example.com") {
 		t.Fatalf("expected native content to be restored: %s", response.Choices[0].Message.NativeContent[0])
+	}
+	if response.Choices[0].Message.ReasoningContent != "Plan for user@example.com." {
+		t.Fatalf("expected reasoning content to be restored: %s", response.Choices[0].Message.ReasoningContent)
 	}
 }
 
