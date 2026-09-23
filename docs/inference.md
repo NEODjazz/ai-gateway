@@ -1919,6 +1919,12 @@ function arguments must decode to a JSON object and use the same size limit as
 chat function arguments. Streaming `output_item.added` snapshots may contain
 partial arguments; the completed value is validated at the terminal boundary.
 
+Incoming Responses `custom_tool_call` history requires a valid name and call ID.
+Its tool name is checked against credential and access-group grants even when no
+new tool definition is sent. Custom calls and outputs require a deployment with
+`custom_tools`; an output without an attributable call or declared custom tool
+is rejected before execution.
+
 The output union also keeps branch-specific fields isolated. Only `message` items
 may contain `content` or an optional `assistant` role, and only `reasoning` items
 may contain `summary`. A provider cannot inject text through a reasoning or tool

@@ -128,6 +128,9 @@ func (r ResponseRequest) Validate() string {
 	if _, message := InspectResponseApplyPatchCallOutputs(r.Input); message != "" {
 		return message
 	}
+	if _, _, message := InspectResponseCustomToolHistory(r.Input); message != "" {
+		return message
+	}
 	if message := validateResponseToolChoice(r.Tools, r.ToolChoice); message != "" {
 		return message
 	}

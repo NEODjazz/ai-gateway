@@ -196,6 +196,27 @@ func TestResponsesCustomToolACLUsesToolName(t *testing.T) {
 	}
 }
 
+func TestResponsesCustomToolHistoryRequiresToolGrant(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		body   string
+		status int
+	}{
+		{name: "allowed history", body: `{"model":"test","input":[{"type":"custom_tool_call","call_id":"call_1","name":"safe_dsl","input":"work"},{"type":"custom_tool_call_output","call_id":"call_1","output":"ok"}]}`, status: http.StatusOK},
+		{name: "denied history", body: `{"model":"test","input":[{"type":"custom_tool_call","call_id":"call_1","name":"unsafe_dsl","input":"work"},{"type":"custom_tool_call_output","call_id":"call_1","output":"ok"}]}`, status: http.StatusForbidden},
+		{name: "unattributed output", body: `{"model":"test","input":[{"type":"custom_tool_call_output","call_id":"call_1","output":"ok"}]}`, status: http.StatusBadRequest},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			handler := NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}, tools: []string{"safe_dsl"}}}), &chatProvider{})
+			out := httptest.NewRecorder()
+			handler.Responses(out, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(test.body)))
+			if out.Code != test.status {
+				t.Fatalf("status=%d body=%s", out.Code, out.Body.String())
+			}
+		})
+	}
+}
+
 func TestResponsesImageGenerationACLUsesCanonicalToolName(t *testing.T) {
 	handler := NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}, tools: []string{"image_generation"}}}), &chatProvider{})
 	allowedResponse := httptest.NewRecorder()

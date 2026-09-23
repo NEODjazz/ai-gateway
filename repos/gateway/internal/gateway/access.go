@@ -8,6 +8,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -200,6 +201,27 @@ func responseRequestToolIdentifiers(request openai.ResponseRequest) ([]string, b
 	identifiers, valid := responseToolIdentifiers(request.Tools)
 	if !valid {
 		return nil, false
+	}
+	customNames, hasCustom, message := openai.InspectResponseCustomToolHistory(request.Input)
+	if message != "" {
+		return nil, false
+	}
+	for _, name := range customNames {
+		if !slices.Contains(identifiers, name) {
+			identifiers = append(identifiers, name)
+		}
+	}
+	if hasCustom && len(customNames) == 0 {
+		declared := false
+		for _, tool := range request.Tools {
+			if tool.Type == "custom" {
+				declared = true
+				break
+			}
+		}
+		if !declared {
+			return nil, false
+		}
 	}
 	computerOutputs, message := openai.InspectResponseComputerCallOutputs(request.Input)
 	if message != "" {
