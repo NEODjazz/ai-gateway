@@ -2094,3 +2094,22 @@ the internal execution ID so worker retries cannot duplicate conversation histor
 Admission reserves the bounded maximum of 1024 provider output items against the
 conversation quota before execution, preventing an unrecoverable terminal quota
 failure from retaining the durable turn.
+
+## Direct guardrail anonymization
+
+Source `3ce760a` applies the effective policy's configured anonymizer to
+`POST /guardrails/apply_guardrail`, including policies that enable only
+anonymization. Every enabled DLP, AV or anonymizer module is required and fails
+closed when unavailable. The response reports the replacement count and includes
+masked text only when at least one replacement occurred; raw input is never echoed
+and durable audit remains metadata-only. Gateway unit tests, vet, build, the full
+Go suite and the full race suite passed.
+
+Rancher Desktop built
+`ai-gateway-gateway:guardrail-anonymization-3ce760a3` with image ID
+`sha256:a2300173ae6bc7b21aa01d292548fe871c41653785631167f9f1691b314ac260`.
+Gateway Helm revision 582 completed successfully. Pod
+`ai-gateway-gateway-75f7b78f46-l457b` became Ready with zero restarts. Live
+liveness and readiness returned 204, OpenAPI 0.1.463 was served, and a direct
+request using the configured `test` policy returned one replacement as
+`{{EMAIL_1}}` without raw content or stored content.
