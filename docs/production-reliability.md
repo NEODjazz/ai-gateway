@@ -2348,3 +2348,17 @@ ID `sha256:272929d6846f0b2654480d509dc26d3c59a5e9c57535209f9e9a14a432a2a81a`.
 Gateway Helm revision 596 completed successfully. Pod
 `ai-gateway-gateway-777c9b58f9-db9km` became Ready with zero restarts, and
 direct service liveness and readiness both returned 204.
+
+## DeepSeek vision model isolation
+
+Source `44ec362` limits native DeepSeek Chat and Responses image input to
+`deepseek-flash` and the two documented legacy Flash names. Pro image requests
+fail before provider execution, including images in Responses tool outputs.
+Flash acceptance and Pro rejection regressions passed with the full race suite,
+vet and build.
+
+Rancher Desktop built `ai-gateway-gateway:deepseek-vision-44ec3628` with image
+ID `sha256:c3428edd560ffffdb8ac85f15fc60cac67f5007049996a2588b16dce926d2159`.
+Gateway Helm revision 597 completed successfully. Pod
+`ai-gateway-gateway-6878b7c47d-8rpqm` became Ready with zero restarts, and
+direct service liveness and readiness both returned 204.
