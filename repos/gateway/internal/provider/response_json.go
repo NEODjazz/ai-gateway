@@ -162,6 +162,9 @@ func validateResponseControls(response openai.ResponseResponse) error {
 	if response.CreatedAt < 0 || response.CompletedAt < 0 || response.CreatedAt > 0 && response.CompletedAt > 0 && response.CompletedAt < response.CreatedAt {
 		return errors.New("provider returned invalid response timestamps")
 	}
+	if message := openai.ValidateMetadata(response.Metadata); message != "" {
+		return errors.New("provider returned invalid response metadata: " + message)
+	}
 	if response.PreviousResponseID != nil && (*response.PreviousResponseID == "" || strings.TrimSpace(*response.PreviousResponseID) != *response.PreviousResponseID || utf8.RuneCountInString(*response.PreviousResponseID) > 512) {
 		return errors.New("provider returned invalid previous_response_id")
 	}

@@ -335,6 +335,44 @@ func TestResponsesPreserveAndValidateLifecycleMetadata(t *testing.T) {
 	}
 }
 
+func TestResponsesPreserveAndValidateMetadata(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprintf("stream=%v", stream), func(t *testing.T) {
+			document := `{"id":"r","object":"response","model":"m","status":"completed","metadata":{"ticket":"42"}}`
+			var response openai.ResponseResponse
+			var err error
+			if stream {
+				response, err = streamResponseData(strings.NewReader("data: {\"type\":\"response.completed\",\"response\":"+document+"}\n\n"), "m", func(string, string) error { return nil })
+			} else {
+				response, err = decodeResponseJSON(strings.NewReader(document))
+			}
+			if err != nil || response.Metadata["ticket"] != "42" {
+				t.Fatalf("response=%+v err=%v", response, err)
+			}
+		})
+	}
+
+	tooMany := make([]string, 17)
+	for index := range tooMany {
+		tooMany[index] = fmt.Sprintf(`"key%d":"value"`, index)
+	}
+	for _, metadata := range []string{
+		`{"` + strings.Repeat("я", 65) + `":"value"}`,
+		`{"key":"` + strings.Repeat("я", 513) + `"}`,
+		`{` + strings.Join(tooMany, ",") + `}`,
+	} {
+		document := `{"id":"r","object":"response","model":"m","status":"completed","metadata":` + metadata + `}`
+		if _, err := decodeResponseJSON(strings.NewReader(document)); err == nil {
+			t.Fatalf("invalid JSON metadata accepted: %s", metadata)
+		}
+		callbacks := 0
+		wire := "data: {\"type\":\"response.completed\",\"response\":" + document + "}\n\n"
+		if _, err := streamResponseData(strings.NewReader(wire), "m", func(string, string) error { callbacks++; return nil }); err == nil || callbacks != 0 {
+			t.Fatalf("invalid SSE metadata delivered: err=%v callbacks=%d", err, callbacks)
+		}
+	}
+}
+
 func TestResponsesPreserveAndValidateConversationReference(t *testing.T) {
 	for _, stream := range []bool{false, true} {
 		t.Run(fmt.Sprintf("stream=%v", stream), func(t *testing.T) {

@@ -1787,6 +1787,11 @@ at request admission. Empty, malformed, oversized and structurally extended
 references fail closed, so clients cannot continue a response under an invalid
 owner-scoped conversation reference.
 
+Response metadata is subject to the same shared limit as request metadata: at
+most 16 entries, 64 Unicode characters per key and 512 per value. Compatible
+JSON and terminal SSE responses reject larger maps before delivery instead of
+exposing data outside the documented lifecycle contract.
+
 ### Responses prompt reference echo
 
 Compatible JSON and terminal SSE responses preserve the optional prompt-template
