@@ -2406,3 +2406,18 @@ ID `sha256:f67ae7f1b63c82fbf39a8bd92a0a73c112bd9d5c48786f3ef0dd90a3dfd74a6f`.
 Gateway Helm revision 600 completed successfully. Pod
 `ai-gateway-gateway-66f9594b69-zkpfb` became Ready with zero restarts, and
 direct service liveness and readiness both returned 204.
+
+## Responses custom tool history authorization
+
+Source `af5488e9` requires the `custom_tools` deployment capability for custom
+calls and outputs in Responses input history, even when the current request
+does not declare tools. Historical call names also pass credential and
+access-group tool grants. A custom output with no attributable call or declared
+custom tool fails before execution. Input, authorization and route regressions
+passed with the full Go race suite, vet and build.
+
+Rancher Desktop built `ai-gateway-gateway:custom-history-af5488e9` with image
+ID `sha256:9f7a4c63d8ea453cab53ec69ef89bb75be2f6dc2b5936f3fb82c47feb6de6b30`.
+Gateway Helm revision 601 completed successfully. Pod
+`ai-gateway-gateway-949ff4646-f6cvt` became Ready with zero restarts, and
+direct service liveness and readiness both returned 204.
