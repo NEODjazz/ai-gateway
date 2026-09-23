@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -183,8 +184,43 @@ func TestDeepSeekResponsesAcceptsDocumentedInputItemTypes(t *testing.T) {
 		{"type": "reasoning", "content": []any{map[string]any{"type": "reasoning_text", "text": "plan"}}},
 		{"type": "web_search_call", "id": "search_1"},
 	} {
-		if err := validateDeepSeekResponseInput([]any{item}); err != nil {
+		if err := validateDeepSeekResponseInput([]any{item}, "deepseek-flash"); err != nil {
 			t.Fatalf("item=%v err=%v", item, err)
+		}
+	}
+}
+
+func TestDeepSeekVisionIsScopedToFlashModels(t *testing.T) {
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
+	defer server.Close()
+	client := NewDeepSeek(server.URL, "key", false)
+	imageURL := "data:image/png;base64," + base64.StdEncoding.EncodeToString([]byte("\x89PNG\r\n\x1a\n"))
+	chat := openai.ChatCompletionRequest{Messages: []openai.Message{{Role: "user", Content: []any{
+		map[string]any{"type": "text", "text": "describe"},
+		map[string]any{"type": "image_url", "image_url": map[string]any{"url": imageURL}},
+	}}}}
+	for _, model := range []string{"deepseek-flash", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp"} {
+		chat.Model = model
+		if err := client.ValidateChatParameters(chat); err != nil {
+			t.Fatalf("model=%s chat err=%v", model, err)
+		}
+	}
+	chat.Model = "deepseek-v4-pro"
+	if _, err := client.ChatCompletions(t.Context(), chat); err == nil || called {
+		t.Fatalf("pro chat err=%v called=%v", err, called)
+	}
+	for _, input := range []any{
+		[]any{map[string]any{"type": "message", "role": "user", "content": []any{map[string]any{"type": "input_image", "image_url": imageURL}}}},
+		[]any{map[string]any{"type": "function_call_output", "call_id": "call_1", "output": []any{map[string]any{"type": "input_image", "image_url": imageURL}}}},
+	} {
+		if err := validateDeepSeekResponseInput(input, "deepseek-flash"); err != nil {
+			t.Fatalf("flash input=%v err=%v", input, err)
+		}
+		_, err := client.Responses(t.Context(), openai.ResponseRequest{Model: "deepseek-v4-pro", Input: input})
+		var failure *Error
+		if !errors.As(err, &failure) || failure.Param != "input" || called {
+			t.Fatalf("pro input=%v err=%v called=%v", input, err, called)
 		}
 	}
 }

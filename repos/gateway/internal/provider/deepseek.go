@@ -48,6 +48,9 @@ func (d DeepSeek) ValidateChatParameters(request openai.ChatCompletionRequest) e
 	if err := rejectChatMessageAudio("deepseek", request.Messages); err != nil {
 		return err
 	}
+	if openai.HasChatImages(request) && !deepSeekVisionModel(request.Model) {
+		return unsupportedDeepSeekParameter("messages.content.image_url")
+	}
 	if err := validateDeepSeekUser(request.User); err != nil {
 		return err
 	}
@@ -149,7 +152,7 @@ func (d DeepSeek) ValidateResponseParameters(request openai.ResponseRequest) err
 	if message := request.Validate(); message != "" {
 		return &Error{Class: FailureClientRequest, Provider: "deepseek", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New(message)}
 	}
-	if err := validateDeepSeekResponseInput(request.Input); err != nil {
+	if err := validateDeepSeekResponseInput(request.Input, request.Model); err != nil {
 		return err
 	}
 	_, verbositySupplied := openai.ResponseTextVerbosity(request.Text)
@@ -191,7 +194,7 @@ func (d DeepSeek) ValidateResponseParameters(request openai.ResponseRequest) err
 	)
 }
 
-func validateDeepSeekResponseInput(input any) error {
+func validateDeepSeekResponseInput(input any, model string) error {
 	if input == nil {
 		return nil
 	}
@@ -219,22 +222,22 @@ func validateDeepSeekResponseInput(input any) error {
 			if item["role"] == nil {
 				return invalid("input item without type must be a message")
 			}
-			if err := validateDeepSeekResponseParts(item["content"], false); err != nil {
+			if err := validateDeepSeekResponseParts(item["content"], false, model); err != nil {
 				return invalid(err.Error())
 			}
 		case "message":
-			if err := validateDeepSeekResponseParts(item["content"], false); err != nil {
+			if err := validateDeepSeekResponseParts(item["content"], false, model); err != nil {
 				return invalid(err.Error())
 			}
 		case "function_call_output", "custom_tool_call_output":
-			if err := validateDeepSeekResponseParts(item["output"], false); err != nil {
+			if err := validateDeepSeekResponseParts(item["output"], false, model); err != nil {
 				return invalid(err.Error())
 			}
 		case "reasoning":
 			if item["summary"] != nil || item["encrypted_content"] != nil {
 				return invalid("reasoning summary and encrypted_content are not supported by DeepSeek")
 			}
-			if err := validateDeepSeekResponseParts(item["content"], true); err != nil {
+			if err := validateDeepSeekResponseParts(item["content"], true, model); err != nil {
 				return invalid(err.Error())
 			}
 		case "function_call", "custom_tool_call", "web_search_call":
@@ -245,7 +248,7 @@ func validateDeepSeekResponseInput(input any) error {
 	return nil
 }
 
-func validateDeepSeekResponseParts(value json.RawMessage, reasoning bool) error {
+func validateDeepSeekResponseParts(value json.RawMessage, reasoning bool, model string) error {
 	if value == nil {
 		return nil
 	}
@@ -268,9 +271,20 @@ func validateDeepSeekResponseParts(value json.RawMessage, reasoning bool) error 
 			}
 		} else if partType != "input_text" && partType != "output_text" && partType != "input_image" {
 			return errors.New("input content part is not supported by DeepSeek")
+		} else if partType == "input_image" && !deepSeekVisionModel(model) {
+			return errors.New("input_image is not supported by this DeepSeek model")
 		}
 	}
 	return nil
+}
+
+func deepSeekVisionModel(model string) bool {
+	switch model {
+	case "deepseek-flash", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp":
+		return true
+	default:
+		return false
+	}
 }
 
 func (d DeepSeek) Responses(ctx context.Context, request openai.ResponseRequest) (openai.ResponseResponse, error) {
