@@ -2421,3 +2421,18 @@ ID `sha256:9f7a4c63d8ea453cab53ec69ef89bb75be2f6dc2b5936f3fb82c47feb6de6b30`.
 Gateway Helm revision 601 completed successfully. Pod
 `ai-gateway-gateway-949ff4646-f6cvt` became Ready with zero restarts, and
 direct service liveness and readiness both returned 204.
+
+## Stateful custom-tool output continuation
+
+Source `40ce3529` permits an output-only custom-tool continuation when it names
+`previous_response_id` and credential grants allow all tools (with the same
+requirement for access-group grants when evaluated). Scoped grants still
+require a tool declaration or named historical call
+so the tool can be authorized. Continuation ACL regressions passed with the full
+Go race suite, vet and build.
+
+Rancher Desktop built `ai-gateway-gateway:custom-continuation-40ce3529` with
+image ID `sha256:5b5f10da0ac54078aea02e57e5bbbad4559d4d661fba7bd2b09fece57cb87e99`.
+Gateway Helm revision 602 completed successfully. Pod
+`ai-gateway-gateway-6d5fbd88f6-4k2lz` became Ready with zero restarts, and
+direct service liveness and readiness both returned 204.
