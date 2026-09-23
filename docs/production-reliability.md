@@ -2291,3 +2291,16 @@ Gateway Helm revision 592 completed successfully. Pod
 service checks returned 204 for liveness and readiness, OpenAPI 0.1.474 was
 served, the live DeepSeek profile reported both thinking values and seven
 validated effort values, and the Groq controls remained isolated.
+
+## DeepSeek inactive sampling control
+
+Source `64283f9` rejects `top_p` when native DeepSeek thinking mode is disabled,
+including the implicit non-thinking default, because that provider ignores the
+value in this mode. The request fails before provider execution. Regression
+tests for both forms passed with the full race suite, vet and build.
+
+Rancher Desktop built `ai-gateway-gateway:deepseek-top-p-64283f98` with image
+ID `sha256:233c37636eb938cfc9bac36a9cc19463b82c9c461ebbabcfa2c84339d6af072c`.
+Gateway Helm revision 593 completed successfully. Pod
+`ai-gateway-gateway-744fffc8d9-qq9js` became Ready with zero restarts, and
+direct service liveness and readiness checks both returned 204.
