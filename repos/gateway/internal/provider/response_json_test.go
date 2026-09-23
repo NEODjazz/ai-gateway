@@ -320,6 +320,42 @@ func TestResponsesPreserveAndValidatePromptCacheDiagnostics(t *testing.T) {
 	}
 }
 
+func TestResponsesPreserveAndValidateContextManagement(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprintf("stream=%v", stream), func(t *testing.T) {
+			document := `{"id":"r","object":"response","model":"m","status":"completed","context_management":[{"type":"compaction","compact_threshold":4096}]}`
+			var response openai.ResponseResponse
+			var err error
+			if stream {
+				response, err = streamResponseData(strings.NewReader("data: {\"type\":\"response.completed\",\"response\":"+document+"}\n\n"), "m", func(string, string) error { return nil })
+			} else {
+				response, err = decodeResponseJSON(strings.NewReader(document))
+			}
+			if err != nil || len(response.ContextManagement) != 1 || response.ContextManagement[0].Type != "compaction" || response.ContextManagement[0].CompactThreshold == nil || *response.ContextManagement[0].CompactThreshold != 4096 {
+				t.Fatalf("response=%+v err=%v", response, err)
+			}
+		})
+	}
+
+	for _, contextManagement := range []string{
+		`[]`,
+		`[{"type":"unknown"}]`,
+		`[{"type":"compaction","compact_threshold":0}]`,
+		`[{"type":"compaction"},{"type":"compaction"}]`,
+		`[{"type":"compaction","unknown":true}]`,
+	} {
+		document := `{"id":"r","object":"response","model":"m","context_management":` + contextManagement + `}`
+		if _, err := decodeResponseJSON(strings.NewReader(document)); err == nil {
+			t.Fatalf("invalid context management accepted: %s", contextManagement)
+		}
+		callbacks := 0
+		wire := "data: {\"type\":\"response.completed\",\"response\":" + document + "}\n\n"
+		if _, err := streamResponseData(strings.NewReader(wire), "m", func(string, string) error { callbacks++; return nil }); err == nil || callbacks != 0 {
+			t.Fatalf("invalid context management delivered: value=%s err=%v callbacks=%d", contextManagement, err, callbacks)
+		}
+	}
+}
+
 func TestResponsesPreserveAndValidateGenerationSettings(t *testing.T) {
 	for _, stream := range []bool{false, true} {
 		t.Run(fmt.Sprintf("stream=%v", stream), func(t *testing.T) {

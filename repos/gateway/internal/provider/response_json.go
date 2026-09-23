@@ -62,6 +62,7 @@ func validateResponseConfigurationPayload(payload []byte, response *openai.Respo
 		PromptCacheOptions     json.RawMessage `json:"prompt_cache_options"`
 		Moderation             json.RawMessage `json:"moderation"`
 		PromptCacheDiagnostics json.RawMessage `json:"prompt_cache_diagnostics"`
+		ContextManagement      json.RawMessage `json:"context_management"`
 	}
 	if err := json.Unmarshal(payload, &wire); err != nil {
 		return err
@@ -99,6 +100,11 @@ func validateResponseConfigurationPayload(payload []byte, response *openai.Respo
 	if len(wire.PromptCacheDiagnostics) > 0 && string(wire.PromptCacheDiagnostics) != "null" {
 		if err := decodeStrictResponseConfiguration(wire.PromptCacheDiagnostics, &response.PromptCacheDiagnostics); err != nil {
 			return errors.New("provider returned invalid prompt_cache_diagnostics")
+		}
+	}
+	if len(wire.ContextManagement) > 0 && string(wire.ContextManagement) != "null" {
+		if err := decodeStrictResponseConfiguration(wire.ContextManagement, &response.ContextManagement); err != nil {
+			return errors.New("provider returned invalid response context_management")
 		}
 	}
 	if message := openai.ValidateResponseConfiguration(response.Tools, response.ToolChoice, response.Reasoning, response.Text); message != "" {
@@ -143,6 +149,9 @@ func validateResponseControls(response openai.ResponseResponse) error {
 	}
 	if err := validateResponsePromptCacheDiagnostics(response.PromptCacheDiagnostics); err != nil {
 		return err
+	}
+	if message := openai.ValidateResponseContextManagement(response.ContextManagement); message != "" {
+		return errors.New("provider returned invalid response context_management: " + message)
 	}
 	if response.MaxOutputTokens != nil && *response.MaxOutputTokens <= 0 {
 		return errors.New("provider returned invalid max_output_tokens")

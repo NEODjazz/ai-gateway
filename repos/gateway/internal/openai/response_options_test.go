@@ -545,6 +545,21 @@ func TestValidateResponseInstructions(t *testing.T) {
 	}
 }
 
+func TestValidateResponseContextManagement(t *testing.T) {
+	threshold := 4096
+	for _, entries := range [][]ResponseContextEntry{nil, {{Type: "compaction"}}, {{Type: "compaction", CompactThreshold: &threshold}}} {
+		if message := ValidateResponseContextManagement(entries); message != "" {
+			t.Fatalf("valid context management rejected: %+v: %s", entries, message)
+		}
+	}
+	zero := 0
+	for _, entries := range [][]ResponseContextEntry{{}, {{Type: "unknown"}}, {{Type: "compaction", CompactThreshold: &zero}}, {{Type: "compaction"}, {Type: "compaction"}}} {
+		if message := ValidateResponseContextManagement(entries); message == "" {
+			t.Fatalf("invalid context management accepted: %+v", entries)
+		}
+	}
+}
+
 func TestResponseRejectsNonPositiveOutputLimits(t *testing.T) {
 	for _, value := range []int{-1, 0} {
 		for _, request := range []ResponseRequest{{MaxOutputTokens: &value}, {MaxTokens: &value}} {

@@ -938,6 +938,7 @@ type ResponseResponse struct {
 	Usage               ResponseUsage              `json:"usage,omitempty"`
 	Instructions        any                        `json:"instructions,omitempty"`
 	Moderation          *ResponseModeration        `json:"moderation,omitempty"`
+	ContextManagement   []ResponseContextEntry     `json:"context_management,omitempty"`
 
 	PromptCacheOptions     *PromptCacheOptions             `json:"prompt_cache_options,omitempty"`
 	PromptCacheRetention   string                          `json:"prompt_cache_retention,omitempty"`

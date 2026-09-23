@@ -65,6 +65,26 @@ func ValidateResponseInstructions(value any) string {
 	return ""
 }
 
+// ValidateResponseContextManagement checks the bounded compaction settings
+// shared by Responses requests and provider response snapshots.
+func ValidateResponseContextManagement(entries []ResponseContextEntry) string {
+	if len(entries) > 1 {
+		return "context_management must contain at most one entry"
+	}
+	if entries != nil && len(entries) == 0 {
+		return "context_management must contain one entry when supplied"
+	}
+	for _, entry := range entries {
+		if entry.Type != "compaction" {
+			return "context_management type must be compaction"
+		}
+		if entry.CompactThreshold != nil && *entry.CompactThreshold <= 0 {
+			return "context_management compact_threshold must be positive"
+		}
+	}
+	return ""
+}
+
 // Validate checks provider-independent Responses generation options.
 func (r ResponseRequest) Validate() string {
 	if r.Conversation != nil {
@@ -87,19 +107,8 @@ func (r ResponseRequest) Validate() string {
 	if message := ValidateMetadata(r.Metadata); message != "" {
 		return message
 	}
-	if len(r.ContextManagement) > 1 {
-		return "context_management must contain at most one entry"
-	}
-	if r.ContextManagement != nil && len(r.ContextManagement) == 0 {
-		return "context_management must contain one entry when supplied"
-	}
-	for _, entry := range r.ContextManagement {
-		if entry.Type != "compaction" {
-			return "context_management type must be compaction"
-		}
-		if entry.CompactThreshold != nil && *entry.CompactThreshold <= 0 {
-			return "context_management compact_threshold must be positive"
-		}
+	if message := ValidateResponseContextManagement(r.ContextManagement); message != "" {
+		return message
 	}
 	if message := validateProviderModeration(r.Moderation); message != "" {
 		return message
