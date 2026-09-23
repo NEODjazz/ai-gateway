@@ -219,9 +219,55 @@ func validateDeepSeekResponseInput(input any) error {
 			if item["role"] == nil {
 				return invalid("input item without type must be a message")
 			}
-		case "message", "function_call", "function_call_output", "custom_tool_call", "custom_tool_call_output", "reasoning", "web_search_call":
+			if err := validateDeepSeekResponseParts(item["content"], false); err != nil {
+				return invalid(err.Error())
+			}
+		case "message":
+			if err := validateDeepSeekResponseParts(item["content"], false); err != nil {
+				return invalid(err.Error())
+			}
+		case "function_call_output", "custom_tool_call_output":
+			if err := validateDeepSeekResponseParts(item["output"], false); err != nil {
+				return invalid(err.Error())
+			}
+		case "reasoning":
+			if item["summary"] != nil || item["encrypted_content"] != nil {
+				return invalid("reasoning summary and encrypted_content are not supported by DeepSeek")
+			}
+			if err := validateDeepSeekResponseParts(item["content"], true); err != nil {
+				return invalid(err.Error())
+			}
+		case "function_call", "custom_tool_call", "web_search_call":
 		default:
 			return invalid("input item type is not supported by DeepSeek")
+		}
+	}
+	return nil
+}
+
+func validateDeepSeekResponseParts(value json.RawMessage, reasoning bool) error {
+	if value == nil {
+		return nil
+	}
+	var content string
+	if json.Unmarshal(value, &content) == nil {
+		return nil
+	}
+	var parts []map[string]json.RawMessage
+	if json.Unmarshal(value, &parts) != nil || len(parts) == 0 {
+		return errors.New("input content must be text or supported content parts")
+	}
+	for _, part := range parts {
+		var partType string
+		if json.Unmarshal(part["type"], &partType) != nil {
+			return errors.New("input content part requires a valid type")
+		}
+		if reasoning {
+			if partType != "reasoning_text" {
+				return errors.New("reasoning content part is not supported by DeepSeek")
+			}
+		} else if partType != "input_text" && partType != "output_text" && partType != "input_image" {
+			return errors.New("input content part is not supported by DeepSeek")
 		}
 	}
 	return nil

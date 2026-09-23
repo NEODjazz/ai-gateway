@@ -155,6 +155,12 @@ func TestDeepSeekResponsesRejectsIgnoredInputItemTypes(t *testing.T) {
 		[]any{map[string]any{"type": "file_search_call", "id": "search_1"}},
 		[]any{map[string]any{"type": "unrecognized", "content": "ignored"}},
 		[]any{map[string]any{"content": "missing role"}},
+		[]any{map[string]any{"role": "user", "content": []any{map[string]any{"type": "input_file", "file_id": "file_1"}}}},
+		[]any{map[string]any{"type": "message", "role": "user", "content": []any{map[string]any{"type": "unknown", "text": "ignored"}}}},
+		[]any{map[string]any{"type": "function_call_output", "call_id": "call_1", "output": []any{map[string]any{"type": "input_file", "file_id": "file_1"}}}},
+		[]any{map[string]any{"type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "ignored"}}}},
+		[]any{map[string]any{"type": "reasoning", "encrypted_content": "opaque"}},
+		[]any{map[string]any{"type": "reasoning", "content": []any{map[string]any{"type": "summary_text", "text": "ignored"}}}},
 	} {
 		_, err := client.Responses(t.Context(), openai.ResponseRequest{Model: "deepseek-flash", Input: input})
 		var failure *Error
@@ -168,8 +174,10 @@ func TestDeepSeekResponsesAcceptsDocumentedInputItemTypes(t *testing.T) {
 	for _, item := range []map[string]any{
 		{"role": "user", "content": "hello"},
 		{"type": "message", "role": "user", "content": "hello"},
+		{"type": "message", "role": "user", "content": []any{map[string]any{"type": "input_text", "text": "hello"}, map[string]any{"type": "input_image", "image_url": "https://example.test/image.png"}}},
 		{"type": "function_call", "call_id": "call_1", "name": "lookup", "arguments": "{}"},
 		{"type": "function_call_output", "call_id": "call_1", "output": "ok"},
+		{"type": "function_call_output", "call_id": "call_1", "output": []any{map[string]any{"type": "output_text", "text": "ok"}}},
 		{"type": "custom_tool_call", "call_id": "call_1", "name": "apply_patch", "input": "patch"},
 		{"type": "custom_tool_call_output", "call_id": "call_1", "output": "ok"},
 		{"type": "reasoning", "content": []any{map[string]any{"type": "reasoning_text", "text": "plan"}}},
