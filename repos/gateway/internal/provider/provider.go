@@ -3319,7 +3319,7 @@ func requiredChatCapabilities(request openai.ChatCompletionRequest, stream bool)
 	if request.GeminiAudioTimestamp != nil {
 		required = append(required, "gemini_audio_timestamp")
 	}
-	if request.GeminiMediaResolution != "" {
+	if request.GeminiMediaResolution != "" || openai.HasChatGeminiPartMediaResolution(request) {
 		required = append(required, "gemini_media_resolution")
 	}
 	if openai.ChatRequestsAudio(request) || openai.ChatHasAudioHistory(request) {

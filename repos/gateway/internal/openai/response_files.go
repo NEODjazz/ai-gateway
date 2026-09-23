@@ -59,7 +59,11 @@ func ResponseFileAttachments(input any) ([]ResponseFileAttachment, error) {
 }
 
 func parseResponseFile(value map[string]any) (ResponseFileAttachment, []byte, error) {
-	if len(value) != 3 {
+	wantFields := 3
+	if _, ok := value["gemini_media_resolution"]; ok {
+		wantFields++
+	}
+	if len(value) != wantFields {
 		return ResponseFileAttachment{}, nil, ErrInvalidFileInput
 	}
 	fileData, dataOK := value["file_data"].(string)

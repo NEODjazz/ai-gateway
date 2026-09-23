@@ -97,6 +97,23 @@ func TestGeminiForwardsValidatedMediaResolution(t *testing.T) {
 	}
 }
 
+func TestGeminiForwardsPerPartMediaResolution(t *testing.T) {
+	request := openai.ChatCompletionRequest{Model: "gemini-test", Messages: []openai.Message{{Role: "user", Content: []any{
+		map[string]any{
+			"type": "image_url", "image_url": map[string]any{"url": "data:image/png;base64,iVBORw0KGgo="},
+			"gemini_media_resolution": "MEDIA_RESOLUTION_ULTRA_HIGH",
+		},
+	}}}}
+	native, err := geminiChatRequest(request)
+	if err != nil || native.Contents[0].Parts[0].MediaResolution == nil || native.Contents[0].Parts[0].MediaResolution.Level != "MEDIA_RESOLUTION_ULTRA_HIGH" {
+		t.Fatalf("native=%+v err=%v", native, err)
+	}
+	request.Messages[0].Content = []any{map[string]any{"type": "text", "text": "hello", "gemini_media_resolution": "MEDIA_RESOLUTION_HIGH"}}
+	if _, err := geminiChatRequest(request); err == nil {
+		t.Fatal("text part media resolution accepted")
+	}
+}
+
 func TestGeminiGoogleSearchGroundingAndUsage(t *testing.T) {
 	var upstream geminiRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

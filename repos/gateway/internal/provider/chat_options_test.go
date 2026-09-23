@@ -531,6 +531,12 @@ func TestGeminiMediaResolutionRequiresMediaCapabilities(t *testing.T) {
 	if got := strings.Join(requiredChatCapabilities(request.Request, false), ","); got != "chat,vision,gemini_media_resolution" {
 		t.Fatalf("media resolution routing requirements=%s", got)
 	}
+	request.Request.GeminiMediaResolution = ""
+	part := request.Request.Messages[0].Content.([]any)[0].(map[string]any)
+	part["gemini_media_resolution"] = "MEDIA_RESOLUTION_ULTRA_HIGH"
+	if got := strings.Join(requiredChatCapabilities(request.Request, false), ","); got != "chat,vision,gemini_media_resolution" {
+		t.Fatalf("per-part media resolution routing requirements=%s", got)
+	}
 }
 
 func TestChatWebFetchDisablesResponseCaches(t *testing.T) {

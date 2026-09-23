@@ -58,7 +58,11 @@ func videoAttachments(value any) ([]VideoAttachment, error) {
 		case map[string]any:
 			typeName, _ := typed["type"].(string)
 			if typeName == "input_video" {
-				if len(typed) != 2 {
+				wantFields := 2
+				if _, ok := typed["gemini_media_resolution"]; ok {
+					wantFields++
+				}
+				if len(typed) != wantFields {
 					return ErrInvalidVideoInput
 				}
 				video, ok := typed["input_video"].(map[string]any)

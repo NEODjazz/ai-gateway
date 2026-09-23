@@ -5304,6 +5304,13 @@ components:
       description: A2A 1.0 member-discriminated part. Supply text, structured JSON data, inline image/audio/MP4/WebM video/PDF bytes, or HTTPS media of the same types with one advertised mediaType. Binary input is signature-validated, bounded, scanner-projected, and routed only to deployments declaring the required media capability. Remote media are converted to validated inline bytes before durable storage.
       properties:
         text: {type: string}
+        mediaResolution:
+          type: object
+          additionalProperties: false
+          required: [level]
+          properties:
+            level: {type: string, enum: [MEDIA_RESOLUTION_UNSPECIFIED, MEDIA_RESOLUTION_LOW, MEDIA_RESOLUTION_MEDIUM, MEDIA_RESOLUTION_HIGH, MEDIA_RESOLUTION_ULTRA_HIGH]}
+          description: Per-part token resolution for inlineData or non-text fileData. Ultra high is available only per part. Requires the gemini_media_resolution capability.
         raw: {type: string, contentEncoding: base64}
         url: {type: string, format: uri, maxLength: 2048, pattern: '^https://', description: "Public HTTPS image, audio, MP4/WebM video, PDF, plain-text, Markdown, or CSV URL without credentials or fragment"}
         data: {description: Structured JSON value accepted with application/json mediaType}

@@ -254,6 +254,38 @@ func TestGenerateRequestMapsMediaResolution(t *testing.T) {
 	}
 }
 
+func TestGenerateRequestMapsPerPartMediaResolution(t *testing.T) {
+	var native generateRequest
+	if err := decodeMessagesValue(json.RawMessage(`{"contents":[{"role":"user","parts":[{"inlineData":{"mimeType":"image/png","data":"iVBORw0KGgo="},"mediaResolution":{"level":"MEDIA_RESOLUTION_ULTRA_HIGH"}}]}]}`), &native); err != nil {
+		t.Fatal(err)
+	}
+	chat, err := native.chat("model", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parts := chat.Messages[0].Content.([]any)
+	image := parts[0].(map[string]any)
+	if image["gemini_media_resolution"] != "MEDIA_RESOLUTION_ULTRA_HIGH" {
+		t.Fatalf("part=%+v", image)
+	}
+
+	var invalid generateRequest
+	if err := decodeMessagesValue(json.RawMessage(`{"contents":[{"role":"user","parts":[{"text":"hello","mediaResolution":{"level":"MEDIA_RESOLUTION_HIGH"}}]}]}`), &invalid); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := invalid.chat("model", false); err == nil {
+		t.Fatal("text part media resolution accepted")
+	}
+
+	var stored generateRequest
+	if err := decodeMessagesValue(json.RawMessage(`{"contents":[{"role":"user","parts":[{"fileData":{"mimeType":"application/pdf","fileUri":"file_report"}}]}],"generationConfig":{"mediaResolution":"MEDIA_RESOLUTION_MEDIUM"}}`), &stored); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stored.chat("model", false); err != nil {
+		t.Fatalf("stored PDF media resolution rejected: %v", err)
+	}
+}
+
 func TestGenerateRequestMapsAdditionalInlineAudioFormats(t *testing.T) {
 	tests := []struct {
 		mediaType, wantMediaType string

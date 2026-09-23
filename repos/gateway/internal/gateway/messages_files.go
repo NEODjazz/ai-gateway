@@ -242,7 +242,7 @@ func (h Handler) resolveMessagesDocumentReferences(ctx context.Context, identity
 					return errMessagesFileUnavailable
 				}
 				imageBytes += len(file.Content)
-				parts[partIndex] = map[string]any{"type": "image_url", "image_url": map[string]any{"url": "data:" + file.ContentType + ";base64," + base64.StdEncoding.EncodeToString(file.Content)}}
+				parts[partIndex] = copyGeminiMediaResolution(object, map[string]any{"type": "image_url", "image_url": map[string]any{"url": "data:" + file.ContentType + ";base64," + base64.StdEncoding.EncodeToString(file.Content)}})
 				continue
 			}
 			if object["type"] == "input_file_audio_reference" {
@@ -256,7 +256,7 @@ func (h Handler) resolveMessagesDocumentReferences(ctx context.Context, identity
 				if !referenceMediaTypeMatches(object, file.ContentType) || format == "" || openai.ValidateAudioAttachment(openai.AudioAttachment{Filename: filename, MediaType: file.ContentType, Data: encoded}) != nil {
 					return errMessagesFileUnavailable
 				}
-				parts[partIndex] = map[string]any{"type": "input_audio", "input_audio": map[string]any{"data": encoded, "format": format}}
+				parts[partIndex] = copyGeminiMediaResolution(object, map[string]any{"type": "input_audio", "input_audio": map[string]any{"data": encoded, "format": format}})
 				continue
 			}
 			if object["type"] == "input_file_video_reference" {
@@ -273,7 +273,7 @@ func (h Handler) resolveMessagesDocumentReferences(ctx context.Context, identity
 				if _, err := openai.ChatVideoAttachments([]openai.Message{{Role: "user", Content: []any{video}}}); err != nil {
 					return errMessagesFileUnavailable
 				}
-				parts[partIndex] = video
+				parts[partIndex] = copyGeminiMediaResolution(object, video)
 				continue
 			}
 			if object["type"] != "input_file_reference" {
@@ -289,11 +289,11 @@ func (h Handler) resolveMessagesDocumentReferences(ctx context.Context, identity
 			}
 			switch file.ContentType {
 			case "application/pdf":
-				parts[partIndex] = map[string]any{
+				parts[partIndex] = copyGeminiMediaResolution(object, map[string]any{
 					"type":      "input_file",
 					"file_data": "data:application/pdf;base64," + base64.StdEncoding.EncodeToString(file.Content),
 					"filename":  file.Filename,
-				}
+				})
 			case "text/plain":
 				runes := utf8.RuneCount(file.Content)
 				if !utf8.Valid(file.Content) || strings.TrimSpace(string(file.Content)) == "" || runes > 262144 || textRunes > 1048576-runes {
@@ -319,7 +319,17 @@ func (h Handler) resolveMessagesDocumentReferences(ctx context.Context, identity
 	if _, err := openai.ChatVideoAttachments(request.Messages); err != nil {
 		return errMessagesFileUnavailable
 	}
+	if err := openai.ValidateChatGeminiPartMediaResolutions(*request); err != nil {
+		return errMessagesFileUnavailable
+	}
 	return nil
+}
+
+func copyGeminiMediaResolution(source, target map[string]any) map[string]any {
+	if resolution, ok := source["gemini_media_resolution"]; ok {
+		target["gemini_media_resolution"] = resolution
+	}
+	return target
 }
 
 func referenceMediaTypeMatches(reference map[string]any, actual string) bool {
