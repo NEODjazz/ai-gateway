@@ -133,3 +133,28 @@ func TestResponsesProviderUsageCountersPreserved(t *testing.T) {
 		}
 	}
 }
+
+func TestResponsesServerSideToolUsageDetailsPreserved(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		for _, count := range []int{0, 3} {
+			t.Run(fmt.Sprintf("stream=%v/count=%d", stream, count), func(t *testing.T) {
+				body := fmt.Sprintf(`{"id":"r","status":"completed","usage":{"input_tokens":4,"output_tokens":3,"total_tokens":7,"server_side_tool_usage_details":{"x_posts_fetched":%d,"x_users_fetched":%d}}}`, count, count)
+				var response openai.ResponseResponse
+				var err error
+				if stream {
+					response, err = streamResponseData(strings.NewReader("data: {\"type\":\"response.completed\",\"response\":"+body+"}\n\n"), "m", func(string, string) error { return nil })
+				} else {
+					response, err = decodeResponseJSON(strings.NewReader(body))
+				}
+				details := response.Usage.ServerSideToolUsageDetails
+				if err != nil || details == nil || details.XPostsFetched == nil || *details.XPostsFetched != count || details.XUsersFetched == nil || *details.XUsersFetched != count {
+					t.Fatalf("response=%+v err=%v", response, err)
+				}
+				encoded, err := json.Marshal(response)
+				if err != nil || !strings.Contains(string(encoded), fmt.Sprintf(`"x_posts_fetched":%d`, count)) || !strings.Contains(string(encoded), fmt.Sprintf(`"x_users_fetched":%d`, count)) {
+					t.Fatalf("encoded=%s err=%v", encoded, err)
+				}
+			})
+		}
+	}
+}

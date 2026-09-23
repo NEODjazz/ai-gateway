@@ -17,6 +17,11 @@ func validateResponseUsage(usage openai.ResponseUsage) error {
 	if usage.NumSourcesUsed != nil && *usage.NumSourcesUsed < 0 || usage.NumServerSideToolsUsed != nil && *usage.NumServerSideToolsUsed < 0 {
 		return errors.New("invalid negative Responses provider usage counters")
 	}
+	if details := usage.ServerSideToolUsageDetails; details != nil {
+		if details.XPostsFetched != nil && *details.XPostsFetched < 0 || details.XUsersFetched != nil && *details.XUsersFetched < 0 {
+			return errors.New("invalid negative Responses server-side tool usage details")
+		}
+	}
 	if usage.InputTokens > int(^uint(0)>>1)-usage.OutputTokens {
 		return errors.New("Responses token usage exceeds integer range")
 	}
