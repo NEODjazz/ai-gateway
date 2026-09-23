@@ -1753,6 +1753,16 @@ The classification remains forward compatible: providers may add values beyond
 the currently documented categories. These diagnostic fields do not affect
 routing, retries, policy decisions or billing settlement.
 
+### Responses incomplete reasons
+
+Compatible JSON and terminal SSE responses preserve the documented optional
+`incomplete_details.reason` values: `max_output_tokens`, `max_messages`,
+`content_filter` and `steered`. An empty details object and JSON `null` remain
+valid when the provider has no reason to report. Unknown reasons, fields and
+non-string values fail before the response is returned or the terminal event is
+delivered, preventing clients from acting on a silently weakened lifecycle
+status.
+
 ### Responses prompt-cache prewarming
 
 Responses accepts `prompt_cache_options.prewarm=true` on compatible adapters to

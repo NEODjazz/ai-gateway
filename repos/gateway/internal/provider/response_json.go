@@ -64,6 +64,7 @@ func validateResponseConfigurationPayload(payload []byte, response *openai.Respo
 		PromptCacheDiagnostics json.RawMessage `json:"prompt_cache_diagnostics"`
 		ContextManagement      json.RawMessage `json:"context_management"`
 		Error                  json.RawMessage `json:"error"`
+		IncompleteDetails      json.RawMessage `json:"incomplete_details"`
 	}
 	if err := json.Unmarshal(payload, &wire); err != nil {
 		return err
@@ -111,6 +112,11 @@ func validateResponseConfigurationPayload(payload []byte, response *openai.Respo
 	if len(wire.Error) > 0 && string(wire.Error) != "null" {
 		if err := decodeStrictResponseConfiguration(wire.Error, &response.Error); err != nil {
 			return errors.New("provider returned invalid response error")
+		}
+	}
+	if len(wire.IncompleteDetails) > 0 && string(wire.IncompleteDetails) != "null" {
+		if err := decodeStrictResponseConfiguration(wire.IncompleteDetails, &response.IncompleteDetails); err != nil {
+			return errors.New("provider returned invalid response incomplete_details")
 		}
 	}
 	if message := openai.ValidateResponseConfiguration(response.Tools, response.ToolChoice, response.Reasoning, response.Text); message != "" {
@@ -162,6 +168,9 @@ func validateResponseControls(response openai.ResponseResponse) error {
 	if err := validateResponseError(response.Error); err != nil {
 		return err
 	}
+	if err := validateResponseIncompleteDetails(response.IncompleteDetails); err != nil {
+		return err
+	}
 	if response.MaxOutputTokens != nil && *response.MaxOutputTokens <= 0 {
 		return errors.New("provider returned invalid max_output_tokens")
 	}
@@ -186,6 +195,18 @@ func validateResponseControls(response openai.ResponseResponse) error {
 		return errors.New("provider returned invalid truncation")
 	}
 	return nil
+}
+
+func validateResponseIncompleteDetails(details *openai.ResponseIncompleteDetails) error {
+	if details == nil || details.Reason == "" {
+		return nil
+	}
+	switch details.Reason {
+	case "max_output_tokens", "max_messages", "content_filter", "steered":
+		return nil
+	default:
+		return errors.New("provider returned invalid response incomplete reason")
+	}
 }
 
 func validateResponseError(responseError *openai.ResponseError) error {

@@ -1012,7 +1012,7 @@ type ResponseMisalignmentSteer struct {
 }
 
 type ResponseIncompleteDetails struct {
-	Reason string `json:"reason"`
+	Reason string `json:"reason,omitempty"`
 }
 
 type ResponseOutputItem struct {

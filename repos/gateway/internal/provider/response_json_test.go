@@ -88,6 +88,53 @@ func TestResponsesPreserveAndValidateMisalignmentError(t *testing.T) {
 	}
 }
 
+func TestResponsesPreserveAndValidateIncompleteDetails(t *testing.T) {
+	for _, reason := range []string{"max_output_tokens", "max_messages", "content_filter", "steered", ""} {
+		for _, stream := range []bool{false, true} {
+			t.Run(fmt.Sprintf("reason=%s/stream=%v", reason, stream), func(t *testing.T) {
+				details := `{}`
+				if reason != "" {
+					details = `{"reason":"` + reason + `"}`
+				}
+				document := `{"id":"r","object":"response","model":"m","status":"incomplete","incomplete_details":` + details + `}`
+				var response openai.ResponseResponse
+				var err error
+				if stream {
+					response, err = streamResponseData(strings.NewReader("data: {\"type\":\"response.incomplete\",\"response\":"+document+"}\n\n"), "m", func(string, string) error { return nil })
+				} else {
+					response, err = decodeResponseJSON(strings.NewReader(document))
+				}
+				if err != nil || response.IncompleteDetails == nil || response.IncompleteDetails.Reason != reason {
+					t.Fatalf("response=%+v err=%v", response, err)
+				}
+			})
+		}
+	}
+
+	for _, details := range []string{
+		`{"reason":"unknown"}`,
+		`{"reason":"max_output_tokens","unknown":true}`,
+		`{"reason":1}`,
+		`null`,
+	} {
+		document := `{"id":"r","object":"response","model":"m","status":"incomplete","incomplete_details":` + details + `}`
+		if details == "null" {
+			if _, err := decodeResponseJSON(strings.NewReader(document)); err != nil {
+				t.Fatalf("null incomplete_details rejected: %v", err)
+			}
+			continue
+		}
+		if _, err := decodeResponseJSON(strings.NewReader(document)); err == nil {
+			t.Fatalf("invalid incomplete_details accepted: %s", details)
+		}
+		callbacks := 0
+		wire := "data: {\"type\":\"response.incomplete\",\"response\":" + document + "}\n\n"
+		if _, err := streamResponseData(strings.NewReader(wire), "m", func(string, string) error { callbacks++; return nil }); err == nil || callbacks != 0 {
+			t.Fatalf("invalid incomplete_details delivered: details=%s err=%v callbacks=%d", details, err, callbacks)
+		}
+	}
+}
+
 func TestResponsesPreserveAndValidateExecutionControls(t *testing.T) {
 	for _, stream := range []bool{false, true} {
 		t.Run(fmt.Sprintf("stream=%v", stream), func(t *testing.T) {
