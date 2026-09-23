@@ -53,7 +53,7 @@ func TestXAIChatAndResponsesContracts(t *testing.T) {
 			_, _ = fmt.Fprint(w, `{"id":"chat","object":"chat.completion","model":"grok","service_tier":"priority","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}`)
 		case "/v1/responses":
 			reasoning, ok := body["reasoning"].(map[string]any)
-			if !ok || reasoning["effort"] != "high" || body["prompt_cache_key"] != "conversation" {
+			if !ok || reasoning["effort"] != "high" || body["prompt_cache_key"] != "conversation" || body["max_tool_calls"] != float64(3) {
 				t.Fatalf("response request=%#v", body)
 			}
 			_, _ = fmt.Fprint(w, `{"id":"resp","object":"response","model":"grok","service_tier":"priority","status":"completed","citations":["https://x.ai/news","https://x.com/xai/status/1"],"output":[{"id":"message","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"ok","annotations":[]}]}],"usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3,"num_sources_used":4,"num_server_side_tools_used":2,"server_side_tool_usage_details":{"x_posts_fetched":6,"x_users_fetched":1}}}`)
@@ -73,9 +73,10 @@ func TestXAIChatAndResponsesContracts(t *testing.T) {
 		t.Fatalf("chat=%+v err=%v", chat, err)
 	}
 	effort := "high"
+	maxToolCalls := 3
 	response, err := client.Responses(t.Context(), openai.ResponseRequest{
 		Model: "grok", Input: "hello", ServiceTier: "priority", PromptCacheKey: "conversation",
-		Reasoning: &openai.ResponseReasoning{Effort: &effort},
+		Reasoning: &openai.ResponseReasoning{Effort: &effort}, MaxToolCalls: &maxToolCalls,
 	})
 	if err != nil || response.ServiceTier != "priority" || !slices.Equal(response.Citations, []string{"https://x.ai/news", "https://x.com/xai/status/1"}) || response.Usage.TotalTokens != 3 || response.OutputText != "ok" || response.Usage.NumSourcesUsed == nil || *response.Usage.NumSourcesUsed != 4 || response.Usage.NumServerSideToolsUsed == nil || *response.Usage.NumServerSideToolsUsed != 2 || response.Usage.ServerSideToolUsageDetails == nil || response.Usage.ServerSideToolUsageDetails.XPostsFetched == nil || *response.Usage.ServerSideToolUsageDetails.XPostsFetched != 6 || response.Usage.ServerSideToolUsageDetails.XUsersFetched == nil || *response.Usage.ServerSideToolUsageDetails.XUsersFetched != 1 {
 		t.Fatalf("response=%+v err=%v", response, err)
@@ -97,7 +98,6 @@ func TestXAIRejectsUnsupportedParametersBeforeHTTP(t *testing.T) {
 	invalidEffort := "max"
 	metadata := map[string]string{"ticket": "42"}
 	truncation := "auto"
-	maxToolCalls := 3
 	tests := []struct {
 		param string
 		code  string
@@ -112,7 +112,6 @@ func TestXAIRejectsUnsupportedParametersBeforeHTTP(t *testing.T) {
 		{param: "metadata", code: "unsupported_parameter", req: openai.ResponseRequest{Metadata: metadata}},
 		{param: "truncation", code: "unsupported_parameter", req: openai.ResponseRequest{Truncation: &truncation}},
 		{param: "safety_identifier", code: "unsupported_parameter", req: openai.ResponseRequest{SafetyIdentifier: "user"}},
-		{param: "max_tool_calls", code: "unsupported_parameter", req: openai.ResponseRequest{MaxToolCalls: &maxToolCalls}},
 		{param: "text.verbosity", code: "unsupported_parameter", req: openai.ResponseRequest{Text: map[string]any{"verbosity": "high"}}},
 	}
 	for _, test := range tests {

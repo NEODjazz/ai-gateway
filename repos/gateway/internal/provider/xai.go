@@ -711,9 +711,6 @@ func (x XAI) ValidateResponseParameters(request openai.ResponseRequest) error {
 	if request.StreamOptions != nil {
 		return xaiUnsupportedParameter("stream_options")
 	}
-	if request.MaxToolCalls != nil {
-		return xaiUnsupportedParameter("max_tool_calls")
-	}
 	if _, supplied := openai.ResponseTextVerbosity(request.Text); supplied {
 		return xaiUnsupportedParameter("text.verbosity")
 	}
