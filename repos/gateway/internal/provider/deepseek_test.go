@@ -72,6 +72,8 @@ func TestDeepSeekRejectsInvalidThinkingCombinationsBeforeHTTP(t *testing.T) {
 	defer server.Close()
 	temperature, lowTopP := 0.5, 0.5
 	requests := []openai.ChatCompletionRequest{
+		{TopP: &lowTopP},
+		{ChatGenerationOptions: openai.ChatGenerationOptions{Thinking: &openai.ChatThinkingOptions{Type: "disabled"}}, TopP: &lowTopP},
 		{ChatGenerationOptions: openai.ChatGenerationOptions{Thinking: &openai.ChatThinkingOptions{Type: "disabled"}, ReasoningEffort: "high"}},
 		{ChatGenerationOptions: openai.ChatGenerationOptions{Thinking: &openai.ChatThinkingOptions{Type: "enabled"}, ReasoningEffort: "none"}},
 		{ChatGenerationOptions: openai.ChatGenerationOptions{Thinking: &openai.ChatThinkingOptions{Type: "enabled"}}, Temperature: &temperature},

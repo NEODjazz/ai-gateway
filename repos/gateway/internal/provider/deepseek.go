@@ -104,6 +104,9 @@ func validateDeepSeekThinking(request openai.ChatCompletionRequest) error {
 		}
 	}
 	if !thinkingEnabled {
+		if request.TopP != nil {
+			return invalid("top_p", "top_p has no effect when DeepSeek thinking mode is disabled")
+		}
 		return nil
 	}
 	if request.Temperature != nil {
