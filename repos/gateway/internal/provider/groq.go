@@ -50,7 +50,7 @@ func (g Groq) ValidateChatParameters(request openai.ChatCompletionRequest) error
 		return err
 	}
 	switch request.ServiceTier {
-	case "", "auto", "default", "on_demand", "flex", "performance":
+	case "", "auto", "on_demand", "flex", "performance":
 	default:
 		return &Error{Class: FailureClientRequest, Provider: "groq", StatusCode: http.StatusBadRequest, UpstreamCode: "unsupported_parameter", Param: "service_tier", Err: errUnsupportedServiceTier}
 	}

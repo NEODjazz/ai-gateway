@@ -41,13 +41,28 @@ func TestGroqChatMapsSupportedContract(t *testing.T) {
 
 func TestGroqAcceptsDocumentedServiceTiers(t *testing.T) {
 	client := NewGroq("http://unused.invalid", "", false)
-	for _, tier := range []string{"auto", "default", "on_demand", "flex", "performance"} {
+	for _, tier := range []string{"auto", "on_demand", "flex", "performance"} {
 		t.Run(tier, func(t *testing.T) {
 			request := openai.ChatCompletionRequest{ChatGenerationOptions: openai.ChatGenerationOptions{ServiceTier: tier}}
 			if err := client.ValidateChatParameters(request); err != nil {
 				t.Fatalf("documented service tier rejected: %v", err)
 			}
 		})
+	}
+}
+
+func TestGroqRejectsResponseOnlyServiceTierBeforeHTTP(t *testing.T) {
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
+	defer server.Close()
+	client := NewGroq(server.URL, "key", true)
+	_, err := client.ChatCompletions(t.Context(), openai.ChatCompletionRequest{
+		Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}},
+		ChatGenerationOptions: openai.ChatGenerationOptions{ServiceTier: "default"},
+	})
+	var providerErr *Error
+	if !errors.As(err, &providerErr) || providerErr.Param != "service_tier" || providerErr.UpstreamCode != "unsupported_parameter" || called {
+		t.Fatalf("err=%v called=%v", err, called)
 	}
 }
 

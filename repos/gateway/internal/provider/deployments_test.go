@@ -535,7 +535,7 @@ func TestManagedProviderCapabilityProfilesExposeValidatedChatParameters(t *testi
 		"mistral":           {ReasoningEffort: []string{"none", "minimal", "low", "medium", "high", "xhigh"}, Logprobs: []string{}, ServiceTier: []string{}},
 		"deepseek":          {ReasoningEffort: []string{}, Logprobs: []string{"false", "true"}, ServiceTier: []string{}},
 		"xai":               {ReasoningEffort: []string{"none", "low", "medium", "high", "xhigh"}, Logprobs: []string{"false", "true"}, ServiceTier: []string{"default", "priority"}},
-		"groq":              {ReasoningEffort: allReasoning, Logprobs: []string{}, ServiceTier: []string{"auto", "default", "on_demand", "flex", "performance"}},
+		"groq":              {ReasoningEffort: allReasoning, Logprobs: []string{}, ServiceTier: []string{"auto", "on_demand", "flex", "performance"}},
 		"openrouter":        {ReasoningEffort: allReasoning, Logprobs: []string{"false", "true"}, ServiceTier: allTiers},
 		"openai-compatible": {ReasoningEffort: allReasoning, Logprobs: []string{"false", "true"}, ServiceTier: []string{}},
 		"openai":            {ReasoningEffort: allReasoning, Logprobs: []string{"false", "true"}, ServiceTier: []string{"auto", "default", "flex", "priority", "fast", "ultrafast"}},
