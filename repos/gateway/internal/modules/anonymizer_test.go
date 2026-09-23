@@ -314,7 +314,8 @@ func TestDeanonymizeResponsesResponseRestoresOriginalValues(t *testing.T) {
 	}
 
 	response := openai.ResponseResponse{
-		OutputText: "Email: {{EMAIL_1}}",
+		Instructions: "Contact {{EMAIL_1}}",
+		OutputText:   "Email: {{EMAIL_1}}",
 		Output: []openai.ResponseOutputItem{
 			{
 				Type:      "message",
@@ -333,6 +334,9 @@ func TestDeanonymizeResponsesResponseRestoresOriginalValues(t *testing.T) {
 	}
 
 	DeanonymizeResponsesResponse(&req, &response)
+	if response.Instructions != "Contact user@example.com" {
+		t.Fatalf("expected instructions to be restored: %v", response.Instructions)
+	}
 	if !strings.Contains(response.OutputText, "user@example.com") {
 		t.Fatalf("expected output_text to be restored: %s", response.OutputText)
 	}

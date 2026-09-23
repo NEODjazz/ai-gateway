@@ -200,6 +200,42 @@ func TestResponsesPreserveAndValidatePromptCacheConfiguration(t *testing.T) {
 	}
 }
 
+func TestResponsesPreserveAndValidateInstructions(t *testing.T) {
+	for _, instructions := range []string{`"be concise"`, `[{"role":"developer","content":"be concise"}]`} {
+		for _, stream := range []bool{false, true} {
+			t.Run(fmt.Sprintf("instructions=%s/stream=%v", instructions, stream), func(t *testing.T) {
+				document := `{"id":"r","object":"response","model":"m","status":"completed","instructions":` + instructions + `}`
+				var response openai.ResponseResponse
+				var err error
+				if stream {
+					response, err = streamResponseData(strings.NewReader("data: {\"type\":\"response.completed\",\"response\":"+document+"}\n\n"), "m", func(string, string) error { return nil })
+				} else {
+					response, err = decodeResponseJSON(strings.NewReader(document))
+				}
+				var expected any
+				decodeErr := json.Unmarshal([]byte(instructions), &expected)
+				want, wantErr := json.Marshal(expected)
+				encoded, marshalErr := json.Marshal(response.Instructions)
+				if err != nil || decodeErr != nil || wantErr != nil || marshalErr != nil || string(encoded) != string(want) {
+					t.Fatalf("instructions=%s response=%+v err=%v marshalErr=%v", instructions, response, err, marshalErr)
+				}
+			})
+		}
+	}
+
+	for _, instructions := range []string{`42`, `[]`, `["be concise"]`, `[null]`} {
+		document := `{"id":"r","object":"response","model":"m","instructions":` + instructions + `}`
+		if _, err := decodeResponseJSON(strings.NewReader(document)); err == nil {
+			t.Fatalf("invalid instructions accepted: %s", instructions)
+		}
+		callbacks := 0
+		wire := "data: {\"type\":\"response.completed\",\"response\":" + document + "}\n\n"
+		if _, err := streamResponseData(strings.NewReader(wire), "m", func(string, string) error { callbacks++; return nil }); err == nil || callbacks != 0 {
+			t.Fatalf("invalid instructions delivered: instructions=%s err=%v callbacks=%d", instructions, err, callbacks)
+		}
+	}
+}
+
 func TestResponsesPreserveAndValidateGenerationSettings(t *testing.T) {
 	for _, stream := range []bool{false, true} {
 		t.Run(fmt.Sprintf("stream=%v", stream), func(t *testing.T) {

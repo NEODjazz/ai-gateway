@@ -532,6 +532,19 @@ func TestResponseIsolationIdentifiersUseUnicodeCharacterLimits(t *testing.T) {
 	}
 }
 
+func TestValidateResponseInstructions(t *testing.T) {
+	for _, value := range []any{"be concise", []any{map[string]any{"role": "developer", "content": "be concise"}}} {
+		if message := ValidateResponseInstructions(value); message != "" {
+			t.Fatalf("valid instructions rejected: %v: %s", value, message)
+		}
+	}
+	for _, value := range []any{42, []any{}, []any{"be concise"}, []any{nil}} {
+		if message := ValidateResponseInstructions(value); message == "" {
+			t.Fatalf("invalid instructions accepted: %v", value)
+		}
+	}
+}
+
 func TestResponseRejectsNonPositiveOutputLimits(t *testing.T) {
 	for _, value := range []int{-1, 0} {
 		for _, request := range []ResponseRequest{{MaxOutputTokens: &value}, {MaxTokens: &value}} {

@@ -123,6 +123,9 @@ func validateResponseControls(response openai.ResponseResponse) error {
 	if response.PromptCacheRetention != "" && response.PromptCacheRetention != "in_memory" && response.PromptCacheRetention != "24h" {
 		return errors.New("provider returned invalid prompt_cache_retention")
 	}
+	if message := openai.ValidateResponseInstructions(response.Instructions); message != "" {
+		return errors.New("provider returned invalid instructions: " + message)
+	}
 	if response.MaxOutputTokens != nil && *response.MaxOutputTokens <= 0 {
 		return errors.New("provider returned invalid max_output_tokens")
 	}

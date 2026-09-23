@@ -936,6 +936,7 @@ type ResponseResponse struct {
 	Output              []ResponseOutputItem       `json:"output,omitempty"`
 	OutputText          string                     `json:"output_text,omitempty"`
 	Usage               ResponseUsage              `json:"usage,omitempty"`
+	Instructions        any                        `json:"instructions,omitempty"`
 
 	PromptCacheOptions   *PromptCacheOptions `json:"prompt_cache_options,omitempty"`
 	PromptCacheRetention string              `json:"prompt_cache_retention,omitempty"`

@@ -39,6 +39,32 @@ func (r ResponseRequest) ValidateEnvelope() string {
 	return ""
 }
 
+// ValidateResponseInstructions checks the string or input-item sequence echoed
+// by a provider before it can be returned to a Responses client.
+func ValidateResponseInstructions(value any) string {
+	if value == nil {
+		return ""
+	}
+	if _, ok := value.(string); ok {
+		return ""
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return "instructions must be a string or non-empty array of objects"
+	}
+	var items []json.RawMessage
+	if json.Unmarshal(encoded, &items) != nil || len(items) == 0 {
+		return "instructions must be a string or non-empty array of objects"
+	}
+	for _, item := range items {
+		var object map[string]json.RawMessage
+		if bytes.Equal(bytes.TrimSpace(item), []byte("null")) || json.Unmarshal(item, &object) != nil || object == nil {
+			return "instructions array entries must be objects"
+		}
+	}
+	return ""
+}
+
 // Validate checks provider-independent Responses generation options.
 func (r ResponseRequest) Validate() string {
 	if r.Conversation != nil {
