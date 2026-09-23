@@ -249,11 +249,11 @@ func validateDeepSeekResponseInput(input any, model string) error {
 			if item["role"] == nil {
 				return invalid("input item without type must be a message")
 			}
-			if err := validateDeepSeekResponseParts(item["content"], false, model); err != nil {
+			if err := validateDeepSeekResponseMessage(item, model); err != nil {
 				return invalid(err.Error())
 			}
 		case "message":
-			if err := validateDeepSeekResponseParts(item["content"], false, model); err != nil {
+			if err := validateDeepSeekResponseMessage(item, model); err != nil {
 				return invalid(err.Error())
 			}
 		case "function_call_output", "custom_tool_call_output":
@@ -264,14 +264,14 @@ func validateDeepSeekResponseInput(input any, model string) error {
 				}
 				delete(customCalls, callID)
 			}
-			if err := validateDeepSeekResponseParts(item["output"], false, model); err != nil {
+			if err := validateDeepSeekResponseParts(item["output"], false, true, model); err != nil {
 				return invalid(err.Error())
 			}
 		case "reasoning":
 			if item["summary"] != nil || item["encrypted_content"] != nil {
 				return invalid("reasoning summary and encrypted_content are not supported by DeepSeek")
 			}
-			if err := validateDeepSeekResponseParts(item["content"], true, model); err != nil {
+			if err := validateDeepSeekResponseParts(item["content"], true, false, model); err != nil {
 				return invalid(err.Error())
 			}
 		case "custom_tool_call":
@@ -288,7 +288,20 @@ func validateDeepSeekResponseInput(input any, model string) error {
 	return nil
 }
 
-func validateDeepSeekResponseParts(value json.RawMessage, reasoning bool, model string) error {
+func validateDeepSeekResponseMessage(item map[string]json.RawMessage, model string) error {
+	var role string
+	if json.Unmarshal(item["role"], &role) != nil {
+		return errors.New("input message requires a valid role")
+	}
+	switch role {
+	case "user", "developer", "system", "assistant":
+		return validateDeepSeekResponseParts(item["content"], false, role == "user" || role == "developer", model)
+	default:
+		return errors.New("input message role is not supported by DeepSeek")
+	}
+}
+
+func validateDeepSeekResponseParts(value json.RawMessage, reasoning, imageAllowed bool, model string) error {
 	if value == nil {
 		return nil
 	}
@@ -311,8 +324,13 @@ func validateDeepSeekResponseParts(value json.RawMessage, reasoning bool, model 
 			}
 		} else if partType != "input_text" && partType != "output_text" && partType != "input_image" {
 			return errors.New("input content part is not supported by DeepSeek")
-		} else if partType == "input_image" && !deepSeekVisionModel(model) {
-			return errors.New("input_image is not supported by this DeepSeek model")
+		} else if partType == "input_image" {
+			if !imageAllowed {
+				return errors.New("input_image is not supported in this DeepSeek message role")
+			}
+			if !deepSeekVisionModel(model) {
+				return errors.New("input_image is not supported by this DeepSeek model")
+			}
 		}
 	}
 	return nil
