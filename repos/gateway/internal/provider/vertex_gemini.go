@@ -53,6 +53,7 @@ func (VertexGemini) SupportsWebSearch() bool        { return true }
 func (VertexGemini) SupportsCodeExecution() bool    { return true }
 func (VertexGemini) SupportsURLContext() bool       { return true }
 func (VertexGemini) SupportsAudioInput() bool       { return true }
+func (VertexGemini) SupportsAudioTimestamp() bool   { return true }
 func (VertexGemini) SupportsVideoInput() bool       { return true }
 func (VertexGemini) SupportsFileInput() bool        { return true }
 func (VertexGemini) SupportsReasoningBlocks() bool  { return true }

@@ -492,6 +492,26 @@ func TestGeminiGoogleMapsDisablesResponseCaches(t *testing.T) {
 	}
 }
 
+func TestVertexAudioTimestampRequiresAudioCapabilities(t *testing.T) {
+	enabled := true
+	request := modules.RequestContext{CredentialID: "key", Request: openai.ChatCompletionRequest{
+		Model: "test",
+		Messages: []openai.Message{{Role: "user", Content: []any{
+			map[string]any{"type": "input_audio", "input_audio": map[string]any{"data": "UklGRgAAAABXQVZF", "format": "wav"}},
+		}}},
+		GeminiAudioTimestamp: &enabled,
+	}}
+	if providerCacheKey("chat", request) != "" {
+		t.Fatal("exact cache allowed timestamp-aware audio")
+	}
+	if _, _, ok := semanticRequest(request, Endpoint{Name: "test"}); ok {
+		t.Fatal("semantic cache allowed timestamp-aware audio")
+	}
+	if got := strings.Join(requiredChatCapabilities(request.Request, false), ","); got != "chat,audio_input,gemini_audio_timestamp" {
+		t.Fatalf("audio timestamp routing requirements=%s", got)
+	}
+}
+
 func TestChatWebFetchDisablesResponseCaches(t *testing.T) {
 	request := modules.RequestContext{CredentialID: "key", Request: openai.ChatCompletionRequest{Model: "test", Messages: []openai.Message{{Role: "user", Content: "read https://example.com"}}, ChatGenerationOptions: openai.ChatGenerationOptions{WebFetchOptions: &openai.ChatWebFetchOptions{AllowedDomains: []string{"example.com"}, MaxContentTokens: 1000}}}}
 	if providerCacheKey("chat", request) != "" {

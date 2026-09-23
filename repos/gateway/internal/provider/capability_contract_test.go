@@ -49,6 +49,13 @@ func TestGeminiManagedToolsRequireExplicitEndpointCapabilities(t *testing.T) {
 			t.Fatalf("explicit endpoint rejected %s", capability)
 		}
 	}
+	if supportsCatalogCapabilities(catalog, Endpoint{Name: "gemini", Type: "gemini", Provider: Gemini{}, Capabilities: []string{"chat", "audio_input", "gemini_audio_timestamp"}}, "model", "chat", "gemini_audio_timestamp") {
+		t.Fatal("public Gemini endpoint enabled Vertex-only audio timestamps")
+	}
+	vertex := Endpoint{Name: "vertex", Type: "vertex-gemini", Provider: NewVertexGemini("https://us-central1-aiplatform.googleapis.com/v1/projects/project-1/locations/us-central1/publishers/google", false), Capabilities: []string{"chat", "audio_input", "gemini_audio_timestamp"}}
+	if !supportsCatalogCapabilities(catalog, vertex, "model", "chat", "gemini_audio_timestamp") {
+		t.Fatal("explicit Vertex audio timestamp capability rejected")
+	}
 }
 
 func TestRouterSkipsNativeUnsupportedResponseProtocol(t *testing.T) {

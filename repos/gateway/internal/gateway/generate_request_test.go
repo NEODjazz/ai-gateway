@@ -206,6 +206,31 @@ func TestGenerateRequestMapsInlineAudio(t *testing.T) {
 	}
 }
 
+func TestGenerateRequestMapsVertexAudioTimestamp(t *testing.T) {
+	var native generateRequest
+	if err := decodeMessagesValue(json.RawMessage(`{"contents":[{"role":"user","parts":[{"inlineData":{"mimeType":"audio/wav","data":"UklGRgAAAABXQVZF"}}]}],"generationConfig":{"audioTimestamp":true}}`), &native); err != nil {
+		t.Fatal(err)
+	}
+	chat, err := native.chat("model", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if chat.GeminiAudioTimestamp == nil || !*chat.GeminiAudioTimestamp {
+		t.Fatalf("audio timestamp=%v", chat.GeminiAudioTimestamp)
+	}
+
+	for _, value := range []string{"true", "false"} {
+		var textOnly generateRequest
+		raw := `{"contents":[{"role":"user","parts":[{"text":"hello"}]}],"generationConfig":{"audioTimestamp":` + value + `}}`
+		if err := decodeMessagesValue(json.RawMessage(raw), &textOnly); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := textOnly.chat("model", false); err == nil {
+			t.Fatalf("text-only audioTimestamp=%s accepted", value)
+		}
+	}
+}
+
 func TestGenerateRequestMapsAdditionalInlineAudioFormats(t *testing.T) {
 	tests := []struct {
 		mediaType, wantMediaType string

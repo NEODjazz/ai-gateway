@@ -375,10 +375,13 @@ func validDeploymentCapabilities(capabilities []string) bool {
 	if seen["response_apply_patch"] && (!seen["responses"] || !seen["tools"]) {
 		return false
 	}
-	for _, capability := range []string{"web_fetch", "tool_search", "memory_tool", "bash_tool", "text_editor_tool", "computer_toolset", "browser_toolset", "thinking", "zero_output", "inference_geo", "context_management", "tool_result_error", "document_citations", "document_metadata", "document_text", "audio", "audio_input", "video_input", "prompt_cache", "assistant_prefill", "gemini_code_execution", "url_context", "google_maps"} {
+	for _, capability := range []string{"web_fetch", "tool_search", "memory_tool", "bash_tool", "text_editor_tool", "computer_toolset", "browser_toolset", "thinking", "zero_output", "inference_geo", "context_management", "tool_result_error", "document_citations", "document_metadata", "document_text", "audio", "audio_input", "video_input", "prompt_cache", "assistant_prefill", "gemini_code_execution", "gemini_audio_timestamp", "url_context", "google_maps"} {
 		if seen[capability] && !seen["chat"] {
 			return false
 		}
+	}
+	if seen["gemini_audio_timestamp"] && !seen["audio_input"] {
+		return false
 	}
 	if seen["background_responses"] && !seen["responses"] {
 		return false
@@ -413,7 +416,7 @@ func ValidModelCapability(capability string) bool {
 		"image_generation", "image_edit", "image_variation",
 		"audio_transcription", "audio_translation", "audio_speech", "ocr", "search", "skills", "fine_tuning", "video", "video_remix", "video_extension", "container", "container_files", "container_network", "cached_content", "sandbox", "realtime",
 		"stream", "tools", "custom_tools", "response_image_generation", "response_computer", "response_shell", "response_apply_patch", "structured_output", "mcp", "vision",
-		"web_search", "web_fetch", "tool_search", "memory_tool", "bash_tool", "text_editor_tool", "computer_toolset", "browser_toolset", "thinking", "zero_output", "inference_geo", "context_management", "tool_result_error", "document_citations", "document_metadata", "document_text", "audio", "audio_input", "video_input", "prompt_cache", "assistant_prefill", "background_responses", "file_input", "bedrock_invoke", "gemini_code_execution", "url_context", "google_maps":
+		"web_search", "web_fetch", "tool_search", "memory_tool", "bash_tool", "text_editor_tool", "computer_toolset", "browser_toolset", "thinking", "zero_output", "inference_geo", "context_management", "tool_result_error", "document_citations", "document_metadata", "document_text", "audio", "audio_input", "video_input", "prompt_cache", "assistant_prefill", "background_responses", "file_input", "bedrock_invoke", "gemini_code_execution", "gemini_audio_timestamp", "url_context", "google_maps":
 		return true
 	default:
 		return false
@@ -677,6 +680,9 @@ func supportsManagedAdapterCapability(endpoint Endpoint, capability string) bool
 	case "gemini_code_execution":
 		client, ok := endpoint.Provider.(interface{ SupportsCodeExecution() bool })
 		return (endpoint.Type == "gemini" || endpoint.Type == "vertex-gemini") && ok && client.SupportsCodeExecution()
+	case "gemini_audio_timestamp":
+		client, ok := endpoint.Provider.(interface{ SupportsAudioTimestamp() bool })
+		return endpoint.Type == "vertex-gemini" && ok && client.SupportsAudioTimestamp()
 	case "url_context":
 		client, ok := endpoint.Provider.(interface{ SupportsURLContext() bool })
 		return (endpoint.Type == "gemini" || endpoint.Type == "vertex-gemini") && ok && client.SupportsURLContext()

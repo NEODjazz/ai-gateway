@@ -131,6 +131,7 @@ type geminiGeneration struct {
 	ThinkingConfig     *geminiThinkingConfig           `json:"thinkingConfig,omitempty"`
 	ImageConfig        *geminiImageConfig              `json:"imageConfig,omitempty"`
 	AudioTranscription *geminiAudioTranscriptionConfig `json:"audioTranscriptionConfig,omitempty"`
+	AudioTimestamp     *bool                           `json:"audioTimestamp,omitempty"`
 	ResponseModalities []string                        `json:"responseModalities,omitempty"`
 	Seed               *int64                          `json:"seed,omitempty"`
 	Stop               []string                        `json:"stopSequences,omitempty"`
@@ -368,7 +369,7 @@ func geminiChatRequest(request openai.ChatCompletionRequest) (geminiRequest, err
 		FrequencyPenalty: request.FrequencyPenalty, PresencePenalty: request.PresencePenalty,
 		ResponseLogprobs: request.Logprobs, Logprobs: request.TopLogprobs, CandidateCount: request.N,
 		ThinkingConfig: thinkingConfig, Seed: request.Seed, Stop: stop,
-		ResponseModalities: responseModalities,
+		AudioTimestamp: request.GeminiAudioTimestamp, ResponseModalities: responseModalities,
 	}
 	result.ServiceTier = serviceTier
 	result.Store = request.Store

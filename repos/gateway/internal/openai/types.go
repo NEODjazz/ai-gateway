@@ -34,6 +34,9 @@ type ChatCompletionRequest struct {
 	// is validated at the native request boundary.
 	GeminiGoogleMaps        bool          `json:"-"`
 	GeminiRetrievalLocation *GeminiLatLng `json:"-"`
+	// GeminiAudioTimestamp enables Vertex audio timestamp understanding for
+	// requests that contain validated audio input.
+	GeminiAudioTimestamp *bool `json:"-"`
 	// AnthropicSkills contains validated native Messages skill references.
 	AnthropicSkills      []AnthropicSkillReference `json:"-"`
 	AnthropicContainerID string                    `json:"-"`
