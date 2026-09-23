@@ -2436,3 +2436,20 @@ image ID `sha256:5b5f10da0ac54078aea02e57e5bbbad4559d4d661fba7bd2b09fece57cb87e9
 Gateway Helm revision 602 completed successfully. Pod
 `ai-gateway-gateway-6d5fbd88f6-4k2lz` became Ready with zero restarts, and
 direct service liveness and readiness both returned 204.
+
+## Responses function tool history authorization
+
+Source `1974d6c0` requires the `tools` deployment capability for function calls
+and outputs in Responses input history, even without a new tool definition.
+Historical function names are checked against credential and access-group
+grants. Output-only stateful continuations use wildcard grants unless a trusted
+internal run snapshot supplies the pending function names. Durable assistant
+runs use that snapshot without changing the provider wire request. Routing,
+authorization and assistant regressions passed with the full Go race suite,
+vet and build.
+
+Rancher Desktop built `ai-gateway-gateway:function-history-1974d6c0` with image
+ID `sha256:259bae039b4cefca6ee2df74b738839af731c1a8cc321d461b2ee2289bbbdbda`.
+Gateway Helm revision 603 completed successfully. Pod
+`ai-gateway-gateway-6669cc4c89-wpbhb` became Ready with zero restarts, and
+direct service liveness and readiness both returned 204.
