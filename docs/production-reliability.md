@@ -2253,3 +2253,22 @@ Gateway Helm revision 590 completed successfully. Pod
 liveness and readiness returned 204, OpenAPI 0.1.472 was served, the Groq
 provider-wide reasoning arrays were empty, and all three exact model policies
 matched the runtime validator.
+
+## Native Groq citation control
+
+Source `dc59c7f` adds the validated `citation_options` Chat control with the
+exact `enabled` and `disabled` values. The native Groq adapter preserves the
+value on the provider request; every other adapter rejects it before provider
+execution. The option participates in exact and semantic cache identity and is
+published by the runtime capability profile. Contract, adapter-isolation,
+capability, cache and OpenAPI regressions passed together with vet, build and
+the full race suite.
+
+Rancher Desktop built `ai-gateway-gateway:groq-citations-dc59c7f2` with image
+ID `sha256:a8196c52f3aed8a4e75ad0a0abd3ddfdda93e3644ee809c0346f7882d4cf6c0c`.
+Gateway Helm revision 591 completed successfully. Pod
+`ai-gateway-gateway-75d4d67557-fhbxf` became Ready with zero restarts. Direct
+service checks returned 204 for liveness and readiness, OpenAPI 0.1.473 was
+served, the live Groq profile reported both citation values, other inspected
+provider profiles omitted them, and the three exact Groq reasoning policies
+remained intact.
