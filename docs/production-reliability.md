@@ -2377,3 +2377,18 @@ ID `sha256:3283f77ca1fc8e85ce458bc6293038499715627f02216d145a762e74f5485e73`.
 Gateway Helm revision 598 completed successfully. Pod
 `ai-gateway-gateway-5845974d9-ljsfr` became Ready with zero restarts, and
 direct service liveness and readiness both returned 204.
+
+## DeepSeek Responses sampling controls
+
+Source `0d2567a8` rejects ineffective `temperature` while Responses thinking is
+enabled by default and rejects `top_p` below its effective threshold. With
+`reasoning.effort=none`, temperature remains available and `top_p` is rejected
+because the provider ignores it. The admin capability profile probes each
+conditionally supported setting in a valid reasoning mode. Sampling and
+profile regressions passed with the full Go race suite, vet and build.
+
+Rancher Desktop built `ai-gateway-gateway:deepseek-sampling-0d2567a8` with
+image ID `sha256:c5521be3dd9cfe8d4f87ceed667fa1fd5e43599a26b4536a0270181c90b4e0c9`.
+Gateway Helm revision 599 completed successfully. Pod
+`ai-gateway-gateway-65f498b759-5fdgq` became Ready with zero restarts, and
+direct service liveness and readiness both returned 204.
