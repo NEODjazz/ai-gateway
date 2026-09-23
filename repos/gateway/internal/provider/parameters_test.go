@@ -6,6 +6,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -13,6 +15,39 @@ import (
 	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/openai"
 )
+
+func TestRejectGenerationOptionsCoversEveryPublicField(t *testing.T) {
+	optionsType := reflect.TypeOf(openai.ChatGenerationOptions{})
+	for index := 0; index < optionsType.NumField(); index++ {
+		field := optionsType.Field(index)
+		parameter := strings.Split(field.Tag.Get("json"), ",")[0]
+		if parameter == "" || parameter == "-" {
+			t.Fatalf("ChatGenerationOptions.%s does not declare a public JSON parameter", field.Name)
+		}
+		t.Run(parameter, func(t *testing.T) {
+			options := reflect.New(optionsType).Elem()
+			value := options.FieldByIndex(field.Index)
+			switch value.Kind() {
+			case reflect.Map:
+				value.Set(reflect.MakeMap(value.Type()))
+			case reflect.Pointer:
+				value.Set(reflect.New(value.Type().Elem()))
+			case reflect.Slice:
+				value.Set(reflect.MakeSlice(value.Type(), 0, 0))
+			case reflect.String:
+				value.SetString("supplied")
+			default:
+				t.Fatalf("ChatGenerationOptions.%s has unhandled kind %s", field.Name, value.Kind())
+			}
+
+			var failure *Error
+			err := rejectGenerationOptions("contract-test", options.Interface().(openai.ChatGenerationOptions))
+			if !errors.As(err, &failure) || failure.UpstreamCode != "unsupported_parameter" || failure.Param != parameter {
+				t.Fatalf("public parameter %s is not covered by the adapter rejection policy: %v", parameter, err)
+			}
+		})
+	}
+}
 
 func TestManagedOpenAIServiceTierIsValidatedAndForwarded(t *testing.T) {
 	requests := 0
