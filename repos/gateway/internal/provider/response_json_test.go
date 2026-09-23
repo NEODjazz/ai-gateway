@@ -159,6 +159,47 @@ func TestResponsesPreserveAndValidateIsolationIdentifiers(t *testing.T) {
 	}
 }
 
+func TestResponsesPreserveAndValidatePromptCacheConfiguration(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprintf("stream=%v", stream), func(t *testing.T) {
+			document := `{"id":"r","object":"response","model":"m","status":"completed","prompt_cache_options":{"mode":"explicit","ttl":"30m","comparison_response_id":"resp_prior","prewarm":false},"prompt_cache_retention":"24h"}`
+			var response openai.ResponseResponse
+			var err error
+			if stream {
+				response, err = streamResponseData(strings.NewReader("data: {\"type\":\"response.completed\",\"response\":"+document+"}\n\n"), "m", func(string, string) error { return nil })
+			} else {
+				response, err = decodeResponseJSON(strings.NewReader(document))
+			}
+			if err != nil || response.PromptCacheOptions == nil || response.PromptCacheOptions.Mode != "explicit" || response.PromptCacheOptions.TTL != "30m" || response.PromptCacheOptions.ComparisonResponseID != "resp_prior" || response.PromptCacheOptions.Prewarm == nil || *response.PromptCacheOptions.Prewarm || response.PromptCacheRetention != "24h" {
+				t.Fatalf("response=%+v err=%v", response, err)
+			}
+			encoded, err := json.Marshal(response)
+			for _, field := range []string{`"prompt_cache_options":{"mode":"explicit","ttl":"30m","comparison_response_id":"resp_prior","prewarm":false}`, `"prompt_cache_retention":"24h"`} {
+				if err != nil || !strings.Contains(string(encoded), field) {
+					t.Fatalf("encoded=%s missing=%s err=%v", encoded, field, err)
+				}
+			}
+		})
+	}
+
+	for _, document := range []string{
+		`{"id":"r","object":"response","model":"m","prompt_cache_options":{"unknown":true}}`,
+		`{"id":"r","object":"response","model":"m","prompt_cache_options":{"mode":"automatic"}}`,
+		`{"id":"r","object":"response","model":"m","prompt_cache_options":{"ttl":"1h"}}`,
+		`{"id":"r","object":"response","model":"m","prompt_cache_options":{"comparison_response_id":"` + strings.Repeat("x", 257) + `"}}`,
+		`{"id":"r","object":"response","model":"m","prompt_cache_retention":"forever"}`,
+	} {
+		if _, err := decodeResponseJSON(strings.NewReader(document)); err == nil {
+			t.Fatalf("invalid prompt cache configuration accepted: %s", document)
+		}
+		callbacks := 0
+		wire := "data: {\"type\":\"response.completed\",\"response\":" + document + "}\n\n"
+		if _, err := streamResponseData(strings.NewReader(wire), "m", func(string, string) error { callbacks++; return nil }); err == nil || callbacks != 0 {
+			t.Fatalf("invalid prompt cache configuration delivered: err=%v callbacks=%d", err, callbacks)
+		}
+	}
+}
+
 func TestResponsesPreserveAndValidateGenerationSettings(t *testing.T) {
 	for _, stream := range []bool{false, true} {
 		t.Run(fmt.Sprintf("stream=%v", stream), func(t *testing.T) {

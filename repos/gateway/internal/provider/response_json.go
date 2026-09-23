@@ -55,10 +55,11 @@ func decodeResponseJSON(reader io.Reader) (openai.ResponseResponse, error) {
 
 func validateResponseConfigurationPayload(payload []byte, response *openai.ResponseResponse) error {
 	var wire struct {
-		Reasoning  json.RawMessage `json:"reasoning"`
-		Text       json.RawMessage `json:"text"`
-		Tools      json.RawMessage `json:"tools"`
-		ToolChoice json.RawMessage `json:"tool_choice"`
+		Reasoning          json.RawMessage `json:"reasoning"`
+		Text               json.RawMessage `json:"text"`
+		Tools              json.RawMessage `json:"tools"`
+		ToolChoice         json.RawMessage `json:"tool_choice"`
+		PromptCacheOptions json.RawMessage `json:"prompt_cache_options"`
 	}
 	if err := json.Unmarshal(payload, &wire); err != nil {
 		return err
@@ -81,6 +82,11 @@ func validateResponseConfigurationPayload(payload []byte, response *openai.Respo
 	if len(wire.ToolChoice) > 0 {
 		if err := json.Unmarshal(wire.ToolChoice, &response.ToolChoice); err != nil {
 			return errors.New("provider returned invalid response tool_choice")
+		}
+	}
+	if len(wire.PromptCacheOptions) > 0 && string(wire.PromptCacheOptions) != "null" {
+		if err := decodeStrictResponseConfiguration(wire.PromptCacheOptions, &response.PromptCacheOptions); err != nil {
+			return errors.New("provider returned invalid prompt_cache_options")
 		}
 	}
 	if message := openai.ValidateResponseConfiguration(response.Tools, response.ToolChoice, response.Reasoning, response.Text); message != "" {
@@ -110,6 +116,12 @@ func validateResponseControls(response openai.ResponseResponse) error {
 	}
 	if utf8.RuneCountInString(response.PromptCacheKey) > 64 {
 		return errors.New("provider returned invalid prompt_cache_key")
+	}
+	if message := openai.ValidatePromptCacheOptions(response.PromptCacheOptions); message != "" {
+		return errors.New("provider returned invalid prompt_cache_options: " + message)
+	}
+	if response.PromptCacheRetention != "" && response.PromptCacheRetention != "in_memory" && response.PromptCacheRetention != "24h" {
+		return errors.New("provider returned invalid prompt_cache_retention")
 	}
 	if response.MaxOutputTokens != nil && *response.MaxOutputTokens <= 0 {
 		return errors.New("provider returned invalid max_output_tokens")
