@@ -937,12 +937,19 @@ type ResponseResponse struct {
 	OutputText          string                     `json:"output_text,omitempty"`
 	Usage               ResponseUsage              `json:"usage,omitempty"`
 	Instructions        any                        `json:"instructions,omitempty"`
+	Prompt              *ResponsePrompt            `json:"prompt,omitempty"`
 	Moderation          *ResponseModeration        `json:"moderation,omitempty"`
 	ContextManagement   []ResponseContextEntry     `json:"context_management,omitempty"`
 
 	PromptCacheOptions     *PromptCacheOptions             `json:"prompt_cache_options,omitempty"`
 	PromptCacheRetention   string                          `json:"prompt_cache_retention,omitempty"`
 	PromptCacheDiagnostics *ResponsePromptCacheDiagnostics `json:"prompt_cache_diagnostics,omitempty"`
+}
+
+type ResponsePrompt struct {
+	ID        string         `json:"id"`
+	Variables map[string]any `json:"variables,omitempty"`
+	Version   *string        `json:"version,omitempty"`
 }
 
 type ResponseModeration struct {

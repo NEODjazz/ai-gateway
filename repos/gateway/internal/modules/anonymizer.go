@@ -257,6 +257,11 @@ func DeanonymizeResponsesResponse(req *RequestContext, response *openai.Response
 
 	response.OutputText = DeanonymizeText(response.OutputText, req.AnonymizationValues)
 	response.Instructions = DeanonymizeAny(response.Instructions, req.AnonymizationValues)
+	if response.Prompt != nil {
+		if variables, ok := DeanonymizeAny(response.Prompt.Variables, req.AnonymizationValues).(map[string]any); ok {
+			response.Prompt.Variables = variables
+		}
+	}
 	for outputIndex := range response.Output {
 		response.Output[outputIndex].Arguments = DeanonymizeText(response.Output[outputIndex].Arguments, req.AnonymizationValues)
 		response.Output[outputIndex].Input = DeanonymizeText(response.Output[outputIndex].Input, req.AnonymizationValues)

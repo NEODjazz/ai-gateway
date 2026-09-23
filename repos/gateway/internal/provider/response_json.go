@@ -86,6 +86,7 @@ func validateResponseConfigurationPayload(payload []byte, response *openai.Respo
 		ContextManagement      json.RawMessage `json:"context_management"`
 		Error                  json.RawMessage `json:"error"`
 		IncompleteDetails      json.RawMessage `json:"incomplete_details"`
+		Prompt                 json.RawMessage `json:"prompt"`
 	}
 	if err := json.Unmarshal(payload, &wire); err != nil {
 		return err
@@ -140,6 +141,11 @@ func validateResponseConfigurationPayload(payload []byte, response *openai.Respo
 			return errors.New("provider returned invalid response incomplete_details")
 		}
 	}
+	if len(wire.Prompt) > 0 && string(wire.Prompt) != "null" {
+		if err := decodeStrictResponseConfiguration(wire.Prompt, &response.Prompt); err != nil {
+			return errors.New("provider returned invalid response prompt")
+		}
+	}
 	if message := openai.ValidateResponseConfiguration(response.Tools, response.ToolChoice, response.Reasoning, response.Text); message != "" {
 		return errors.New("provider returned invalid response configuration: " + message)
 	}
@@ -192,6 +198,9 @@ func validateResponseControls(response openai.ResponseResponse) error {
 	if err := validateResponseIncompleteDetails(response.IncompleteDetails); err != nil {
 		return err
 	}
+	if err := validateResponsePrompt(response.Prompt); err != nil {
+		return err
+	}
 	if response.MaxOutputTokens != nil && *response.MaxOutputTokens <= 0 {
 		return errors.New("provider returned invalid max_output_tokens")
 	}
@@ -216,6 +225,87 @@ func validateResponseControls(response openai.ResponseResponse) error {
 		return errors.New("provider returned invalid truncation")
 	}
 	return nil
+}
+
+func validateResponsePrompt(prompt *openai.ResponsePrompt) error {
+	if prompt == nil {
+		return nil
+	}
+	if strings.TrimSpace(prompt.ID) != prompt.ID || prompt.ID == "" || utf8.RuneCountInString(prompt.ID) > 512 {
+		return errors.New("provider returned invalid response prompt ID")
+	}
+	if prompt.Version != nil && (strings.TrimSpace(*prompt.Version) != *prompt.Version || *prompt.Version == "" || utf8.RuneCountInString(*prompt.Version) > 512) {
+		return errors.New("provider returned invalid response prompt version")
+	}
+	if len(prompt.Variables) > 256 {
+		return errors.New("provider returned too many response prompt variables")
+	}
+	for key, value := range prompt.Variables {
+		if strings.TrimSpace(key) == "" || utf8.RuneCountInString(key) > 64 {
+			return errors.New("provider returned invalid response prompt variable name")
+		}
+		if text, ok := value.(string); ok {
+			if utf8.RuneCountInString(text) > 1<<20 {
+				return errors.New("provider returned oversized response prompt variable")
+			}
+			continue
+		}
+		object, ok := value.(map[string]any)
+		if !ok || !validResponsePromptVariableObject(object) {
+			return errors.New("provider returned invalid response prompt variable")
+		}
+	}
+	return nil
+}
+
+func validResponsePromptVariableObject(object map[string]any) bool {
+	typeName, ok := object["type"].(string)
+	if !ok {
+		return false
+	}
+	allowed := map[string]bool{"type": true, "prompt_cache_breakpoint": true}
+	stringLimits := map[string]int{}
+	switch typeName {
+	case "input_text":
+		allowed["text"], stringLimits["text"] = true, 1<<20
+		if _, ok := object["text"].(string); !ok {
+			return false
+		}
+	case "input_image":
+		allowed["detail"], allowed["file_id"], allowed["image_url"] = true, true, true
+		stringLimits["file_id"], stringLimits["image_url"] = 512, 16<<20
+		if detail, present := object["detail"]; present && detail != "low" && detail != "high" && detail != "auto" && detail != "original" {
+			return false
+		}
+	case "input_file":
+		for _, key := range []string{"detail", "file_data", "file_id", "file_url", "filename"} {
+			allowed[key] = true
+		}
+		stringLimits["file_data"], stringLimits["file_id"], stringLimits["file_url"], stringLimits["filename"] = 24<<20, 512, 8192, 512
+		if detail, present := object["detail"]; present && detail != "auto" && detail != "low" && detail != "high" {
+			return false
+		}
+	default:
+		return false
+	}
+	for key, value := range object {
+		if !allowed[key] {
+			return false
+		}
+		if limit, bounded := stringLimits[key]; bounded {
+			text, ok := value.(string)
+			if !ok || utf8.RuneCountInString(text) > limit {
+				return false
+			}
+		}
+	}
+	if breakpoint, present := object["prompt_cache_breakpoint"]; present {
+		value, ok := breakpoint.(map[string]any)
+		if !ok || len(value) != 1 || value["mode"] != "explicit" {
+			return false
+		}
+	}
+	return true
 }
 
 func validateResponseIncompleteDetails(details *openai.ResponseIncompleteDetails) error {

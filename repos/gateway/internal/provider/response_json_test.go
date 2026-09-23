@@ -165,6 +165,65 @@ func TestResponsesPreserveAndValidateIncompleteDetails(t *testing.T) {
 	}
 }
 
+func TestResponsesPreserveAndValidatePromptReference(t *testing.T) {
+	valid := `{"id":"pmpt_1","version":"3","variables":{"name":"Ada","instruction":{"type":"input_text","text":"Contact {{EMAIL_1}}","prompt_cache_breakpoint":{"mode":"explicit"}},"image":{"type":"input_image","detail":"high","file_id":"file_image"},"document":{"type":"input_file","detail":"low","file_id":"file_document","filename":"facts.pdf"}}}`
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprintf("stream=%v", stream), func(t *testing.T) {
+			document := `{"id":"resp_1","object":"response","model":"m","status":"completed","prompt":` + valid + `}`
+			var response openai.ResponseResponse
+			var err error
+			if stream {
+				response, err = streamResponseData(strings.NewReader("data: {\"type\":\"response.completed\",\"response\":"+document+"}\n\n"), "m", func(string, string) error { return nil })
+			} else {
+				response, err = decodeResponseJSON(strings.NewReader(document))
+			}
+			if err != nil || response.Prompt == nil || response.Prompt.Version == nil || *response.Prompt.Version != "3" || response.Prompt.Variables["name"] != "Ada" {
+				t.Fatalf("response=%+v err=%v", response, err)
+			}
+			encoded, err := json.Marshal(response)
+			if err != nil || !strings.Contains(string(encoded), `"prompt":{"id":"pmpt_1"`) || !strings.Contains(string(encoded), `"type":"input_text"`) {
+				t.Fatalf("encoded=%s err=%v", encoded, err)
+			}
+		})
+	}
+
+	invalid := []string{
+		`{}`,
+		`{"id":" pmpt_1"}`,
+		`{"id":"` + strings.Repeat("p", 513) + `"}`,
+		`{"id":"pmpt_1","version":""}`,
+		`{"id":"pmpt_1","version":"` + strings.Repeat("v", 513) + `"}`,
+		`{"id":"pmpt_1","unknown":true}`,
+		`{"id":"pmpt_1","variables":{" ":"value"}}`,
+		`{"id":"pmpt_1","variables":{"` + strings.Repeat("k", 65) + `":"value"}}`,
+		`{"id":"pmpt_1","variables":{"value":true}}`,
+		`{"id":"pmpt_1","variables":{"value":{"type":"unknown"}}}`,
+		`{"id":"pmpt_1","variables":{"value":{"type":"input_text"}}}`,
+		`{"id":"pmpt_1","variables":{"value":{"type":"input_text","text":"x","unknown":true}}}`,
+		`{"id":"pmpt_1","variables":{"value":{"type":"input_text","text":"x","prompt_cache_breakpoint":{"mode":"implicit"}}}}`,
+		`{"id":"pmpt_1","variables":{"value":{"type":"input_image","detail":"medium"}}}`,
+		`{"id":"pmpt_1","variables":{"value":{"type":"input_file","detail":"original"}}}`,
+		`{"id":"pmpt_1","variables":{"value":{"type":"input_file","file_id":1}}}`,
+		`{"id":"pmpt_1","variables":{"value":"` + strings.Repeat("x", (1<<20)+1) + `"}}`,
+	}
+	variables := make([]string, 257)
+	for index := range variables {
+		variables[index] = fmt.Sprintf(`"v%d":"x"`, index)
+	}
+	invalid = append(invalid, `{"id":"pmpt_1","variables":{`+strings.Join(variables, ",")+`}}`)
+	for _, prompt := range invalid {
+		document := `{"id":"resp_1","object":"response","model":"m","status":"completed","prompt":` + prompt + `}`
+		if _, err := decodeResponseJSON(strings.NewReader(document)); err == nil {
+			t.Fatalf("invalid prompt accepted: %s", prompt[:min(len(prompt), 512)])
+		}
+		callbacks := 0
+		wire := "data: {\"type\":\"response.completed\",\"response\":" + document + "}\n\n"
+		if _, err := streamResponseData(strings.NewReader(wire), "m", func(string, string) error { callbacks++; return nil }); err == nil || callbacks != 0 {
+			t.Fatalf("invalid prompt delivered: err=%v callbacks=%d", err, callbacks)
+		}
+	}
+}
+
 func TestResponsesPreserveAndValidateExecutionControls(t *testing.T) {
 	for _, stream := range []bool{false, true} {
 		t.Run(fmt.Sprintf("stream=%v", stream), func(t *testing.T) {

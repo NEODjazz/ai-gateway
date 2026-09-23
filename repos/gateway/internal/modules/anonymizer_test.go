@@ -315,6 +315,7 @@ func TestDeanonymizeResponsesResponseRestoresOriginalValues(t *testing.T) {
 
 	response := openai.ResponseResponse{
 		Instructions: "Contact {{EMAIL_1}}",
+		Prompt:       &openai.ResponsePrompt{ID: "pmpt_1", Variables: map[string]any{"recipient": "{{EMAIL_1}}", "instruction": map[string]any{"type": "input_text", "text": "Contact {{EMAIL_1}}"}}},
 		OutputText:   "Email: {{EMAIL_1}}",
 		Output: []openai.ResponseOutputItem{
 			{
@@ -336,6 +337,9 @@ func TestDeanonymizeResponsesResponseRestoresOriginalValues(t *testing.T) {
 	DeanonymizeResponsesResponse(&req, &response)
 	if response.Instructions != "Contact user@example.com" {
 		t.Fatalf("expected instructions to be restored: %v", response.Instructions)
+	}
+	if response.Prompt.Variables["recipient"] != "user@example.com" || response.Prompt.Variables["instruction"].(map[string]any)["text"] != "Contact user@example.com" {
+		t.Fatalf("expected prompt variables to be restored: %v", response.Prompt.Variables)
 	}
 	if !strings.Contains(response.OutputText, "user@example.com") {
 		t.Fatalf("expected output_text to be restored: %s", response.OutputText)

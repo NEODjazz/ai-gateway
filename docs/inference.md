@@ -1773,6 +1773,21 @@ Legacy compatible providers may omit these echoed identity fields; when present,
 they must satisfy the public contract. Terminal SSE events continue to require a
 matching terminal state and a response object.
 
+### Responses prompt reference echo
+
+Compatible JSON and terminal SSE responses preserve the optional prompt-template
+reference selected by the provider: its ID, version and bounded variables.
+Variables accept strings or the documented text, image and file input objects;
+unknown fields, invalid discriminators, malformed explicit cache breakpoints and
+oversized values fail before delivery. Text variables participate in the same
+response deanonymization pass as instructions and generated text, while media
+variables remain structured references.
+
+This support is response-only. Public request decoding does not accept prompt
+templates because their server-side expanded content is unavailable to the
+gateway's TPM and budget-reserve calculation. Enabling execution requires a
+provider count/preflight contract or a configured conservative reserve.
+
 ### Responses prompt-cache prewarming
 
 Responses accepts `prompt_cache_options.prewarm=true` on compatible adapters to
