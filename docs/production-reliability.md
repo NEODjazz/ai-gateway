@@ -2594,3 +2594,21 @@ ID `sha256:79fc492d6c46fd03a1507eeeaaf9c8645982901e6b4038c7f43f7a6f549260a0`.
 Gateway Helm revision 612 completed successfully. Pod
 `ai-gateway-gateway-6bbf8dc8d9-66g76` became Ready with zero restarts, and
 direct service liveness and readiness both returned 204.
+
+## RAG SSE source citations
+
+Source `f3970479` extends owner-scoped RAG source citations to native Chat
+SSE. The gateway keeps a bounded per-request text accumulator across choices,
+including citation markers split across provider deltas, and emits an annotation
+delta after the cited text and before that choice's terminal delta. A provider
+failure before choice completion emits no synthesized citation. Buffered
+stream fallback carries the same annotations in its content delta. Regression
+tests cover native streaming, multi-choice order, fallback and failure; the
+full Go test and race suites, vet and build passed. No live provider credential
+was used.
+
+Rancher Desktop built `ai-gateway-gateway:rag-sse-citations-f3970479` with
+image ID `sha256:00cb1f635100fa203166c8e4c95b9b80f7bb161268e2fca4bb590dc48546a3e0`.
+Gateway Helm revision 613 completed successfully. Pod
+`ai-gateway-gateway-695cf6d97d-b82fv` became Ready with zero restarts, and
+direct service liveness and readiness both returned 204.
