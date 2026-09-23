@@ -1165,6 +1165,9 @@ func managedProviderResponseParameterPolicy(client Client, supportsResponses boo
 		return policy
 	}
 	baseline := openai.ResponseRequest{Model: "model", Input: "test"}
+	if prober, ok := client.(interface{ ManagedResponseParameterProbeModel() string }); ok {
+		baseline.Model = prober.ManagedResponseParameterProbeModel()
+	}
 	for _, value := range []string{"none", "minimal", "low", "medium", "high", "xhigh", "max", "default"} {
 		request, effort := baseline, value
 		request.Reasoning = &openai.ResponseReasoning{Effort: &effort}

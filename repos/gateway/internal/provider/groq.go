@@ -33,6 +33,8 @@ func (Groq) ManagedChatModelProbes() []string {
 	return []string{"openai/gpt-oss-20b", "openai/gpt-oss-120b", "qwen/qwen3.8-27b"}
 }
 
+func (Groq) ManagedResponseParameterProbeModel() string { return "openai/gpt-oss-20b" }
+
 func (g Groq) ValidateChatParameters(request openai.ChatCompletionRequest) error {
 	if err := rejectChatModeration("groq", request); err != nil {
 		return err
@@ -86,18 +88,22 @@ func validateGroqReasoningControls(request openai.ChatCompletionRequest) error {
 		}
 	}
 	if request.ReasoningEffort != "" {
-		valid := false
-		switch request.Model {
-		case "openai/gpt-oss-20b", "openai/gpt-oss-120b":
-			valid = request.ReasoningEffort == "low" || request.ReasoningEffort == "medium" || request.ReasoningEffort == "high"
-		case "qwen/qwen3.8-27b":
-			valid = request.ReasoningEffort == "none" || request.ReasoningEffort == "default" || request.ReasoningEffort == "low" || request.ReasoningEffort == "medium" || request.ReasoningEffort == "high"
-		}
-		if !valid {
+		if !groqSupportsReasoningEffort(request.Model, request.ReasoningEffort) {
 			return invalid("reasoning_effort", "reasoning_effort is not supported by this Groq model")
 		}
 	}
 	return nil
+}
+
+func groqSupportsReasoningEffort(model, effort string) bool {
+	switch model {
+	case "openai/gpt-oss-20b", "openai/gpt-oss-120b":
+		return effort == "low" || effort == "medium" || effort == "high"
+	case "qwen/qwen3.8-27b":
+		return effort == "none" || effort == "default" || effort == "low" || effort == "medium" || effort == "high"
+	default:
+		return false
+	}
 }
 
 func (g Groq) ChatCompletions(ctx context.Context, request openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
@@ -146,10 +152,8 @@ func (g Groq) ValidateResponseParameters(request openai.ResponseRequest) error {
 			return rejectParameters("groq", parameterCheck{"reasoning", true})
 		}
 		if reasoning.Effort != nil {
-			switch *reasoning.Effort {
-			case "low", "medium", "high":
-			default:
-				return &Error{Class: FailureClientRequest, Provider: "groq", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "reasoning.effort", Err: errors.New("reasoning effort must be low, medium, or high")}
+			if !groqSupportsReasoningEffort(request.Model, *reasoning.Effort) {
+				return &Error{Class: FailureClientRequest, Provider: "groq", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "reasoning.effort", Err: errors.New("reasoning effort is not supported by this Groq model")}
 			}
 		}
 	}

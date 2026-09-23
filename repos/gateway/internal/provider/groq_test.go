@@ -253,10 +253,10 @@ func TestGroqResponsesMapsSupportedContract(t *testing.T) {
 		if !ok || len(tools) != 2 || tools[1].(map[string]any)["type"] != "mcp" {
 			t.Fatalf("tools=%#v", body["tools"])
 		}
-		if body["model"] != "model" || body["input"] != "hello" || body["instructions"] != "be brief" || body["max_output_tokens"] != float64(64) || body["service_tier"] != "flex" || body["user"] != "tenant-user" || body["store"] != false || body["parallel_tool_calls"] != true || body["metadata"].(map[string]any)["ticket"] != "42" || body["text"] == nil {
+		if body["model"] != "openai/gpt-oss-20b" || body["input"] != "hello" || body["instructions"] != "be brief" || body["max_output_tokens"] != float64(64) || body["service_tier"] != "flex" || body["user"] != "tenant-user" || body["store"] != false || body["parallel_tool_calls"] != true || body["metadata"].(map[string]any)["ticket"] != "42" || body["text"] == nil {
 			t.Fatalf("request=%#v", body)
 		}
-		_, _ = fmt.Fprint(w, `{"id":"response","object":"response","status":"completed","model":"model","service_tier":"flex","output":[{"id":"message","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"ok","annotations":[]}]}],"usage":{"input_tokens":2,"input_tokens_details":{"cached_tokens":1,"reasoning_tokens":1},"output_tokens":1,"output_tokens_details":{"cached_tokens":1,"reasoning_tokens":0},"total_tokens":3}}`)
+		_, _ = fmt.Fprint(w, `{"id":"response","object":"response","status":"completed","model":"openai/gpt-oss-20b","service_tier":"flex","output":[{"id":"message","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"ok","annotations":[]}]}],"usage":{"input_tokens":2,"input_tokens_details":{"cached_tokens":1,"reasoning_tokens":1},"output_tokens":1,"output_tokens_details":{"cached_tokens":1,"reasoning_tokens":0},"total_tokens":3}}`)
 	}))
 	defer server.Close()
 
@@ -265,7 +265,7 @@ func TestGroqResponsesMapsSupportedContract(t *testing.T) {
 	effort := "low"
 	client := NewGroq(server.URL+"/openai/v1", "groq-key", true)
 	response, err := client.Responses(t.Context(), openai.ResponseRequest{
-		Model: "model", Input: "hello", Instructions: "be brief", MaxOutputTokens: &maxTokens,
+		Model: "openai/gpt-oss-20b", Input: "hello", Instructions: "be brief", MaxOutputTokens: &maxTokens,
 		Metadata: map[string]string{"ticket": "42"}, ParallelToolCalls: &parallel,
 		Reasoning: &openai.ResponseReasoning{Effort: &effort}, Store: &store, ServiceTier: "flex", User: "tenant-user",
 		Text: map[string]any{"format": map[string]any{"type": "json_object"}},
@@ -276,6 +276,38 @@ func TestGroqResponsesMapsSupportedContract(t *testing.T) {
 	})
 	if err != nil || response.ServiceTier != "flex" || response.Usage.TotalTokens != 3 || response.OutputText != "ok" || response.Usage.InputTokensDetails == nil || response.Usage.InputTokensDetails.ReasoningTokens != 1 || response.Usage.OutputTokensDetails == nil || response.Usage.OutputTokensDetails.CachedTokens != 1 {
 		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
+func TestGroqResponsesReasoningEffortIsModelScoped(t *testing.T) {
+	client := NewGroq("http://unused.invalid", "", false)
+	tests := []struct {
+		model, effort string
+		valid         bool
+	}{
+		{model: "openai/gpt-oss-20b", effort: "low", valid: true},
+		{model: "openai/gpt-oss-120b", effort: "high", valid: true},
+		{model: "openai/gpt-oss-20b", effort: "none"},
+		{model: "qwen/qwen3.8-27b", effort: "default", valid: true},
+		{model: "qwen/qwen3.8-27b", effort: "none", valid: true},
+		{model: "qwen/qwen3.8-27b", effort: "max"},
+		{model: "unknown", effort: "low"},
+	}
+	for _, test := range tests {
+		t.Run(test.model+"/"+test.effort, func(t *testing.T) {
+			request := openai.ResponseRequest{Model: test.model, Input: "hello", Reasoning: &openai.ResponseReasoning{Effort: &test.effort}}
+			err := client.ValidateResponseParameters(request)
+			if test.valid {
+				if err != nil {
+					t.Fatalf("valid effort rejected: %v", err)
+				}
+				return
+			}
+			var failure *Error
+			if !errors.As(err, &failure) || failure.Param != "reasoning.effort" || failure.UpstreamCode != "invalid_request" {
+				t.Fatalf("unexpected failure: %v", err)
+			}
+		})
 	}
 }
 
