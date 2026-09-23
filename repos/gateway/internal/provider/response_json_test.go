@@ -335,6 +335,42 @@ func TestResponsesPreserveAndValidateLifecycleMetadata(t *testing.T) {
 	}
 }
 
+func TestResponsesPreserveAndValidateConversationReference(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprintf("stream=%v", stream), func(t *testing.T) {
+			document := `{"id":"r","object":"response","model":"m","status":"completed","conversation":{"id":"conv_owned"}}`
+			var response openai.ResponseResponse
+			var err error
+			if stream {
+				response, err = streamResponseData(strings.NewReader("data: {\"type\":\"response.completed\",\"response\":"+document+"}\n\n"), "m", func(string, string) error { return nil })
+			} else {
+				response, err = decodeResponseJSON(strings.NewReader(document))
+			}
+			if err != nil || response.Conversation == nil || response.Conversation.ID != "conv_owned" {
+				t.Fatalf("response=%+v err=%v", response, err)
+			}
+		})
+	}
+
+	for _, conversation := range []string{
+		`{"id":""}`,
+		`{"id":"response_owned"}`,
+		`{"id":"conv_bad value"}`,
+		`{"id":"conv_` + strings.Repeat("x", 124) + `"}`,
+		`{"id":"conv_owned","unexpected":true}`,
+	} {
+		document := `{"id":"r","object":"response","model":"m","status":"completed","conversation":` + conversation + `}`
+		if _, err := decodeResponseJSON(strings.NewReader(document)); err == nil {
+			t.Fatalf("invalid JSON conversation accepted: %s", conversation)
+		}
+		callbacks := 0
+		wire := "data: {\"type\":\"response.completed\",\"response\":" + document + "}\n\n"
+		if _, err := streamResponseData(strings.NewReader(wire), "m", func(string, string) error { callbacks++; return nil }); err == nil || callbacks != 0 {
+			t.Fatalf("invalid SSE conversation delivered: err=%v callbacks=%d", err, callbacks)
+		}
+	}
+}
+
 func TestResponsesPreserveAndValidateIsolationIdentifiers(t *testing.T) {
 	for _, stream := range []bool{false, true} {
 		t.Run(fmt.Sprintf("stream=%v", stream), func(t *testing.T) {

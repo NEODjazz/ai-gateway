@@ -165,6 +165,9 @@ func validateResponseControls(response openai.ResponseResponse) error {
 	if response.PreviousResponseID != nil && (*response.PreviousResponseID == "" || strings.TrimSpace(*response.PreviousResponseID) != *response.PreviousResponseID || utf8.RuneCountInString(*response.PreviousResponseID) > 512) {
 		return errors.New("provider returned invalid previous_response_id")
 	}
+	if response.Conversation != nil && (!strings.HasPrefix(response.Conversation.ID, "conv_") || len(response.Conversation.ID) > 128 || !validResponseResourceID(response.Conversation.ID)) {
+		return errors.New("provider returned invalid conversation ID")
+	}
 	if utf8.RuneCountInString(response.User) > 256 {
 		return errors.New("provider returned invalid user")
 	}

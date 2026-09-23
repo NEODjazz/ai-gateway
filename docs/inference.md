@@ -1781,6 +1781,12 @@ Legacy compatible providers may omit these echoed identity fields; when present,
 they must satisfy the public contract. Terminal SSE events continue to require a
 matching terminal state and a response object.
 
+The optional response `conversation.id` is validated before JSON or terminal
+SSE delivery with the same `conv_` resource namespace and 128-byte bound used
+at request admission. Empty, malformed, oversized and structurally extended
+references fail closed, so clients cannot continue a response under an invalid
+owner-scoped conversation reference.
+
 ### Responses prompt reference echo
 
 Compatible JSON and terminal SSE responses preserve the optional prompt-template
