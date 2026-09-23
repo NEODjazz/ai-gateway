@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"net/url"
 	"strconv"
 	"strings"
@@ -61,6 +62,15 @@ func validateResponseControls(response openai.ResponseResponse) error {
 	}
 	if response.MaxToolCalls != nil && *response.MaxToolCalls < 0 {
 		return errors.New("provider returned invalid negative max_tool_calls")
+	}
+	if response.Temperature != nil && (math.IsNaN(*response.Temperature) || math.IsInf(*response.Temperature, 0) || *response.Temperature < 0 || *response.Temperature > 2) {
+		return errors.New("provider returned invalid temperature")
+	}
+	if response.TopP != nil && (math.IsNaN(*response.TopP) || math.IsInf(*response.TopP, 0) || *response.TopP < 0 || *response.TopP > 1) {
+		return errors.New("provider returned invalid top_p")
+	}
+	if response.Truncation != nil && *response.Truncation != "auto" && *response.Truncation != "disabled" {
+		return errors.New("provider returned invalid truncation")
 	}
 	return nil
 }
