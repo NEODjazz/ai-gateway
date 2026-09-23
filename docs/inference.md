@@ -1919,6 +1919,11 @@ function arguments must decode to a JSON object and use the same size limit as
 chat function arguments. Streaming `output_item.added` snapshots may contain
 partial arguments; the completed value is validated at the terminal boundary.
 
+The output union also keeps branch-specific fields isolated. Only `message` items
+may contain `content` or an optional `assistant` role, and only `reasoning` items
+may contain `summary`. A provider cannot inject text through a reasoning or tool
+item and have it included in the derived `output_text`.
+
 Regression tests cover interleaved messages and parts, text completion events,
 empty and populated terminal snapshots, invalid content indices and JSON text
 aggregation. The tests also reproduced the earlier behavior through a temporary

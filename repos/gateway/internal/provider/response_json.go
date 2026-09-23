@@ -455,6 +455,19 @@ func validateResponseOutputItemsMode(items []openai.ResponseOutputItem, allowSpa
 		if len(item.Content) > maxResponseStreamContentParts || len(item.Summary) > maxResponseStreamContentParts {
 			return errors.New("provider returned too many response output content parts")
 		}
+		if item.Type == "message" {
+			if item.Role != "" && item.Role != "assistant" {
+				return errors.New("provider returned response message with an invalid role")
+			}
+		} else if item.Role != "" {
+			return errors.New("provider returned role on a non-message response output item")
+		}
+		if item.Type != "message" && len(item.Content) > 0 {
+			return errors.New("provider returned content on a non-message response output item")
+		}
+		if item.Type != "reasoning" && len(item.Summary) > 0 {
+			return errors.New("provider returned summary on a non-reasoning response output item")
+		}
 		for _, parts := range [][]openai.ResponseOutputContent{item.Content, item.Summary} {
 			for _, part := range parts {
 				if part.Type == "" && !allowSparse {

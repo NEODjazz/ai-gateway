@@ -136,6 +136,32 @@ func TestResponsesValidateFunctionAndCustomToolCalls(t *testing.T) {
 	}
 }
 
+func TestResponsesValidateOutputItemUnionFields(t *testing.T) {
+	invalid := []string{
+		`{"type":"message","role":"user","content":[{"type":"output_text","text":"wrong role"}]}`,
+		`{"type":"message","content":[{"type":"output_text","text":"answer"}],"summary":[{"type":"summary_text","text":"wrong branch"}]}`,
+		`{"type":"reasoning","content":[{"type":"output_text","text":"must not become output text"}]}`,
+		`{"type":"function_call","call_id":"call","name":"lookup","arguments":"{}","role":"assistant"}`,
+	}
+	for _, output := range invalid {
+		document := `{"id":"r","output":[` + output + `]}`
+		if _, err := decodeResponseJSON(strings.NewReader(document)); err == nil {
+			t.Fatalf("invalid JSON output union accepted: %s", output)
+		}
+		callbacks := 0
+		wire := "data: {\"type\":\"response.completed\",\"response\":" + document + "}\n\n"
+		if _, err := streamResponseData(strings.NewReader(wire), "m", func(string, string) error { callbacks++; return nil }); err == nil || callbacks != 0 {
+			t.Fatalf("invalid SSE output union delivered: output=%s err=%v callbacks=%d", output, err, callbacks)
+		}
+	}
+
+	valid := `{"id":"r","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"answer"}]},{"type":"reasoning","summary":[{"type":"summary_text","text":"summary"}]}]}`
+	response, err := decodeResponseJSON(strings.NewReader(valid))
+	if err != nil || response.OutputText != "answer" {
+		t.Fatalf("valid output union rejected: response=%+v err=%v", response, err)
+	}
+}
+
 func TestResponsesRejectsInvalidJSONDocuments(t *testing.T) {
 	for _, body := range []string{"null", `{"id":"r"} {"id":"second"}`, `{"id":"r"} trailing`, `{"id":`} {
 		t.Run(body, func(t *testing.T) {
