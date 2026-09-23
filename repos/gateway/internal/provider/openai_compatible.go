@@ -1290,6 +1290,8 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 		},
 	}
 	terminal := false
+	var lastSequenceNumber int64
+	sequenceNumberSeen := false
 	err := scanSSEEvents(&responseStreamReader{source: body, remaining: maxResponseStreamBytes}, func(event string, payload string) error {
 		if payload == "[DONE]" {
 			if !terminal {
@@ -1318,6 +1320,20 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 			event = typedEvent
 		} else if event == "" {
 			return errors.New("Responses event is missing its type")
+		}
+		if rawSequence, present := decoded["sequence_number"]; present {
+			sequence, ok := rawSequence.(json.Number)
+			if !ok {
+				return errors.New("Responses event contains an invalid sequence_number")
+			}
+			value, err := sequence.Int64()
+			if err != nil || value < 0 {
+				return errors.New("Responses event contains an invalid sequence_number")
+			}
+			if sequenceNumberSeen && value <= lastSequenceNumber {
+				return errors.New("Responses event sequence_number is not increasing")
+			}
+			lastSequenceNumber, sequenceNumberSeen = value, true
 		}
 		if value, present := decoded["item_id"]; present {
 			itemID, ok := value.(string)

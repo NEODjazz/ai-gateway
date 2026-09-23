@@ -1949,6 +1949,11 @@ When a native SSE frame supplies both an `event:` field and a JSON `type`, they
 must match. A payload-only or header-only event remains accepted, while a missing,
 empty, non-string or contradictory type fails before the frame is forwarded.
 
+Optional native `sequence_number` values must be non-negative integers and must
+increase across the stream. Providers that omit the field remain compatible;
+once present, duplicate or reordered values stop processing before the offending
+frame reaches the client.
+
 Regression tests cover interleaved messages and parts, text completion events,
 empty and populated terminal snapshots, invalid content indices and JSON text
 aggregation. The tests also reproduced the earlier behavior through a temporary
