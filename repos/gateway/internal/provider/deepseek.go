@@ -21,10 +21,11 @@ func NewDeepSeek(baseURL, apiKey string, stream bool) DeepSeek {
 	return DeepSeek{compatible: compatible}
 }
 
-func (DeepSeek) SupportsResponses() bool        { return true }
-func (DeepSeek) SupportsTools() bool            { return true }
-func (DeepSeek) SupportsStructuredOutput() bool { return true }
-func (DeepSeek) SupportsVision() bool           { return true }
+func (DeepSeek) SupportsResponses() bool           { return true }
+func (DeepSeek) SupportsTools() bool               { return true }
+func (DeepSeek) SupportsResponseCustomTools() bool { return true }
+func (DeepSeek) SupportsStructuredOutput() bool    { return true }
+func (DeepSeek) SupportsVision() bool              { return true }
 
 func (d DeepSeek) ValidateChatParameters(request openai.ChatCompletionRequest) error {
 	if err := rejectChatModeration("deepseek", request); err != nil {
@@ -163,7 +164,11 @@ func (d DeepSeek) ValidateResponseParameters(request openai.ResponseRequest) err
 		return &Error{Class: FailureClientRequest, Provider: "deepseek", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "text", Err: errors.New("text must contain a supported output format")}
 	}
 	for _, tool := range request.Tools {
-		if tool.Type != "function" {
+		if tool.Type == "custom" {
+			if tool.Name != "apply_patch" || tool.Description != "" || tool.Format != nil {
+				return unsupportedDeepSeekParameter("tools.custom")
+			}
+		} else if tool.Type != "function" {
 			return unsupportedDeepSeekParameter("tools.type")
 		}
 	}
@@ -212,6 +217,7 @@ func validateDeepSeekResponseInput(input any, model string) error {
 	if json.Unmarshal(payload, &items) != nil || len(items) == 0 {
 		return invalid("input must be a string or supported item array")
 	}
+	customCalls := make(map[string]bool)
 	for _, item := range items {
 		var itemType string
 		if len(item) == 0 || item["type"] != nil && json.Unmarshal(item["type"], &itemType) != nil {
@@ -230,6 +236,13 @@ func validateDeepSeekResponseInput(input any, model string) error {
 				return invalid(err.Error())
 			}
 		case "function_call_output", "custom_tool_call_output":
+			if itemType == "custom_tool_call_output" {
+				var callID string
+				if json.Unmarshal(item["call_id"], &callID) != nil || !customCalls[callID] {
+					return invalid("custom_tool_call_output requires a preceding apply_patch call with the same call_id")
+				}
+				delete(customCalls, callID)
+			}
 			if err := validateDeepSeekResponseParts(item["output"], false, model); err != nil {
 				return invalid(err.Error())
 			}
@@ -240,7 +253,13 @@ func validateDeepSeekResponseInput(input any, model string) error {
 			if err := validateDeepSeekResponseParts(item["content"], true, model); err != nil {
 				return invalid(err.Error())
 			}
-		case "function_call", "custom_tool_call", "web_search_call":
+		case "custom_tool_call":
+			var name, callID string
+			if json.Unmarshal(item["name"], &name) != nil || name != "apply_patch" || json.Unmarshal(item["call_id"], &callID) != nil || callID == "" || customCalls[callID] {
+				return invalid("custom_tool_call requires apply_patch and a unique call_id")
+			}
+			customCalls[callID] = true
+		case "function_call", "web_search_call":
 		default:
 			return invalid("input item type is not supported by DeepSeek")
 		}

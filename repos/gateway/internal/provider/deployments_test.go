@@ -354,7 +354,7 @@ func TestManagedDeploymentAcceptsSupportedFeatureCapabilities(t *testing.T) {
 		{providerType: "cohere", capabilities: []string{"chat", "tools", "structured_output"}},
 		{providerType: "bedrock", capabilities: []string{"chat", "tools", "prompt_cache", "bedrock_invoke"}},
 		{providerType: "groq", capabilities: []string{"chat", "responses", "audio_transcription", "audio_translation", "audio_speech", "stream", "tools", "structured_output", "mcp", "vision"}},
-		{providerType: "deepseek", capabilities: []string{"chat", "responses", "stream", "tools", "structured_output", "vision"}},
+		{providerType: "deepseek", capabilities: []string{"chat", "responses", "stream", "tools", "custom_tools", "structured_output", "vision"}},
 		{providerType: "openrouter", capabilities: []string{"chat", "responses", "embeddings", "rerank", "image_generation", "image_edit", "audio_transcription", "audio_speech", "stream", "tools", "custom_tools", "structured_output", "vision", "web_search", "audio"}},
 		{providerType: "mistral", capabilities: []string{"chat", "audio_transcription", "audio_speech", "tools", "structured_output", "vision", "assistant_prefill"}},
 		{providerType: "xai", capabilities: []string{"chat", "responses", "tools", "custom_tools", "video", "video_remix", "video_extension"}},
@@ -505,7 +505,7 @@ func TestManagedProviderCapabilityProfilesMatchAdapterOperations(t *testing.T) {
 	if !slices.Equal(profilesByType["groq"].Operations, []string{"chat", "responses", "audio_transcription", "audio_translation", "audio_speech", "stream"}) || !slices.Equal(profilesByType["groq"].Capabilities, []string{"chat", "responses", "audio_transcription", "audio_translation", "audio_speech", "stream", "tools", "structured_output", "mcp", "vision"}) {
 		t.Fatalf("groq profile=%+v", profilesByType["groq"])
 	}
-	if !slices.Equal(profilesByType["deepseek"].Operations, []string{"chat", "responses", "stream"}) || !slices.Equal(profilesByType["deepseek"].Capabilities, []string{"chat", "responses", "stream", "tools", "structured_output", "vision"}) {
+	if !slices.Equal(profilesByType["deepseek"].Operations, []string{"chat", "responses", "stream"}) || !slices.Equal(profilesByType["deepseek"].Capabilities, []string{"chat", "responses", "stream", "tools", "custom_tools", "structured_output", "vision"}) {
 		t.Fatalf("deepseek profile=%+v", profilesByType["deepseek"])
 	}
 	if !slices.Equal(profilesByType["xai"].Operations, []string{"chat", "responses", "embeddings", "image_generation", "image_edit", "audio_transcription", "audio_speech", "video", "video_remix", "video_extension", "stream"}) || !slices.Equal(profilesByType["xai"].Capabilities, []string{"chat", "responses", "embeddings", "image_generation", "image_edit", "audio_transcription", "audio_speech", "video", "video_remix", "video_extension", "stream", "tools", "custom_tools", "structured_output", "vision", "web_search"}) {

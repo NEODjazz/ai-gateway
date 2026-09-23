@@ -147,6 +147,51 @@ func TestDeepSeekResponsesReasoningEffortWire(t *testing.T) {
 	}
 }
 
+func TestDeepSeekResponsesApplyPatchCustomToolWire(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Tools      []openai.ResponseTool `json:"tools"`
+			ToolChoice map[string]any        `json:"tool_choice"`
+			Input      []map[string]any      `json:"input"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if len(body.Tools) != 1 || body.Tools[0].Type != "custom" || body.Tools[0].Name != "apply_patch" || body.ToolChoice["type"] != "custom" || body.ToolChoice["name"] != "apply_patch" || len(body.Input) != 3 || body.Input[2]["type"] != "custom_tool_call_output" {
+			t.Fatalf("request=%+v", body)
+		}
+		_, _ = fmt.Fprint(w, `{"id":"resp-custom","object":"response","status":"completed","model":"deepseek-flash","output":[{"id":"ct_1","type":"custom_tool_call","status":"completed","call_id":"call_2","name":"apply_patch","input":"*** Begin Patch"}],"usage":{"input_tokens":4,"output_tokens":2,"total_tokens":6}}`)
+	}))
+	defer server.Close()
+	response, err := NewDeepSeek(server.URL, "key", false).Responses(t.Context(), openai.ResponseRequest{
+		Model: "deepseek-flash", Tools: []openai.ResponseTool{{Type: "custom", Name: "apply_patch"}},
+		ToolChoice: map[string]any{"type": "custom", "name": "apply_patch"},
+		Input: []any{
+			map[string]any{"role": "user", "content": "edit the file"},
+			map[string]any{"type": "custom_tool_call", "call_id": "call_1", "name": "apply_patch", "input": "*** Begin Patch"},
+			map[string]any{"type": "custom_tool_call_output", "call_id": "call_1", "output": "ok"},
+		},
+	})
+	if err != nil || len(response.Output) != 1 || response.Output[0].Type != "custom_tool_call" || response.Output[0].Name != "apply_patch" || response.Output[0].Input != "*** Begin Patch" {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
+func TestDeepSeekResponsesRejectsUnsupportedCustomTools(t *testing.T) {
+	client := NewDeepSeek("https://example.test", "key", false)
+	for _, tool := range []openai.ResponseTool{
+		{Type: "custom", Name: "other"},
+		{Type: "custom", Name: "apply_patch", Description: "unsupported"},
+		{Type: "custom", Name: "apply_patch", Format: &openai.ResponseCustomToolFormat{Type: "text"}},
+	} {
+		err := client.ValidateResponseParameters(openai.ResponseRequest{Model: "deepseek-flash", Input: "hello", Tools: []openai.ResponseTool{tool}})
+		var failure *Error
+		if !errors.As(err, &failure) || failure.Param != "tools.custom" {
+			t.Fatalf("tool=%+v err=%v", tool, err)
+		}
+	}
+}
+
 func TestDeepSeekResponsesRejectsIgnoredInputItemTypes(t *testing.T) {
 	called := false
 	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
@@ -162,6 +207,9 @@ func TestDeepSeekResponsesRejectsIgnoredInputItemTypes(t *testing.T) {
 		[]any{map[string]any{"type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "ignored"}}}},
 		[]any{map[string]any{"type": "reasoning", "encrypted_content": "opaque"}},
 		[]any{map[string]any{"type": "reasoning", "content": []any{map[string]any{"type": "summary_text", "text": "ignored"}}}},
+		[]any{map[string]any{"type": "custom_tool_call", "call_id": "call_1", "name": "other", "input": "patch"}},
+		[]any{map[string]any{"type": "custom_tool_call_output", "call_id": "call_1", "output": "ok"}},
+		[]any{map[string]any{"type": "custom_tool_call", "call_id": "call_1", "name": "apply_patch", "input": "patch"}, map[string]any{"type": "custom_tool_call_output", "call_id": "call_2", "output": "ok"}},
 	} {
 		_, err := client.Responses(t.Context(), openai.ResponseRequest{Model: "deepseek-flash", Input: input})
 		var failure *Error
@@ -179,14 +227,18 @@ func TestDeepSeekResponsesAcceptsDocumentedInputItemTypes(t *testing.T) {
 		{"type": "function_call", "call_id": "call_1", "name": "lookup", "arguments": "{}"},
 		{"type": "function_call_output", "call_id": "call_1", "output": "ok"},
 		{"type": "function_call_output", "call_id": "call_1", "output": []any{map[string]any{"type": "output_text", "text": "ok"}}},
-		{"type": "custom_tool_call", "call_id": "call_1", "name": "apply_patch", "input": "patch"},
-		{"type": "custom_tool_call_output", "call_id": "call_1", "output": "ok"},
 		{"type": "reasoning", "content": []any{map[string]any{"type": "reasoning_text", "text": "plan"}}},
 		{"type": "web_search_call", "id": "search_1"},
 	} {
 		if err := validateDeepSeekResponseInput([]any{item}, "deepseek-flash"); err != nil {
 			t.Fatalf("item=%v err=%v", item, err)
 		}
+	}
+	if err := validateDeepSeekResponseInput([]any{
+		map[string]any{"type": "custom_tool_call", "call_id": "call_1", "name": "apply_patch", "input": "patch"},
+		map[string]any{"type": "custom_tool_call_output", "call_id": "call_1", "output": "ok"},
+	}, "deepseek-flash"); err != nil {
+		t.Fatal(err)
 	}
 }
 
