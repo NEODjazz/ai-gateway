@@ -147,6 +147,20 @@ func (g Groq) ValidateResponseParameters(request openai.ResponseRequest) error {
 	if request.ServiceTier != "" && request.ServiceTier != "auto" && request.ServiceTier != "default" && request.ServiceTier != "flex" {
 		return &Error{Class: FailureClientRequest, Provider: "groq", StatusCode: http.StatusBadRequest, UpstreamCode: "unsupported_parameter", Param: "service_tier", Err: errUnsupportedServiceTier}
 	}
+	for _, tool := range request.Tools {
+		switch tool.Type {
+		case "function", "mcp":
+		case "code_interpreter":
+			if request.Model != "openai/gpt-oss-20b" && request.Model != "openai/gpt-oss-120b" {
+				return &Error{Class: FailureClientRequest, Provider: "groq", StatusCode: http.StatusBadRequest, UpstreamCode: "unsupported_parameter", Param: "tools.code_interpreter", Err: errors.New("code interpreter is not supported by this Groq model")}
+			}
+			if !groqSupportsResponseCodeContainer(tool.Container) {
+				return &Error{Class: FailureClientRequest, Provider: "groq", StatusCode: http.StatusBadRequest, UpstreamCode: "unsupported_parameter", Param: "tools.code_interpreter.container", Err: errors.New("Groq code interpreter requires an automatic container without additional options")}
+			}
+		default:
+			return rejectParameters("groq", parameterCheck{"tools.type", true})
+		}
+	}
 	if reasoning := request.Reasoning; reasoning != nil {
 		if reasoning.Summary != nil || reasoning.GenerateSummary != nil || reasoning.Context != nil || reasoning.Mode != nil {
 			return rejectParameters("groq", parameterCheck{"reasoning", true})
@@ -176,6 +190,19 @@ func (g Groq) ValidateResponseParameters(request openai.ResponseRequest) error {
 		parameterCheck{"presence_penalty", request.PresencePenalty != nil},
 		parameterCheck{"max_tool_calls", request.MaxToolCalls != nil},
 	)
+}
+
+func groqSupportsResponseCodeContainer(container any) bool {
+	encoded, err := json.Marshal(container)
+	if err != nil {
+		return false
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(encoded, &fields) != nil || len(fields) != 1 {
+		return false
+	}
+	var containerType string
+	return json.Unmarshal(fields["type"], &containerType) == nil && containerType == "auto"
 }
 
 func (g Groq) Responses(ctx context.Context, request openai.ResponseRequest) (openai.ResponseResponse, error) {

@@ -300,6 +300,54 @@ func TestGroqResponsesMapsSupportedContract(t *testing.T) {
 	}
 }
 
+func TestGroqResponsesCodeInterpreterUsesSupportedWireContract(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		tools, ok := body["tools"].([]any)
+		if !ok || len(tools) != 1 || body["model"] != "openai/gpt-oss-20b" || tools[0].(map[string]any)["container"].(map[string]any)["type"] != "auto" {
+			t.Fatalf("request=%#v", body)
+		}
+		_, _ = fmt.Fprint(w, `{"id":"response","object":"response","model":"openai/gpt-oss-20b","status":"completed","output":[{"id":"ci_1","type":"code_interpreter_call","status":"completed","container_id":"cntr_1","code":"print(1)","outputs":[{"type":"logs","logs":"1"}]},{"id":"message","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"1","annotations":[]}]}],"usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}`)
+	}))
+	defer server.Close()
+	response, err := NewGroq(server.URL, "key", false).Responses(t.Context(), openai.ResponseRequest{
+		Model: "openai/gpt-oss-20b", Input: "calculate", Tools: []openai.ResponseTool{{Type: "code_interpreter", Container: map[string]any{"type": "auto"}}},
+	})
+	if err != nil || response.Usage.TotalTokens != 3 || len(response.Output) != 2 || response.OutputText != "1" {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
+func TestGroqResponsesRejectsUnsupportedToolsBeforeHTTP(t *testing.T) {
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
+	defer server.Close()
+	client := NewGroq(server.URL, "key", false)
+	tests := []struct {
+		name, model, param string
+		tool               openai.ResponseTool
+	}{
+		{name: "wrong model", model: "qwen/qwen3.8-27b", param: "tools.code_interpreter", tool: openai.ResponseTool{Type: "code_interpreter", Container: map[string]any{"type": "auto"}}},
+		{name: "reused container", model: "openai/gpt-oss-20b", param: "tools.code_interpreter.container", tool: openai.ResponseTool{Type: "code_interpreter", Container: "cntr_existing"}},
+		{name: "file references", model: "openai/gpt-oss-20b", param: "tools.code_interpreter.container", tool: openai.ResponseTool{Type: "code_interpreter", Container: map[string]any{"type": "auto", "file_ids": []string{"file_owned"}}}},
+		{name: "memory option", model: "openai/gpt-oss-20b", param: "tools.code_interpreter.container", tool: openai.ResponseTool{Type: "code_interpreter", Container: map[string]any{"type": "auto", "memory_limit": "4g"}}},
+		{name: "file search", model: "openai/gpt-oss-20b", param: "tools.type", tool: openai.ResponseTool{Type: "file_search", VectorStoreIDs: []string{"vs_owned"}}},
+		{name: "web search", model: "openai/gpt-oss-20b", param: "tools.type", tool: openai.ResponseTool{Type: "web_search"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := client.Responses(t.Context(), openai.ResponseRequest{Model: test.model, Input: "hello", Tools: []openai.ResponseTool{test.tool}})
+			var failure *Error
+			if !errors.As(err, &failure) || failure.Param != test.param || failure.UpstreamCode != "unsupported_parameter" || called {
+				t.Fatalf("err=%v called=%v", err, called)
+			}
+		})
+	}
+}
+
 func TestGroqResponsesReasoningEffortIsModelScoped(t *testing.T) {
 	client := NewGroq("http://unused.invalid", "", false)
 	tests := []struct {
