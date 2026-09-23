@@ -410,6 +410,7 @@ func (h Handler) serveChatAdapted(w http.ResponseWriter, r *http.Request, reques
 	if request.GeminiGoogleMaps {
 		toolIdentifiers = append(toolIdentifiers, "google_maps")
 	}
+	toolIdentifiers = append(toolIdentifiers, openai.GeminiFileSearchToolIdentifiers(request.GeminiFileSearch)...)
 	if request.AnthropicCodeExecution {
 		toolIdentifiers = append(toolIdentifiers, "code_execution")
 	}

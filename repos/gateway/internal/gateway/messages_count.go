@@ -131,6 +131,7 @@ func (h Handler) countContextTokens(w http.ResponseWriter, r *http.Request, requ
 	if request.GeminiGoogleMaps {
 		tools = append(tools, "google_maps")
 	}
+	tools = append(tools, openai.GeminiFileSearchToolIdentifiers(request.GeminiFileSearch)...)
 	if request.AnthropicCodeExecution {
 		tools = append(tools, "code_execution")
 	}

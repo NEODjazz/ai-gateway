@@ -460,6 +460,19 @@ func TestGeminiSearchTimeRangeRequiresNativeCapability(t *testing.T) {
 	}
 }
 
+func TestGeminiFileSearchDisablesResponseCaches(t *testing.T) {
+	request := modules.RequestContext{CredentialID: "key", Request: openai.ChatCompletionRequest{Model: "test", Messages: []openai.Message{{Role: "user", Content: "find policy"}}, GeminiFileSearch: &openai.GeminiFileSearchConfig{StoreNames: []string{"fileSearchStores/policies"}}}}
+	if providerCacheKey("chat", request) != "" {
+		t.Fatal("exact cache allowed file search")
+	}
+	if _, _, ok := semanticRequest(request, Endpoint{Name: "test"}); ok {
+		t.Fatal("semantic cache allowed file search")
+	}
+	if got := strings.Join(requiredChatCapabilities(request.Request, false), ","); got != "chat,gemini_file_search" {
+		t.Fatalf("file search routing requirements=%s", got)
+	}
+}
+
 func TestGeminiCodeExecutionDisablesResponseCaches(t *testing.T) {
 	request := modules.RequestContext{CredentialID: "key", Request: openai.ChatCompletionRequest{Model: "test", Messages: []openai.Message{{Role: "user", Content: "calculate"}}, GeminiCodeExecution: true}}
 	if providerCacheKey("chat", request) != "" {

@@ -7016,6 +7016,11 @@ components:
                     type: object
                     additionalProperties: false
                     description: Native location grounding included in token counting context. Requires the google_maps tool grant.
+              - type: object
+                additionalProperties: false
+                required: [fileSearch]
+                properties:
+                  fileSearch: {$ref: '#/components/schemas/GeminiFileSearchConfig'}
         toolConfig:
           type: object
           additionalProperties: false
@@ -7138,6 +7143,14 @@ components:
                     type: object
                     additionalProperties: false
                     description: Native location-aware grounding. Requires the google_maps deployment capability and tool grant, bills an actual grounding request when provider metadata confirms use, and bypasses response caches.
+              - type: object
+                additionalProperties: false
+                required: [fileSearch]
+                properties:
+                  fileSearch:
+                    allOf:
+                      - {$ref: '#/components/schemas/GeminiFileSearchConfig'}
+                    description: Native retrieval from provider-managed stores. Requires the gemini_file_search deployment capability, the file_search grant and a gemini_file_search:<store-name> grant for every store. It cannot be combined with another tool and bypasses response caches.
         toolConfig:
           type: object
           additionalProperties: false
@@ -7330,6 +7343,22 @@ components:
             cachedContentTokenCount: {type: integer, minimum: 0}
             totalTokenCount: {type: integer, minimum: 0}
             serviceTier: {type: string, enum: [unspecified, standard, flex, priority]}
+    GeminiFileSearchConfig:
+      type: object
+      additionalProperties: false
+      required: [fileSearchStoreNames]
+      properties:
+        fileSearchStoreNames:
+          type: array
+          minItems: 1
+          maxItems: 20
+          uniqueItems: true
+          items: {type: string, pattern: '^fileSearchStores/[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$'}
+        metadataFilter:
+          type: string
+          maxLength: 2048
+          pattern: '^[^\r\n\x00]*$'
+        topK: {type: integer, minimum: 1, maximum: 100}
     GeminiLatLng:
       type: object
       additionalProperties: false
@@ -7996,7 +8025,7 @@ components:
         capabilities:
           type: array
           uniqueItems: true
-          items: {type: string, enum: [chat, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, gemini_code_execution, gemini_audio_timestamp, gemini_media_resolution, gemini_media_processing, gemini_search_time_range, url_context, google_maps, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, cached_content, realtime, stream, tools, custom_tools, response_image_generation, response_computer, response_shell, response_apply_patch, structured_output, mcp, code_interpreter, file_search, vision, web_search, web_fetch, tool_search, zero_output, inference_geo, context_management, tool_result_error, document_citations, document_metadata, document_text, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
+          items: {type: string, enum: [chat, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, gemini_code_execution, gemini_audio_timestamp, gemini_media_resolution, gemini_media_processing, gemini_search_time_range, gemini_file_search, url_context, google_maps, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, cached_content, realtime, stream, tools, custom_tools, response_image_generation, response_computer, response_shell, response_apply_patch, structured_output, mcp, code_interpreter, file_search, vision, web_search, web_fetch, tool_search, zero_output, inference_geo, context_management, tool_result_error, document_citations, document_metadata, document_text, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
         max_input_tokens: {type: integer, minimum: 0}
         max_output_tokens: {type: integer, minimum: 0}
         input_cost_per_1m: {type: number, minimum: 0}
@@ -10847,7 +10876,7 @@ components:
           type: array
           uniqueItems: true
           description: Operations and optional request features preserved by the managed adapter.
-          items: {type: string, enum: [chat, completions, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, gemini_code_execution, gemini_audio_timestamp, gemini_media_resolution, gemini_media_processing, gemini_search_time_range, url_context, google_maps, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, cached_content, realtime, stream, tools, custom_tools, response_image_generation, response_computer, response_shell, response_apply_patch, structured_output, mcp, code_interpreter, file_search, vision, web_search, web_fetch, tool_search, zero_output, inference_geo, context_management, tool_result_error, document_citations, document_metadata, document_text, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
+          items: {type: string, enum: [chat, completions, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, gemini_code_execution, gemini_audio_timestamp, gemini_media_resolution, gemini_media_processing, gemini_search_time_range, gemini_file_search, url_context, google_maps, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, cached_content, realtime, stream, tools, custom_tools, response_image_generation, response_computer, response_shell, response_apply_patch, structured_output, mcp, code_interpreter, file_search, vision, web_search, web_fetch, tool_search, zero_output, inference_geo, context_management, tool_result_error, document_citations, document_metadata, document_text, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
         auth_types:
           type: array
           uniqueItems: true

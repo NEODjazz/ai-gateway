@@ -163,6 +163,45 @@ func TestGeminiForwardsGoogleSearchTimeRange(t *testing.T) {
 	}
 }
 
+func TestGeminiFileSearchRoundTrip(t *testing.T) {
+	var upstream geminiRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&upstream); err != nil {
+			t.Fatal(err)
+		}
+		_, _ = fmt.Fprint(w, `{"responseId":"retrieved","candidates":[{"content":{"parts":[{"text":"Use policy A."}]},"finishReason":"STOP","groundingMetadata":{"groundingChunks":[{"retrievedContext":{"uri":"https://docs.example/policy-a","title":"Policy A","text":"Policy body","fileSearchStore":"fileSearchStores/policies","pageNumber":2,"mediaId":"fileSearchStores/policies/media/policy-a","customMetadata":[{"key":"status","stringValue":"active"}]}}],"groundingSupports":[{"segment":{"startIndex":4,"endIndex":12,"text":"policy A"},"groundingChunkIndices":[0]}]}}],"usageMetadata":{"promptTokenCount":4,"candidatesTokenCount":3,"totalTokenCount":7}}`)
+	}))
+	defer server.Close()
+	topK := 8
+	request := openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "find policy"}}, GeminiFileSearch: &openai.GeminiFileSearchConfig{StoreNames: []string{"fileSearchStores/policies"}, MetadataFilter: "status=active", TopK: &topK}}
+	response, err := NewGemini(server.URL, "key", false).ChatCompletions(t.Context(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	annotations := response.Choices[0].Message.Annotations
+	if len(upstream.Tools) != 1 || upstream.Tools[0].FileSearch == nil || upstream.Tools[0].FileSearch.StoreNames[0] != "fileSearchStores/policies" || response.Usage.SearchRequests != 0 || len(annotations) != 1 || annotations[0].URLCitation.URL != "https://docs.example/policy-a" || !strings.Contains(string(response.Choices[0].GeminiGroundingMetadata), "retrievedContext") {
+		t.Fatalf("upstream=%+v response=%+v", upstream, response)
+	}
+	request.GeminiCodeExecution = true
+	if _, err := geminiChatRequest(request); err == nil {
+		t.Fatal("file search combined with another tool")
+	}
+}
+
+func TestGeminiRejectsInvalidFileSearchGrounding(t *testing.T) {
+	for _, raw := range []string{
+		`{"groundingChunks":[{"retrievedContext":{"fileSearchStore":"wrong"}}]}`,
+		`{"groundingChunks":[{"retrievedContext":{"fileSearchStore":"fileSearchStores/a","mediaId":"fileSearchStores/b/media/one"}}]}`,
+		`{"groundingChunks":[{"retrievedContext":{"fileSearchStore":"fileSearchStores/a","pageNumber":0}}]}`,
+		`{"groundingChunks":[{"retrievedContext":{"fileSearchStore":"fileSearchStores/a","customMetadata":[{"key":"x","stringValue":"a","numericValue":1}]}}]}`,
+		`{"groundingChunks":[{"web":{"uri":"https://example.com","title":"Web"},"retrievedContext":{"fileSearchStore":"fileSearchStores/a"}}]}`,
+	} {
+		if _, _, err := geminiGrounding(json.RawMessage(raw), "text"); err == nil {
+			t.Fatalf("invalid file search grounding accepted: %s", raw)
+		}
+	}
+}
+
 func TestGeminiGoogleMapsGroundingAndUsage(t *testing.T) {
 	var upstream geminiRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

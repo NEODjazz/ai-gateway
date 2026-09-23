@@ -292,6 +292,21 @@ func TestGenerateContentEnforcesToolACL(t *testing.T) {
 	}
 }
 
+func TestGenerateContentFileSearchEnforcesStoreACL(t *testing.T) {
+	body := `{"contents":[{"parts":[{"text":"find policy"}]}],"tools":[{"fileSearch":{"fileSearchStoreNames":["fileSearchStores/policies"]}}]}`
+	upstream := &fallbackChatProvider{}
+	missingStore := Routes(NewHandler(modules.NewPipeline([]modules.Module{messagesAuth{accessPolicyModule{models: []string{"*"}, tools: []string{"file_search"}}}}), upstream))
+	response := generateCall(missingStore, "/v1beta/models/m:generateContent", body, "gateway-test-key")
+	if response.Code != http.StatusForbidden || upstream.calls != 0 || !strings.Contains(response.Body.String(), "gemini_file_search:fileSearchStores/policies") {
+		t.Fatalf("store ACL bypassed: status=%d calls=%d body=%s", response.Code, upstream.calls, response.Body.String())
+	}
+	allowed := Routes(NewHandler(modules.NewPipeline([]modules.Module{messagesAuth{accessPolicyModule{models: []string{"*"}, tools: []string{"file_search", "gemini_file_search:fileSearchStores/policies"}}}}), upstream))
+	response = generateCall(allowed, "/v1beta/models/m:generateContent", body, "gateway-test-key")
+	if response.Code == http.StatusForbidden || upstream.calls != 1 || upstream.request.Request.GeminiFileSearch == nil || upstream.request.Request.NativeInputTokens == 0 {
+		t.Fatalf("authorized file search rejected: status=%d calls=%d request=%+v body=%s", response.Code, upstream.calls, upstream.request, response.Body.String())
+	}
+}
+
 func TestGenerateContentGeminiCodeExecutionStreamAndACL(t *testing.T) {
 	denied := &fallbackChatProvider{}
 	deniedHandler := Routes(NewHandler(modules.NewPipeline([]modules.Module{messagesAuth{accessPolicyModule{models: []string{"*"}, tools: []string{"safe"}}}}), denied))
@@ -423,6 +438,21 @@ func TestGenerateCountTokensEnforcesNativeManagedToolACL(t *testing.T) {
 				t.Fatalf("managed tool count rejected: status=%d calls=%d request=%+v body=%s", response.Code, counter.calls, counter.request.Request, response.Body.String())
 			}
 		})
+	}
+}
+
+func TestGenerateCountTokensFileSearchEnforcesStoreACL(t *testing.T) {
+	counter := &countProviderSpy{}
+	body := `{"generateContentRequest":{"contents":[{"parts":[{"text":"count"}]}],"tools":[{"fileSearch":{"fileSearchStoreNames":["fileSearchStores/policies"]}}]}}`
+	denied := Routes(NewHandler(modules.NewPipeline([]modules.Module{messagesAuth{accessPolicyModule{models: []string{"m"}, tools: []string{"file_search"}}}}), counter))
+	response := generateCall(denied, "/v1beta/models/m:countTokens", body, "gateway-test-key")
+	if response.Code != http.StatusForbidden || counter.calls != 0 {
+		t.Fatalf("file search count store ACL bypassed: status=%d calls=%d body=%s", response.Code, counter.calls, response.Body.String())
+	}
+	allowed := Routes(NewHandler(modules.NewPipeline([]modules.Module{messagesAuth{accessPolicyModule{models: []string{"m"}, tools: []string{"file_search", "gemini_file_search:fileSearchStores/policies"}}}}), counter))
+	response = generateCall(allowed, "/v1beta/models/m:countTokens", body, "gateway-test-key")
+	if response.Code != http.StatusOK || counter.calls != 1 || counter.request.Request.GeminiFileSearch == nil || counter.request.Request.NativeInputTokens == 0 {
+		t.Fatalf("authorized file search count rejected: status=%d calls=%d request=%+v body=%s", response.Code, counter.calls, counter.request.Request, response.Body.String())
 	}
 }
 func TestGenerateContentFallbackSSE(t *testing.T) {

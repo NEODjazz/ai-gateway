@@ -39,6 +39,8 @@ type ChatCompletionRequest struct {
 	GeminiAudioTimestamp *bool `json:"-"`
 	// GeminiMediaResolution controls the native input-media token resolution.
 	GeminiMediaResolution string `json:"-"`
+	// GeminiFileSearch contains validated provider-managed retrieval stores.
+	GeminiFileSearch *GeminiFileSearchConfig `json:"-"`
 	// AnthropicSkills contains validated native Messages skill references.
 	AnthropicSkills      []AnthropicSkillReference `json:"-"`
 	AnthropicContainerID string                    `json:"-"`

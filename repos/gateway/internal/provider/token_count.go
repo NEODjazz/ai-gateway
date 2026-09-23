@@ -40,6 +40,7 @@ type TokenCountRequest struct {
 	AnthropicContextManagement json.RawMessage
 	GeminiCachedContent        string
 	GeminiMediaResolution      string
+	GeminiFileSearch           *openai.GeminiFileSearchConfig
 }
 type TokenCountResult struct {
 	InputTokens         int

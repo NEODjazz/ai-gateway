@@ -16,6 +16,7 @@ describe("modelCapabilityOptions", () => {
       "gemini_media_resolution",
       "gemini_media_processing",
       "gemini_search_time_range",
+      "gemini_file_search",
       "url_context",
       "google_maps",
       "background_responses",

@@ -23,9 +23,10 @@ type generateRequest struct {
 		GoogleSearch *struct {
 			TimeRange *openai.GeminiSearchTimeRange `json:"timeRangeFilter,omitempty"`
 		} `json:"googleSearch,omitempty"`
-		GoogleMaps    *struct{} `json:"googleMaps,omitempty"`
-		CodeExecution *struct{} `json:"codeExecution,omitempty"`
-		URLContext    *struct{} `json:"urlContext,omitempty"`
+		GoogleMaps    *struct{}                      `json:"googleMaps,omitempty"`
+		CodeExecution *struct{}                      `json:"codeExecution,omitempty"`
+		URLContext    *struct{}                      `json:"urlContext,omitempty"`
+		FileSearch    *openai.GeminiFileSearchConfig `json:"fileSearch,omitempty"`
 	} `json:"tools,omitempty"`
 	ToolConfig *struct {
 		FunctionCalling *struct {
@@ -446,7 +447,7 @@ func (r generateRequest) chatWithContentRequirement(model string, stream, requir
 	}
 	for _, tool := range r.Tools {
 		members := 0
-		for _, present := range []bool{len(tool.Functions) > 0, tool.GoogleSearch != nil, tool.GoogleMaps != nil, tool.CodeExecution != nil, tool.URLContext != nil} {
+		for _, present := range []bool{len(tool.Functions) > 0, tool.GoogleSearch != nil, tool.GoogleMaps != nil, tool.CodeExecution != nil, tool.URLContext != nil, tool.FileSearch != nil} {
 			if present {
 				members++
 			}
@@ -497,6 +498,16 @@ func (r generateRequest) chatWithContentRequirement(model string, stream, requir
 			result.NativeInputTokens = openai.ReserveTokens(result.NativeInputTokens, openai.EstimateContextTokens(tool))
 			continue
 		}
+		if tool.FileSearch != nil {
+			if result.GeminiFileSearch != nil || !openai.ValidGeminiFileSearchConfig(tool.FileSearch) {
+				return fail("fileSearch")
+			}
+			config := *tool.FileSearch
+			config.StoreNames = append([]string(nil), tool.FileSearch.StoreNames...)
+			result.GeminiFileSearch = &config
+			result.NativeInputTokens = openai.ReserveTokens(result.NativeInputTokens, openai.EstimateContextTokens(tool))
+			continue
+		}
 		for _, function := range tool.Functions {
 			if function.Name == "" {
 				return fail("functionDeclarations.name")
@@ -517,6 +528,9 @@ func (r generateRequest) chatWithContentRequirement(model string, stream, requir
 			}
 			result.Tools = append(result.Tools, openai.Tool{Type: "function", Function: openai.FunctionDefinition{Name: function.Name, Description: function.Description, Parameters: schema}})
 		}
+	}
+	if result.GeminiFileSearch != nil && len(r.Tools) != 1 {
+		return fail("fileSearch")
 	}
 	if len(result.Tools) > 128 {
 		return fail("functionDeclarations")

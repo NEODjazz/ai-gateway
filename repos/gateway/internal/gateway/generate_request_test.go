@@ -118,6 +118,33 @@ func TestGenerateRequestMapsGoogleSearchTimeRange(t *testing.T) {
 	}
 }
 
+func TestGenerateRequestMapsFileSearchTool(t *testing.T) {
+	var native generateRequest
+	raw := `{"contents":[{"parts":[{"text":"find the policy"}]}],"tools":[{"fileSearch":{"fileSearchStoreNames":["fileSearchStores/policies"],"metadataFilter":"status=active","topK":8}}]}`
+	if err := decodeMessagesValue(json.RawMessage(raw), &native); err != nil {
+		t.Fatal(err)
+	}
+	chat, err := native.chat("model", false)
+	if err != nil || chat.GeminiFileSearch == nil || len(chat.GeminiFileSearch.StoreNames) != 1 || chat.GeminiFileSearch.StoreNames[0] != "fileSearchStores/policies" || chat.GeminiFileSearch.TopK == nil || *chat.GeminiFileSearch.TopK != 8 || chat.NativeInputTokens == 0 {
+		t.Fatalf("chat=%+v err=%v", chat, err)
+	}
+	for _, invalid := range []string{
+		`{"contents":[{"parts":[{"text":"find"}]}],"tools":[{"fileSearch":{"fileSearchStoreNames":[]}}]}`,
+		`{"contents":[{"parts":[{"text":"find"}]}],"tools":[{"fileSearch":{"fileSearchStoreNames":["bad"]}}]}`,
+		`{"contents":[{"parts":[{"text":"find"}]}],"tools":[{"fileSearch":{"fileSearchStoreNames":["fileSearchStores/a"],"topK":0}}]}`,
+		`{"contents":[{"parts":[{"text":"find"}]}],"tools":[{"fileSearch":{"fileSearchStoreNames":["fileSearchStores/a"]}},{"googleSearch":{}}]}`,
+		`{"contents":[{"parts":[{"text":"find"}]}],"tools":[{"fileSearch":{"fileSearchStoreNames":["fileSearchStores/a"]},"codeExecution":{}}]}`,
+	} {
+		var request generateRequest
+		if err := decodeMessagesValue(json.RawMessage(invalid), &request); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := request.chat("model", false); err == nil {
+			t.Fatalf("invalid file search accepted: %s", invalid)
+		}
+	}
+}
+
 func TestGenerateRequestMapsGoogleMapsAndLocation(t *testing.T) {
 	var native generateRequest
 	raw := `{"contents":[{"parts":[{"text":"restaurants near here"}]}],"tools":[{"googleMaps":{}}],"toolConfig":{"retrievalConfig":{"latLng":{"latitude":40.758896,"longitude":-73.98513}}}}`

@@ -1263,6 +1263,17 @@ the conservative TPM estimate, require `video_input`, and bypass exact and
 semantic response caches.
 
 
+### Native Gemini file search
+
+`tools[].fileSearch` performs retrieval against provider-managed stores. The request
+accepts one to 20 unique `fileSearchStores/...` names, an optional bounded metadata
+filter, and optional `topK` from 1 to 100. File search cannot be combined with other
+tools. Routing requires `gemini_file_search`; authorization requires `file_search`
+and `gemini_file_search:<store-name>` for every requested store. The tool definition
+is included in the TPM and budget reserve, native token counting preserves it, and
+exact and semantic response caches are bypassed. Returned retrieval grounding is
+bounded and validated before citations and raw native metadata are exposed.
+
 ### Native GenerateContent token counting
 
 POST `/v1beta/models/{model}:countTokens` accepts either `contents` or

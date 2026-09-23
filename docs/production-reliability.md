@@ -2044,3 +2044,12 @@ Gateway Helm revision 507 completed successfully. Pod
 image. Live liveness and readiness returned 204, OpenAPI 0.1.401 exposed the
 expanded MIME contract, and a cluster-local unauthenticated AVI request returned
 401 at the authentication boundary without provider execution.
+
+## Native Gemini file search
+
+Native GenerateContent and countTokens accept bounded provider-managed file-search
+store configuration. Every store is authorized separately, tool schemas enter token
+reserve, provider token counts remain authoritative for settlement, and requests
+bypass response caches. Gemini and Vertex routing requires an explicit capability.
+Retrieval grounding metadata is validated and preserved, while file-search execution
+does not create a synthetic search-request charge.
