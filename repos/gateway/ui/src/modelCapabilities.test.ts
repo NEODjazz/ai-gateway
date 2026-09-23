@@ -15,6 +15,7 @@ describe("modelCapabilityOptions", () => {
       "gemini_audio_timestamp",
       "gemini_media_resolution",
       "gemini_media_processing",
+      "gemini_search_time_range",
       "url_context",
       "google_maps",
       "background_responses",

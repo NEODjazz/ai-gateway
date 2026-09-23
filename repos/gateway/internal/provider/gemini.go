@@ -67,6 +67,7 @@ func (Gemini) SupportsVision() bool          { return true }
 func (Gemini) SupportsWebSearch() bool       { return true }
 func (Gemini) SupportsCodeExecution() bool   { return true }
 func (Gemini) SupportsURLContext() bool      { return true }
+func (Gemini) SupportsSearchTimeRange() bool { return true }
 func (Gemini) SupportsGoogleMaps() bool      { return true }
 func (Gemini) SupportsAudioInput() bool      { return true }
 func (Gemini) SupportsFileInput() bool       { return true }
@@ -116,11 +117,13 @@ type geminiFunction struct {
 	Parameters  any    `json:"parametersJsonSchema,omitempty"`
 }
 type geminiTool struct {
-	Functions     []geminiFunction `json:"functionDeclarations,omitempty"`
-	GoogleSearch  *struct{}        `json:"googleSearch,omitempty"`
-	GoogleMaps    *struct{}        `json:"googleMaps,omitempty"`
-	CodeExecution *struct{}        `json:"codeExecution,omitempty"`
-	URLContext    *struct{}        `json:"urlContext,omitempty"`
+	Functions    []geminiFunction `json:"functionDeclarations,omitempty"`
+	GoogleSearch *struct {
+		TimeRange *openai.GeminiSearchTimeRange `json:"timeRangeFilter,omitempty"`
+	} `json:"googleSearch,omitempty"`
+	GoogleMaps    *struct{} `json:"googleMaps,omitempty"`
+	CodeExecution *struct{} `json:"codeExecution,omitempty"`
+	URLContext    *struct{} `json:"urlContext,omitempty"`
 }
 type geminiGeneration struct {
 	MaxOutputTokens    *int                            `json:"maxOutputTokens,omitempty"`
@@ -262,6 +265,9 @@ func geminiChatRequest(request openai.ChatCompletionRequest) (geminiRequest, err
 	}
 	if err := openai.ValidateGeminiSafetySettings(request.GeminiSafetySettings); err != nil {
 		return result, geminiInvalid("safety_settings")
+	}
+	if request.WebSearchOptions != nil && !openai.ValidGeminiSearchTimeRange(request.WebSearchOptions.GeminiTimeRange) {
+		return result, geminiInvalid("web_search_options.time_range")
 	}
 	if err := openai.ValidateChatGeminiPartMediaResolutions(request); err != nil {
 		return result, geminiInvalid("messages.content.media_resolution")
@@ -543,7 +549,10 @@ func geminiChatRequest(request openai.ChatCompletionRequest) (geminiRequest, err
 		result.Tools = []geminiTool{tool}
 	}
 	if request.WebSearchOptions != nil {
-		result.Tools = append(result.Tools, geminiTool{GoogleSearch: &struct{}{}})
+		search := &struct {
+			TimeRange *openai.GeminiSearchTimeRange `json:"timeRangeFilter,omitempty"`
+		}{TimeRange: request.WebSearchOptions.GeminiTimeRange}
+		result.Tools = append(result.Tools, geminiTool{GoogleSearch: search})
 	}
 	if request.GeminiCodeExecution {
 		result.Tools = append(result.Tools, geminiTool{CodeExecution: &struct{}{}})

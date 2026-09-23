@@ -51,6 +51,12 @@ type ChatWebSearchOptions struct {
 	BlockedDomains    []string                   `json:"-"`
 	AllowedCallers    []string                   `json:"-"`
 	ResponseInclusion string                     `json:"-"`
+	GeminiTimeRange   *GeminiSearchTimeRange     `json:"-"`
+}
+
+type GeminiSearchTimeRange struct {
+	StartTime string `json:"startTime"`
+	EndTime   string `json:"endTime"`
 }
 
 type ChatWebFetchOptions struct {

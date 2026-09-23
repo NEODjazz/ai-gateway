@@ -375,7 +375,7 @@ func validDeploymentCapabilities(capabilities []string) bool {
 	if seen["response_apply_patch"] && (!seen["responses"] || !seen["tools"]) {
 		return false
 	}
-	for _, capability := range []string{"web_fetch", "tool_search", "memory_tool", "bash_tool", "text_editor_tool", "computer_toolset", "browser_toolset", "thinking", "zero_output", "inference_geo", "context_management", "tool_result_error", "document_citations", "document_metadata", "document_text", "audio", "audio_input", "video_input", "prompt_cache", "assistant_prefill", "gemini_code_execution", "gemini_audio_timestamp", "gemini_media_resolution", "gemini_media_processing", "url_context", "google_maps"} {
+	for _, capability := range []string{"web_fetch", "tool_search", "memory_tool", "bash_tool", "text_editor_tool", "computer_toolset", "browser_toolset", "thinking", "zero_output", "inference_geo", "context_management", "tool_result_error", "document_citations", "document_metadata", "document_text", "audio", "audio_input", "video_input", "prompt_cache", "assistant_prefill", "gemini_code_execution", "gemini_audio_timestamp", "gemini_media_resolution", "gemini_media_processing", "gemini_search_time_range", "url_context", "google_maps"} {
 		if seen[capability] && !seen["chat"] {
 			return false
 		}
@@ -387,6 +387,9 @@ func validDeploymentCapabilities(capabilities []string) bool {
 		return false
 	}
 	if seen["gemini_media_processing"] && !seen["video_input"] {
+		return false
+	}
+	if seen["gemini_search_time_range"] && !seen["web_search"] {
 		return false
 	}
 	if seen["background_responses"] && !seen["responses"] {
@@ -422,7 +425,7 @@ func ValidModelCapability(capability string) bool {
 		"image_generation", "image_edit", "image_variation",
 		"audio_transcription", "audio_translation", "audio_speech", "ocr", "search", "skills", "fine_tuning", "video", "video_remix", "video_extension", "container", "container_files", "container_network", "cached_content", "sandbox", "realtime",
 		"stream", "tools", "custom_tools", "response_image_generation", "response_computer", "response_shell", "response_apply_patch", "structured_output", "mcp", "vision",
-		"web_search", "web_fetch", "tool_search", "memory_tool", "bash_tool", "text_editor_tool", "computer_toolset", "browser_toolset", "thinking", "zero_output", "inference_geo", "context_management", "tool_result_error", "document_citations", "document_metadata", "document_text", "audio", "audio_input", "video_input", "prompt_cache", "assistant_prefill", "background_responses", "file_input", "bedrock_invoke", "gemini_code_execution", "gemini_audio_timestamp", "gemini_media_resolution", "gemini_media_processing", "url_context", "google_maps":
+		"web_search", "web_fetch", "tool_search", "memory_tool", "bash_tool", "text_editor_tool", "computer_toolset", "browser_toolset", "thinking", "zero_output", "inference_geo", "context_management", "tool_result_error", "document_citations", "document_metadata", "document_text", "audio", "audio_input", "video_input", "prompt_cache", "assistant_prefill", "background_responses", "file_input", "bedrock_invoke", "gemini_code_execution", "gemini_audio_timestamp", "gemini_media_resolution", "gemini_media_processing", "gemini_search_time_range", "url_context", "google_maps":
 		return true
 	default:
 		return false
@@ -695,6 +698,9 @@ func supportsManagedAdapterCapability(endpoint Endpoint, capability string) bool
 	case "gemini_media_processing":
 		client, ok := endpoint.Provider.(interface{ SupportsMediaProcessing() bool })
 		return (endpoint.Type == "gemini" || endpoint.Type == "vertex-gemini") && ok && client.SupportsMediaProcessing()
+	case "gemini_search_time_range":
+		client, ok := endpoint.Provider.(interface{ SupportsSearchTimeRange() bool })
+		return (endpoint.Type == "gemini" || endpoint.Type == "vertex-gemini") && ok && client.SupportsSearchTimeRange()
 	case "url_context":
 		client, ok := endpoint.Provider.(interface{ SupportsURLContext() bool })
 		return (endpoint.Type == "gemini" || endpoint.Type == "vertex-gemini") && ok && client.SupportsURLContext()

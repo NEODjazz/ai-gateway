@@ -453,6 +453,13 @@ func TestChatWebSearchDisablesResponseCaches(t *testing.T) {
 	}
 }
 
+func TestGeminiSearchTimeRangeRequiresNativeCapability(t *testing.T) {
+	request := openai.ChatCompletionRequest{Model: "test", Messages: []openai.Message{{Role: "user", Content: "news"}}, ChatGenerationOptions: openai.ChatGenerationOptions{WebSearchOptions: &openai.ChatWebSearchOptions{GeminiTimeRange: &openai.GeminiSearchTimeRange{StartTime: "2026-01-01T00:00:00Z", EndTime: "2026-02-01T00:00:00Z"}}}}
+	if got := strings.Join(requiredChatCapabilities(request, false), ","); got != "chat,web_search,gemini_search_time_range" {
+		t.Fatalf("search time-range routing requirements=%s", got)
+	}
+}
+
 func TestGeminiCodeExecutionDisablesResponseCaches(t *testing.T) {
 	request := modules.RequestContext{CredentialID: "key", Request: openai.ChatCompletionRequest{Model: "test", Messages: []openai.Message{{Role: "user", Content: "calculate"}}, GeminiCodeExecution: true}}
 	if providerCacheKey("chat", request) != "" {

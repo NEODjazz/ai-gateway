@@ -95,6 +95,29 @@ func TestGenerateRequestMapsGoogleSearchTool(t *testing.T) {
 	}
 }
 
+func TestGenerateRequestMapsGoogleSearchTimeRange(t *testing.T) {
+	var native generateRequest
+	if err := decodeMessagesValue(json.RawMessage(`{"contents":[{"parts":[{"text":"news"}]}],"tools":[{"googleSearch":{"timeRangeFilter":{"startTime":"2026-01-01T02:00:00+02:00","endTime":"2026-02-01T00:00:00Z"}}}]}`), &native); err != nil {
+		t.Fatal(err)
+	}
+	chat, err := native.chat("model", false)
+	if err != nil || chat.WebSearchOptions == nil || chat.WebSearchOptions.GeminiTimeRange == nil || chat.WebSearchOptions.GeminiTimeRange.StartTime != "2026-01-01T00:00:00Z" {
+		t.Fatalf("chat=%+v err=%v", chat, err)
+	}
+	for _, raw := range []string{
+		`{"contents":[{"parts":[{"text":"news"}]}],"tools":[{"googleSearch":{"timeRangeFilter":{"startTime":"bad","endTime":"2026-02-01T00:00:00Z"}}}]}`,
+		`{"contents":[{"parts":[{"text":"news"}]}],"tools":[{"googleSearch":{"timeRangeFilter":{"startTime":"2026-02-01T00:00:00Z","endTime":"2026-01-01T00:00:00Z"}}}]}`,
+	} {
+		var invalid generateRequest
+		if err := decodeMessagesValue(json.RawMessage(raw), &invalid); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := invalid.chat("model", false); err == nil {
+			t.Fatalf("invalid search time range accepted: %s", raw)
+		}
+	}
+}
+
 func TestGenerateRequestMapsGoogleMapsAndLocation(t *testing.T) {
 	var native generateRequest
 	raw := `{"contents":[{"parts":[{"text":"restaurants near here"}]}],"tools":[{"googleMaps":{}}],"toolConfig":{"retrievalConfig":{"latLng":{"latitude":40.758896,"longitude":-73.98513}}}}`

@@ -151,6 +151,18 @@ func TestGeminiGoogleSearchGroundingAndUsage(t *testing.T) {
 	}
 }
 
+func TestGeminiForwardsGoogleSearchTimeRange(t *testing.T) {
+	rangeFilter := &openai.GeminiSearchTimeRange{StartTime: "2026-01-01T00:00:00Z", EndTime: "2026-02-01T00:00:00Z"}
+	native, err := geminiChatRequest(openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "news"}}, ChatGenerationOptions: openai.ChatGenerationOptions{WebSearchOptions: &openai.ChatWebSearchOptions{GeminiTimeRange: rangeFilter}}})
+	if err != nil || len(native.Tools) != 1 || native.Tools[0].GoogleSearch == nil || native.Tools[0].GoogleSearch.TimeRange == nil || native.Tools[0].GoogleSearch.TimeRange.StartTime != rangeFilter.StartTime {
+		t.Fatalf("native=%+v err=%v", native, err)
+	}
+	rangeFilter.StartTime = "invalid"
+	if _, err := geminiChatRequest(openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "news"}}, ChatGenerationOptions: openai.ChatGenerationOptions{WebSearchOptions: &openai.ChatWebSearchOptions{GeminiTimeRange: rangeFilter}}}); err == nil {
+		t.Fatal("invalid search time range accepted")
+	}
+}
+
 func TestGeminiGoogleMapsGroundingAndUsage(t *testing.T) {
 	var upstream geminiRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

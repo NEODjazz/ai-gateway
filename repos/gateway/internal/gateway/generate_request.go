@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"time"
 
 	"ai-gateway-gateway/internal/openai"
 )
@@ -18,11 +19,13 @@ type generateRequest struct {
 	System        *generateContent             `json:"systemInstruction,omitempty"`
 	Safety        []openai.GeminiSafetySetting `json:"safetySettings,omitempty"`
 	Tools         []struct {
-		Functions     []generateFunction `json:"functionDeclarations,omitempty"`
-		GoogleSearch  *struct{}          `json:"googleSearch,omitempty"`
-		GoogleMaps    *struct{}          `json:"googleMaps,omitempty"`
-		CodeExecution *struct{}          `json:"codeExecution,omitempty"`
-		URLContext    *struct{}          `json:"urlContext,omitempty"`
+		Functions    []generateFunction `json:"functionDeclarations,omitempty"`
+		GoogleSearch *struct {
+			TimeRange *openai.GeminiSearchTimeRange `json:"timeRangeFilter,omitempty"`
+		} `json:"googleSearch,omitempty"`
+		GoogleMaps    *struct{} `json:"googleMaps,omitempty"`
+		CodeExecution *struct{} `json:"codeExecution,omitempty"`
+		URLContext    *struct{} `json:"urlContext,omitempty"`
 	} `json:"tools,omitempty"`
 	ToolConfig *struct {
 		FunctionCalling *struct {
@@ -456,6 +459,17 @@ func (r generateRequest) chatWithContentRequirement(model string, stream, requir
 				return fail("googleSearch")
 			}
 			result.WebSearchOptions = &openai.ChatWebSearchOptions{}
+			if tool.GoogleSearch.TimeRange != nil {
+				start, startErr := time.Parse(time.RFC3339Nano, tool.GoogleSearch.TimeRange.StartTime)
+				end, endErr := time.Parse(time.RFC3339Nano, tool.GoogleSearch.TimeRange.EndTime)
+				if startErr != nil || endErr != nil || start.After(end) {
+					return fail("googleSearch.timeRangeFilter")
+				}
+				result.WebSearchOptions.GeminiTimeRange = &openai.GeminiSearchTimeRange{
+					StartTime: start.UTC().Format(time.RFC3339Nano),
+					EndTime:   end.UTC().Format(time.RFC3339Nano),
+				}
+			}
 			result.NativeInputTokens = openai.ReserveTokens(result.NativeInputTokens, openai.EstimateContextTokens(tool))
 			continue
 		}
