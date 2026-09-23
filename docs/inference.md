@@ -1940,6 +1940,11 @@ search, code execution, image generation, MCP and patch items additionally accep
 only their documented intermediate or failure states. Omitted statuses and
 unknown future item families remain compatible.
 
+Native Responses streams validate every explicit `response_id` before forwarding
+its event. Once a response ID is established, later event fields and response
+snapshots must retain it. A malformed or changed identifier terminates the stream
+before the conflicting event can reach the client or final accounting.
+
 Regression tests cover interleaved messages and parts, text completion events,
 empty and populated terminal snapshots, invalid content indices and JSON text
 aggregation. The tests also reproduced the earlier behavior through a temporary

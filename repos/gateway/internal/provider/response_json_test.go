@@ -221,6 +221,37 @@ func TestResponsesValidateOutputItemStatuses(t *testing.T) {
 	}
 }
 
+func TestResponsesValidateStableStreamResponseID(t *testing.T) {
+	for name, wire := range map[string]string{
+		"invalid event ID": `data: {"type":"response.output_text.delta","response_id":"bad/id","delta":"answer"}` + "\n\n" + responseTestTerminal,
+		"changed event ID": `data: {"type":"response.created","response":{"id":"resp_one","object":"response","status":"in_progress"}}` + "\n\n" +
+			`data: {"type":"response.output_text.delta","response_id":"resp_two","delta":"answer"}` + "\n\n" + responseTestTerminal,
+		"changed snapshot ID": `data: {"type":"response.created","response":{"id":"resp_one","object":"response","status":"in_progress"}}` + "\n\n" +
+			`data: {"type":"response.completed","response":{"id":"resp_two","object":"response","status":"completed"}}` + "\n\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			callbacks := 0
+			if _, err := streamResponseData(strings.NewReader(wire), "m", func(string, string) error { callbacks++; return nil }); err == nil {
+				t.Fatal("invalid response ID lifecycle accepted")
+			}
+			if name == "invalid event ID" && callbacks != 0 {
+				t.Fatalf("invalid first event delivered: callbacks=%d", callbacks)
+			}
+			if name != "invalid event ID" && callbacks != 1 {
+				t.Fatalf("event after established ID was delivered: callbacks=%d", callbacks)
+			}
+		})
+	}
+
+	wire := `data: {"type":"response.created","response":{"id":"resp_same","object":"response","status":"in_progress"}}` + "\n\n" +
+		`data: {"type":"response.output_text.delta","response_id":"resp_same","delta":"answer"}` + "\n\n" +
+		`data: {"type":"response.completed","response":{"id":"resp_same","object":"response","status":"completed"}}` + "\n\n"
+	response, err := streamResponseData(strings.NewReader(wire), "m", nil)
+	if err != nil || response.ID != "resp_same" {
+		t.Fatalf("stable response ID rejected: response=%+v err=%v", response, err)
+	}
+}
+
 func TestResponsesRejectsInvalidJSONDocuments(t *testing.T) {
 	for _, body := range []string{"null", `{"id":"r"} {"id":"second"}`, `{"id":"r"} trailing`, `{"id":`} {
 		t.Run(body, func(t *testing.T) {

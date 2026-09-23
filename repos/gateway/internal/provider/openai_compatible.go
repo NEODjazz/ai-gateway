@@ -1316,6 +1316,15 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 				return errors.New("Responses event contains an invalid item_id")
 			}
 		}
+		if value, present := decoded["response_id"]; present {
+			responseID, ok := value.(string)
+			if !ok || !validResponseResourceID(responseID) {
+				return errors.New("Responses event contains an invalid response_id")
+			}
+			if response.ID != "" && response.ID != responseID {
+				return errors.New("provider changed response ID during stream")
+			}
+		}
 		outputIndex, err := responseOutputIndex(decoded)
 		if err != nil {
 			return err
@@ -1535,8 +1544,12 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 			if err := validateResponseConfigurationPayload(marshaled, &response); err != nil {
 				return err
 			}
+			previousResponseID := response.ID
 			if err := json.Unmarshal(marshaled, &response); err != nil {
 				return err
+			}
+			if previousResponseID != "" && response.ID != "" && previousResponseID != response.ID {
+				return errors.New("provider changed response ID during stream")
 			}
 			if err := recordResponseInputUsage(marshaled, &response); err != nil {
 				return err
