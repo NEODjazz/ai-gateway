@@ -2147,3 +2147,19 @@ Gateway Helm revision 584 completed successfully. Pod
 liveness and readiness returned 204, OpenAPI 0.1.465 was served, and the live
 provider-capability endpoint reported the four Chat request tiers while retaining
 `auto`, `default` and `flex` for Responses.
+
+## Native Cerebras effective service tier
+
+Source `c49c167` normalizes Cerebras `service_tier_used` into the public
+`service_tier` response field when automatic tier selection is requested. JSON
+and SSE now expose the tier that actually processed the request; the native-only
+field is removed from streamed payloads, and unknown, malformed or conflicting
+provider values fail closed. Provider and OpenAPI tests, vet, build and the full
+race suite passed.
+
+Rancher Desktop built `ai-gateway-gateway:cerebras-tier-c49c167f` with image ID
+`sha256:c6daa89321b22863738db582c03df1ac02b65f170035372dbca9102f1b5e411b`.
+Gateway Helm revision 585 completed successfully. Pod
+`ai-gateway-gateway-84c6857d9c-ms4vc` became Ready with zero restarts. Live
+liveness and readiness returned 204, OpenAPI 0.1.466 was served, and the live
+provider-capability endpoint retained the validated Cerebras request tiers.
