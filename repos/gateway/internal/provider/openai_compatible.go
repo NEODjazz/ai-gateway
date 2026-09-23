@@ -1514,6 +1514,9 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 			if _, present := typed["metadata"]; present {
 				response.Metadata = nil
 			}
+			if err := validateResponseConfigurationPayload(marshaled, &response); err != nil {
+				return err
+			}
 			if err := json.Unmarshal(marshaled, &response); err != nil {
 				return err
 			}

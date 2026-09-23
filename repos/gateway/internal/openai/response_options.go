@@ -243,6 +243,21 @@ func validateResponseReasoning(reasoning *ResponseReasoning) string {
 	return ""
 }
 
+// ValidateResponseConfiguration validates provider-echoed Responses settings
+// with the same policy used for client requests.
+func ValidateResponseConfiguration(tools []ResponseTool, toolChoice any, reasoning *ResponseReasoning, text any) string {
+	if message := validateResponseTools(tools); message != "" {
+		return message
+	}
+	if message := validateResponseToolChoice(tools, toolChoice); message != "" {
+		return message
+	}
+	if message := validateResponseReasoning(reasoning); message != "" {
+		return message
+	}
+	return validateResponseText(text)
+}
+
 func validateResponseTools(tools []ResponseTool) string {
 	if len(tools) > 128 {
 		return "tools must contain at most 128 entries"

@@ -31,6 +31,9 @@ func decodeResponseJSON(reader io.Reader) (openai.ResponseResponse, error) {
 	if response == nil {
 		return openai.ResponseResponse{}, errors.New("upstream Responses JSON must be an object")
 	}
+	if err := validateResponseConfigurationPayload(payload, response); err != nil {
+		return openai.ResponseResponse{}, err
+	}
 	if err := recordResponseInputUsage(payload, response); err != nil {
 		return openai.ResponseResponse{}, err
 	}
@@ -48,6 +51,48 @@ func decodeResponseJSON(reader io.Reader) (openai.ResponseResponse, error) {
 	}
 	response.OutputText = responseText(*response)
 	return *response, nil
+}
+
+func validateResponseConfigurationPayload(payload []byte, response *openai.ResponseResponse) error {
+	var wire struct {
+		Reasoning  json.RawMessage `json:"reasoning"`
+		Text       json.RawMessage `json:"text"`
+		Tools      json.RawMessage `json:"tools"`
+		ToolChoice json.RawMessage `json:"tool_choice"`
+	}
+	if err := json.Unmarshal(payload, &wire); err != nil {
+		return err
+	}
+	if len(wire.Reasoning) > 0 && string(wire.Reasoning) != "null" {
+		if err := decodeStrictResponseConfiguration(wire.Reasoning, &response.Reasoning); err != nil {
+			return errors.New("provider returned invalid response reasoning configuration")
+		}
+	}
+	if len(wire.Tools) > 0 && string(wire.Tools) != "null" {
+		if err := decodeStrictResponseConfiguration(wire.Tools, &response.Tools); err != nil {
+			return errors.New("provider returned invalid response tools configuration")
+		}
+	}
+	if len(wire.Text) > 0 {
+		if err := json.Unmarshal(wire.Text, &response.Text); err != nil {
+			return errors.New("provider returned invalid response text configuration")
+		}
+	}
+	if len(wire.ToolChoice) > 0 {
+		if err := json.Unmarshal(wire.ToolChoice, &response.ToolChoice); err != nil {
+			return errors.New("provider returned invalid response tool_choice")
+		}
+	}
+	if message := openai.ValidateResponseConfiguration(response.Tools, response.ToolChoice, response.Reasoning, response.Text); message != "" {
+		return errors.New("provider returned invalid response configuration: " + message)
+	}
+	return nil
+}
+
+func decodeStrictResponseConfiguration(payload []byte, target any) error {
+	decoder := json.NewDecoder(strings.NewReader(string(payload)))
+	decoder.DisallowUnknownFields()
+	return decoder.Decode(target)
 }
 
 func validateResponseControls(response openai.ResponseResponse) error {

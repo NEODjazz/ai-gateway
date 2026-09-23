@@ -924,6 +924,10 @@ type ResponseResponse struct {
 	FrequencyPenalty    *float64                   `json:"frequency_penalty,omitempty"`
 	PresencePenalty     *float64                   `json:"presence_penalty,omitempty"`
 	Truncation          *string                    `json:"truncation,omitempty"`
+	Reasoning           *ResponseReasoning         `json:"reasoning,omitempty"`
+	Text                any                        `json:"text,omitempty"`
+	Tools               []ResponseTool             `json:"tools,omitempty"`
+	ToolChoice          any                        `json:"tool_choice,omitempty"`
 	Citations           []string                   `json:"citations,omitempty"`
 	Conversation        *ResponseConversation      `json:"conversation,omitempty"`
 	Output              []ResponseOutputItem       `json:"output,omitempty"`

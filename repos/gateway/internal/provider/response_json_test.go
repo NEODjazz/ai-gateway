@@ -201,6 +201,46 @@ func TestResponsesPreserveAndValidatePenaltySettings(t *testing.T) {
 	}
 }
 
+func TestResponsesPreserveAndValidateEchoedConfiguration(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprintf("stream=%v", stream), func(t *testing.T) {
+			document := `{"id":"r","object":"response","model":"m","status":"completed","reasoning":{"effort":"high","summary":"auto"},"text":{"format":{"type":"text"},"verbosity":"low"},"tools":[{"type":"function","name":"lookup","parameters":{"type":"object"}}],"tool_choice":{"type":"function","name":"lookup"}}`
+			var response openai.ResponseResponse
+			var err error
+			if stream {
+				response, err = streamResponseData(strings.NewReader("data: {\"type\":\"response.completed\",\"response\":"+document+"}\n\n"), "m", func(string, string) error { return nil })
+			} else {
+				response, err = decodeResponseJSON(strings.NewReader(document))
+			}
+			if err != nil || response.Reasoning == nil || response.Reasoning.Effort == nil || *response.Reasoning.Effort != "high" || len(response.Tools) != 1 || response.Tools[0].Name != "lookup" || response.Text == nil || response.ToolChoice == nil {
+				t.Fatalf("response=%+v err=%v", response, err)
+			}
+			encoded, err := json.Marshal(response)
+			for _, field := range []string{`"reasoning":{"effort":"high"`, `"text":{"format"`, `"tools":[{"type":"function","name":"lookup"`, `"tool_choice":{"name":"lookup","type":"function"}`} {
+				if err != nil || !strings.Contains(string(encoded), field) {
+					t.Fatalf("encoded=%s missing=%s err=%v", encoded, field, err)
+				}
+			}
+		})
+	}
+
+	for _, document := range []string{
+		`{"id":"r","object":"response","model":"m","reasoning":{"unknown":true}}`,
+		`{"id":"r","object":"response","model":"m","text":{"unknown":true}}`,
+		`{"id":"r","object":"response","model":"m","tools":[{"type":"function","name":"lookup","parameters":{"type":"object"},"unknown":true}]}`,
+		`{"id":"r","object":"response","model":"m","tool_choice":{"type":"function","name":"missing"}}`,
+	} {
+		if _, err := decodeResponseJSON(strings.NewReader(document)); err == nil {
+			t.Fatalf("invalid echoed configuration accepted: %s", document)
+		}
+		callbacks := 0
+		wire := "data: {\"type\":\"response.completed\",\"response\":" + document + "}\n\n"
+		if _, err := streamResponseData(strings.NewReader(wire), "m", func(string, string) error { callbacks++; return nil }); err == nil || callbacks != 0 {
+			t.Fatalf("invalid echoed configuration delivered: err=%v callbacks=%d", err, callbacks)
+		}
+	}
+}
+
 func TestResponsesRejectsInvalidImageGenerationResults(t *testing.T) {
 	for _, output := range []string{
 		`{"type":"image_generation_call","status":"completed"}`,
