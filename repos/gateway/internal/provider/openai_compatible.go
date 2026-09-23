@@ -623,6 +623,9 @@ func validateChatCompletionEnvelope(response openai.ChatCompletionResponse) erro
 	if message := openai.ValidateMetadata(response.Metadata); message != "" {
 		return fmt.Errorf("provider returned invalid chat completion metadata: %s", message)
 	}
+	if !openai.ValidReportedServiceTier(response.ServiceTier) {
+		return errors.New("provider returned invalid chat completion service tier")
+	}
 	for _, choice := range response.Choices {
 		if err := openai.ValidateLegacyFunctionResponse(choice.Message.FunctionCall); err != nil {
 			return fmt.Errorf("provider returned invalid legacy function call: %w", err)
@@ -1052,6 +1055,9 @@ func streamChatCompletionDataWithNormalizer(body io.Reader, fallbackModel string
 			metadataSeen = true
 		}
 		if chunk.ServiceTier != "" {
+			if !openai.ValidReportedServiceTier(chunk.ServiceTier) {
+				return errors.New("provider returned invalid chat completion service tier")
+			}
 			if serviceTierSeen && response.ServiceTier != chunk.ServiceTier {
 				return errors.New("provider changed chat completion service tier during stream")
 			}

@@ -261,8 +261,9 @@ func TestChatCompletionJSONResponseIsBoundedAndExact(t *testing.T) {
 
 func TestCompatibleChatRejectsInvalidResponseEnvelope(t *testing.T) {
 	for name, payload := range map[string]string{
-		"negative timestamp": `{"created":-1,"choices":[]}`,
-		"oversized metadata": `{"metadata":{"trace":"` + strings.Repeat("x", 513) + `"},"choices":[]}`,
+		"negative timestamp":   `{"created":-1,"choices":[]}`,
+		"oversized metadata":   `{"metadata":{"trace":"` + strings.Repeat("x", 513) + `"},"choices":[]}`,
+		"unknown service tier": `{"service_tier":"unknown","choices":[]}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

@@ -483,6 +483,17 @@ func TestServiceTierValues(t *testing.T) {
 	}
 }
 
+func TestReportedServiceTierValues(t *testing.T) {
+	for _, value := range []string{"", "default", "priority", "standard", "batch"} {
+		if !ValidReportedServiceTier(value) {
+			t.Fatalf("valid reported service tier rejected: %q", value)
+		}
+	}
+	if ValidReportedServiceTier("unknown") {
+		t.Fatal("unknown reported service tier accepted")
+	}
+}
+
 func TestVerbosityValues(t *testing.T) {
 	for _, value := range []string{"", "low", "medium", "high"} {
 		if !validVerbosity(value) {

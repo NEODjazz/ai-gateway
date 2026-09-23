@@ -390,6 +390,18 @@ func ValidServiceTier(value string) bool {
 	}
 }
 
+func ValidReportedServiceTier(value string) bool {
+	if ValidServiceTier(value) {
+		return true
+	}
+	switch value {
+	case "standard", "batch":
+		return true
+	default:
+		return false
+	}
+}
+
 type ChoiceLogprobs struct {
 	Content []TokenLogprob `json:"content,omitempty"`
 	Refusal []TokenLogprob `json:"refusal,omitempty"`
