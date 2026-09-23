@@ -16,6 +16,7 @@ import (
 type memoryConversationStore struct {
 	mu        sync.Mutex
 	turn      conversationstate.Turn
+	staged    []conversationstate.Item
 	completed []conversationstate.Item
 	released  bool
 }
@@ -57,13 +58,23 @@ func (s *memoryConversationStore) BeginTurn(_ context.Context, owner, id, execut
 	s.released = false
 	return s.turn, nil
 }
+func (s *memoryConversationStore) StageTurn(_ context.Context, turn conversationstate.Turn, items []conversationstate.Item, _, _ int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.turn.ExecutionID != turn.ExecutionID {
+		return conversationstate.ErrConflict
+	}
+	s.staged = append([]conversationstate.Item(nil), items...)
+	return nil
+}
 func (s *memoryConversationStore) CompleteTurn(_ context.Context, turn conversationstate.Turn, items []conversationstate.Item, _ int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.turn.ExecutionID != turn.ExecutionID {
 		return conversationstate.ErrConflict
 	}
-	s.completed = append([]conversationstate.Item(nil), items...)
+	s.completed = append(append([]conversationstate.Item(nil), s.staged...), items...)
+	s.staged = nil
 	s.turn.ExecutionID = ""
 	return nil
 }
@@ -74,6 +85,7 @@ func (s *memoryConversationStore) ReleaseTurn(_ context.Context, turn conversati
 		return conversationstate.ErrConflict
 	}
 	s.turn.ExecutionID = ""
+	s.staged = nil
 	s.released = true
 	return nil
 }
@@ -100,9 +112,9 @@ type conversationPostModule struct {
 	inputTokens int
 }
 
-func (*conversationPostModule) Name() string                                          { return "conversation-order" }
-func (*conversationPostModule) Required() bool                                        { return true }
-func (*conversationPostModule) PostResponseEnabled() bool                             { return true }
+func (*conversationPostModule) Name() string              { return "conversation-order" }
+func (*conversationPostModule) Required() bool            { return true }
+func (*conversationPostModule) PostResponseEnabled() bool { return true }
 func (m *conversationPostModule) Handle(_ context.Context, req *modules.RequestContext) error {
 	m.inputTokens = openai.ResponseInputTokens(*req.ResponseRequest)
 	return nil

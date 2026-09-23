@@ -48,9 +48,6 @@ func (r ResponseRequest) Validate() string {
 		if r.PreviousResponse != "" {
 			return "conversation and previous_response_id are mutually exclusive"
 		}
-		if r.Background {
-			return "conversation is not supported with background execution"
-		}
 	}
 	if r.Background && r.Stream {
 		return "background and stream cannot both be enabled"

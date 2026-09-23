@@ -544,11 +544,14 @@ func TestResponseConversationReferenceValidation(t *testing.T) {
 	invalid := []ResponseRequest{
 		{Conversation: &ResponseConversation{ID: "bad"}},
 		{Conversation: &ResponseConversation{ID: "conv_one"}, PreviousResponse: "resp_one"},
-		{Conversation: &ResponseConversation{ID: "conv_one"}, Background: true},
 	}
 	for _, request := range invalid {
 		if request.Validate() == "" {
 			t.Fatalf("invalid conversation request accepted: %+v", request)
 		}
+	}
+	store := true
+	if message := (ResponseRequest{Conversation: &ResponseConversation{ID: "conv_one"}, Background: true, Store: &store}).Validate(); message != "" {
+		t.Fatalf("background conversation rejected: %s", message)
 	}
 }

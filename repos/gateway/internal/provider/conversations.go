@@ -16,6 +16,7 @@ import (
 
 const conversationTurnLease = 15 * time.Minute
 const defaultConversationItemQuota = 4096
+const conversationBackgroundOutputReserve = 1024
 
 var ErrConversationNotFound = errors.New("conversation not found")
 var ErrConversationConflict = errors.New("conversation has another active request")
@@ -54,7 +55,21 @@ func (r Router) PrepareConversation(ctx context.Context, req modules.RequestCont
 }
 
 func (r Router) ReleaseConversation(ctx context.Context, req *modules.RequestContext) {
-	r.releaseConversation(ctx, req)
+	if req != nil && req.ConversationTurn != nil && req.ConversationTurn.Durable {
+		return
+	}
+	_ = r.releaseConversation(ctx, req)
+}
+
+func (r Router) stageBackgroundConversation(ctx context.Context, req *modules.RequestContext) error {
+	if req == nil || req.ConversationTurn == nil {
+		return nil
+	}
+	if err := r.conversations.StageTurn(ctx, *req.ConversationTurn, req.ConversationInputItems, r.conversationItemLimit(), conversationBackgroundOutputReserve); err != nil {
+		return conversationError(err)
+	}
+	req.ConversationTurn.Durable = true
+	return nil
 }
 
 func (r Router) completeConversation(ctx context.Context, req *modules.RequestContext, response *openai.ResponseResponse) error {
@@ -92,12 +107,29 @@ func (r Router) conversationItemLimit() int {
 	return defaultConversationItemQuota
 }
 
-func (r Router) releaseConversation(ctx context.Context, req *modules.RequestContext) {
+func (r Router) releaseConversation(ctx context.Context, req *modules.RequestContext) error {
 	if req == nil || req.ConversationTurn == nil || interfaceIsNil(r.conversations) {
+		return nil
+	}
+	if err := r.conversations.ReleaseTurn(ctx, *req.ConversationTurn); err != nil {
+		return conversationError(err)
+	}
+	req.ConversationTurn = nil
+	return nil
+}
+
+func (r Router) restoreBackgroundConversation(req *modules.RequestContext, conversationID string) {
+	if req == nil || conversationID == "" {
 		return
 	}
-	_ = r.conversations.ReleaseTurn(ctx, *req.ConversationTurn)
-	req.ConversationTurn = nil
+	req.ConversationTurn = &conversationstate.Turn{
+		Conversation: conversationstate.Conversation{
+			ID:       conversationID,
+			OwnerKey: conversationstate.OwnerKey(req.CredentialID, req.UserID),
+		},
+		ExecutionID: req.RequestID,
+		Durable:     true,
+	}
 }
 
 func conversationError(err error) error {

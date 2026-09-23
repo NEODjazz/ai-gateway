@@ -43,6 +43,9 @@ func decodeResponseJSON(reader io.Reader) (openai.ResponseResponse, error) {
 }
 
 func validateResponseOutputItems(items []openai.ResponseOutputItem) error {
+	if len(items) > maxResponseStreamOutputItems {
+		return errors.New("provider returned too many response output items")
+	}
 	for _, item := range items {
 		switch item.Type {
 		case "computer_call":

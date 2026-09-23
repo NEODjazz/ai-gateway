@@ -2076,3 +2076,17 @@ search read that stored strategy after a restart, preventing chunk boundaries
 from changing because request-local state was lost. The database constraint
 rejects static sizes outside 100 to 4096 estimated tokens and overlap above half
 the configured chunk size.
+
+## Background Responses conversations
+
+Background Responses can use the durable Conversations API. Current input items
+are staged in a separate PostgreSQL table before the background job is exposed;
+the queue payload retains identifiers and effective policy metadata but no prompt.
+A durable active-turn marker prevents lease expiry from admitting a second request
+or CRUD mutation while provider execution is pending. Terminal success atomically
+commits staged input and provider output, while failed and cancelled responses
+remove pending input and release the turn. Completion and release are idempotent by
+the internal execution ID so worker retries cannot duplicate conversation history.
+Admission reserves the bounded maximum of 1024 provider output items against the
+conversation quota before execution, preventing an unrecoverable terminal quota
+failure from retaining the durable turn.

@@ -115,7 +115,7 @@ func (s *PostgresStore) UpdateConversation(ctx context.Context, owner, id string
 	if owner == "" || id == "" || revision < 1 || !validConversationMetadata(metadata) {
 		return conversationstate.Conversation{}, conversationstate.ErrInvalid
 	}
-	value, err := scanConversation(s.pool.QueryRow(ctx, `UPDATE gateway_conversations SET metadata=$3::jsonb,revision=revision+1,updated_at=now() WHERE owner_key=$1 AND id=$2 AND revision=$4 AND (active_execution_id IS NULL OR lease_until<=now()) RETURNING id,owner_key,metadata,revision,created_at,updated_at`, owner, id, metadata, revision))
+	value, err := scanConversation(s.pool.QueryRow(ctx, `UPDATE gateway_conversations SET metadata=$3::jsonb,revision=revision+1,updated_at=now() WHERE owner_key=$1 AND id=$2 AND revision=$4 AND (active_execution_id IS NULL OR (durable_active=false AND lease_until<=now())) RETURNING id,owner_key,metadata,revision,created_at,updated_at`, owner, id, metadata, revision))
 	if errors.Is(err, pgx.ErrNoRows) {
 		if _, getErr := s.GetConversation(ctx, owner, id); errors.Is(getErr, conversationstate.ErrNotFound) {
 			return conversationstate.Conversation{}, conversationstate.ErrNotFound
@@ -132,7 +132,7 @@ func (s *PostgresStore) DeleteConversation(ctx context.Context, owner, id string
 	if owner == "" || id == "" {
 		return conversationstate.ErrInvalid
 	}
-	command, err := s.pool.Exec(ctx, `DELETE FROM gateway_conversations WHERE owner_key=$1 AND id=$2 AND (active_execution_id IS NULL OR lease_until<=now())`, owner, id)
+	command, err := s.pool.Exec(ctx, `DELETE FROM gateway_conversations WHERE owner_key=$1 AND id=$2 AND (active_execution_id IS NULL OR (durable_active=false AND lease_until<=now()))`, owner, id)
 	if err != nil {
 		return err
 	}
@@ -285,17 +285,18 @@ func (s *PostgresStore) BeginTurn(ctx context.Context, owner, conversationID, ex
 	defer func() { _ = tx.Rollback(ctx) }()
 	var active *string
 	var leaseActive bool
-	conversation, err := scanConversationWithLease(tx.QueryRow(ctx, `SELECT id,owner_key,metadata,revision,created_at,updated_at,active_execution_id,COALESCE(lease_until>now(),false) FROM gateway_conversations WHERE owner_key=$1 AND id=$2 FOR UPDATE`, owner, conversationID), &active, &leaseActive)
+	var durable bool
+	conversation, err := scanConversationWithLease(tx.QueryRow(ctx, `SELECT id,owner_key,metadata,revision,created_at,updated_at,active_execution_id,COALESCE(lease_until>now(),false),durable_active FROM gateway_conversations WHERE owner_key=$1 AND id=$2 FOR UPDATE`, owner, conversationID), &active, &leaseActive, &durable)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return conversationstate.Turn{}, conversationstate.ErrNotFound
 	}
 	if err != nil {
 		return conversationstate.Turn{}, err
 	}
-	if active != nil && leaseActive {
+	if active != nil && (leaseActive || durable) {
 		return conversationstate.Turn{}, conversationstate.ErrConflict
 	}
-	if _, err = tx.Exec(ctx, `UPDATE gateway_conversations SET active_execution_id=$3,lease_until=now()+$4::interval WHERE owner_key=$1 AND id=$2`, owner, conversationID, executionID, lease.String()); err != nil {
+	if _, err = tx.Exec(ctx, `UPDATE gateway_conversations SET active_execution_id=$3,lease_until=now()+$4::interval,durable_active=false WHERE owner_key=$1 AND id=$2`, owner, conversationID, executionID, lease.String()); err != nil {
 		return conversationstate.Turn{}, err
 	}
 	rows, err := tx.Query(ctx, `SELECT id,conversation_id,owner_key,payload,ordinal,created_at FROM gateway_conversation_items WHERE owner_key=$1 AND conversation_id=$2 ORDER BY ordinal ASC`, owner, conversationID)
@@ -320,10 +321,50 @@ func (s *PostgresStore) BeginTurn(ctx context.Context, owner, conversationID, ex
 	return conversationstate.Turn{Conversation: conversation, Items: items, ExecutionID: executionID}, nil
 }
 
-func scanConversationWithLease(row conversationRow, active **string, leaseActive *bool) (conversationstate.Conversation, error) {
+func scanConversationWithLease(row conversationRow, active **string, leaseActive, durable *bool) (conversationstate.Conversation, error) {
 	var value conversationstate.Conversation
-	err := row.Scan(&value.ID, &value.OwnerKey, &value.Metadata, &value.Revision, &value.CreatedAt, &value.UpdatedAt, active, leaseActive)
+	err := row.Scan(&value.ID, &value.OwnerKey, &value.Metadata, &value.Revision, &value.CreatedAt, &value.UpdatedAt, active, leaseActive, durable)
 	return value, err
+}
+
+func (s *PostgresStore) StageTurn(ctx context.Context, turn conversationstate.Turn, items []conversationstate.Item, itemQuota, outputReserve int) error {
+	if s == nil || s.pool == nil {
+		return conversationstate.ErrUnavailable
+	}
+	owner, conversationID := turn.Conversation.OwnerKey, turn.Conversation.ID
+	if turn.ExecutionID == "" || itemQuota < 1 || len(items) < 1 || !validConversationItems(items, owner, conversationID) {
+		return conversationstate.ErrInvalid
+	}
+	if outputReserve < 1 || outputReserve > itemQuota || len(items) > itemQuota-outputReserve {
+		return conversationstate.ErrQuotaExceeded
+	}
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var found bool
+	if err = tx.QueryRow(ctx, `SELECT true FROM gateway_conversations WHERE owner_key=$1 AND id=$2 AND active_execution_id=$3 FOR UPDATE`, owner, conversationID, turn.ExecutionID).Scan(&found); errors.Is(err, pgx.ErrNoRows) {
+		return conversationstate.ErrConflict
+	} else if err != nil {
+		return err
+	}
+	var count int
+	if err = tx.QueryRow(ctx, `SELECT count(*) FROM gateway_conversation_items WHERE owner_key=$1 AND conversation_id=$2`, owner, conversationID).Scan(&count); err != nil {
+		return err
+	}
+	if count > itemQuota-outputReserve-len(items) {
+		return conversationstate.ErrQuotaExceeded
+	}
+	for position, item := range items {
+		if _, err = tx.Exec(ctx, `INSERT INTO gateway_conversation_pending_items (execution_id,id,conversation_id,owner_key,payload,position) VALUES ($1,$2,$3,$4,$5::jsonb,$6)`, turn.ExecutionID, item.ID, conversationID, owner, item.Payload, position); err != nil {
+			return err
+		}
+	}
+	if _, err = tx.Exec(ctx, `UPDATE gateway_conversations SET durable_active=true WHERE owner_key=$1 AND id=$2 AND active_execution_id=$3`, owner, conversationID, turn.ExecutionID); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 func (s *PostgresStore) CompleteTurn(ctx context.Context, turn conversationstate.Turn, items []conversationstate.Item, itemQuota int) error {
@@ -339,14 +380,42 @@ func (s *PostgresStore) CompleteTurn(ctx context.Context, turn conversationstate
 		return err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	var found bool
-	err = tx.QueryRow(ctx, `SELECT true FROM gateway_conversations WHERE owner_key=$1 AND id=$2 AND active_execution_id=$3 FOR UPDATE`, owner, conversationID, turn.ExecutionID).Scan(&found)
+	var active, last *string
+	var lastCommitted *bool
+	err = tx.QueryRow(ctx, `SELECT active_execution_id,last_execution_id,last_execution_committed FROM gateway_conversations WHERE owner_key=$1 AND id=$2 FOR UPDATE`, owner, conversationID).Scan(&active, &last, &lastCommitted)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return conversationstate.ErrConflict
+		return conversationstate.ErrNotFound
 	}
 	if err != nil {
 		return err
 	}
+	if last != nil && *last == turn.ExecutionID && lastCommitted != nil && *lastCommitted {
+		return tx.Commit(ctx)
+	}
+	if active == nil {
+		return conversationstate.ErrConflict
+	}
+	if *active != turn.ExecutionID {
+		return conversationstate.ErrConflict
+	}
+	rows, err := tx.Query(ctx, `SELECT id,conversation_id,owner_key,payload,0,created_at FROM gateway_conversation_pending_items WHERE owner_key=$1 AND conversation_id=$2 AND execution_id=$3 ORDER BY position ASC`, owner, conversationID, turn.ExecutionID)
+	if err != nil {
+		return err
+	}
+	var pending []conversationstate.Item
+	for rows.Next() {
+		item, scanErr := scanConversationItem(rows)
+		if scanErr != nil {
+			rows.Close()
+			return scanErr
+		}
+		pending = append(pending, item)
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return err
+	}
+	items = append(pending, items...)
 	var count int
 	if err = tx.QueryRow(ctx, `SELECT count(*) FROM gateway_conversation_items WHERE owner_key=$1 AND conversation_id=$2`, owner, conversationID).Scan(&count); err != nil {
 		return err
@@ -357,7 +426,10 @@ func (s *PostgresStore) CompleteTurn(ctx context.Context, turn conversationstate
 	if _, err = insertConversationItems(ctx, tx, items); err != nil {
 		return err
 	}
-	command, err := tx.Exec(ctx, `UPDATE gateway_conversations SET active_execution_id=NULL,lease_until=NULL,revision=revision+1,updated_at=now() WHERE owner_key=$1 AND id=$2 AND active_execution_id=$3`, owner, conversationID, turn.ExecutionID)
+	if _, err = tx.Exec(ctx, `DELETE FROM gateway_conversation_pending_items WHERE owner_key=$1 AND conversation_id=$2 AND execution_id=$3`, owner, conversationID, turn.ExecutionID); err != nil {
+		return err
+	}
+	command, err := tx.Exec(ctx, `UPDATE gateway_conversations SET active_execution_id=NULL,lease_until=NULL,durable_active=false,last_execution_id=$3,last_execution_committed=true,revision=revision+1,updated_at=now() WHERE owner_key=$1 AND id=$2 AND active_execution_id=$3`, owner, conversationID, turn.ExecutionID)
 	if err != nil {
 		return err
 	}
@@ -371,31 +443,51 @@ func (s *PostgresStore) ReleaseTurn(ctx context.Context, turn conversationstate.
 	if s == nil || s.pool == nil {
 		return conversationstate.ErrUnavailable
 	}
-	command, err := s.pool.Exec(ctx, `UPDATE gateway_conversations SET active_execution_id=NULL,lease_until=NULL WHERE owner_key=$1 AND id=$2 AND active_execution_id=$3`, turn.Conversation.OwnerKey, turn.Conversation.ID, turn.ExecutionID)
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return err
 	}
-	if command.RowsAffected() != 1 {
-		return conversationstate.ErrConflict
-	}
-	return nil
-}
-
-func lockConversation(ctx context.Context, tx pgx.Tx, owner, conversationID string) error {
-	var active *string
-	var leaseActive bool
-	err := tx.QueryRow(ctx, `SELECT active_execution_id,COALESCE(lease_until>now(),false) FROM gateway_conversations WHERE owner_key=$1 AND id=$2 FOR UPDATE`, owner, conversationID).Scan(&active, &leaseActive)
+	defer func() { _ = tx.Rollback(ctx) }()
+	var active, last *string
+	var lastCommitted *bool
+	err = tx.QueryRow(ctx, `SELECT active_execution_id,last_execution_id,last_execution_committed FROM gateway_conversations WHERE owner_key=$1 AND id=$2 FOR UPDATE`, turn.Conversation.OwnerKey, turn.Conversation.ID).Scan(&active, &last, &lastCommitted)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return conversationstate.ErrNotFound
 	}
 	if err != nil {
 		return err
 	}
-	if active != nil && leaseActive {
+	if last != nil && *last == turn.ExecutionID && lastCommitted != nil && !*lastCommitted {
+		return tx.Commit(ctx)
+	}
+	if active == nil || *active != turn.ExecutionID {
+		return conversationstate.ErrConflict
+	}
+	if _, err = tx.Exec(ctx, `DELETE FROM gateway_conversation_pending_items WHERE owner_key=$1 AND conversation_id=$2 AND execution_id=$3`, turn.Conversation.OwnerKey, turn.Conversation.ID, turn.ExecutionID); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, `UPDATE gateway_conversations SET active_execution_id=NULL,lease_until=NULL,durable_active=false,last_execution_id=$3,last_execution_committed=false WHERE owner_key=$1 AND id=$2 AND active_execution_id=$3`, turn.Conversation.OwnerKey, turn.Conversation.ID, turn.ExecutionID); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func lockConversation(ctx context.Context, tx pgx.Tx, owner, conversationID string) error {
+	var active *string
+	var leaseActive bool
+	var durable bool
+	err := tx.QueryRow(ctx, `SELECT active_execution_id,COALESCE(lease_until>now(),false),durable_active FROM gateway_conversations WHERE owner_key=$1 AND id=$2 FOR UPDATE`, owner, conversationID).Scan(&active, &leaseActive, &durable)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return conversationstate.ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if active != nil && (leaseActive || durable) {
 		return conversationstate.ErrConflict
 	}
 	if active != nil {
-		if _, err := tx.Exec(ctx, `UPDATE gateway_conversations SET active_execution_id=NULL,lease_until=NULL WHERE owner_key=$1 AND id=$2`, owner, conversationID); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE gateway_conversations SET active_execution_id=NULL,lease_until=NULL,durable_active=false WHERE owner_key=$1 AND id=$2`, owner, conversationID); err != nil {
 			return err
 		}
 	}

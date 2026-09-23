@@ -1053,7 +1053,7 @@ func (r Router) Responses(ctx context.Context, req modules.RequestContext) (open
 	defer func() {
 		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
-		r.releaseConversation(releaseCtx, &req)
+		r.ReleaseConversation(releaseCtx, &req)
 	}()
 	if err := r.validateResponseOwnership(req, *req.ResponseRequest); err != nil {
 		return openai.ResponseResponse{}, err
@@ -1156,6 +1156,11 @@ func (r Router) Responses(ctx context.Context, req modules.RequestContext) (open
 			cachePayload, _ := json.Marshal(response)
 			attemptCtx.ResponsesResponse = &response
 			if attemptCtx.ResponseRequest.Background && backgroundResponsePending(response) {
+				if err := r.stageBackgroundConversation(ctx, &attemptCtx); err != nil {
+					r.compensateBackgroundResponse(ctx, attemptCtx, response.ID, request.Model, endpoint)
+					r.modules.RunFailure(ctx, &attemptCtx, err)
+					return openai.ResponseResponse{}, err
+				}
 				if err := r.persistResponseOwnership(ctx, attemptCtx, *attemptCtx.ResponseRequest, request.Model, response.ID, endpoint); err != nil {
 					r.compensateBackgroundResponse(ctx, attemptCtx, response.ID, request.Model, endpoint)
 					r.modules.RunFailure(ctx, &attemptCtx, err)

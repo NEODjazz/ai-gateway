@@ -13,6 +13,15 @@ import (
 	"ai-gateway-gateway/internal/openai"
 )
 
+func TestResponseOutputItemsHaveBoundedCardinality(t *testing.T) {
+	if err := validateResponseOutputItems(make([]openai.ResponseOutputItem, maxResponseStreamOutputItems)); err != nil {
+		t.Fatalf("boundary rejected: %v", err)
+	}
+	if err := validateResponseOutputItems(make([]openai.ResponseOutputItem, maxResponseStreamOutputItems+1)); err == nil {
+		t.Fatal("oversized response output accepted")
+	}
+}
+
 func TestResponsesRejectsInvalidJSONDocuments(t *testing.T) {
 	for _, body := range []string{"null", `{"id":"r"} {"id":"second"}`, `{"id":"r"} trailing`, `{"id":`} {
 		t.Run(body, func(t *testing.T) {

@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.416
+  version: 0.1.417
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -9665,7 +9665,7 @@ components:
             verbosity: {type: string, enum: [low, medium, high]}
         previous_response_id: {type: string}
         conversation:
-          description: Owner-isolated durable conversation ID. Its ordered items are prepended before policy, token admission, and billing. Mutually exclusive with previous_response_id and background execution.
+          description: Owner-isolated durable conversation ID. Its ordered items are prepended before policy, token admission, and billing. Mutually exclusive with previous_response_id. Background turns stage their input durably and serialize later turns until terminal settlement.
           oneOf:
             - {type: string, maxLength: 128, pattern: '^conv_[A-Za-z0-9_-]+$'}
             - type: object
@@ -10046,6 +10046,7 @@ components:
             id: {type: string, pattern: '^conv_[A-Za-z0-9_-]+$'}
         output:
           type: array
+          maxItems: 1024
           items: {$ref: '#/components/schemas/ResponseOutputItem'}
         output_text: {type: string}
         usage: {$ref: '#/components/schemas/ResponseUsage'}

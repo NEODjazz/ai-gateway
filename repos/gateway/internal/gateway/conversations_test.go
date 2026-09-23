@@ -133,6 +133,9 @@ func (s *gatewayConversationStore) DeleteItem(_ context.Context, owner, id, item
 func (*gatewayConversationStore) BeginTurn(context.Context, string, string, string, time.Duration) (conversationstate.Turn, error) {
 	panic("not used")
 }
+func (*gatewayConversationStore) StageTurn(context.Context, conversationstate.Turn, []conversationstate.Item, int, int) error {
+	panic("not used")
+}
 func (*gatewayConversationStore) CompleteTurn(context.Context, conversationstate.Turn, []conversationstate.Item, int) error {
 	panic("not used")
 }

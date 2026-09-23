@@ -54,6 +54,15 @@ JSON decoder применяет закрытый контракт request types,
 job storage и deployment capability `background_responses`. Распознаваемые параметры перечислены ниже; adapter policy может
 отклонить поле до выполнения запроса.
 
+Background Responses можно выполнять внутри owner-isolated conversation. Gateway
+сохраняет текущие input items в отдельном pending-состоянии PostgreSQL, не помещая
+prompt в payload очереди. Durable turn блокирует параллельные изменения conversation
+до terminal settlement. Успешный результат атомарно переносит pending input и output
+в историю; failed или cancelled result удаляет pending input и освобождает turn.
+Повторная обработка того же execution ID идемпотентна. Admission резервирует до
+1024 output items, совпадающих с общей границей Responses output cardinality,
+поэтому terminal commit не может зависнуть на item quota.
+
 | Endpoint | Поля контракта верхнего уровня |
 | --- | --- |
 | `/v1/chat/completions` | `metadata`, `store`, `provider`, `model`, `messages`, `tools`, `tool_choice`, `parallel_tool_calls`, `response_format`, `stream`, `stream_options`, `max_tokens`, `max_completion_tokens`, `temperature`, `top_p`, `stop`, `seed`, `modalities`, `audio`, `reasoning_effort`, `safe_prompt`, `n`, `safety_identifier`, `prompt_cache_key`, `prompt_cache_options`, `prompt_cache_retention`, `prompt_mode`, `prediction`, `service_tier`, `user`, `verbosity`, `web_search_options`, `web_fetch_options`, `logprobs`, `top_logprobs`, `frequency_penalty`, `presence_penalty`, `min_p`, `top_k`, `top_a`, `repetition_penalty`, `logit_bias`; assistant messages may contain signed `reasoning` blocks or bounded `reasoning_content` when the selected adapter supports that history format |

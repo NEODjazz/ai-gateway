@@ -45,6 +45,7 @@ type Turn struct {
 	Conversation Conversation
 	Items        []Item
 	ExecutionID  string
+	Durable      bool
 }
 
 type Store interface {
@@ -57,6 +58,7 @@ type Store interface {
 	GetItem(context.Context, string, string, string) (Item, error)
 	DeleteItem(context.Context, string, string, string) error
 	BeginTurn(context.Context, string, string, string, time.Duration) (Turn, error)
+	StageTurn(context.Context, Turn, []Item, int, int) error
 	CompleteTurn(context.Context, Turn, []Item, int) error
 	ReleaseTurn(context.Context, Turn) error
 }
