@@ -21,3 +21,19 @@ func TestResponseStreamItemSnapshotReplacesAccumulatedItem(t *testing.T) {
 		})
 	}
 }
+
+func TestResponseTerminalSnapshotReplacesAccumulatedOutput(t *testing.T) {
+	stream := "data: {\"type\":\"response.output_text.delta\",\"delta\":\"obsolete\"}\n\n" +
+		`data: {"type":"response.completed","response":{"id":"r","object":"response","model":"m","status":"completed","output":[{"id":"tool","type":"function_call","name":"lookup","call_id":"call","arguments":"{}"}]}}` + "\n\n"
+	result, err := streamResponseData(strings.NewReader(stream), "m", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Output) != 1 || result.OutputText != "" {
+		t.Fatalf("result=%+v", result)
+	}
+	item := result.Output[0]
+	if item.ID != "tool" || item.Type != "function_call" || item.Name != "lookup" || item.CallID != "call" || item.Arguments != "{}" || item.Role != "" || len(item.Content) != 0 || item.Status != "" {
+		t.Fatalf("stale terminal snapshot fields: item=%+v", item)
+	}
+}

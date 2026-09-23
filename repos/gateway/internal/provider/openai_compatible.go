@@ -1508,8 +1508,10 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 				return err
 			}
 			// An output snapshot replaces text assembled from earlier events.
-			if _, present := typed["output"]; present {
+			_, outputPresent := typed["output"]
+			if outputPresent {
 				response.OutputText = ""
+				response.Output = nil
 			}
 			if _, present := typed["metadata"]; present {
 				response.Metadata = nil
@@ -1535,7 +1537,7 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 			if err := validateResponseCitations(response.Citations); err != nil {
 				return err
 			}
-			if err := validateResponseOutputItems(response.Output); err != nil {
+			if err := validateResponseOutputItemsAllowSparse(response.Output, !outputPresent); err != nil {
 				return err
 			}
 			response.OutputText = responseText(response)

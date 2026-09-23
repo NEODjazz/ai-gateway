@@ -15,11 +15,41 @@ import (
 )
 
 func TestResponseOutputItemsHaveBoundedCardinality(t *testing.T) {
-	if err := validateResponseOutputItems(make([]openai.ResponseOutputItem, maxResponseStreamOutputItems)); err != nil {
+	items := make([]openai.ResponseOutputItem, maxResponseStreamOutputItems)
+	for index := range items {
+		items[index].Type = "message"
+	}
+	if err := validateResponseOutputItems(items); err != nil {
 		t.Fatalf("boundary rejected: %v", err)
 	}
-	if err := validateResponseOutputItems(make([]openai.ResponseOutputItem, maxResponseStreamOutputItems+1)); err == nil {
+	items = append(items, openai.ResponseOutputItem{Type: "message"})
+	if err := validateResponseOutputItems(items); err == nil {
 		t.Fatal("oversized response output accepted")
+	}
+}
+
+func TestResponsesRejectsMissingOutputTypeAndOversizedPartsBeforeDelivery(t *testing.T) {
+	parts := make([]string, maxResponseStreamContentParts+1)
+	for index := range parts {
+		parts[index] = `{"type":"output_text","text":"x"}`
+	}
+	for name, output := range map[string]string{
+		"missing type":      `{}`,
+		"oversized content": `{"type":"message","content":[` + strings.Join(parts, ",") + `]}`,
+		"oversized summary": `{"type":"reasoning","summary":[` + strings.Join(parts, ",") + `]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			document := `{"id":"r","object":"response","model":"m","status":"completed","output":[` + output + `]}`
+			if _, err := decodeResponseJSON(strings.NewReader(document)); err == nil {
+				t.Fatalf("invalid JSON output accepted: %s", output[:min(len(output), 512)])
+			}
+			callbacks := 0
+			wire := "data: {\"type\":\"response.completed\",\"response\":" + document + "}\n\n"
+			response, err := streamResponseData(strings.NewReader(wire), "m", func(string, string) error { callbacks++; return nil })
+			if err == nil || callbacks != 0 {
+				t.Fatalf("invalid SSE output delivered: response=%+v err=%v callbacks=%d", response, err, callbacks)
+			}
+		})
 	}
 }
 

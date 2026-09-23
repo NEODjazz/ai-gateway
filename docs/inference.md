@@ -1622,6 +1622,13 @@ by an index, not total response bytes, text accumulation, or background lifecycl
 Regression tests cover malformed values, numbers beyond machine integer range,
 the first rejected index, the highest accepted index, and omitted indices.
 
+Complete JSON and terminal SSE response snapshots also require every output item
+to carry its non-empty `type`. Their `content` and reasoning `summary` arrays are
+limited to 128 parts, matching the stream content-index bound. Structurally
+incomplete or oversized snapshots fail before delivery. An explicit snapshot
+replaces the previously assembled output slice before JSON decoding, preventing
+omitted fields from inheriting stale placeholder values.
+
 ### Native Responses refusal assembly
 
 Native SSE accumulation resolves the event name from JSON `type` when the SSE

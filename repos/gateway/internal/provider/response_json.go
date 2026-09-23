@@ -419,10 +419,23 @@ func validateResponseCitations(citations []string) error {
 }
 
 func validateResponseOutputItems(items []openai.ResponseOutputItem) error {
+	return validateResponseOutputItemsAllowSparse(items, false)
+}
+
+func validateResponseOutputItemsAllowSparse(items []openai.ResponseOutputItem, allowSparse bool) error {
 	if len(items) > maxResponseStreamOutputItems {
 		return errors.New("provider returned too many response output items")
 	}
 	for _, item := range items {
+		if item.Type == "" {
+			if allowSparse {
+				continue
+			}
+			return errors.New("provider returned response output item without type")
+		}
+		if len(item.Content) > maxResponseStreamContentParts || len(item.Summary) > maxResponseStreamContentParts {
+			return errors.New("provider returned too many response output content parts")
+		}
 		switch item.Type {
 		case "computer_call":
 			if err := validateResponseComputerCall(item); err != nil {
