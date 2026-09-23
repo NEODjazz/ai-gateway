@@ -2453,3 +2453,18 @@ ID `sha256:259bae039b4cefca6ee2df74b738839af731c1a8cc321d461b2ee2289bbbdbda`.
 Gateway Helm revision 603 completed successfully. Pod
 `ai-gateway-gateway-6669cc4c89-wpbhb` became Ready with zero restarts, and
 direct service liveness and readiness both returned 204.
+
+## Groq Responses reasoning effort validation
+
+Source `fadcf1aa` applies the same model-specific `reasoning.effort` policy to
+native Groq Chat and Responses. Unsupported model/value pairs now fail before
+provider execution, while the capability profile probes a supported model so
+the available Responses setting remains visible. Regression tests, the full Go
+test and race suites, vet and build passed. No live provider credential was
+used for this contract check.
+
+Rancher Desktop built `ai-gateway-gateway:groq-reasoning-fadcf1aa` with image
+ID `sha256:9372822445db5a3ae19f0bd412d71a54d3805bd4b41cf8716e056ec3c0a85131`.
+Gateway Helm revision 604 completed successfully. Pod
+`ai-gateway-gateway-54cbb6656f-scmtz` became Ready with zero restarts, and
+direct service liveness and readiness both returned 204.
