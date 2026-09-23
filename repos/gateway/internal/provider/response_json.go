@@ -92,56 +92,67 @@ func validateResponseConfigurationPayload(payload []byte, response *openai.Respo
 		return err
 	}
 	if len(wire.Reasoning) > 0 && string(wire.Reasoning) != "null" {
+		response.Reasoning = nil
 		if err := decodeStrictResponseConfiguration(wire.Reasoning, &response.Reasoning); err != nil {
 			return errors.New("provider returned invalid response reasoning configuration")
 		}
 	}
 	if len(wire.Tools) > 0 && string(wire.Tools) != "null" {
+		response.Tools = nil
 		if err := decodeStrictResponseConfiguration(wire.Tools, &response.Tools); err != nil {
 			return errors.New("provider returned invalid response tools configuration")
 		}
 	}
 	if len(wire.Text) > 0 {
+		response.Text = nil
 		if err := json.Unmarshal(wire.Text, &response.Text); err != nil {
 			return errors.New("provider returned invalid response text configuration")
 		}
 	}
 	if len(wire.ToolChoice) > 0 {
+		response.ToolChoice = nil
 		if err := json.Unmarshal(wire.ToolChoice, &response.ToolChoice); err != nil {
 			return errors.New("provider returned invalid response tool_choice")
 		}
 	}
 	if len(wire.PromptCacheOptions) > 0 && string(wire.PromptCacheOptions) != "null" {
+		response.PromptCacheOptions = nil
 		if err := decodeStrictResponseConfiguration(wire.PromptCacheOptions, &response.PromptCacheOptions); err != nil {
 			return errors.New("provider returned invalid prompt_cache_options")
 		}
 	}
 	if len(wire.Moderation) > 0 && string(wire.Moderation) != "null" {
+		response.Moderation = nil
 		if err := decodeStrictResponseConfiguration(wire.Moderation, &response.Moderation); err != nil {
 			return errors.New("provider returned invalid response moderation results")
 		}
 	}
 	if len(wire.PromptCacheDiagnostics) > 0 && string(wire.PromptCacheDiagnostics) != "null" {
+		response.PromptCacheDiagnostics = nil
 		if err := decodeStrictResponseConfiguration(wire.PromptCacheDiagnostics, &response.PromptCacheDiagnostics); err != nil {
 			return errors.New("provider returned invalid prompt_cache_diagnostics")
 		}
 	}
 	if len(wire.ContextManagement) > 0 && string(wire.ContextManagement) != "null" {
+		response.ContextManagement = nil
 		if err := decodeStrictResponseConfiguration(wire.ContextManagement, &response.ContextManagement); err != nil {
 			return errors.New("provider returned invalid response context_management")
 		}
 	}
 	if len(wire.Error) > 0 && string(wire.Error) != "null" {
+		response.Error = nil
 		if err := decodeStrictResponseConfiguration(wire.Error, &response.Error); err != nil {
 			return errors.New("provider returned invalid response error")
 		}
 	}
 	if len(wire.IncompleteDetails) > 0 && string(wire.IncompleteDetails) != "null" {
+		response.IncompleteDetails = nil
 		if err := decodeStrictResponseConfiguration(wire.IncompleteDetails, &response.IncompleteDetails); err != nil {
 			return errors.New("provider returned invalid response incomplete_details")
 		}
 	}
 	if len(wire.Prompt) > 0 && string(wire.Prompt) != "null" {
+		response.Prompt = nil
 		if err := decodeStrictResponseConfiguration(wire.Prompt, &response.Prompt); err != nil {
 			return errors.New("provider returned invalid response prompt")
 		}

@@ -1629,6 +1629,11 @@ incomplete or oversized snapshots fail before delivery. An explicit snapshot
 replaces the previously assembled output slice before JSON decoding, preventing
 omitted fields from inheriting stale placeholder values.
 
+Explicit nested configuration snapshots are replaced from a zero value as well.
+Reasoning, tools, text, tool choice, prompt-cache data, moderation, diagnostics,
+context management, error details, incomplete details and prompt references
+cannot retain fields that a later provider snapshot omitted.
+
 ### Native Responses refusal assembly
 
 Native SSE accumulation resolves the event name from JSON `type` when the SSE
