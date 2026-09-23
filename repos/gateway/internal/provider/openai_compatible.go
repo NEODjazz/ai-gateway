@@ -1496,6 +1496,10 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 				if message := openai.ValidateResponseApplyPatchCallPartial(snapshot); message != "" {
 					return errors.New(message)
 				}
+			} else if event == "response.output_item.added" && (snapshot.Type == "function_call" || snapshot.Type == "custom_tool_call") {
+				if err := validatePartialResponseOutputItems([]openai.ResponseOutputItem{snapshot}); err != nil {
+					return err
+				}
 			} else if err := validateResponseOutputItems([]openai.ResponseOutputItem{snapshot}); err != nil {
 				return err
 			}

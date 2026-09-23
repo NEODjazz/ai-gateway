@@ -430,10 +430,18 @@ func validateResponseCitations(citations []string) error {
 }
 
 func validateResponseOutputItems(items []openai.ResponseOutputItem) error {
-	return validateResponseOutputItemsAllowSparse(items, false)
+	return validateResponseOutputItemsMode(items, false, false)
 }
 
 func validateResponseOutputItemsAllowSparse(items []openai.ResponseOutputItem, allowSparse bool) error {
+	return validateResponseOutputItemsMode(items, allowSparse, false)
+}
+
+func validatePartialResponseOutputItems(items []openai.ResponseOutputItem) error {
+	return validateResponseOutputItemsMode(items, false, true)
+}
+
+func validateResponseOutputItemsMode(items []openai.ResponseOutputItem, allowSparse, allowPartial bool) error {
 	if len(items) > maxResponseStreamOutputItems {
 		return errors.New("provider returned too many response output items")
 	}
@@ -469,6 +477,16 @@ func validateResponseOutputItemsAllowSparse(items []openai.ResponseOutputItem, a
 			}
 		}
 		switch item.Type {
+		case "function_call":
+			if err := validateResponseFunctionCall(item, allowPartial, allowSparse); err != nil {
+				return err
+			}
+			continue
+		case "custom_tool_call":
+			if err := validateResponseCustomToolCall(item, allowSparse); err != nil {
+				return err
+			}
+			continue
 		case "computer_call":
 			if err := validateResponseComputerCall(item); err != nil {
 				return err
@@ -514,6 +532,65 @@ func validateResponseOutputItemsAllowSparse(items []openai.ResponseOutputItem, a
 		}
 	}
 	return nil
+}
+
+func validateResponseFunctionCall(item openai.ResponseOutputItem, allowPartial, allowSparse bool) error {
+	if item.CallID == "" && !allowSparse {
+		return errors.New("provider function call has an invalid call_id")
+	}
+	if item.CallID != "" && !validResponseCallID(item.CallID) {
+		return errors.New("provider function call has an invalid call_id")
+	}
+	if item.Name == "" && !allowSparse {
+		return errors.New("provider function call has an invalid name")
+	}
+	if item.Name != "" && !validResponseToolName(item.Name) {
+		return errors.New("provider function call has an invalid name")
+	}
+	if utf8.RuneCountInString(item.Arguments) > openai.MaxChatFunctionArgumentsChars {
+		return errors.New("provider function call arguments are too large")
+	}
+	if allowPartial {
+		return nil
+	}
+	var arguments map[string]json.RawMessage
+	if json.Unmarshal([]byte(item.Arguments), &arguments) != nil || arguments == nil {
+		return errors.New("provider function call arguments must be a JSON object")
+	}
+	return nil
+}
+
+func validateResponseCustomToolCall(item openai.ResponseOutputItem, allowSparse bool) error {
+	if item.CallID == "" && !allowSparse {
+		return errors.New("provider custom tool call has an invalid call_id")
+	}
+	if item.CallID != "" && !validResponseCallID(item.CallID) {
+		return errors.New("provider custom tool call has an invalid call_id")
+	}
+	if item.Name == "" && !allowSparse {
+		return errors.New("provider custom tool call has an invalid name")
+	}
+	if item.Name != "" && !validResponseToolName(item.Name) {
+		return errors.New("provider custom tool call has an invalid name")
+	}
+	return nil
+}
+
+func validResponseCallID(value string) bool {
+	return value != "" && strings.TrimSpace(value) == value && utf8.RuneCountInString(value) <= 512
+}
+
+func validResponseToolName(value string) bool {
+	if len(value) == 0 || len(value) > 64 {
+		return false
+	}
+	for _, character := range value {
+		if character >= 'a' && character <= 'z' || character >= 'A' && character <= 'Z' || character >= '0' && character <= '9' || character == '_' || character == '-' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func validateResponseShellCall(item openai.ResponseOutputItem) error {

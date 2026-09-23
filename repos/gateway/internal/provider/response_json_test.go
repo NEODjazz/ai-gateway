@@ -96,6 +96,46 @@ func TestResponsesRejectsUnsupportedOutputContentTypeBeforeDelivery(t *testing.T
 	}
 }
 
+func TestResponsesValidateFunctionAndCustomToolCalls(t *testing.T) {
+	valid := []string{
+		`{"type":"function_call","call_id":"call_1","name":"lookup","arguments":"{\"city\":\"Paris\"}"}`,
+		`{"type":"custom_tool_call","call_id":"call_2","name":"query","input":"status:open"}`,
+	}
+	for _, output := range valid {
+		document := `{"id":"r","output":[` + output + `]}`
+		if _, err := decodeResponseJSON(strings.NewReader(document)); err != nil {
+			t.Fatalf("valid tool call rejected: output=%s err=%v", output, err)
+		}
+	}
+
+	invalid := []string{
+		`{"type":"function_call","name":"lookup","arguments":"{}"}`,
+		`{"type":"function_call","call_id":"call","arguments":"{}"}`,
+		`{"type":"function_call","call_id":"call","name":"bad name","arguments":"{}"}`,
+		`{"type":"function_call","call_id":"call","name":"lookup","arguments":"[]"}`,
+		`{"type":"function_call","call_id":"call","name":"lookup","arguments":"{broken"}`,
+		`{"type":"custom_tool_call","name":"query","input":"status:open"}`,
+		`{"type":"custom_tool_call","call_id":"call","name":"bad name","input":"status:open"}`,
+	}
+	for _, output := range invalid {
+		document := `{"id":"r","output":[` + output + `]}`
+		if _, err := decodeResponseJSON(strings.NewReader(document)); err == nil {
+			t.Fatalf("invalid JSON tool call accepted: %s", output)
+		}
+		callbacks := 0
+		wire := "data: {\"type\":\"response.completed\",\"response\":" + document + "}\n\n"
+		if _, err := streamResponseData(strings.NewReader(wire), "m", func(string, string) error { callbacks++; return nil }); err == nil || callbacks != 0 {
+			t.Fatalf("invalid SSE tool call delivered: output=%s err=%v callbacks=%d", output, err, callbacks)
+		}
+	}
+
+	partial := `data: {"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","call_id":"call","name":"lookup","arguments":"{\"city\":"}}` + "\n\n" +
+		`data: {"type":"response.function_call_arguments.done","output_index":0,"arguments":"{\"city\":\"Paris\"}"}` + "\n\n" + responseTestTerminal
+	if _, err := streamResponseData(strings.NewReader(partial), "m", nil); err != nil {
+		t.Fatalf("partial function arguments rejected before completion: %v", err)
+	}
+}
+
 func TestResponsesRejectsInvalidJSONDocuments(t *testing.T) {
 	for _, body := range []string{"null", `{"id":"r"} {"id":"second"}`, `{"id":"r"} trailing`, `{"id":`} {
 		t.Run(body, func(t *testing.T) {

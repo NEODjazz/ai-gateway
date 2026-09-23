@@ -1913,6 +1913,12 @@ only `output_text` and `refusal`, while reasoning summaries accept only
 being partially decoded and silently discarded. This validation applies equally
 to JSON results and terminal SSE snapshots.
 
+Function and custom-tool output items require a bounded non-blank `call_id` and a
+tool name containing 1–64 letters, digits, underscores or hyphens. Completed
+function arguments must decode to a JSON object and use the same size limit as
+chat function arguments. Streaming `output_item.added` snapshots may contain
+partial arguments; the completed value is validated at the terminal boundary.
+
 Regression tests cover interleaved messages and parts, text completion events,
 empty and populated terminal snapshots, invalid content indices and JSON text
 aggregation. The tests also reproduced the earlier behavior through a temporary
