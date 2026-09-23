@@ -11,6 +11,10 @@ Gateway реализует OpenAI-compatible endpoints:
 | `POST /v1/chat/completions` | Chat, tools, structured output и vision |
 | `POST /v1/completions` | Native text completion для строковых и token-ID prompts; JSON и SSE |
 | `POST /v1/responses` | Responses, continuity, function tools и MCP passthrough |
+| `POST /v1/conversations` | Создание owner-isolated durable conversation с начальными items |
+| `GET/POST/DELETE /v1/conversations/{conversation_id}` | Чтение, обновление metadata и удаление conversation |
+| `POST/GET /v1/conversations/{conversation_id}/items` | Добавление и cursor pagination conversation items |
+| `GET/DELETE /v1/conversations/{conversation_id}/items/{item_id}` | Чтение и удаление отдельного item |
 | `POST /v1/responses/input_tokens` | Native-подсчет полного Responses input без generation billing lifecycle |
 | `POST /v1/responses/compact` | Native compaction с авторизацией модели и учетом фактического usage |
 | `POST /v1/interactions` | Синхронное, incremental SSE или durable background взаимодействие через Responses policy/routing с отдельной billing attribution |
@@ -54,7 +58,7 @@ job storage и deployment capability `background_responses`. Распознав�
 | --- | --- |
 | `/v1/chat/completions` | `metadata`, `store`, `provider`, `model`, `messages`, `tools`, `tool_choice`, `parallel_tool_calls`, `response_format`, `stream`, `stream_options`, `max_tokens`, `max_completion_tokens`, `temperature`, `top_p`, `stop`, `seed`, `modalities`, `audio`, `reasoning_effort`, `safe_prompt`, `n`, `safety_identifier`, `prompt_cache_key`, `prompt_cache_options`, `prompt_cache_retention`, `prompt_mode`, `prediction`, `service_tier`, `user`, `verbosity`, `web_search_options`, `web_fetch_options`, `logprobs`, `top_logprobs`, `frequency_penalty`, `presence_penalty`, `min_p`, `top_k`, `top_a`, `repetition_penalty`, `logit_bias`; assistant messages may contain signed `reasoning` blocks or bounded `reasoning_content` when the selected adapter supports that history format |
 | `/v1/completions` | `provider`, `model`, `prompt`, `metadata`, `best_of`, `echo`, `frequency_penalty`, `logit_bias`, `logprobs`, `max_tokens`, `min_tokens`, `n`, `presence_penalty`, `prompt_cache_key`, `seed`, `stop`, `stream`, `suffix`, `temperature`, `top_p`, `user` |
-| `/v1/responses` | `metadata`, `top_logprobs`, `truncation`, `reasoning`, `store`, `include`, `provider`, `model`, `input`, `instructions`, `tools`, `tool_choice`, `parallel_tool_calls`, `text`, `previous_response_id`, `user`, `safety_identifier`, `prompt_cache_key`, `service_tier`, `background`, `stream`, `max_output_tokens`, `max_tokens`, `temperature`, `top_p`, `frequency_penalty`, `presence_penalty`, `max_tool_calls` |
+| `/v1/responses` | `metadata`, `top_logprobs`, `truncation`, `reasoning`, `store`, `include`, `provider`, `model`, `input`, `instructions`, `tools`, `tool_choice`, `parallel_tool_calls`, `text`, `previous_response_id`, `conversation`, `user`, `safety_identifier`, `prompt_cache_key`, `service_tier`, `background`, `stream`, `max_output_tokens`, `max_tokens`, `temperature`, `top_p`, `frequency_penalty`, `presence_penalty`, `max_tool_calls` |
 | `/v1/responses/input_tokens` | `provider`, `model`, `input`, `instructions`, `tools`, `tool_choice`, `parallel_tool_calls`, `text`, `previous_response_id`, `reasoning`, `truncation` |
 | `/v1/responses/compact` | `provider`, `model`, `input`, `instructions` |
 | `/v1/embeddings` | `provider`, `model`, `input`, `metadata`, `input_type`, `encoding_format`, `dimensions`, `output_dtype`, `user` |

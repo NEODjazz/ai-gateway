@@ -17,22 +17,23 @@ import (
 )
 
 type Config struct {
-	HTTP         HTTPConfig
-	Cache        CacheConfig
-	Redis        RedisConfig
-	Modules      ModuleConfig
-	Provider     ProviderConfig
-	Catalog      modelcatalog.Catalog
-	Telemetry    TelemetryConfig
-	Management   ManagementConfig
-	APIDocs      APIDocsConfig
-	AdminUI      AdminUIConfig
-	Guardrails   GuardrailMonitorConfig
-	Files        FileConfig
-	VectorStores VectorStoreConfig
-	Assistants   AssistantConfig
-	A2ATasks     A2ATaskConfig
-	InitErr      error
+	HTTP          HTTPConfig
+	Cache         CacheConfig
+	Redis         RedisConfig
+	Modules       ModuleConfig
+	Provider      ProviderConfig
+	Catalog       modelcatalog.Catalog
+	Telemetry     TelemetryConfig
+	Management    ManagementConfig
+	APIDocs       APIDocsConfig
+	AdminUI       AdminUIConfig
+	Guardrails    GuardrailMonitorConfig
+	Files         FileConfig
+	VectorStores  VectorStoreConfig
+	Assistants    AssistantConfig
+	Conversations ConversationConfig
+	A2ATasks      A2ATaskConfig
+	InitErr       error
 }
 
 type FileConfig struct {
@@ -53,6 +54,11 @@ type AssistantConfig struct {
 	RunOwnerQuota      int
 	RunStepQuota       int
 	RunRetention       time.Duration
+}
+
+type ConversationConfig struct {
+	OwnerQuota int
+	ItemQuota  int
 }
 
 type A2ATaskConfig struct {
@@ -219,6 +225,8 @@ func Load() Config {
 	assistantRunOwnerQuota := envInt("ASSISTANT_RUN_OWNER_QUOTA", 10000)
 	assistantRunStepQuota := envInt("ASSISTANT_RUN_STEP_QUOTA", 10000)
 	assistantRunRetentionSeconds := envInt("ASSISTANT_RUN_RETENTION_SECONDS", 2_592_000)
+	conversationOwnerQuota := envInt("CONVERSATION_OWNER_QUOTA", 10000)
+	conversationItemQuota := envInt("CONVERSATION_ITEM_QUOTA", 4096)
 	a2aTaskOwnerQuota := envInt("A2A_TASK_OWNER_QUOTA", 1000)
 	a2aTaskTTLSeconds := envInt("A2A_TASK_TTL_SECONDS", 2_592_000)
 	a2aSubscriptionLimit := envInt("A2A_SUBSCRIPTION_LIMIT", 256)
@@ -229,6 +237,7 @@ func Load() Config {
 	var fileErr error
 	var vectorStoreErr error
 	var assistantErr error
+	var conversationErr error
 	var a2aTaskErr error
 	controlPlaneDSN := strings.TrimSpace(os.Getenv("PROVIDER_CONTROL_PLANE_POSTGRES_DSN"))
 	credentialKey := os.Getenv("PROVIDER_CREDENTIAL_ENCRYPTION_KEY")
@@ -280,6 +289,12 @@ func Load() Config {
 	}
 	if assistantRunRetentionSeconds < 60 || assistantRunRetentionSeconds > 31_536_000 {
 		assistantErr = errors.Join(assistantErr, errors.New("assistant run retention must be between 60 and 31536000 seconds"))
+	}
+	if conversationOwnerQuota < 1 || conversationOwnerQuota > 1000000 {
+		conversationErr = errors.New("conversation owner quota must be between 1 and 1000000")
+	}
+	if conversationItemQuota < 1 || conversationItemQuota > 100000 {
+		conversationErr = errors.Join(conversationErr, errors.New("conversation item quota must be between 1 and 100000"))
 	}
 	if a2aTaskOwnerQuota < 1 || a2aTaskOwnerQuota > 100000 {
 		a2aTaskErr = errors.New("A2A task owner quota must be between 1 and 100000")
@@ -365,12 +380,13 @@ func Load() Config {
 			RunStepQuota: assistantRunStepQuota,
 			RunRetention: time.Duration(assistantRunRetentionSeconds) * time.Second,
 		},
+		Conversations: ConversationConfig{OwnerQuota: conversationOwnerQuota, ItemQuota: conversationItemQuota},
 		A2ATasks: A2ATaskConfig{
 			OwnerQuota: a2aTaskOwnerQuota, TTL: time.Duration(a2aTaskTTLSeconds) * time.Second,
 			SubscriptionLimit: a2aSubscriptionLimit, SubscriptionDuration: time.Duration(a2aSubscriptionDurationSeconds) * time.Second,
 			SubscriptionPoll: time.Duration(a2aSubscriptionPollMilliseconds) * time.Millisecond,
 		},
-		InitErr: errors.Join(catalogErr, semanticErr, providerAdmissionErr, controlPlaneErr, guardrailMonitorErr, fileErr, vectorStoreErr, assistantErr, a2aTaskErr),
+		InitErr: errors.Join(catalogErr, semanticErr, providerAdmissionErr, controlPlaneErr, guardrailMonitorErr, fileErr, vectorStoreErr, assistantErr, conversationErr, a2aTaskErr),
 		Modules: ModuleConfig{
 			Auth: FeatureConfig{
 				Required: envBool("AUTH_REQUIRED", true),

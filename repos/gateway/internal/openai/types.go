@@ -746,6 +746,7 @@ type ResponseRequest struct {
 	ParallelToolCalls    *bool                  `json:"parallel_tool_calls,omitempty"`
 	Text                 any                    `json:"text,omitempty"`
 	PreviousResponse     string                 `json:"previous_response_id,omitempty"`
+	Conversation         *ResponseConversation  `json:"conversation,omitempty"`
 	User                 string                 `json:"user,omitempty"`
 	SafetyIdentifier     string                 `json:"safety_identifier,omitempty"`
 	PromptCacheKey       string                 `json:"prompt_cache_key,omitempty"`
@@ -762,6 +763,26 @@ type ResponseRequest struct {
 	FrequencyPenalty     *float64               `json:"frequency_penalty,omitempty"`
 	PresencePenalty      *float64               `json:"presence_penalty,omitempty"`
 	MaxToolCalls         *int                   `json:"max_tool_calls,omitempty"`
+}
+
+type ResponseConversation struct {
+	ID string `json:"id"`
+}
+
+func (c *ResponseConversation) UnmarshalJSON(data []byte) error {
+	var id string
+	if len(bytes.TrimSpace(data)) > 0 && bytes.TrimSpace(data)[0] == '"' && json.Unmarshal(data, &id) == nil {
+		c.ID = id
+		return nil
+	}
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(data, &object); err != nil || object == nil || len(object) != 1 {
+		if err == nil {
+			err = errors.New("conversation must be a string or object containing only id")
+		}
+		return err
+	}
+	return json.Unmarshal(object["id"], &c.ID)
 }
 
 type ResponseContextEntry struct {
@@ -888,6 +909,7 @@ type ResponseResponse struct {
 	CreatedAt           int64                      `json:"created_at,omitempty"`
 	Status              string                     `json:"status,omitempty"`
 	Model               string                     `json:"model"`
+	Conversation        *ResponseConversation      `json:"conversation,omitempty"`
 	Output              []ResponseOutputItem       `json:"output,omitempty"`
 	OutputText          string                     `json:"output_text,omitempty"`
 	Usage               ResponseUsage              `json:"usage,omitempty"`

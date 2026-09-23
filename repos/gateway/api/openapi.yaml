@@ -2662,6 +2662,87 @@ paths:
         '429': {$ref: '#/components/responses/RateLimited'}
         '451': {$ref: '#/components/responses/ContentRejected'}
         '502': {$ref: '#/components/responses/ProviderFailed'}
+  /v1/conversations:
+    post:
+      operationId: createConversation
+      tags: [Inference]
+      summary: Create an owner-isolated durable conversation
+      description: Stores up to 20 initial items in PostgreSQL. Conversations are isolated by authenticated credential and user and have bounded item cardinality.
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/ConversationCreateRequest'}}}
+      responses:
+        '200': {description: Created conversation, content: {application/json: {schema: {$ref: '#/components/schemas/Conversation'}}}}
+        default: {description: 'Authentication, validation, quota, conflict, or storage failure', content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+  /v1/conversations/{conversation_id}:
+    parameters:
+      - {name: conversation_id, in: path, required: true, schema: {type: string, maxLength: 128, pattern: '^conv_[A-Za-z0-9_-]+$'}}
+    get:
+      operationId: getConversation
+      tags: [Inference]
+      summary: Retrieve an owned conversation
+      responses:
+        '200': {description: Conversation, content: {application/json: {schema: {$ref: '#/components/schemas/Conversation'}}}}
+        default: {description: Authentication or storage failure, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+    post:
+      operationId: updateConversation
+      tags: [Inference]
+      summary: Replace conversation metadata
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/ConversationUpdateRequest'}}}
+      responses:
+        '200': {description: Updated conversation, content: {application/json: {schema: {$ref: '#/components/schemas/Conversation'}}}}
+        default: {description: 'Authentication, validation, conflict, or storage failure', content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+    delete:
+      operationId: deleteConversation
+      tags: [Inference]
+      summary: Delete a conversation and its items
+      responses:
+        '200': {description: Conversation deletion object, content: {application/json: {schema: {$ref: '#/components/schemas/ConversationDeletion'}}}}
+        default: {description: 'Authentication, conflict, or storage failure', content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+  /v1/conversations/{conversation_id}/items:
+    parameters:
+      - {name: conversation_id, in: path, required: true, schema: {type: string, maxLength: 128, pattern: '^conv_[A-Za-z0-9_-]+$'}}
+    post:
+      operationId: createConversationItems
+      tags: [Inference]
+      summary: Add up to 20 items to an owned conversation
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/ConversationItemsCreateRequest'}}}
+      responses:
+        '200': {description: Created items, content: {application/json: {schema: {$ref: '#/components/schemas/ConversationItemList'}}}}
+        default: {description: 'Authentication, validation, quota, conflict, or storage failure', content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+    get:
+      operationId: listConversationItems
+      tags: [Inference]
+      summary: List owned conversation items
+      parameters:
+        - {name: after, in: query, schema: {type: string, maxLength: 128}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
+        - {name: order, in: query, schema: {type: string, enum: [asc, desc], default: desc}}
+      responses:
+        '200': {description: Cursor page of items, content: {application/json: {schema: {$ref: '#/components/schemas/ConversationItemList'}}}}
+        default: {description: 'Authentication, validation, or storage failure', content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+  /v1/conversations/{conversation_id}/items/{item_id}:
+    parameters:
+      - {name: conversation_id, in: path, required: true, schema: {type: string, maxLength: 128, pattern: '^conv_[A-Za-z0-9_-]+$'}}
+      - {name: item_id, in: path, required: true, schema: {type: string, maxLength: 128}}
+    get:
+      operationId: getConversationItem
+      tags: [Inference]
+      summary: Retrieve an owned conversation item
+      responses:
+        '200': {description: Conversation item, content: {application/json: {schema: {$ref: '#/components/schemas/ConversationItem'}}}}
+        default: {description: Authentication or storage failure, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+    delete:
+      operationId: deleteConversationItem
+      tags: [Inference]
+      summary: Delete an owned conversation item
+      responses:
+        '200': {description: Item deletion object, content: {application/json: {schema: {$ref: '#/components/schemas/ConversationDeletion'}}}}
+        default: {description: 'Authentication, conflict, or storage failure', content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
   /v1/responses:
     post:
       operationId: createResponse
@@ -9425,6 +9506,75 @@ components:
           properties:
             input: {$ref: '#/components/schemas/ProviderModerationRule'}
             output: {$ref: '#/components/schemas/ProviderModerationRule'}
+    Conversation:
+      type: object
+      required: [id, object, created_at, metadata]
+      properties:
+        id: {type: string, pattern: '^conv_[A-Za-z0-9_-]+$'}
+        object: {type: string, const: conversation}
+        created_at: {type: integer, format: int64}
+        metadata:
+          type: object
+          maxProperties: 16
+          propertyNames: {maxLength: 64}
+          additionalProperties: {type: string, maxLength: 512}
+    ConversationItem:
+      type: object
+      required: [id, type]
+      properties:
+        id: {type: string, maxLength: 128}
+        type: {type: string, minLength: 1}
+      additionalProperties: true
+    ConversationCreateRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        metadata:
+          type: object
+          maxProperties: 16
+          propertyNames: {maxLength: 64}
+          additionalProperties: {type: string, maxLength: 512}
+        items:
+          type: array
+          maxItems: 20
+          items: {$ref: '#/components/schemas/ConversationItem'}
+    ConversationUpdateRequest:
+      type: object
+      additionalProperties: false
+      required: [metadata]
+      properties:
+        metadata:
+          type: object
+          maxProperties: 16
+          propertyNames: {maxLength: 64}
+          additionalProperties: {type: string, maxLength: 512}
+    ConversationItemsCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items: {$ref: '#/components/schemas/ConversationItem'}
+    ConversationItemList:
+      type: object
+      required: [object, data, has_more]
+      properties:
+        object: {type: string, const: list}
+        data: {type: array, items: {$ref: '#/components/schemas/ConversationItem'}}
+        first_id: {type: string}
+        last_id: {type: string}
+        has_more: {type: boolean}
+    ConversationDeletion:
+      type: object
+      additionalProperties: false
+      required: [id, object, deleted]
+      properties:
+        id: {type: string}
+        object: {type: string, enum: [conversation.deleted, conversation.item.deleted]}
+        deleted: {type: boolean, const: true}
     ResponseRequest:
       description: Supply at most one non-null output limit, max_output_tokens or max_tokens.
       type: object
@@ -9514,6 +9664,15 @@ components:
             format: {type: object, additionalProperties: true}
             verbosity: {type: string, enum: [low, medium, high]}
         previous_response_id: {type: string}
+        conversation:
+          description: Owner-isolated durable conversation ID. Its ordered items are prepended before policy, token admission, and billing. Mutually exclusive with previous_response_id and background execution.
+          oneOf:
+            - {type: string, maxLength: 128, pattern: '^conv_[A-Za-z0-9_-]+$'}
+            - type: object
+              additionalProperties: false
+              required: [id]
+              properties:
+                id: {type: string, maxLength: 128, pattern: '^conv_[A-Za-z0-9_-]+$'}
         user: {type: string, description: Provider-specific end-user isolation identifier; compatible adapters forward it and native adapters reject or validate it according to their contract.}
         safety_identifier: {type: string, maxLength: 64}
         prompt_cache_key: {type: string}
@@ -9880,6 +10039,11 @@ components:
           properties:
             reason: {type: string}
         model: {type: string}
+        conversation:
+          type: object
+          required: [id]
+          properties:
+            id: {type: string, pattern: '^conv_[A-Za-z0-9_-]+$'}
         output:
           type: array
           items: {$ref: '#/components/schemas/ResponseOutputItem'}

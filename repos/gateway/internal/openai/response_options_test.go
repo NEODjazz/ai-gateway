@@ -530,3 +530,25 @@ func TestResponseRejectsConflictingOutputLimits(t *testing.T) {
 		}
 	}
 }
+
+func TestResponseConversationReferenceValidation(t *testing.T) {
+	for _, body := range []string{
+		`{"conversation":"conv_one"}`,
+		`{"conversation":{"id":"conv_two"}}`,
+	} {
+		var request ResponseRequest
+		if err := json.Unmarshal([]byte(body), &request); err != nil || request.Conversation == nil || request.Conversation.ID == "" || request.Validate() != "" {
+			t.Fatalf("body=%s request=%+v err=%v validation=%q", body, request, err, request.Validate())
+		}
+	}
+	invalid := []ResponseRequest{
+		{Conversation: &ResponseConversation{ID: "bad"}},
+		{Conversation: &ResponseConversation{ID: "conv_one"}, PreviousResponse: "resp_one"},
+		{Conversation: &ResponseConversation{ID: "conv_one"}, Background: true},
+	}
+	for _, request := range invalid {
+		if request.Validate() == "" {
+			t.Fatalf("invalid conversation request accepted: %+v", request)
+		}
+	}
+}

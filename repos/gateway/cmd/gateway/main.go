@@ -93,6 +93,8 @@ func main() {
 	providerConfig.ControlPlaneStore = controlPlaneStoreFor(providerControlStore)
 	if providerControlStore != nil {
 		providerConfig.AsyncJobs = providerControlStore
+		providerConfig.Conversations = providerControlStore
+		providerConfig.ConversationItemQuota = cfg.Conversations.ItemQuota
 	}
 	if redisStore != nil {
 		providerConfig.CacheStore = redisStore
@@ -154,6 +156,7 @@ func main() {
 			WithVideoStore(providerControlStore).
 			WithContainerStore(providerControlStore).
 			WithCachedContentStore(providerControlStore).
+			WithConversationStore(providerControlStore, gateway.ConversationRuntimeConfig{OwnerQuota: cfg.Conversations.OwnerQuota, ItemQuota: cfg.Conversations.ItemQuota}).
 			WithSkillStore(providerControlStore).
 			WithRAGIngestStore(providerControlStore).
 			WithVectorStore(providerControlStore, gateway.VectorStoreRuntimeConfig{OwnerQuota: cfg.VectorStores.OwnerQuota, FileQuota: cfg.VectorStores.FileQuota, ByteQuota: cfg.VectorStores.ByteQuota})

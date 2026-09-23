@@ -41,6 +41,17 @@ func (r ResponseRequest) ValidateEnvelope() string {
 
 // Validate checks provider-independent Responses generation options.
 func (r ResponseRequest) Validate() string {
+	if r.Conversation != nil {
+		if !validResponseResourceID(r.Conversation.ID, "conv_") {
+			return "conversation must contain a valid conversation ID"
+		}
+		if r.PreviousResponse != "" {
+			return "conversation and previous_response_id are mutually exclusive"
+		}
+		if r.Background {
+			return "conversation is not supported with background execution"
+		}
+	}
 	if r.Background && r.Stream {
 		return "background and stream cannot both be enabled"
 	}
@@ -136,6 +147,19 @@ func (r ResponseRequest) Validate() string {
 		return "max_tool_calls must be between 0 and 1000"
 	}
 	return ""
+}
+
+func validResponseResourceID(value, prefix string) bool {
+	if !strings.HasPrefix(value, prefix) || len(value) > 128 {
+		return false
+	}
+	for _, character := range value {
+		if character >= 'a' && character <= 'z' || character >= 'A' && character <= 'Z' || character >= '0' && character <= '9' || character == '_' || character == '-' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func validateProviderModeration(moderation *ProviderModeration) string {

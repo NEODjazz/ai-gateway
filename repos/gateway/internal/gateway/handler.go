@@ -18,6 +18,7 @@ import (
 	"ai-gateway-gateway/internal/batchstate"
 	"ai-gateway-gateway/internal/cachedstate"
 	"ai-gateway-gateway/internal/containerstate"
+	"ai-gateway-gateway/internal/conversationstate"
 	"ai-gateway-gateway/internal/filestate"
 	"ai-gateway-gateway/internal/finetunestate"
 	"ai-gateway-gateway/internal/mcpclient"
@@ -34,61 +35,63 @@ import (
 )
 
 type Handler struct {
-	pipeline          modules.Pipeline
-	resourceBilling   modules.Pipeline
-	provider          provider.Provider
-	rateLimits        RateLimitStore
-	metrics           *Metrics
-	ready             func(context.Context) error
-	management        ManagementClient
-	directory         IdentityDirectoryClient
-	organizations     OrganizationDirectoryClient
-	dlp               modules.Module
-	av                modules.Module
-	anonymizer        modules.Module
-	guardrails        *GuardrailMonitor
-	cacheConfig       CacheRuntimeConfig
-	logging           *LoggingRegistry
-	agents            *AgentRegistry
-	a2aTasks          a2astate.Store
-	a2aTaskConfig     A2ATaskRuntimeConfig
-	assistants        assistantstate.Store
-	assistantThreads  assistantstate.ThreadStore
-	assistantRuns     assistantstate.RunStore
-	assistantConfig   AssistantRuntimeConfig
-	a2aSubscriptions  chan struct{}
-	a2aHTTPClient     httpDoer
-	a2aPushJobs       asyncstate.Store
-	a2aPushConfigs    a2astate.AtomicOutboxStore
-	a2aPushVault      *a2aPushVault
-	mcp               *MCPRegistry
-	mcpRuntime        MCPRuntimeFactory
-	mcpRuntimeCache   *mcpRuntimeCache
-	mcpCalls          mcpstate.Store
-	files             filestate.Store
-	fileConfig        FileRuntimeConfig
-	batches           batchstate.Store
-	fineTuning        finetunestate.Store
-	fineTuningJobs    asyncstate.Store
-	videos            videostate.Store
-	containers        containerstate.Store
-	cachedContents    cachedstate.Store
-	videoJobs         asyncstate.Store
-	batchJobs         asyncstate.Store
-	skills            skillstate.Store
-	vectorStores      vectorstate.Store
-	ragIngest         ragstate.Store
-	vectorStoreConfig VectorStoreRuntimeConfig
-	access            *AccessRegistry
-	budgets           BudgetManagementClient
-	usage             UsageManagementClient
-	requestLogs       RequestLogClient
-	models            *modelcatalog.Registry
-	audit             AuditClient
-	apiDocs           apiDocsConfig
-	adminUI           bool
-	browserSSO        *BrowserSSO
-	adminState        *AdminStateRuntime
+	pipeline           modules.Pipeline
+	resourceBilling    modules.Pipeline
+	provider           provider.Provider
+	rateLimits         RateLimitStore
+	metrics            *Metrics
+	ready              func(context.Context) error
+	management         ManagementClient
+	directory          IdentityDirectoryClient
+	organizations      OrganizationDirectoryClient
+	dlp                modules.Module
+	av                 modules.Module
+	anonymizer         modules.Module
+	guardrails         *GuardrailMonitor
+	cacheConfig        CacheRuntimeConfig
+	logging            *LoggingRegistry
+	agents             *AgentRegistry
+	a2aTasks           a2astate.Store
+	a2aTaskConfig      A2ATaskRuntimeConfig
+	assistants         assistantstate.Store
+	assistantThreads   assistantstate.ThreadStore
+	assistantRuns      assistantstate.RunStore
+	assistantConfig    AssistantRuntimeConfig
+	a2aSubscriptions   chan struct{}
+	a2aHTTPClient      httpDoer
+	a2aPushJobs        asyncstate.Store
+	a2aPushConfigs     a2astate.AtomicOutboxStore
+	a2aPushVault       *a2aPushVault
+	mcp                *MCPRegistry
+	mcpRuntime         MCPRuntimeFactory
+	mcpRuntimeCache    *mcpRuntimeCache
+	mcpCalls           mcpstate.Store
+	files              filestate.Store
+	fileConfig         FileRuntimeConfig
+	batches            batchstate.Store
+	fineTuning         finetunestate.Store
+	fineTuningJobs     asyncstate.Store
+	videos             videostate.Store
+	containers         containerstate.Store
+	cachedContents     cachedstate.Store
+	conversations      conversationstate.Store
+	conversationConfig ConversationRuntimeConfig
+	videoJobs          asyncstate.Store
+	batchJobs          asyncstate.Store
+	skills             skillstate.Store
+	vectorStores       vectorstate.Store
+	ragIngest          ragstate.Store
+	vectorStoreConfig  VectorStoreRuntimeConfig
+	access             *AccessRegistry
+	budgets            BudgetManagementClient
+	usage              UsageManagementClient
+	requestLogs        RequestLogClient
+	models             *modelcatalog.Registry
+	audit              AuditClient
+	apiDocs            apiDocsConfig
+	adminUI            bool
+	browserSSO         *BrowserSSO
+	adminState         *AdminStateRuntime
 }
 
 func (h Handler) WithBatchStore(store batchstate.Store, jobs asyncstate.Store) Handler {
@@ -744,11 +747,30 @@ func (h Handler) serveResponsesAs(w http.ResponseWriter, r *http.Request, reques
 		return
 	}
 	reqCtx.APIKey = ""
+	if request.Conversation != nil {
+		conversationProvider, ok := h.provider.(provider.ConversationProvider)
+		if !ok {
+			writeProviderFailure(w, provider.ErrConversationStorageUnavailable)
+			return
+		}
+		prepared, err := conversationProvider.PrepareConversation(r.Context(), reqCtx)
+		if err != nil {
+			writeProviderFailure(w, err)
+			return
+		}
+		reqCtx = prepared
+		defer func() {
+			releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
+			defer cancel()
+			conversationProvider.ReleaseConversation(releaseCtx, &reqCtx)
+		}()
+	}
 	if reqCtx.ResponseRequest == nil {
 		writeError(w, http.StatusBadGateway, "module_failed", "module removed inference request")
 		return
 	}
 	request = *reqCtx.ResponseRequest
+	reqCtx.Request.Messages = responseMessages(request)
 	if message := request.ValidateEnvelope(); message != "" {
 		writeError(w, http.StatusBadGateway, "module_failed", "module produced an invalid inference request: "+message)
 		return
@@ -2050,6 +2072,18 @@ func decodeInferenceRequest(w http.ResponseWriter, r *http.Request, target any) 
 }
 
 func writeProviderFailure(w http.ResponseWriter, err error) {
+	if errors.Is(err, provider.ErrConversationNotFound) {
+		writeError(w, http.StatusNotFound, "conversation_not_found", "conversation not found")
+		return
+	}
+	if errors.Is(err, provider.ErrConversationConflict) {
+		writeError(w, http.StatusConflict, "conversation_conflict", "conversation has another active request")
+		return
+	}
+	if errors.Is(err, provider.ErrConversationStorageUnavailable) {
+		writeError(w, http.StatusServiceUnavailable, "conversation_storage_unavailable", "conversation storage is unavailable")
+		return
+	}
 	if errors.Is(err, provider.ErrCachedContentPolicyChanged) {
 		writeError(w, http.StatusConflict, "cached_content_policy_changed", "cached content effective policy has changed")
 		return

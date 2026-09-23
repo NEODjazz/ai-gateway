@@ -78,6 +78,11 @@ gateway:
     runStepQuota: 10000
     # Retention for terminal runs. Expired rows are evicted during creation.
     runRetentionSeconds: 2592000
+  conversations:
+    # Maximum durable conversations per credential-and-user owner.
+    ownerQuota: 10000
+    # Maximum retained input and output items per conversation.
+    itemQuota: 4096
   a2aTasks:
     # Maximum retained tasks per credential-and-user owner.
     ownerQuota: 1000

@@ -17,6 +17,7 @@ import (
 
 	"ai-gateway-gateway/internal/asyncstate"
 	"ai-gateway-gateway/internal/config"
+	"ai-gateway-gateway/internal/conversationstate"
 	"ai-gateway-gateway/internal/modelcatalog"
 	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/openai"
@@ -37,6 +38,11 @@ type Provider interface {
 	Responses(ctx context.Context, req modules.RequestContext) (openai.ResponseResponse, error)
 	StreamResponses(ctx context.Context, req modules.RequestContext, write ResponseStreamWriter) (openai.ResponseResponse, bool, error)
 	Models() []openai.Model
+}
+
+type ConversationProvider interface {
+	PrepareConversation(context.Context, modules.RequestContext) (modules.RequestContext, error)
+	ReleaseConversation(context.Context, *modules.RequestContext)
 }
 
 type InteractionProvider interface {
@@ -405,6 +411,8 @@ type Config struct {
 	ControlPlaneRefresh     time.Duration
 	DeploymentQuotaStore    DeploymentQuotaStore
 	AsyncJobs               asyncstate.Store
+	Conversations           conversationstate.Store
+	ConversationItemQuota   int
 }
 
 type ProviderObserver interface {
@@ -450,32 +458,34 @@ type Endpoint struct {
 }
 
 type Router struct {
-	defaultProvider  string
-	endpoints        []Endpoint
-	endpointState    *endpointRegistry
-	modules          modules.Pipeline
-	health           *endpointHealthTracker
-	routeCounter     *atomic.Uint64
-	cache            responseCache
-	catalog          *modelcatalog.Registry
-	observer         ProviderObserver
-	routingStrategy  string
-	adaptive         *adaptiveRouter
-	affinity         affinityStore
-	ownership        responseOwnershipStore
-	semantic         *semanticResponseCache
-	deployments      *deploymentRegistry
-	providers        *managedProviderRegistry
-	credentials      *credentialVault
-	modelGroups      *modelGroupRegistry
-	controlPlane     *controlPlaneRuntime
-	guardrails       *guardrailRegistry
-	adminState       *adminStateRegistry
-	deploymentHealth *deploymentHealthRegistry
-	retry            retryScheduler
-	deploymentQuotas DeploymentQuotaStore
-	awsCredentials   *awsCredentialRegistry
-	asyncJobs        asyncstate.Store
+	defaultProvider       string
+	endpoints             []Endpoint
+	endpointState         *endpointRegistry
+	modules               modules.Pipeline
+	health                *endpointHealthTracker
+	routeCounter          *atomic.Uint64
+	cache                 responseCache
+	catalog               *modelcatalog.Registry
+	observer              ProviderObserver
+	routingStrategy       string
+	adaptive              *adaptiveRouter
+	affinity              affinityStore
+	ownership             responseOwnershipStore
+	semantic              *semanticResponseCache
+	deployments           *deploymentRegistry
+	providers             *managedProviderRegistry
+	credentials           *credentialVault
+	modelGroups           *modelGroupRegistry
+	controlPlane          *controlPlaneRuntime
+	guardrails            *guardrailRegistry
+	adminState            *adminStateRegistry
+	deploymentHealth      *deploymentHealthRegistry
+	retry                 retryScheduler
+	deploymentQuotas      DeploymentQuotaStore
+	awsCredentials        *awsCredentialRegistry
+	asyncJobs             asyncstate.Store
+	conversations         conversationstate.Store
+	conversationItemQuota int
 }
 
 func New(cfg Config) Provider {
@@ -603,21 +613,23 @@ func NewWithError(cfg Config) (Provider, error) {
 		deploymentQuotas = NewMemoryDeploymentQuotaStore()
 	}
 	router := &Router{
-		defaultProvider:  cfg.Default,
-		endpoints:        endpoints,
-		modules:          cfg.Modules,
-		health:           newEndpointHealthTracker(cfg.CircuitStore),
-		routeCounter:     &atomic.Uint64{},
-		cache:            newResponseCache(cfg.CacheTTL, cfg.CacheMaxBytes, cfg.CacheStore),
-		catalog:          registry,
-		observer:         cfg.Observer,
-		routingStrategy:  strings.ToLower(strings.TrimSpace(cfg.RoutingStrategy)),
-		adaptive:         newAdaptiveRouter(cfg.AdaptiveEWMAAlpha),
-		deploymentQuotas: deploymentQuotas,
-		asyncJobs:        cfg.AsyncJobs,
-		awsCredentials:   &awsCredentialRegistry{current: make(map[string]managedAWSCredentialSource)},
-		affinity:         newAffinityStore(cfg.AffinityTTL, cfg.SessionStore),
-		ownership:        newResponseOwnershipStore(cfg.ResponseOwnershipTTL, cfg.SessionStore),
+		defaultProvider:       cfg.Default,
+		endpoints:             endpoints,
+		modules:               cfg.Modules,
+		health:                newEndpointHealthTracker(cfg.CircuitStore),
+		routeCounter:          &atomic.Uint64{},
+		cache:                 newResponseCache(cfg.CacheTTL, cfg.CacheMaxBytes, cfg.CacheStore),
+		catalog:               registry,
+		observer:              cfg.Observer,
+		routingStrategy:       strings.ToLower(strings.TrimSpace(cfg.RoutingStrategy)),
+		adaptive:              newAdaptiveRouter(cfg.AdaptiveEWMAAlpha),
+		deploymentQuotas:      deploymentQuotas,
+		asyncJobs:             cfg.AsyncJobs,
+		conversations:         cfg.Conversations,
+		conversationItemQuota: cfg.ConversationItemQuota,
+		awsCredentials:        &awsCredentialRegistry{current: make(map[string]managedAWSCredentialSource)},
+		affinity:              newAffinityStore(cfg.AffinityTTL, cfg.SessionStore),
+		ownership:             newResponseOwnershipStore(cfg.ResponseOwnershipTTL, cfg.SessionStore),
 		semantic: newSemanticResponseCache(semanticCacheConfig{
 			ttl: cfg.SemanticCacheTTL, threshold: cfg.SemanticCacheThreshold,
 			maxEntries: cfg.SemanticCacheMaxEntries, maxBytes: cfg.SemanticCacheMaxBytes,
@@ -1033,6 +1045,16 @@ func (r Router) Responses(ctx context.Context, req modules.RequestContext) (open
 	if err := validateResponseOptions(*req.ResponseRequest); err != nil {
 		return openai.ResponseResponse{}, err
 	}
+	prepared, err := r.prepareConversation(ctx, req)
+	if err != nil {
+		return openai.ResponseResponse{}, err
+	}
+	req = prepared
+	defer func() {
+		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		r.releaseConversation(releaseCtx, &req)
+	}()
 	if err := r.validateResponseOwnership(req, *req.ResponseRequest); err != nil {
 		return openai.ResponseResponse{}, err
 	}
@@ -1094,7 +1116,7 @@ func (r Router) Responses(ctx context.Context, req modules.RequestContext) (open
 		started := time.Now()
 		lastAttempt = &attemptCtx
 		cacheKey := ""
-		if !persistentResponseRequested(*attemptCtx.ResponseRequest) && responseReplaySafe(*attemptCtx.ResponseRequest) {
+		if attemptCtx.ConversationTurn == nil && !persistentResponseRequested(*attemptCtx.ResponseRequest) && responseReplaySafe(*attemptCtx.ResponseRequest) {
 			cacheKey = providerCacheKey("responses", attemptCtx)
 		}
 		if payload, found, cacheErr := r.cacheGet(ctx, cacheKey); found {
@@ -1117,7 +1139,7 @@ func (r Router) Responses(ctx context.Context, req modules.RequestContext) (open
 			attemptCtx.Metadata["provider.cache.status"] = "error"
 			log.Printf("provider cache get failed: %v", cacheErr)
 		}
-		if !mirrored && !persistentResponseRequested(*attemptCtx.ResponseRequest) && responseReplaySafe(*attemptCtx.ResponseRequest) {
+		if !mirrored && attemptCtx.ConversationTurn == nil && !persistentResponseRequested(*attemptCtx.ResponseRequest) && responseReplaySafe(*attemptCtx.ResponseRequest) {
 			r.mirrorResponses(ctx, req.RequestID, *attemptCtx.ResponseRequest, request.Model, requiredResponseCapabilities(request, false)...)
 			mirrored = true
 		}
@@ -1148,6 +1170,10 @@ func (r Router) Responses(ctx context.Context, req modules.RequestContext) (open
 			}
 			modules.DeanonymizeResponsesResponse(&attemptCtx, &response)
 			r.rememberResponseAffinity(ctx, attemptCtx, response.ID, endpoint.Name)
+			if err := r.completeConversation(ctx, &attemptCtx, &response); err != nil {
+				r.modules.RunFailure(ctx, &attemptCtx, err)
+				return openai.ResponseResponse{}, &Error{Class: FailurePostProcessing, Provider: endpoint.Name, Err: err}
+			}
 			if err := r.modules.RunPostResponse(ctx, &attemptCtx); err != nil {
 				return openai.ResponseResponse{}, &Error{Class: FailurePostProcessing, Provider: endpoint.Name, Err: err}
 			}
@@ -2004,13 +2030,25 @@ func validateRerankResponse(response openai.RerankResponse, documentCount int) e
 	return nil
 }
 
-func (r Router) StreamResponses(ctx context.Context, req modules.RequestContext, write ResponseStreamWriter) (openai.ResponseResponse, bool, error) {
+func (r Router) StreamResponses(ctx context.Context, req modules.RequestContext, write ResponseStreamWriter) (result openai.ResponseResponse, streamed bool, resultErr error) {
 	if req.ResponseRequest == nil {
 		return openai.ResponseResponse{}, false, errors.New("missing response request")
 	}
 	if err := validateResponseOptions(*req.ResponseRequest); err != nil {
 		return openai.ResponseResponse{}, true, err
 	}
+	prepared, err := r.prepareConversation(ctx, req)
+	if err != nil {
+		return openai.ResponseResponse{}, true, err
+	}
+	req = prepared
+	defer func() {
+		if streamed || resultErr != nil {
+			releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			r.releaseConversation(releaseCtx, &req)
+		}
+	}()
 	if err := r.validateResponseOwnership(req, *req.ResponseRequest); err != nil {
 		return openai.ResponseResponse{}, true, err
 	}
@@ -2078,7 +2116,7 @@ func (r Router) StreamResponses(ctx context.Context, req modules.RequestContext,
 			return openai.ResponseResponse{}, true, err
 		}
 		lastAttempt = &attemptCtx
-		if !mirrored && !persistentResponseRequested(*attemptCtx.ResponseRequest) && responseReplaySafe(*attemptCtx.ResponseRequest) {
+		if !mirrored && attemptCtx.ConversationTurn == nil && !persistentResponseRequested(*attemptCtx.ResponseRequest) && responseReplaySafe(*attemptCtx.ResponseRequest) {
 			r.mirrorResponses(ctx, req.RequestID, *attemptCtx.ResponseRequest, request.Model, requiredResponseCapabilities(request, true)...)
 			mirrored = true
 		}
@@ -2155,6 +2193,10 @@ func (r Router) StreamResponses(ctx context.Context, req modules.RequestContext,
 		attemptCtx.ResponsesResponse = &response
 		modules.DeanonymizeResponsesResponse(&attemptCtx, &response)
 		r.rememberResponseAffinity(ctx, attemptCtx, response.ID, endpoint.Name)
+		if err := r.completeConversation(ctx, &attemptCtx, &response); err != nil {
+			r.modules.RunFailure(ctx, &attemptCtx, err)
+			return openai.ResponseResponse{}, true, &Error{Class: FailurePostProcessing, Provider: endpoint.Name, Err: err}
+		}
 		if err := r.modules.RunPostResponse(ctx, &attemptCtx); err != nil {
 			return openai.ResponseResponse{}, true, &Error{Class: FailurePostProcessing, Provider: endpoint.Name, Err: err}
 		}

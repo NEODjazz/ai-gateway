@@ -129,6 +129,10 @@ spec:
               value: {{ include "ai-gateway.integerString" .Values.gateway.assistants.runStepQuota | quote }}
             - name: ASSISTANT_RUN_RETENTION_SECONDS
               value: {{ include "ai-gateway.integerString" .Values.gateway.assistants.runRetentionSeconds | quote }}
+            - name: CONVERSATION_OWNER_QUOTA
+              value: {{ include "ai-gateway.integerString" .Values.gateway.conversations.ownerQuota | quote }}
+            - name: CONVERSATION_ITEM_QUOTA
+              value: {{ include "ai-gateway.integerString" .Values.gateway.conversations.itemQuota | quote }}
             - name: A2A_TASK_OWNER_QUOTA
               value: {{ include "ai-gateway.integerString" .Values.gateway.a2aTasks.ownerQuota | quote }}
             - name: A2A_TASK_TTL_SECONDS

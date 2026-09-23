@@ -55,7 +55,7 @@ func (s responseOwnershipStore) configured() bool {
 }
 
 func persistentResponseRequested(request openai.ResponseRequest) bool {
-	return request.Store != nil && *request.Store
+	return request.Conversation != nil || request.Store != nil && *request.Store
 }
 
 func (r Router) validateResponseOwnership(req modules.RequestContext, request openai.ResponseRequest) error {

@@ -168,6 +168,8 @@ func TestLoadRoutingAndCacheConfiguration(t *testing.T) {
 	t.Setenv("ASSISTANT_RUN_OWNER_QUOTA", "125")
 	t.Setenv("ASSISTANT_RUN_STEP_QUOTA", "250")
 	t.Setenv("ASSISTANT_RUN_RETENTION_SECONDS", "7200")
+	t.Setenv("CONVERSATION_OWNER_QUOTA", "2500")
+	t.Setenv("CONVERSATION_ITEM_QUOTA", "5000")
 	t.Setenv("A2A_TASK_OWNER_QUOTA", "75")
 	t.Setenv("A2A_TASK_TTL_SECONDS", "3600")
 	t.Setenv("A2A_SUBSCRIPTION_LIMIT", "12")
@@ -189,6 +191,9 @@ func TestLoadRoutingAndCacheConfiguration(t *testing.T) {
 	}
 	if cfg.Assistants.OwnerQuota != 125 || cfg.Assistants.ThreadOwnerQuota != 1250 || cfg.Assistants.MessageThreadQuota != 12500 || cfg.Assistants.RunOwnerQuota != 125 || cfg.Assistants.RunStepQuota != 250 || cfg.Assistants.RunRetention != 2*time.Hour {
 		t.Fatalf("unexpected assistant config: %+v", cfg.Assistants)
+	}
+	if cfg.Conversations.OwnerQuota != 2500 || cfg.Conversations.ItemQuota != 5000 {
+		t.Fatalf("unexpected conversation config: %+v", cfg.Conversations)
 	}
 	if cfg.A2ATasks.OwnerQuota != 75 || cfg.A2ATasks.TTL != time.Hour || cfg.A2ATasks.SubscriptionLimit != 12 || cfg.A2ATasks.SubscriptionDuration != 45*time.Second || cfg.A2ATasks.SubscriptionPoll != 250*time.Millisecond {
 		t.Fatalf("unexpected A2A task config: %+v", cfg.A2ATasks)
@@ -278,6 +283,16 @@ func TestLoadRejectsUnsafeAssistantQuota(t *testing.T) {
 		t.Setenv("ASSISTANT_RUN_STEP_QUOTA", quota)
 		if cfg := Load(); cfg.InitErr == nil {
 			t.Fatalf("unsafe assistant run step quota accepted: %s", quota)
+		}
+	}
+}
+
+func TestLoadRejectsUnsafeConversationQuota(t *testing.T) {
+	for _, test := range []struct{ owner, items string }{{"0", "1"}, {"1000001", "1"}, {"1", "0"}, {"1", "100001"}} {
+		t.Setenv("CONVERSATION_OWNER_QUOTA", test.owner)
+		t.Setenv("CONVERSATION_ITEM_QUOTA", test.items)
+		if cfg := Load(); cfg.InitErr == nil {
+			t.Fatalf("unsafe conversation quota accepted: owner=%s items=%s", test.owner, test.items)
 		}
 	}
 }
