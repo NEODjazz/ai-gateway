@@ -65,10 +65,11 @@ type ProviderChatParameterPolicy struct {
 }
 
 type ProviderChatModelParameterPolicy struct {
-	Model            string   `json:"model"`
-	SupportedOptions []string `json:"supported_options"`
-	ReasoningEffort  []string `json:"reasoning_effort"`
-	ReasoningFormat  []string `json:"reasoning_format"`
+	Model              string   `json:"model"`
+	SupportedOptions   []string `json:"supported_options"`
+	UnsupportedOptions []string `json:"unsupported_options,omitempty"`
+	ReasoningEffort    []string `json:"reasoning_effort"`
+	ReasoningFormat    []string `json:"reasoning_format"`
 }
 
 type ProviderResponseParameterPolicy struct {
@@ -467,12 +468,18 @@ func managedProviderChatModelParameterPolicies(client Client, supported bool) []
 	for _, model := range prober.ManagedChatModelProbes() {
 		policy := managedProviderChatParameterPolicyForModel(client, true, model)
 		options := make([]string, 0, len(policy.SupportedOptions))
+		unsupported := make([]string, 0)
 		for _, option := range policy.SupportedOptions {
 			if !slicesContain(base.SupportedOptions, option) {
 				options = append(options, option)
 			}
 		}
-		result = append(result, ProviderChatModelParameterPolicy{Model: model, SupportedOptions: options, ReasoningEffort: policy.ReasoningEffort, ReasoningFormat: policy.ReasoningFormat})
+		for _, option := range base.SupportedOptions {
+			if !slicesContain(policy.SupportedOptions, option) {
+				unsupported = append(unsupported, option)
+			}
+		}
+		result = append(result, ProviderChatModelParameterPolicy{Model: model, SupportedOptions: options, UnsupportedOptions: unsupported, ReasoningEffort: policy.ReasoningEffort, ReasoningFormat: policy.ReasoningFormat})
 	}
 	return result
 }

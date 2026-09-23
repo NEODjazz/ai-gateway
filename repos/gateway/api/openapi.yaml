@@ -11405,7 +11405,7 @@ components:
       type: object
       additionalProperties: false
       required: [model, supported_options, reasoning_effort, reasoning_format]
-      description: Options accepted only for this exact upstream model. The values are derived by probing the runtime adapter validator and take precedence over the provider-wide value arrays.
+      description: Exact upstream-model differences from the provider-wide Chat policy. supported_options adds accepted controls, unsupported_options removes controls the model rejects, and value arrays take precedence over provider-wide values. The values are derived by probing the runtime adapter validator.
       properties:
         model:
           type: string
@@ -11415,6 +11415,11 @@ components:
           type: array
           uniqueItems: true
           items: {type: string, enum: [clear_thinking, include_reasoning, reasoning_format, reasoning_effort]}
+        unsupported_options:
+          type: array
+          uniqueItems: true
+          description: Provider-wide controls rejected for this exact upstream model.
+          items: {type: string}
         reasoning_effort:
           type: array
           uniqueItems: true

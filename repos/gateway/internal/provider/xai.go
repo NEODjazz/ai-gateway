@@ -627,6 +627,14 @@ func (x XAI) ValidateChatParameters(request openai.ChatCompletionRequest) error 
 	if request.ReasoningEffort != "" && !xaiSupportsReasoningEffort(request.Model, request.ReasoningEffort, false) {
 		return xaiParameterError("reasoning_effort", "reasoning_effort is not supported by this xAI model")
 	}
+	if xaiIgnoresLogprobs(request.Model) {
+		if request.TopLogprobs != nil {
+			return xaiParameterError("top_logprobs", "top_logprobs is not supported by this xAI model")
+		}
+		if request.Logprobs != nil {
+			return xaiParameterError("logprobs", "logprobs is not supported by this xAI model")
+		}
+	}
 	if request.TopLogprobs != nil && (*request.TopLogprobs < 0 || *request.TopLogprobs > 8 || request.Logprobs == nil || !*request.Logprobs) {
 		return xaiParameterError("top_logprobs", "top_logprobs must be between 0 and 8 and requires logprobs=true")
 	}
@@ -788,12 +796,21 @@ func xaiSupportsReasoningEffort(model, effort string, responses bool) bool {
 	}
 }
 
+func xaiIgnoresLogprobs(model string) bool {
+	for _, family := range []string{"grok-4.20", "grok-4.3", "grok-4.5", "grok-4.6", "grok-4.7"} {
+		if model == family || strings.HasPrefix(model, family+"-") {
+			return true
+		}
+	}
+	return false
+}
+
 func (XAI) ManagedChatModelProbes() []string {
-	return []string{"grok-4.5", "grok-4.6", "grok-4.7"}
+	return []string{"grok-4.20", "grok-4.3", "grok-4.5", "grok-4.6", "grok-4.7"}
 }
 
 func (x XAI) ManagedResponseModelProbes() []string {
-	return append(x.ManagedChatModelProbes(), "grok-4.20-multi-agent")
+	return []string{"grok-4.5", "grok-4.6", "grok-4.7", "grok-4.20-multi-agent"}
 }
 
 func xaiParameterError(param, message string) error {
