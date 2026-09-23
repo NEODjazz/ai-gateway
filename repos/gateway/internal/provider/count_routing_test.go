@@ -84,6 +84,36 @@ func TestTokenCountPreservesGeminiMediaResolution(t *testing.T) {
 	}
 }
 
+func TestTokenCountPreservesGeminiMediaProcessing(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Request struct {
+				Contents []geminiContent `json:"contents"`
+			} `json:"generateContentRequest"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if got := body.Request.Contents[0].Parts[0].MediaProcessing; got != "AGENTIC" {
+			t.Errorf("media processing=%q", got)
+		}
+		_, _ = w.Write([]byte(`{"totalTokens":240}`))
+	}))
+	defer server.Close()
+	router := New(Config{Endpoints: []config.ProviderEndpointConfig{{
+		Name: "gemini", Type: "gemini", BaseURL: server.URL, Models: []string{"model"},
+		Capabilities: []string{"chat", "video_input", "gemini_media_processing"}, AVEnabled: true,
+	}}}).(*Router)
+	result, err := router.CountTokens(t.Context(), modules.RequestContext{Request: openai.ChatCompletionRequest{
+		Model: "model", Messages: []openai.Message{{Role: "user", Content: []any{
+			map[string]any{"type": "input_video", "input_video": map[string]any{"data": "AAAADGZ0eXBtcDQy", "format": "mp4"}, "gemini_media_processing": "AGENTIC"},
+		}}},
+	}})
+	if err != nil || result.InputTokens != 240 {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+}
+
 type countPrePolicy struct{ stopAdmissionModule }
 
 func (*countPrePolicy) Name() string { return "dlp" }

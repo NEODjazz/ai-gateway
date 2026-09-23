@@ -72,6 +72,7 @@ func (Gemini) SupportsAudioInput() bool      { return true }
 func (Gemini) SupportsFileInput() bool       { return true }
 func (Gemini) SupportsVideoInput() bool      { return true }
 func (Gemini) SupportsMediaResolution() bool { return true }
+func (Gemini) SupportsMediaProcessing() bool { return true }
 
 func (Gemini) SupportsResponses() bool { return false }
 
@@ -89,6 +90,7 @@ type geminiPart struct {
 	Thought             bool                              `json:"thought,omitempty"`
 	ThoughtSignature    string                            `json:"thoughtSignature,omitempty"`
 	MediaResolution     *openai.GeminiMediaResolution     `json:"mediaResolution,omitempty"`
+	MediaProcessing     string                            `json:"mediaProcessing,omitempty"`
 }
 type geminiInlineData struct {
 	MIMEType string `json:"mimeType"`
@@ -263,6 +265,9 @@ func geminiChatRequest(request openai.ChatCompletionRequest) (geminiRequest, err
 	}
 	if err := openai.ValidateChatGeminiPartMediaResolutions(request); err != nil {
 		return result, geminiInvalid("messages.content.media_resolution")
+	}
+	if err := openai.ValidateChatGeminiPartMediaProcessing(request); err != nil {
+		return result, geminiInvalid("messages.content.media_processing")
 	}
 	if err := validateChatMessagePrefix("gemini", request.Messages, false); err != nil {
 		return result, err
@@ -614,6 +619,10 @@ func geminiMessageParts(value any) ([]geminiPart, error) {
 			if err != nil {
 				return nil, geminiInvalid("messages.content.media_resolution")
 			}
+			processing, err := openai.GeminiPartMediaProcessing(part)
+			if err != nil {
+				return nil, geminiInvalid("messages.content.media_processing")
+			}
 			switch part["type"] {
 			case "text":
 				text, ok := part["text"].(string)
@@ -646,7 +655,7 @@ func geminiMessageParts(value any) ([]geminiPart, error) {
 				if err != nil || len(attachments) != 1 {
 					return nil, openai.ErrInvalidVideoInput
 				}
-				parts = append(parts, geminiPart{InlineData: &geminiInlineData{MIMEType: attachments[0].MediaType, Data: attachments[0].Data}, MediaResolution: resolution})
+				parts = append(parts, geminiPart{InlineData: &geminiInlineData{MIMEType: attachments[0].MediaType, Data: attachments[0].Data}, MediaResolution: resolution, MediaProcessing: processing})
 			default:
 				return nil, geminiInvalid("messages.content.type")
 			}

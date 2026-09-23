@@ -105,7 +105,7 @@ func TestGenerateContentResolvesOwnedFileDataAfterAuthentication(t *testing.T) {
 	upstream := &fallbackChatProvider{response: openai.ChatCompletionResponse{ID: "id", Model: "m", Choices: []openai.Choice{{Index: 0, Message: openai.Message{Role: "assistant", Content: "ok"}, FinishReason: "stop"}}, Usage: openai.Usage{PromptTokens: 10, CompletionTokens: 1, TotalTokens: 11}}}
 	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{&lifecycleAuthModule{}}), upstream).
 		WithFileStore(files, FileRuntimeConfig{MaxBytes: 32 << 20, OwnerQuotaBytes: 64 << 20}))
-	body := `{"contents":[{"parts":[{"fileData":{"mimeType":"image/png","fileUri":"file_image"}},{"fileData":{"mimeType":"application/pdf","fileUri":"file_pdf"},"mediaResolution":{"level":"MEDIA_RESOLUTION_ULTRA_HIGH"}},{"fileData":{"mimeType":"text/plain","fileUri":"file_text"}},{"fileData":{"mimeType":"audio/wav","fileUri":"file_audio"}},{"fileData":{"mimeType":"video/mp4","fileUri":"file_video"}},{"fileData":{"mimeType":"video/avi","fileUri":"file_avi"}}]}]}`
+	body := `{"contents":[{"parts":[{"fileData":{"mimeType":"image/png","fileUri":"file_image"}},{"fileData":{"mimeType":"application/pdf","fileUri":"file_pdf"},"mediaResolution":{"level":"MEDIA_RESOLUTION_ULTRA_HIGH"}},{"fileData":{"mimeType":"text/plain","fileUri":"file_text"}},{"fileData":{"mimeType":"audio/wav","fileUri":"file_audio"}},{"fileData":{"mimeType":"video/mp4","fileUri":"file_video"},"mediaProcessing":"AGENTIC"},{"fileData":{"mimeType":"video/avi","fileUri":"file_avi"}}]}]}`
 	response := generateCall(handler, "/v1beta/models/m:generateContent", body, "gateway-test-key")
 	request := upstream.request.Request
 	images, imageErr := openai.ChatImageAttachments(request.Messages)
@@ -114,7 +114,8 @@ func TestGenerateContentResolvesOwnedFileDataAfterAuthentication(t *testing.T) {
 	videos, videoErr := openai.ChatVideoAttachments(request.Messages)
 	parts := request.Messages[0].Content.([]any)
 	resolution, resolutionErr := openai.GeminiPartMediaResolution(parts[1].(map[string]any))
-	if response.Code != http.StatusOK || upstream.calls != 1 || imageErr != nil || len(images) != 1 || fileErr != nil || len(filesFound) != 1 || !openai.HasChatTextDocuments(request) || audioErr != nil || len(audio) != 1 || videoErr != nil || len(videos) != 2 || videos[1].MediaType != "video/avi" || resolutionErr != nil || resolution == nil || resolution.Level != "MEDIA_RESOLUTION_ULTRA_HIGH" {
+	processing, processingErr := openai.GeminiPartMediaProcessing(parts[4].(map[string]any))
+	if response.Code != http.StatusOK || upstream.calls != 1 || imageErr != nil || len(images) != 1 || fileErr != nil || len(filesFound) != 1 || !openai.HasChatTextDocuments(request) || audioErr != nil || len(audio) != 1 || videoErr != nil || len(videos) != 2 || videos[1].MediaType != "video/avi" || resolutionErr != nil || resolution == nil || resolution.Level != "MEDIA_RESOLUTION_ULTRA_HIGH" || processingErr != nil || processing != "AGENTIC" {
 		t.Fatalf("status=%d calls=%d images=%d/%v files=%d/%v audio=%d/%v videos=%d/%v request=%+v body=%s", response.Code, upstream.calls, len(images), imageErr, len(filesFound), fileErr, len(audio), audioErr, len(videos), videoErr, request, response.Body.String())
 	}
 

@@ -12,7 +12,7 @@ func TestCapabilityContractIsSharedByDeploymentsAndOnboarding(t *testing.T) {
 		"image_generation", "image_edit", "image_variation",
 		"audio_transcription", "audio_translation", "audio_speech", "ocr", "search", "skills", "fine_tuning", "video", "video_remix", "video_extension", "container", "container_files", "container_network", "cached_content", "sandbox", "realtime",
 		"stream", "tools", "custom_tools", "response_image_generation", "response_computer", "response_shell", "response_apply_patch", "structured_output", "mcp", "vision",
-		"web_search", "web_fetch", "tool_search", "memory_tool", "bash_tool", "text_editor_tool", "computer_toolset", "browser_toolset", "thinking", "zero_output", "inference_geo", "context_management", "tool_result_error", "document_citations", "document_metadata", "document_text", "audio", "audio_input", "video_input", "prompt_cache", "assistant_prefill", "background_responses", "background_interactions", "file_input", "bedrock_invoke", "interaction_agents", "interaction_environment_reuse", "gemini_safety_settings", "gemini_code_execution", "gemini_audio_timestamp", "gemini_media_resolution", "url_context", "google_maps",
+		"web_search", "web_fetch", "tool_search", "memory_tool", "bash_tool", "text_editor_tool", "computer_toolset", "browser_toolset", "thinking", "zero_output", "inference_geo", "context_management", "tool_result_error", "document_citations", "document_metadata", "document_text", "audio", "audio_input", "video_input", "prompt_cache", "assistant_prefill", "background_responses", "background_interactions", "file_input", "bedrock_invoke", "interaction_agents", "interaction_environment_reuse", "gemini_safety_settings", "gemini_code_execution", "gemini_audio_timestamp", "gemini_media_resolution", "gemini_media_processing", "url_context", "google_maps",
 	}
 	if !validDeploymentCapabilities(capabilities) {
 		t.Fatal("deployment rejected a supported model capability")
@@ -128,6 +128,17 @@ func TestGeminiMediaResolutionRequiresChatAndMediaInput(t *testing.T) {
 		if !validDeploymentCapabilities([]string{"chat", mediaCapability, "gemini_media_resolution"}) {
 			t.Fatalf("media resolution rejected with %s", mediaCapability)
 		}
+	}
+}
+
+func TestGeminiMediaProcessingRequiresChatAndVideoInput(t *testing.T) {
+	for _, capabilities := range [][]string{{"gemini_media_processing"}, {"chat", "gemini_media_processing"}, {"video_input", "gemini_media_processing"}, {"chat", "vision", "gemini_media_processing"}} {
+		if validDeploymentCapabilities(capabilities) {
+			t.Fatalf("media processing accepted without chat and video input: %v", capabilities)
+		}
+	}
+	if !validDeploymentCapabilities([]string{"chat", "video_input", "gemini_media_processing"}) {
+		t.Fatal("media processing rejected with chat and video input")
 	}
 }
 

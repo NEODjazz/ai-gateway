@@ -539,6 +539,23 @@ func TestGeminiMediaResolutionRequiresMediaCapabilities(t *testing.T) {
 	}
 }
 
+func TestGeminiMediaProcessingRequiresVideoCapability(t *testing.T) {
+	part := map[string]any{
+		"type": "input_video", "input_video": map[string]any{"data": "AAAADGZ0eXBtcDQy", "format": "mp4"},
+		"gemini_media_processing": "STATIC",
+	}
+	request := modules.RequestContext{CredentialID: "key", Request: openai.ChatCompletionRequest{Model: "test", Messages: []openai.Message{{Role: "user", Content: []any{part}}}}}
+	if providerCacheKey("chat", request) != "" {
+		t.Fatal("exact cache allowed media-processing video request")
+	}
+	if _, _, ok := semanticRequest(request, Endpoint{Name: "test"}); ok {
+		t.Fatal("semantic cache allowed media-processing request")
+	}
+	if got := strings.Join(requiredChatCapabilities(request.Request, false), ","); got != "chat,video_input,gemini_media_processing" {
+		t.Fatalf("media processing routing requirements=%s", got)
+	}
+}
+
 func TestChatWebFetchDisablesResponseCaches(t *testing.T) {
 	request := modules.RequestContext{CredentialID: "key", Request: openai.ChatCompletionRequest{Model: "test", Messages: []openai.Message{{Role: "user", Content: "read https://example.com"}}, ChatGenerationOptions: openai.ChatGenerationOptions{WebFetchOptions: &openai.ChatWebFetchOptions{AllowedDomains: []string{"example.com"}, MaxContentTokens: 1000}}}}
 	if providerCacheKey("chat", request) != "" {

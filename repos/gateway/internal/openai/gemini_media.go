@@ -3,6 +3,7 @@ package openai
 import "errors"
 
 var ErrInvalidGeminiMediaResolution = errors.New("invalid Gemini media resolution")
+var ErrInvalidGeminiMediaProcessing = errors.New("invalid Gemini media processing")
 
 type GeminiMediaResolution struct {
 	Level string `json:"level"`
@@ -68,6 +69,65 @@ func ValidateChatGeminiPartMediaResolutions(request ChatCompletionRequest) error
 			resolution, err := GeminiPartMediaResolution(part)
 			if err != nil || resolution != nil && message.Role != "user" {
 				return ErrInvalidGeminiMediaResolution
+			}
+		}
+	}
+	return nil
+}
+
+func ValidGeminiMediaProcessing(value string) bool {
+	switch value {
+	case "MEDIA_PROCESSING_UNSPECIFIED", "STATIC", "AGENTIC":
+		return true
+	default:
+		return false
+	}
+}
+
+func GeminiPartMediaProcessing(part map[string]any) (string, error) {
+	value, found := part["gemini_media_processing"]
+	if !found {
+		return "", nil
+	}
+	processing, ok := value.(string)
+	if !ok || !ValidGeminiMediaProcessing(processing) || part["type"] != "input_video" {
+		return "", ErrInvalidGeminiMediaProcessing
+	}
+	return processing, nil
+}
+
+func HasChatGeminiPartMediaProcessing(request ChatCompletionRequest) bool {
+	for _, message := range request.Messages {
+		parts, ok := message.Content.([]any)
+		if !ok {
+			continue
+		}
+		for _, raw := range parts {
+			part, ok := raw.(map[string]any)
+			if ok {
+				if _, found := part["gemini_media_processing"]; found {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func ValidateChatGeminiPartMediaProcessing(request ChatCompletionRequest) error {
+	for _, message := range request.Messages {
+		parts, ok := message.Content.([]any)
+		if !ok {
+			continue
+		}
+		for _, raw := range parts {
+			part, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			processing, err := GeminiPartMediaProcessing(part)
+			if err != nil || processing != "" && message.Role != "user" {
+				return ErrInvalidGeminiMediaProcessing
 			}
 		}
 	}

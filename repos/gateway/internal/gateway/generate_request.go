@@ -66,6 +66,7 @@ type generateFunction struct {
 type generatePart struct {
 	Text            *string                       `json:"text,omitempty"`
 	MediaResolution *openai.GeminiMediaResolution `json:"mediaResolution,omitempty"`
+	MediaProcessing string                        `json:"mediaProcessing,omitempty"`
 	InlineData      *struct {
 		MIMEType string `json:"mimeType"`
 		Data     string `json:"data"`
@@ -209,7 +210,7 @@ func (r generateRequest) chatWithContentRequirement(model string, stream, requir
 		}
 		parts := []any{}
 		for _, part := range r.System.Parts {
-			if part.Text == nil || part.InlineData != nil || part.FileData != nil || part.Call != nil || part.Result != nil || part.Signature != "" {
+			if part.Text == nil || part.InlineData != nil || part.FileData != nil || part.Call != nil || part.Result != nil || part.Signature != "" || part.MediaResolution != nil || part.MediaProcessing != "" {
 				return fail("systemInstruction.parts")
 			}
 			parts = append(parts, map[string]any{"type": "text", "text": *part.Text})
@@ -263,9 +264,26 @@ func (r generateRequest) chatWithContentRequirement(model string, stream, requir
 					return fail("contents.parts.mediaResolution")
 				}
 			}
-			withResolution := func(value map[string]any) map[string]any {
+			mediaProcessing := part.MediaProcessing
+			if mediaProcessing != "" {
+				mediaType := ""
+				if part.InlineData != nil {
+					mediaType = part.InlineData.MIMEType
+				}
+				if part.FileData != nil {
+					mediaType = part.FileData.MIMEType
+				}
+				_, video := openai.VideoInputFormat(mediaType)
+				if !openai.ValidGeminiMediaProcessing(mediaProcessing) || !video {
+					return fail("contents.parts.mediaProcessing")
+				}
+			}
+			withMediaControls := func(value map[string]any) map[string]any {
 				if mediaResolution != "" {
 					value["gemini_media_resolution"] = mediaResolution
+				}
+				if mediaProcessing != "" {
+					value["gemini_media_processing"] = mediaProcessing
 				}
 				return value
 			}
@@ -300,7 +318,7 @@ func (r generateRequest) chatWithContentRequirement(model string, stream, requir
 				}
 				data := "data:" + part.InlineData.MIMEType + ";base64," + part.InlineData.Data
 				if _, err := openai.ParseDataImageURL(data); err == nil {
-					parts = append(parts, withResolution(map[string]any{"type": "image_url", "image_url": map[string]any{"url": data}}))
+					parts = append(parts, withMediaControls(map[string]any{"type": "image_url", "image_url": map[string]any{"url": data}}))
 					break
 				}
 				if part.InlineData.MIMEType == "application/pdf" {
@@ -308,7 +326,7 @@ func (r generateRequest) chatWithContentRequirement(model string, stream, requir
 					if _, err := openai.ResponseFileAttachments([]any{file}); err != nil {
 						return result, err
 					}
-					parts = append(parts, withResolution(file))
+					parts = append(parts, withMediaControls(file))
 					break
 				}
 				videoFormat, videoOK := openai.VideoInputFormat(part.InlineData.MIMEType)
@@ -317,7 +335,7 @@ func (r generateRequest) chatWithContentRequirement(model string, stream, requir
 					if _, err := openai.ChatVideoAttachments([]openai.Message{{Role: "user", Content: []any{video}}}); err != nil {
 						return result, err
 					}
-					parts = append(parts, withResolution(video))
+					parts = append(parts, withMediaControls(video))
 					break
 				}
 				format, filename := generateAudioFormat(part.InlineData.MIMEType)
@@ -327,7 +345,7 @@ func (r generateRequest) chatWithContentRequirement(model string, stream, requir
 				if err := openai.ValidateAudioAttachment(openai.AudioAttachment{Filename: filename, MediaType: part.InlineData.MIMEType, Data: part.InlineData.Data}); err != nil {
 					return result, err
 				}
-				parts = append(parts, withResolution(map[string]any{"type": "input_audio", "input_audio": map[string]any{"data": part.InlineData.Data, "format": format}}))
+				parts = append(parts, withMediaControls(map[string]any{"type": "input_audio", "input_audio": map[string]any{"data": part.InlineData.Data, "format": format}}))
 			case part.FileData != nil:
 				if role != "user" || !validFileToken(part.FileData.FileURI, 128) || !strings.HasPrefix(part.FileData.FileURI, "file_") {
 					return fail("fileData")
@@ -336,7 +354,7 @@ func (r generateRequest) chatWithContentRequirement(model string, stream, requir
 				if referenceType == "" {
 					return fail("fileData.mimeType")
 				}
-				parts = append(parts, withResolution(map[string]any{"type": referenceType, "file_id": part.FileData.FileURI, "media_type": part.FileData.MIMEType}))
+				parts = append(parts, withMediaControls(map[string]any{"type": referenceType, "file_id": part.FileData.FileURI, "media_type": part.FileData.MIMEType}))
 			case part.Call != nil:
 				callIndex++
 				call := part.Call

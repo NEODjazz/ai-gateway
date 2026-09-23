@@ -286,6 +286,43 @@ func TestGenerateRequestMapsPerPartMediaResolution(t *testing.T) {
 	}
 }
 
+func TestGenerateRequestMapsPerVideoMediaProcessing(t *testing.T) {
+	var native generateRequest
+	if err := decodeMessagesValue(json.RawMessage(`{"contents":[{"role":"user","parts":[{"inlineData":{"mimeType":"video/mp4","data":"AAAADGZ0eXBtcDQy"},"mediaProcessing":"AGENTIC"}]}]}`), &native); err != nil {
+		t.Fatal(err)
+	}
+	chat, err := native.chat("model", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	part := chat.Messages[0].Content.([]any)[0].(map[string]any)
+	if part["gemini_media_processing"] != "AGENTIC" {
+		t.Fatalf("part=%+v", part)
+	}
+
+	for _, raw := range []string{
+		`{"contents":[{"role":"user","parts":[{"text":"hello","mediaProcessing":"STATIC"}]}]}`,
+		`{"contents":[{"role":"user","parts":[{"inlineData":{"mimeType":"image/png","data":"iVBORw0KGgo="},"mediaProcessing":"STATIC"}]}]}`,
+		`{"contents":[{"role":"user","parts":[{"inlineData":{"mimeType":"video/mp4","data":"AAAADGZ0eXBtcDQy"},"mediaProcessing":"DYNAMIC"}]}]}`,
+	} {
+		var invalid generateRequest
+		if err := decodeMessagesValue(json.RawMessage(raw), &invalid); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := invalid.chat("model", false); err == nil {
+			t.Fatalf("invalid media processing accepted: %s", raw)
+		}
+	}
+
+	var stored generateRequest
+	if err := decodeMessagesValue(json.RawMessage(`{"contents":[{"role":"user","parts":[{"fileData":{"mimeType":"video/mp4","fileUri":"file_video"},"mediaProcessing":"STATIC"}]}]}`), &stored); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stored.chat("model", false); err != nil {
+		t.Fatalf("stored video media processing rejected: %v", err)
+	}
+}
+
 func TestGenerateRequestMapsAdditionalInlineAudioFormats(t *testing.T) {
 	tests := []struct {
 		mediaType, wantMediaType string

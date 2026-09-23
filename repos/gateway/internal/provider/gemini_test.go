@@ -114,6 +114,23 @@ func TestGeminiForwardsPerPartMediaResolution(t *testing.T) {
 	}
 }
 
+func TestGeminiForwardsPerVideoMediaProcessing(t *testing.T) {
+	request := openai.ChatCompletionRequest{Model: "gemini-test", Messages: []openai.Message{{Role: "user", Content: []any{
+		map[string]any{
+			"type": "input_video", "input_video": map[string]any{"data": "AAAADGZ0eXBtcDQy", "format": "mp4"},
+			"gemini_media_processing": "AGENTIC",
+		},
+	}}}}
+	native, err := geminiChatRequest(request)
+	if err != nil || native.Contents[0].Parts[0].MediaProcessing != "AGENTIC" {
+		t.Fatalf("native=%+v err=%v", native, err)
+	}
+	request.Messages[0].Content = []any{map[string]any{"type": "image_url", "image_url": map[string]any{"url": "data:image/png;base64,iVBORw0KGgo="}, "gemini_media_processing": "STATIC"}}
+	if _, err := geminiChatRequest(request); err == nil {
+		t.Fatal("image media processing accepted")
+	}
+}
+
 func TestGeminiGoogleSearchGroundingAndUsage(t *testing.T) {
 	var upstream geminiRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

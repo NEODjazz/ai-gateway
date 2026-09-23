@@ -197,6 +197,17 @@ func validateTokenCountRequest(request openai.ChatCompletionRequest) error {
 					if !ok || len(part) != 2 || len(image) != 1 {
 						return invalid("messages.content")
 					}
+				case "input_audio", "input_file", "input_video":
+					wantFields := 2
+					if _, ok := part["gemini_media_resolution"]; ok {
+						wantFields++
+					}
+					if _, ok := part["gemini_media_processing"]; ok {
+						wantFields++
+					}
+					if len(part) != wantFields {
+						return invalid("messages.content")
+					}
 				default:
 					return invalid("messages.content")
 				}

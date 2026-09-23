@@ -62,6 +62,9 @@ func videoAttachments(value any) ([]VideoAttachment, error) {
 				if _, ok := typed["gemini_media_resolution"]; ok {
 					wantFields++
 				}
+				if _, ok := typed["gemini_media_processing"]; ok {
+					wantFields++
+				}
 				if len(typed) != wantFields {
 					return ErrInvalidVideoInput
 				}

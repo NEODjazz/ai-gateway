@@ -11,6 +11,7 @@ export const modelCapabilityOptions: ChipOption[] = [
   { value: "gemini_code_execution", label: "Gemini code execution", description: "Native managed code execution tool" },
   { value: "gemini_audio_timestamp", label: "Vertex audio timestamps", description: "Timestamp-aware processing for audio inputs" },
   { value: "gemini_media_resolution", label: "Gemini media resolution", description: "Control input media token resolution" },
+  { value: "gemini_media_processing", label: "Gemini video processing", description: "Static or agentic processing for video inputs" },
   { value: "url_context", label: "URL context", description: "Native retrieval of URLs supplied in the prompt" },
   { value: "google_maps", label: "Google Maps grounding", description: "Native location-aware grounding with source metadata" },
   { value: "background_responses", label: "Background responses", description: "Durable asynchronous Responses execution" },
