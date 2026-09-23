@@ -39,6 +39,36 @@ func TestResponsesRejectsInvalidJSONDocuments(t *testing.T) {
 	}
 }
 
+func TestResponsesValidateEnvelopeIdentityAndLifecycle(t *testing.T) {
+	for _, status := range []string{"", "completed", "failed", "in_progress", "cancelled", "queued", "incomplete"} {
+		document := `{"id":"resp_1","object":"response","model":"m"}`
+		if status != "" {
+			document = `{"id":"resp_1","object":"response","model":"m","status":"` + status + `"}`
+		}
+		if _, err := decodeResponseJSON(strings.NewReader(document)); err != nil {
+			t.Fatalf("valid status %q rejected: %v", status, err)
+		}
+	}
+
+	for _, document := range []string{
+		`{"id":"bad/id","object":"response","model":"m","status":"completed"}`,
+		`{"id":"` + strings.Repeat("r", 257) + `","object":"response","model":"m","status":"completed"}`,
+		`{"id":"resp_1","object":"chat.completion","model":"m","status":"completed"}`,
+		`{"id":"resp_1","object":"response","model":" m","status":"completed"}`,
+		`{"id":"resp_1","object":"response","model":"` + strings.Repeat("m", 257) + `","status":"completed"}`,
+		`{"id":"resp_1","object":"response","model":"m","status":"unknown"}`,
+	} {
+		if _, err := decodeResponseJSON(strings.NewReader(document)); err == nil {
+			t.Fatalf("invalid response envelope accepted: %s", document)
+		}
+		callbacks := 0
+		wire := "data: {\"type\":\"response.completed\",\"response\":" + document + "}\n\n"
+		if _, err := streamResponseData(strings.NewReader(wire), "m", func(string, string) error { callbacks++; return nil }); err == nil || callbacks != 0 {
+			t.Fatalf("invalid response envelope delivered: document=%s err=%v callbacks=%d", document, err, callbacks)
+		}
+	}
+}
+
 func TestResponsesPreserveAndValidateMisalignmentError(t *testing.T) {
 	valid := `{"code":"misalignment_policy_violation","message":"request blocked","misalignment":{"detailed_explanation":"unsafe transfer","error_type":"potentially_unintended_data_transfer","steer":{"message":"continue without private data"}}}`
 	for _, stream := range []bool{false, true} {

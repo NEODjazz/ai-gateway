@@ -1763,6 +1763,16 @@ non-string values fail before the response is returned or the terminal event is
 delivered, preventing clients from acting on a silently weakened lifecycle
 status.
 
+### Responses envelope validation
+
+Compatible JSON and SSE snapshots reject malformed response IDs, non-Response
+object discriminators, whitespace-padded or oversized model IDs and unknown
+lifecycle states before delivery. The accepted lifecycle values are
+`completed`, `failed`, `in_progress`, `cancelled`, `queued` and `incomplete`.
+Legacy compatible providers may omit these echoed identity fields; when present,
+they must satisfy the public contract. Terminal SSE events continue to require a
+matching terminal state and a response object.
+
 ### Responses prompt-cache prewarming
 
 Responses accepts `prompt_cache_options.prewarm=true` on compatible adapters to

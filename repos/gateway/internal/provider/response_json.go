@@ -40,6 +40,9 @@ func decodeResponseJSON(reader io.Reader) (openai.ResponseResponse, error) {
 	if err := validateResponseUsage(response.Usage); err != nil {
 		return openai.ResponseResponse{}, err
 	}
+	if err := validateResponseEnvelope(*response); err != nil {
+		return openai.ResponseResponse{}, err
+	}
 	if err := validateResponseControls(*response); err != nil {
 		return openai.ResponseResponse{}, err
 	}
@@ -51,6 +54,24 @@ func decodeResponseJSON(reader io.Reader) (openai.ResponseResponse, error) {
 	}
 	response.OutputText = responseText(*response)
 	return *response, nil
+}
+
+func validateResponseEnvelope(response openai.ResponseResponse) error {
+	if response.ID != "" && !validResponseResourceID(response.ID) {
+		return errors.New("provider returned invalid response ID")
+	}
+	if response.Object != "" && response.Object != "response" {
+		return errors.New("provider returned invalid response object")
+	}
+	if response.Model != "" && (strings.TrimSpace(response.Model) != response.Model || utf8.RuneCountInString(response.Model) > 256) {
+		return errors.New("provider returned invalid response model")
+	}
+	switch response.Status {
+	case "", "completed", "failed", "in_progress", "cancelled", "queued", "incomplete":
+		return nil
+	default:
+		return errors.New("provider returned invalid response status")
+	}
 }
 
 func validateResponseConfigurationPayload(payload []byte, response *openai.ResponseResponse) error {
