@@ -94,12 +94,12 @@ func (h Handler) RAGQuery(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	chat.Messages = insertRAGContext(chat.Messages, results)
-	if chat.Stream {
-		h.serveChatAs(w, r, chat, "rag_query")
-		return
-	}
-	h.serveChatAdapted(w, r, chat, "rag_query", func(response openai.ChatCompletionResponse) (any, error) {
-		return annotateRAGResponse(response, results), nil
+	citations := newRAGStreamCitations(results)
+	h.serveChatWithAdapter(w, r, chat, "rag_query", chatResponseAdapter{
+		decorate: func(response *openai.ChatCompletionResponse) {
+			*response = annotateRAGResponse(*response, results)
+		},
+		stream: citations.decorate,
 	})
 }
 

@@ -258,6 +258,12 @@ func (h Handler) serveChatAs(w http.ResponseWriter, r *http.Request, request ope
 	h.serveChatAdapted(w, r, request, apiType, nil)
 }
 
+type chatResponseAdapter struct {
+	transform func(openai.ChatCompletionResponse) (any, error)
+	decorate  func(*openai.ChatCompletionResponse)
+	stream    func(string) ([]string, error)
+}
+
 func validateChatRequest(request openai.ChatCompletionRequest) string {
 	if err := openai.ValidateLegacyFunctionRequest(request); err != nil {
 		return err.Error()
@@ -328,6 +334,10 @@ func responseAttachmentError(input any) (string, error) {
 }
 
 func (h Handler) serveChatAdapted(w http.ResponseWriter, r *http.Request, request openai.ChatCompletionRequest, apiType string, transform func(openai.ChatCompletionResponse) (any, error)) {
+	h.serveChatWithAdapter(w, r, request, apiType, chatResponseAdapter{transform: transform})
+}
+
+func (h Handler) serveChatWithAdapter(w http.ResponseWriter, r *http.Request, request openai.ChatCompletionRequest, apiType string, adapter chatResponseAdapter) {
 	if message := validateChatRequest(request); message != "" {
 		writeError(w, http.StatusBadRequest, "invalid_request", message)
 		return
@@ -443,20 +453,33 @@ func (h Handler) serveChatAdapted(w http.ResponseWriter, r *http.Request, reques
 		includeUsage := request.StreamOptions != nil && request.StreamOptions.IncludeUsage
 		usageDelivered := false
 		writeStreamPayload := func(payload string) error {
-			payload, hasUsage, deliver, err := transformChatStreamPayload(payload, request.StreamOptions, includeUsage)
-			if err != nil {
-				return err
+			payloads := []string{payload}
+			if adapter.stream != nil {
+				var err error
+				payloads, err = adapter.stream(payload)
+				if err != nil {
+					return err
+				}
 			}
-			usageDelivered = usageDelivered || hasUsage && deliver
-			if !deliver {
-				return nil
+			for _, item := range payloads {
+				transformed, hasUsage, deliver, err := transformChatStreamPayload(item, request.StreamOptions, includeUsage)
+				if err != nil {
+					return err
+				}
+				usageDelivered = usageDelivered || hasUsage && deliver
+				if !deliver {
+					continue
+				}
+				if !streamStarted {
+					writeStreamHeaders(w)
+					w.WriteHeader(http.StatusOK)
+					streamStarted = true
+				}
+				if err := writeSSEPayload(w, transformed); err != nil {
+					return err
+				}
 			}
-			if !streamStarted {
-				writeStreamHeaders(w)
-				w.WriteHeader(http.StatusOK)
-				streamStarted = true
-			}
-			return writeSSEPayload(w, payload)
+			return nil
 		}
 		if response, streamed, err := h.provider.StreamChatCompletions(r.Context(), reqCtx, writeStreamPayload); streamed {
 			if err != nil {
@@ -494,6 +517,9 @@ func (h Handler) serveChatAdapted(w http.ResponseWriter, r *http.Request, reques
 		writeSkillExecutionError(w, err)
 		return
 	}
+	if adapter.decorate != nil {
+		adapter.decorate(&response)
+	}
 	if sink, ok := w.(interface {
 		chatResult(openai.ChatCompletionResponse, bool)
 	}); ok {
@@ -505,8 +531,8 @@ func (h Handler) serveChatAdapted(w http.ResponseWriter, r *http.Request, reques
 		writeChatCompletionStream(w, response, request.StreamOptions)
 		return
 	}
-	if transform != nil {
-		adapted, err := transform(response)
+	if adapter.transform != nil {
+		adapted, err := adapter.transform(response)
 		if err != nil {
 			writeProviderFailure(w, err)
 			return
@@ -2324,19 +2350,23 @@ func writeChatCompletionStream(w http.ResponseWriter, response openai.ChatComple
 		for index := range calls {
 			calls[index].Index = &index
 		}
+		delta := map[string]any{
+			"role":          choice.Message.Role,
+			"content":       openai.ContentText(choice.Message.Content),
+			"refusal":       choice.Message.Refusal,
+			"audio":         choice.Message.Audio,
+			"function_call": choice.Message.FunctionCall,
+			"tool_calls":    calls,
+		}
+		if len(choice.Message.Annotations) > 0 {
+			delta["annotations"] = choice.Message.Annotations
+		}
 		content := envelope()
 		content["choices"] = []map[string]any{
 			{
-				"index":    choice.Index,
-				"logprobs": choice.Logprobs,
-				"delta": map[string]any{
-					"role":          choice.Message.Role,
-					"content":       openai.ContentText(choice.Message.Content),
-					"refusal":       choice.Message.Refusal,
-					"audio":         choice.Message.Audio,
-					"function_call": choice.Message.FunctionCall,
-					"tool_calls":    calls,
-				},
+				"index":         choice.Index,
+				"logprobs":      choice.Logprobs,
+				"delta":         delta,
 				"finish_reason": nil,
 			},
 		}
