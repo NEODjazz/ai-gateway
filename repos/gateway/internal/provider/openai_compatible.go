@@ -1506,6 +1506,9 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 			if err := json.Unmarshal(payload, &snapshot); err != nil {
 				return err
 			}
+			if snapshot.Type != "output_text" && snapshot.Type != "refusal" {
+				return errors.New("Responses content event has an unsupported part type")
+			}
 			if err := validateResponseOutputContent(snapshot); err != nil {
 				return err
 			}
