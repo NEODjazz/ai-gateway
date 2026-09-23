@@ -79,6 +79,47 @@ func TestResponsesPreserveAndValidateExecutionControls(t *testing.T) {
 	}
 }
 
+func TestResponsesPreserveAndValidateLifecycleMetadata(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprintf("stream=%v", stream), func(t *testing.T) {
+			document := `{"id":"r","object":"response","model":"m","status":"completed","created_at":100,"completed_at":101,"background":false,"store":false,"previous_response_id":"resp_prior"}`
+			var response openai.ResponseResponse
+			var err error
+			if stream {
+				response, err = streamResponseData(strings.NewReader("data: {\"type\":\"response.completed\",\"response\":"+document+"}\n\n"), "m", func(string, string) error { return nil })
+			} else {
+				response, err = decodeResponseJSON(strings.NewReader(document))
+			}
+			if err != nil || response.CreatedAt != 100 || response.CompletedAt != 101 || response.Background == nil || *response.Background || response.Store == nil || *response.Store || response.PreviousResponseID == nil || *response.PreviousResponseID != "resp_prior" {
+				t.Fatalf("response=%+v err=%v", response, err)
+			}
+			encoded, err := json.Marshal(response)
+			for _, field := range []string{`"completed_at":101`, `"background":false`, `"store":false`, `"previous_response_id":"resp_prior"`} {
+				if err != nil || !strings.Contains(string(encoded), field) {
+					t.Fatalf("encoded=%s missing=%s err=%v", encoded, field, err)
+				}
+			}
+		})
+	}
+
+	for _, document := range []string{
+		`{"id":"r","object":"response","model":"m","created_at":-1}`,
+		`{"id":"r","object":"response","model":"m","completed_at":-1}`,
+		`{"id":"r","object":"response","model":"m","created_at":2,"completed_at":1}`,
+		`{"id":"r","object":"response","model":"m","previous_response_id":" "}`,
+		`{"id":"r","object":"response","model":"m","previous_response_id":"` + strings.Repeat("x", 513) + `"}`,
+	} {
+		if _, err := decodeResponseJSON(strings.NewReader(document)); err == nil {
+			t.Fatalf("invalid lifecycle metadata accepted: %s", document)
+		}
+		callbacks := 0
+		wire := "data: {\"type\":\"response.completed\",\"response\":" + document + "}\n\n"
+		if _, err := streamResponseData(strings.NewReader(wire), "m", func(string, string) error { callbacks++; return nil }); err == nil || callbacks != 0 {
+			t.Fatalf("invalid lifecycle metadata delivered: err=%v callbacks=%d", err, callbacks)
+		}
+	}
+}
+
 func TestResponsesRejectsInvalidImageGenerationResults(t *testing.T) {
 	for _, output := range []string{
 		`{"type":"image_generation_call","status":"completed"}`,

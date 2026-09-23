@@ -50,6 +50,12 @@ func decodeResponseJSON(reader io.Reader) (openai.ResponseResponse, error) {
 }
 
 func validateResponseControls(response openai.ResponseResponse) error {
+	if response.CreatedAt < 0 || response.CompletedAt < 0 || response.CreatedAt > 0 && response.CompletedAt > 0 && response.CompletedAt < response.CreatedAt {
+		return errors.New("provider returned invalid response timestamps")
+	}
+	if response.PreviousResponseID != nil && (*response.PreviousResponseID == "" || strings.TrimSpace(*response.PreviousResponseID) != *response.PreviousResponseID || utf8.RuneCountInString(*response.PreviousResponseID) > 512) {
+		return errors.New("provider returned invalid previous_response_id")
+	}
 	if response.MaxOutputTokens != nil && *response.MaxOutputTokens <= 0 {
 		return errors.New("provider returned invalid max_output_tokens")
 	}

@@ -908,8 +908,12 @@ type ResponseResponse struct {
 	ID                  string                     `json:"id"`
 	Object              string                     `json:"object"`
 	CreatedAt           int64                      `json:"created_at,omitempty"`
+	CompletedAt         int64                      `json:"completed_at,omitempty"`
 	Status              string                     `json:"status,omitempty"`
 	Model               string                     `json:"model"`
+	Background          *bool                      `json:"background,omitempty"`
+	Store               *bool                      `json:"store,omitempty"`
+	PreviousResponseID  *string                    `json:"previous_response_id,omitempty"`
 	ServiceTier         string                     `json:"service_tier,omitempty"`
 	MaxOutputTokens     *int                       `json:"max_output_tokens,omitempty"`
 	MaxToolCalls        *int                       `json:"max_tool_calls,omitempty"`
