@@ -123,7 +123,7 @@ func decodeCerebrasChatCompletionResponse(reader io.Reader, target *openai.ChatC
 	if len(payload) > maxChatCompletionResponseBytes {
 		return errors.New("chat completion response exceeds limit")
 	}
-	normalized, err := normalizeChatReasoningAliasPayload("Cerebras", payload, "message")
+	normalized, err := normalizeCerebrasChatPayload(payload, "message")
 	if err != nil {
 		return err
 	}
@@ -131,12 +131,48 @@ func decodeCerebrasChatCompletionResponse(reader io.Reader, target *openai.ChatC
 }
 
 func normalizeCerebrasChatStreamPayload(payload string) (string, error) {
-	normalized, err := normalizeChatReasoningAliasPayload("Cerebras", []byte(payload), "delta")
+	normalized, err := normalizeCerebrasChatPayload([]byte(payload), "delta")
 	return string(normalized), err
 }
 
 func normalizeCerebrasChatPayload(payload []byte, messageField string) ([]byte, error) {
-	return normalizeChatReasoningAliasPayload("Cerebras", payload, messageField)
+	normalized, err := normalizeChatReasoningAliasPayload("Cerebras", payload, messageField)
+	if err != nil {
+		return nil, err
+	}
+	return normalizeCerebrasServiceTier(normalized)
+}
+
+func normalizeCerebrasServiceTier(payload []byte) ([]byte, error) {
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &envelope); err != nil {
+		return nil, err
+	}
+	rawUsed, found := envelope["service_tier_used"]
+	if !found {
+		return payload, nil
+	}
+	var used string
+	if err := json.Unmarshal(rawUsed, &used); err != nil || used == "" {
+		return nil, errors.New("provider returned invalid Cerebras service_tier_used")
+	}
+	switch used {
+	case "priority", "default", "flex":
+	default:
+		return nil, errors.New("provider returned unsupported Cerebras service_tier_used")
+	}
+	if rawTier := envelope["service_tier"]; len(rawTier) > 0 && string(rawTier) != "null" {
+		var tier string
+		if err := json.Unmarshal(rawTier, &tier); err != nil {
+			return nil, errors.New("provider returned invalid Cerebras service_tier")
+		}
+		if tier != "" && tier != "auto" && tier != used {
+			return nil, errors.New("provider returned conflicting Cerebras service tiers")
+		}
+	}
+	delete(envelope, "service_tier_used")
+	envelope["service_tier"], _ = json.Marshal(used)
+	return json.Marshal(envelope)
 }
 
 func normalizeChatReasoningAliasPayload(providerName string, payload []byte, messageField string) ([]byte, error) {

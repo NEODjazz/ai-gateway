@@ -78,6 +78,52 @@ func TestCerebrasStreamsNormalizedReasoningAndUsage(t *testing.T) {
 	}
 }
 
+func TestCerebrasUsesEffectiveAutoServiceTier(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body["service_tier"] != "auto" {
+			t.Fatalf("request=%#v", body)
+		}
+		_, _ = fmt.Fprint(w, `{"id":"chat","object":"chat.completion","model":"model","service_tier":"auto","service_tier_used":"flex","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`)
+	}))
+	defer server.Close()
+	client := NewCerebras(server.URL, "key", true)
+	response, err := client.ChatCompletions(t.Context(), openai.ChatCompletionRequest{
+		Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}},
+		ChatGenerationOptions: openai.ChatGenerationOptions{ServiceTier: "auto"},
+	})
+	if err != nil || response.ServiceTier != "flex" {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
+func TestCerebrasStreamsEffectiveAutoServiceTier(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"chat\",\"model\":\"model\",\"service_tier\":\"auto\",\"service_tier_used\":\"priority\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"ok\"}}]}\n\ndata: {\"id\":\"chat\",\"model\":\"model\",\"service_tier\":\"auto\",\"service_tier_used\":\"priority\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2}}\n\ndata: [DONE]\n\n")
+	}))
+	defer server.Close()
+	client := NewCerebras(server.URL, "key", true)
+	var payloads []string
+	response, err := client.StreamChatCompletions(t.Context(), openai.ChatCompletionRequest{
+		Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}}, Stream: true,
+		ChatGenerationOptions: openai.ChatGenerationOptions{ServiceTier: "auto"},
+	}, func(payload string) error {
+		payloads = append(payloads, payload)
+		return nil
+	})
+	if err != nil || response.ServiceTier != "priority" || len(payloads) != 2 {
+		t.Fatalf("response=%+v payloads=%v err=%v", response, payloads, err)
+	}
+	for _, payload := range payloads {
+		if strings.Contains(payload, "service_tier_used") || !strings.Contains(payload, `"service_tier":"priority"`) {
+			t.Fatalf("effective service tier was not normalized: %s", payload)
+		}
+	}
+}
+
 func TestCerebrasRejectsInvalidReasoningResponses(t *testing.T) {
 	for _, test := range []struct {
 		name    string
@@ -92,6 +138,18 @@ func TestCerebrasRejectsInvalidReasoningResponses(t *testing.T) {
 				t.Fatal("invalid provider reasoning was accepted")
 			}
 		})
+	}
+}
+
+func TestCerebrasRejectsInvalidEffectiveServiceTier(t *testing.T) {
+	for _, payload := range []string{
+		`{"service_tier":"auto","service_tier_used":"unknown","choices":[]}`,
+		`{"service_tier":"priority","service_tier_used":"flex","choices":[]}`,
+		`{"service_tier":"auto","service_tier_used":7,"choices":[]}`,
+	} {
+		if _, err := normalizeCerebrasChatPayload([]byte(payload), "message"); err == nil {
+			t.Fatalf("invalid provider service tier was accepted: %s", payload)
+		}
 	}
 }
 
