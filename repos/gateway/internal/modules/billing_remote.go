@@ -590,11 +590,13 @@ func responseRequestsImageGeneration(request openai.ResponseRequest) bool {
 func responseToolUsageReserve(request openai.ResponseRequest) (toolRequests, searchRequests int, searchEstimated bool) {
 	var hosted, search bool
 	for _, tool := range request.Tools {
+		if openai.IsResponseWebSearchTool(tool.Type) {
+			search = true
+			continue
+		}
 		switch tool.Type {
 		case "code_interpreter", "file_search", "mcp", "computer", "shell", "apply_patch":
 			hosted = true
-		case "web_search", "web_search_preview":
-			search = true
 		}
 	}
 	if hosted {

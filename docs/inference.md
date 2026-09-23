@@ -656,6 +656,11 @@ adapters возвращают `unsupported_parameter`. Маршрутизаци�
 deployment/model capability `web_search`. Exact и semantic response cache
 отключены, поскольку результат зависит от внешнего состояния веба.
 
+Responses принимает current и versioned `web_search`/`web_search_preview`
+контракты как одну capability. До provider call billing резервирует одинаковый
+консервативный лимит поисков для каждого варианта; `max_tool_calls` сужает этот
+лимит, а commit заменяет оценку фактическим числом `web_search_call` outputs.
+
 Chat assistant messages preserve nullable `refusal` in compatible request
 history, JSON responses, live SSE accumulation and synthetic SSE. Refusal text
 is included in context token estimates and follows the same anonymization and

@@ -690,20 +690,24 @@ func TestResponsesApplyPatchBillingAccountsForExecutedClientCalls(t *testing.T) 
 }
 
 func TestResponsesWebSearchBillingUsesConservativeDefaultReserve(t *testing.T) {
-	req := &RequestContext{
-		Request:         openai.ChatCompletionRequest{Model: "model"},
-		ResponseRequest: &openai.ResponseRequest{Model: "model", Input: "search", Tools: []openai.ResponseTool{{Type: "web_search_preview"}}},
-	}
-	reserved := billingRequest(req)
-	if reserved.ToolRequests != 0 || reserved.SearchRequests != openai.WebSearchMaxUses || !reserved.SearchRequestsEstimated {
-		t.Fatalf("Responses web search reserve=%+v", reserved)
-	}
+	for _, toolType := range []string{"web_search", "web_search_2025_08_26", "web_search_preview", "web_search_preview_2025_03_11"} {
+		t.Run(toolType, func(t *testing.T) {
+			req := &RequestContext{
+				Request:         openai.ChatCompletionRequest{Model: "model"},
+				ResponseRequest: &openai.ResponseRequest{Model: "model", Input: "search", Tools: []openai.ResponseTool{{Type: toolType}}},
+			}
+			reserved := billingRequest(req)
+			if reserved.ToolRequests != 0 || reserved.SearchRequests != openai.WebSearchMaxUses || !reserved.SearchRequestsEstimated {
+				t.Fatalf("Responses web search reserve=%+v", reserved)
+			}
 
-	zero := 0
-	req.ResponseRequest.MaxToolCalls = &zero
-	reserved = billingRequest(req)
-	if reserved.SearchRequests != 0 || !reserved.SearchRequestsEstimated {
-		t.Fatalf("Responses zero-call reserve=%+v", reserved)
+			zero := 0
+			req.ResponseRequest.MaxToolCalls = &zero
+			reserved = billingRequest(req)
+			if reserved.SearchRequests != 0 || !reserved.SearchRequestsEstimated {
+				t.Fatalf("Responses zero-call reserve=%+v", reserved)
+			}
+		})
 	}
 }
 
