@@ -614,7 +614,7 @@ func TestManagedProviderCapabilityProfilesExposeAllValidatedResponseOptions(t *t
 		"azure-openai":      {SupportedOptions: compatible, ReasoningEffort: allReasoning},
 		"anthropic":         {SupportedOptions: []string{"parallel_tool_calls", "max_output_tokens", "max_tokens", "temperature", "top_p"}},
 		"groq":              {SupportedOptions: []string{"metadata", "parallel_tool_calls", "user", "max_output_tokens", "max_tokens", "temperature", "top_p", "reasoning", "service_tier"}, ReasoningEffort: []string{"low", "medium", "high"}, ServiceTier: []string{"auto", "default", "flex"}},
-		"deepseek":          {SupportedOptions: []string{"top_logprobs", "user", "max_output_tokens", "max_tokens", "temperature", "top_p", "reasoning"}, ReasoningEffort: []string{"low", "medium", "high", "xhigh", "max"}},
+		"deepseek":          {SupportedOptions: []string{"top_logprobs", "user", "max_output_tokens", "max_tokens", "temperature", "top_p", "reasoning"}, ReasoningEffort: []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"}},
 		"xai":               {SupportedOptions: []string{"store", "include", "parallel_tool_calls", "previous_response_id", "user", "prompt_cache_key", "max_output_tokens", "max_tokens", "temperature", "top_p", "max_tool_calls", "reasoning", "service_tier"}, ReasoningEffort: []string{"none", "low", "medium", "high", "xhigh"}, ServiceTier: []string{"default", "priority"}},
 	}
 	for providerType, want := range expected {

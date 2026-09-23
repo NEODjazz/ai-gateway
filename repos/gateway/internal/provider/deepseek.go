@@ -166,9 +166,9 @@ func (d DeepSeek) ValidateResponseParameters(request openai.ResponseRequest) err
 		}
 		if reasoning.Effort != nil {
 			switch *reasoning.Effort {
-			case "low", "medium", "high", "xhigh", "max":
+			case "none", "minimal", "low", "medium", "high", "xhigh", "max":
 			default:
-				return &Error{Class: FailureClientRequest, Provider: "deepseek", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "reasoning.effort", Err: errors.New("reasoning effort must be low, medium, high, xhigh, or max")}
+				return &Error{Class: FailureClientRequest, Provider: "deepseek", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "reasoning.effort", Err: errors.New("reasoning effort must be none, minimal, low, medium, high, xhigh, or max")}
 			}
 		}
 	}

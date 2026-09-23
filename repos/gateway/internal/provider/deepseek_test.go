@@ -120,6 +120,31 @@ func TestDeepSeekResponsesMapsSupportedContract(t *testing.T) {
 	}
 }
 
+func TestDeepSeekResponsesReasoningEffortWire(t *testing.T) {
+	for _, effort := range []string{"none", "minimal"} {
+		t.Run(effort, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var body map[string]any
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Fatal(err)
+				}
+				reasoning, _ := body["reasoning"].(map[string]any)
+				if reasoning["effort"] != effort {
+					t.Fatalf("reasoning=%v", reasoning)
+				}
+				_, _ = fmt.Fprint(w, `{"id":"resp","object":"response","created_at":1,"status":"completed","model":"deepseek-flash","output":[{"id":"msg","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"ok","annotations":[]}]}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`)
+			}))
+			defer server.Close()
+			response, err := NewDeepSeek(server.URL, "key", false).Responses(t.Context(), openai.ResponseRequest{
+				Model: "deepseek-flash", Input: "hello", Reasoning: &openai.ResponseReasoning{Effort: &effort},
+			})
+			if err != nil || response.OutputText != "ok" {
+				t.Fatalf("response=%+v err=%v", response, err)
+			}
+		})
+	}
+}
+
 func TestDeepSeekStreamsResponses(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
