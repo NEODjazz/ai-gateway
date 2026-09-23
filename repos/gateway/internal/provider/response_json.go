@@ -60,6 +60,7 @@ func validateResponseConfigurationPayload(payload []byte, response *openai.Respo
 		Tools              json.RawMessage `json:"tools"`
 		ToolChoice         json.RawMessage `json:"tool_choice"`
 		PromptCacheOptions json.RawMessage `json:"prompt_cache_options"`
+		Moderation         json.RawMessage `json:"moderation"`
 	}
 	if err := json.Unmarshal(payload, &wire); err != nil {
 		return err
@@ -87,6 +88,11 @@ func validateResponseConfigurationPayload(payload []byte, response *openai.Respo
 	if len(wire.PromptCacheOptions) > 0 && string(wire.PromptCacheOptions) != "null" {
 		if err := decodeStrictResponseConfiguration(wire.PromptCacheOptions, &response.PromptCacheOptions); err != nil {
 			return errors.New("provider returned invalid prompt_cache_options")
+		}
+	}
+	if len(wire.Moderation) > 0 && string(wire.Moderation) != "null" {
+		if err := decodeStrictResponseConfiguration(wire.Moderation, &response.Moderation); err != nil {
+			return errors.New("provider returned invalid response moderation results")
 		}
 	}
 	if message := openai.ValidateResponseConfiguration(response.Tools, response.ToolChoice, response.Reasoning, response.Text); message != "" {
@@ -126,6 +132,9 @@ func validateResponseControls(response openai.ResponseResponse) error {
 	if message := openai.ValidateResponseInstructions(response.Instructions); message != "" {
 		return errors.New("provider returned invalid instructions: " + message)
 	}
+	if err := validateResponseModeration(response.Moderation); err != nil {
+		return err
+	}
 	if response.MaxOutputTokens != nil && *response.MaxOutputTokens <= 0 {
 		return errors.New("provider returned invalid max_output_tokens")
 	}
@@ -148,6 +157,29 @@ func validateResponseControls(response openai.ResponseResponse) error {
 	}
 	if response.Truncation != nil && *response.Truncation != "auto" && *response.Truncation != "disabled" {
 		return errors.New("provider returned invalid truncation")
+	}
+	return nil
+}
+
+func validateResponseModeration(moderation *openai.ResponseModeration) error {
+	if moderation == nil {
+		return nil
+	}
+	if moderation.Input == nil && moderation.Output == nil {
+		return errors.New("provider returned empty response moderation results")
+	}
+	for _, result := range []*openai.ResponseModerationResult{moderation.Input, moderation.Output} {
+		if result == nil {
+			continue
+		}
+		if result.Type != "moderation_result" || strings.TrimSpace(result.Model) == "" || len(result.Model) > 512 {
+			return errors.New("provider returned invalid response moderation identity")
+		}
+		if err := validateModerationResult(openai.ModerationResult{
+			Flagged: result.Flagged, Categories: result.Categories, CategoryScores: result.CategoryScores, CategoryAppliedInputTypes: result.CategoryAppliedInputTypes,
+		}); err != nil {
+			return err
+		}
 	}
 	return nil
 }

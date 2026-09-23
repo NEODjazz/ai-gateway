@@ -937,9 +937,24 @@ type ResponseResponse struct {
 	OutputText          string                     `json:"output_text,omitempty"`
 	Usage               ResponseUsage              `json:"usage,omitempty"`
 	Instructions        any                        `json:"instructions,omitempty"`
+	Moderation          *ResponseModeration        `json:"moderation,omitempty"`
 
 	PromptCacheOptions   *PromptCacheOptions `json:"prompt_cache_options,omitempty"`
 	PromptCacheRetention string              `json:"prompt_cache_retention,omitempty"`
+}
+
+type ResponseModeration struct {
+	Input  *ResponseModerationResult `json:"input,omitempty"`
+	Output *ResponseModerationResult `json:"output,omitempty"`
+}
+
+type ResponseModerationResult struct {
+	Type                      string              `json:"type"`
+	Model                     string              `json:"model"`
+	Flagged                   bool                `json:"flagged"`
+	Categories                map[string]*bool    `json:"categories"`
+	CategoryScores            map[string]float64  `json:"category_scores"`
+	CategoryAppliedInputTypes map[string][]string `json:"category_applied_input_types"`
 }
 
 type ResponseInputItemList struct {

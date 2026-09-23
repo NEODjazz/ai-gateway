@@ -236,6 +236,44 @@ func TestResponsesPreserveAndValidateInstructions(t *testing.T) {
 	}
 }
 
+func TestResponsesPreserveAndValidateModerationResults(t *testing.T) {
+	result := `{"type":"moderation_result","model":"omni-moderation","flagged":true,"categories":{"violence":true},"category_scores":{"violence":0.9},"category_applied_input_types":{"violence":["text"]}}`
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprintf("stream=%v", stream), func(t *testing.T) {
+			document := `{"id":"r","object":"response","model":"m","status":"completed","moderation":{"input":` + result + `,"output":` + result + `}}`
+			var response openai.ResponseResponse
+			var err error
+			if stream {
+				response, err = streamResponseData(strings.NewReader("data: {\"type\":\"response.completed\",\"response\":"+document+"}\n\n"), "m", func(string, string) error { return nil })
+			} else {
+				response, err = decodeResponseJSON(strings.NewReader(document))
+			}
+			if err != nil || response.Moderation == nil || response.Moderation.Input == nil || response.Moderation.Output == nil || !response.Moderation.Input.Flagged || response.Moderation.Output.Model != "omni-moderation" {
+				t.Fatalf("response=%+v err=%v", response, err)
+			}
+		})
+	}
+
+	for _, moderation := range []string{
+		`{}`,
+		`{"input":{"type":"moderation_result","model":"m","flagged":false,"categories":{"violence":false},"category_scores":{"violence":0.1},"category_applied_input_types":{"violence":["text"]},"unknown":true}}`,
+		`{"input":{"type":"unknown","model":"m","flagged":false,"categories":{"violence":false},"category_scores":{"violence":0.1},"category_applied_input_types":{"violence":["text"]}}}`,
+		`{"input":{"type":"moderation_result","model":"","flagged":false,"categories":{"violence":false},"category_scores":{"violence":0.1},"category_applied_input_types":{"violence":["text"]}}}`,
+		`{"input":{"type":"moderation_result","model":"m","flagged":false,"categories":{"violence":true},"category_scores":{"violence":0.1},"category_applied_input_types":{"violence":["text"]}}}`,
+		`{"input":{"type":"moderation_result","model":"m","flagged":false,"categories":{"violence":false},"category_scores":{"violence":1.1},"category_applied_input_types":{"violence":["text"]}}}`,
+	} {
+		document := `{"id":"r","object":"response","model":"m","moderation":` + moderation + `}`
+		if _, err := decodeResponseJSON(strings.NewReader(document)); err == nil {
+			t.Fatalf("invalid moderation accepted: %s", moderation)
+		}
+		callbacks := 0
+		wire := "data: {\"type\":\"response.completed\",\"response\":" + document + "}\n\n"
+		if _, err := streamResponseData(strings.NewReader(wire), "m", func(string, string) error { callbacks++; return nil }); err == nil || callbacks != 0 {
+			t.Fatalf("invalid moderation delivered: moderation=%s err=%v callbacks=%d", moderation, err, callbacks)
+		}
+	}
+}
+
 func TestResponsesPreserveAndValidateGenerationSettings(t *testing.T) {
 	for _, stream := range []bool{false, true} {
 		t.Run(fmt.Sprintf("stream=%v", stream), func(t *testing.T) {
