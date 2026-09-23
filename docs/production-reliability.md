@@ -2163,3 +2163,17 @@ Gateway Helm revision 585 completed successfully. Pod
 `ai-gateway-gateway-84c6857d9c-ms4vc` became Ready with zero restarts. Live
 liveness and readiness returned 204, OpenAPI 0.1.466 was served, and the live
 provider-capability endpoint retained the validated Cerebras request tiers.
+
+## Provider-reported Chat service tiers
+
+Source `f9c1be4` validates provider-reported Chat service tiers before JSON
+delivery or the first SSE callback. The response allowlist covers the request
+values plus the provider-assigned `standard` and `batch` values. Unknown values
+now fail closed instead of entering usage and billing metadata. OpenAI contract,
+provider and API tests, vet, build and the full race suite passed.
+
+Rancher Desktop built `ai-gateway-gateway:reported-tiers-f9c1be4f` with image ID
+`sha256:4b1dda00c028fa1677e4d4b4ff3b953938e2a4e128ce767ee8cf18106cb6d62a`.
+Gateway Helm revision 586 completed successfully. Pod
+`ai-gateway-gateway-5c76bf8b65-7sjrj` became Ready with zero restarts. Live
+liveness and readiness returned 204 and OpenAPI 0.1.467 was served.
