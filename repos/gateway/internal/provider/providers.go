@@ -57,6 +57,7 @@ type ProviderChatParameterPolicy struct {
 	SupportedOptions []string `json:"supported_options"`
 	ReasoningEffort  []string `json:"reasoning_effort"`
 	ReasoningFormat  []string `json:"reasoning_format"`
+	CitationOptions  []string `json:"citation_options"`
 	Logprobs         []string `json:"logprobs"`
 	ServiceTier      []string `json:"service_tier"`
 }
@@ -1241,7 +1242,7 @@ func managedProviderChatParameterPolicy(client Client, supportsChat bool) Provid
 }
 
 func managedProviderChatParameterPolicyForModel(client Client, supportsChat bool, model string) ProviderChatParameterPolicy {
-	policy := ProviderChatParameterPolicy{SupportedOptions: []string{}, ReasoningEffort: []string{}, ReasoningFormat: []string{}, Logprobs: []string{}, ServiceTier: []string{}}
+	policy := ProviderChatParameterPolicy{SupportedOptions: []string{}, ReasoningEffort: []string{}, ReasoningFormat: []string{}, CitationOptions: []string{}, Logprobs: []string{}, ServiceTier: []string{}}
 	if !supportsChat {
 		return policy
 	}
@@ -1258,6 +1259,13 @@ func managedProviderChatParameterPolicyForModel(client Client, supportsChat bool
 		request.ReasoningFormat = value
 		if validateChatAdapter(client, request) == nil {
 			policy.ReasoningFormat = append(policy.ReasoningFormat, value)
+		}
+	}
+	for _, value := range []string{"enabled", "disabled"} {
+		request := baseline
+		request.CitationOptions = value
+		if validateChatAdapter(client, request) == nil {
+			policy.CitationOptions = append(policy.CitationOptions, value)
 		}
 	}
 	for _, value := range []bool{false, true} {
@@ -1286,6 +1294,9 @@ func managedProviderChatParameterPolicyForModel(client Client, supportsChat bool
 	}
 	if len(policy.ReasoningFormat) > 0 {
 		policy.SupportedOptions = append(policy.SupportedOptions, "reasoning_format")
+	}
+	if len(policy.CitationOptions) > 0 {
+		policy.SupportedOptions = append(policy.SupportedOptions, "citation_options")
 	}
 	if len(policy.ServiceTier) > 0 {
 		policy.SupportedOptions = append(policy.SupportedOptions, "service_tier")

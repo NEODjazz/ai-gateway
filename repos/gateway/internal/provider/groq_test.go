@@ -21,7 +21,7 @@ func TestGroqChatMapsSupportedContract(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatal(err)
 		}
-		if body["model"] != "qwen/qwen3.8-27b" || body["max_completion_tokens"] != float64(32) || body["service_tier"] != "performance" || body["user"] != "tenant-user" || body["reasoning_format"] != "parsed" || len(body["tools"].([]any)) != 1 || body["response_format"] == nil {
+		if body["model"] != "qwen/qwen3.8-27b" || body["max_completion_tokens"] != float64(32) || body["service_tier"] != "performance" || body["user"] != "tenant-user" || body["citation_options"] != "disabled" || body["reasoning_format"] != "parsed" || len(body["tools"].([]any)) != 1 || body["response_format"] == nil {
 			t.Fatalf("request=%#v", body)
 		}
 		_, _ = fmt.Fprint(w, `{"id":"chat","object":"chat.completion","model":"model","service_tier":"performance","choices":[{"index":0,"message":{"role":"assistant","content":"ok","reasoning":"private plan"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}`)
@@ -30,7 +30,7 @@ func TestGroqChatMapsSupportedContract(t *testing.T) {
 	maxTokens := 32
 	client := NewGroq(server.URL+"/openai/v1", "groq-key", true)
 	response, err := client.ChatCompletions(t.Context(), openai.ChatCompletionRequest{
-		Model: "qwen/qwen3.8-27b", Messages: []openai.Message{{Role: "user", Content: "hello"}}, MaxCompletionTokens: &maxTokens, ChatGenerationOptions: openai.ChatGenerationOptions{ServiceTier: "performance", User: "tenant-user", ReasoningFormat: "parsed"},
+		Model: "qwen/qwen3.8-27b", Messages: []openai.Message{{Role: "user", Content: "hello"}}, MaxCompletionTokens: &maxTokens, ChatGenerationOptions: openai.ChatGenerationOptions{ServiceTier: "performance", User: "tenant-user", CitationOptions: "disabled", ReasoningFormat: "parsed"},
 		Tools:          []openai.Tool{{Type: "function", Function: openai.FunctionDefinition{Name: "lookup", Parameters: map[string]any{"type": "object"}}}},
 		ResponseFormat: &openai.ResponseFormat{Type: "json_object"},
 	})
@@ -114,6 +114,19 @@ func TestGroqRejectsInvalidReasoningControlsBeforeHTTP(t *testing.T) {
 		if err == nil || called {
 			t.Fatalf("options=%+v err=%v called=%v", options, err, called)
 		}
+	}
+}
+
+func TestGroqRejectsInvalidCitationOptionsBeforeHTTP(t *testing.T) {
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
+	defer server.Close()
+	_, err := NewGroq(server.URL, "key", false).ChatCompletions(t.Context(), openai.ChatCompletionRequest{
+		Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}},
+		ChatGenerationOptions: openai.ChatGenerationOptions{CitationOptions: "invalid"},
+	})
+	if err == nil || called {
+		t.Fatalf("err=%v called=%v", err, called)
 	}
 }
 
@@ -209,6 +222,7 @@ func TestGroqReasoningControlsAreAdapterIsolated(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			for parameter, options := range map[string]openai.ChatGenerationOptions{
+				"citation_options":  {CitationOptions: "enabled"},
 				"include_reasoning": {IncludeReasoning: &include},
 				"reasoning_format":  {ReasoningFormat: "raw"},
 			} {

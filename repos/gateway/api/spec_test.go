@@ -111,6 +111,22 @@ func TestOpenAPIGroqReasoningControlsAndCapabilityPolicy(t *testing.T) {
 	}
 }
 
+func TestOpenAPIGroqCitationOptionsAndCapabilityPolicy(t *testing.T) {
+	document := loadDocument(t)
+	chat := document.Components.Schemas["ChatCompletionRequest"].Value
+	if chat == nil || chat.Properties["citation_options"] == nil {
+		t.Fatal("ChatCompletionRequest is missing citation_options")
+	}
+	values := chat.Properties["citation_options"].Value.Enum
+	if len(values) != 2 || values[0] != "enabled" || values[1] != "disabled" {
+		t.Fatalf("citation_options values=%v", values)
+	}
+	policy := document.Components.Schemas["ProviderChatParameterPolicy"].Value
+	if policy == nil || policy.Properties["citation_options"] == nil {
+		t.Fatal("ProviderChatParameterPolicy is missing citation_options")
+	}
+}
+
 func TestOpenAPITopKBelongsToMessagesRequest(t *testing.T) {
 	document := loadDocument(t)
 	messages := document.Components.Schemas["MessagesRequest"].Value
