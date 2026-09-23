@@ -36,6 +36,9 @@ func decodeResponseJSON(reader io.Reader) (openai.ResponseResponse, error) {
 	if err := validateResponseUsage(response.Usage); err != nil {
 		return openai.ResponseResponse{}, err
 	}
+	if err := validateResponseControls(*response); err != nil {
+		return openai.ResponseResponse{}, err
+	}
 	if err := validateResponseCitations(response.Citations); err != nil {
 		return openai.ResponseResponse{}, err
 	}
@@ -44,6 +47,13 @@ func decodeResponseJSON(reader io.Reader) (openai.ResponseResponse, error) {
 	}
 	response.OutputText = responseText(*response)
 	return *response, nil
+}
+
+func validateResponseControls(response openai.ResponseResponse) error {
+	if response.MaxToolCalls != nil && *response.MaxToolCalls < 0 {
+		return errors.New("provider returned invalid negative max_tool_calls")
+	}
+	return nil
 }
 
 func validateResponseCitations(citations []string) error {

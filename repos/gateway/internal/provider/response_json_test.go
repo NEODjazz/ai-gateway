@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -35,6 +36,38 @@ func TestResponsesRejectsInvalidJSONDocuments(t *testing.T) {
 				t.Fatal("invalid JSON document accepted")
 			}
 		})
+	}
+}
+
+func TestResponsesPreserveAndValidateMaxToolCalls(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprintf("stream=%v", stream), func(t *testing.T) {
+			document := `{"id":"r","object":"response","model":"m","status":"completed","max_tool_calls":0,"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`
+			var response openai.ResponseResponse
+			var err error
+			if stream {
+				response, err = streamResponseData(strings.NewReader("data: {\"type\":\"response.completed\",\"response\":"+document+"}\n\n"), "m", func(string, string) error { return nil })
+			} else {
+				response, err = decodeResponseJSON(strings.NewReader(document))
+			}
+			if err != nil || response.MaxToolCalls == nil || *response.MaxToolCalls != 0 {
+				t.Fatalf("response=%+v err=%v", response, err)
+			}
+			encoded, err := json.Marshal(response)
+			if err != nil || !strings.Contains(string(encoded), `"max_tool_calls":0`) {
+				t.Fatalf("encoded=%s err=%v", encoded, err)
+			}
+		})
+	}
+
+	document := `{"id":"r","object":"response","model":"m","status":"completed","max_tool_calls":-1}`
+	if _, err := decodeResponseJSON(strings.NewReader(document)); err == nil {
+		t.Fatal("negative JSON max_tool_calls accepted")
+	}
+	callbacks := 0
+	wire := "data: {\"type\":\"response.completed\",\"response\":" + document + "}\n\n"
+	if _, err := streamResponseData(strings.NewReader(wire), "m", func(string, string) error { callbacks++; return nil }); err == nil || callbacks != 0 {
+		t.Fatalf("negative SSE max_tool_calls delivered: err=%v callbacks=%d", err, callbacks)
 	}
 }
 
