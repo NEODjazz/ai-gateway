@@ -198,6 +198,16 @@ func TestResponsesRejectsInvalidProviderModerationBeforeExecution(t *testing.T) 
 	}
 }
 
+func TestResponsesPreservesPromptCachePrewarm(t *testing.T) {
+	upstream := &chatProvider{}
+	handler := NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}}}), upstream)
+	out := httptest.NewRecorder()
+	handler.Responses(out, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"m","input":"hello","prompt_cache_options":{"prewarm":true}}`)))
+	if out.Code != http.StatusOK || upstream.request.ResponseRequest == nil || upstream.request.ResponseRequest.PromptCacheOptions == nil || upstream.request.ResponseRequest.PromptCacheOptions.Prewarm == nil || !*upstream.request.ResponseRequest.PromptCacheOptions.Prewarm {
+		t.Fatalf("status=%d request=%+v body=%s", out.Code, upstream.request.ResponseRequest, out.Body.String())
+	}
+}
+
 func TestResponsesValidatesStreamOptionsBeforeExecution(t *testing.T) {
 	handler := Handler{}
 	for _, body := range []string{

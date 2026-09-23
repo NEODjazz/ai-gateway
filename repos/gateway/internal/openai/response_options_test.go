@@ -93,6 +93,14 @@ func TestResponseModerationValidation(t *testing.T) {
 	}
 }
 
+func TestResponsePromptCachePrewarmValidation(t *testing.T) {
+	enabled := true
+	request := ResponseRequest{PromptCacheOptions: &PromptCacheOptions{Prewarm: &enabled}}
+	if message := request.Validate(); message != "" {
+		t.Fatalf("valid prewarm rejected: %s", message)
+	}
+}
+
 func TestResponseBackgroundRequiresDurableNonStreamingStorage(t *testing.T) {
 	store := true
 	if message := (ResponseRequest{Background: true, Store: &store}).Validate(); message != "" {

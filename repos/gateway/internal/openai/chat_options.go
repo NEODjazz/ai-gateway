@@ -85,6 +85,7 @@ type PromptCacheOptions struct {
 	Mode                 string `json:"mode,omitempty"`
 	TTL                  string `json:"ttl,omitempty"`
 	ComparisonResponseID string `json:"comparison_response_id,omitempty"`
+	Prewarm              *bool  `json:"prewarm,omitempty"`
 }
 
 type ChatPrediction struct {
@@ -132,6 +133,9 @@ func (o ChatGenerationOptions) Validate() string {
 	if o.PromptCacheOptions != nil {
 		if message := ValidatePromptCacheOptions(o.PromptCacheOptions); message != "" {
 			return message
+		}
+		if o.PromptCacheOptions.Prewarm != nil {
+			return "prompt_cache_options.prewarm is only supported by Responses"
 		}
 		if o.PromptCacheOptions.ComparisonResponseID != "" {
 			return "prompt_cache_options.comparison_response_id is only supported by Responses"

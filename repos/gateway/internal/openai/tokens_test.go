@@ -148,6 +148,24 @@ func TestExplicitZeroMessagesOutputHasNoDefaultReserve(t *testing.T) {
 	}
 }
 
+func TestResponsePrewarmReservesInputOnly(t *testing.T) {
+	enabled := true
+	limit := 100_000
+	request := ResponseRequest{
+		Input:              "prepare this prompt",
+		MaxOutputTokens:    &limit,
+		PromptCacheOptions: &PromptCacheOptions{Prewarm: &enabled},
+	}
+	if ResponseOutputLimit(request) != 0 || ResponseReserveTokens(request) != ResponseInputTokens(request) {
+		t.Fatalf("prewarm reserve includes output: output=%d total=%d input=%d", ResponseOutputLimit(request), ResponseReserveTokens(request), ResponseInputTokens(request))
+	}
+	disabled := false
+	request.PromptCacheOptions.Prewarm = &disabled
+	if ResponseOutputLimit(request) != limit || ResponseReserveTokens(request) != ResponseInputTokens(request)+limit {
+		t.Fatal("prewarm=false changed the normal response reserve")
+	}
+}
+
 func TestImageEstimationDoesNotTokenizeBase64(t *testing.T) {
 	makeInput := func(n int) any {
 		return []any{map[string]any{"type": "image_url", "image_url": map[string]any{"url": "data:image/png;base64," + strings.Repeat("a", n)}}}

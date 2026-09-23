@@ -9520,6 +9520,9 @@ components:
               type: string
               maxLength: 256
               description: Must reference a recent response owned by the same credential and user; the gateway pins execution to that response's deployment and rejects missing, cross-owner or conflicting references.
+            prewarm:
+              type: boolean
+              description: Prepares the provider prompt cache without generating output. Output-token reserve is zero, and the request bypasses gateway response caches and shadow execution.
         prompt_cache_retention: {type: string, enum: [in_memory, 24h], deprecated: true}
         service_tier: {type: string, enum: [auto, default, on_demand, flex, performance, scale, priority, fast, ultrafast, standard_only], description: Forwarded by compatible adapters; native adapters may reject it.}
         stream: {type: boolean, default: false}

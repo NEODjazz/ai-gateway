@@ -222,3 +222,16 @@ func TestResponsesModerationIsNotReplaySafe(t *testing.T) {
 		t.Fatal("provider-moderated request was considered replay safe")
 	}
 }
+
+func TestResponsesPrewarmIsNotReplaySafe(t *testing.T) {
+	enabled := true
+	request := openai.ResponseRequest{Model: "m", Input: "hello", PromptCacheOptions: &openai.PromptCacheOptions{Prewarm: &enabled}}
+	if responseReplaySafe(request) {
+		t.Fatal("provider prompt-cache prewarm was considered replay safe")
+	}
+	disabled := false
+	request.PromptCacheOptions.Prewarm = &disabled
+	if !responseReplaySafe(request) {
+		t.Fatal("prewarm=false disabled normal response replay")
+	}
+}

@@ -275,7 +275,7 @@ func cacheableResponsesResult(response openai.ResponseResponse) bool {
 // exact cache or copied to a shadow deployment. Provider-managed state and
 // server-side tools may change independently or perform external work.
 func responseReplaySafe(request openai.ResponseRequest) bool {
-	if len(request.ContextManagement) > 0 || request.Moderation != nil {
+	if len(request.ContextManagement) > 0 || request.Moderation != nil || openai.ResponsePrewarmRequested(request) {
 		return false
 	}
 	for _, tool := range request.Tools {

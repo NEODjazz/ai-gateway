@@ -40,6 +40,7 @@ func TestChatGenerationOptionValidation(t *testing.T) {
 		{`{"prompt_cache_options":{"mode":"invalid"}}`, false},
 		{`{"prompt_cache_options":{"ttl":"24h"}}`, false},
 		{`{"prompt_cache_options":{"comparison_response_id":"resp_reference"}}`, false},
+		{`{"prompt_cache_options":{"prewarm":true}}`, false},
 		{`{"metadata":{"trace":"` + strings.Repeat("я", 512) + `"}}`, true},
 		{`{"metadata":{"trace":"` + strings.Repeat("я", 513) + `"}}`, false},
 		{`{"n":0}`, false},

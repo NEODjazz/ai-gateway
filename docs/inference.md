@@ -1722,6 +1722,17 @@ bypass gateway response caches and shadow execution because the provider's
 moderation policy can change independently. Terminal provider usage remains
 authoritative for billing.
 
+### Responses prompt-cache prewarming
+
+Responses accepts `prompt_cache_options.prewarm=true` on compatible adapters to
+prepare provider prompt caches without generating output. Chat requests reject
+this Responses-only control. Prewarm requests reserve their estimated input
+tokens with zero output tokens, then settle from exact terminal provider usage.
+
+Prewarming always executes against the selected provider, so it bypasses the
+gateway response cache and shadow execution. `prewarm=false` is preserved as an
+explicit provider setting and follows the normal response path.
+
 ### Responses cache outcome policy
 
 Responses exact-cache writes and reads now require `status="completed"` (or the
