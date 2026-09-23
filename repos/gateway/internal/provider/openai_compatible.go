@@ -1523,6 +1523,9 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 			if err := validateResponseUsage(response.Usage); err != nil {
 				return err
 			}
+			if err := validateResponseCitations(response.Citations); err != nil {
+				return err
+			}
 			if err := validateResponseOutputItems(response.Output); err != nil {
 				return err
 			}

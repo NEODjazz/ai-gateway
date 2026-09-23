@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net/url"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -35,11 +36,27 @@ func decodeResponseJSON(reader io.Reader) (openai.ResponseResponse, error) {
 	if err := validateResponseUsage(response.Usage); err != nil {
 		return openai.ResponseResponse{}, err
 	}
+	if err := validateResponseCitations(response.Citations); err != nil {
+		return openai.ResponseResponse{}, err
+	}
 	if err := validateResponseOutputItems(response.Output); err != nil {
 		return openai.ResponseResponse{}, err
 	}
 	response.OutputText = responseText(*response)
 	return *response, nil
+}
+
+func validateResponseCitations(citations []string) error {
+	if len(citations) > 1024 {
+		return errors.New("provider returned too many response citations")
+	}
+	for _, citation := range citations {
+		parsed, err := url.Parse(citation)
+		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || utf8.RuneCountInString(citation) > 8192 {
+			return errors.New("provider returned an invalid response citation")
+		}
+	}
+	return nil
 }
 
 func validateResponseOutputItems(items []openai.ResponseOutputItem) error {

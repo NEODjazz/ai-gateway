@@ -1977,6 +1977,9 @@ Compatible Responses also retains nonnegative provider-reported
 `num_sources_used` and `num_server_side_tools_used`, including explicit zeroes.
 These observability counters remain separate from token totals and local tool
 billing dimensions.
+Provider-reported top-level `citations` are retained as at most 1024 bounded
+HTTP(S) source URLs in JSON and terminal SSE responses. Invalid citations fail
+before the terminal response is delivered.
 This detail is not added to `output_tokens` or `total_tokens`; those reported
 counters remain unchanged. Tests cover positive/zero details, negative rejection
 and unchanged totals for JSON and native streaming. The OpenAPI response schema
