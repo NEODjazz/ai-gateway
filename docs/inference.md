@@ -1945,6 +1945,10 @@ its event. Once a response ID is established, later event fields and response
 snapshots must retain it. A malformed or changed identifier terminates the stream
 before the conflicting event can reach the client or final accounting.
 
+When a native SSE frame supplies both an `event:` field and a JSON `type`, they
+must match. A payload-only or header-only event remains accepted, while a missing,
+empty, non-string or contradictory type fails before the frame is forwarded.
+
 Regression tests cover interleaved messages and parts, text completion events,
 empty and populated terminal snapshots, invalid content indices and JSON text
 aggregation. The tests also reproduced the earlier behavior through a temporary

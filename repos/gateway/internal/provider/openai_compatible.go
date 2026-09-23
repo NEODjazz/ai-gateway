@@ -1307,8 +1307,17 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 		if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
 			return errors.New("invalid trailing data in Responses SSE event")
 		}
-		if event == "" {
-			event = eventName(decoded)
+		if payloadType, present := decoded["type"]; present {
+			typedEvent, ok := payloadType.(string)
+			if !ok || typedEvent == "" {
+				return errors.New("Responses event contains an invalid type")
+			}
+			if event != "" && event != typedEvent {
+				return errors.New("Responses SSE event name contradicts payload type")
+			}
+			event = typedEvent
+		} else if event == "" {
+			return errors.New("Responses event is missing its type")
 		}
 		if value, present := decoded["item_id"]; present {
 			itemID, ok := value.(string)
@@ -1687,13 +1696,6 @@ func scanSSEEvents(body io.Reader, handle func(event string, payload string) err
 		}
 	}
 	return scanner.Err()
-}
-
-func eventName(event map[string]any) string {
-	if typed, ok := event["type"].(string); ok {
-		return typed
-	}
-	return ""
 }
 
 func ensureResponseOutputTextSlot(response *openai.ResponseResponse) *openai.ResponseOutputContent {
