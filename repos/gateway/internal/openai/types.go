@@ -730,6 +730,7 @@ type ResponseRequest struct {
 	// NativeInputTokens reserves provider-native context omitted from the public Responses wire shape.
 	NativeInputTokens    int                    `json:"-"`
 	Metadata             map[string]string      `json:"metadata,omitempty"`
+	ContextManagement    []ResponseContextEntry `json:"context_management,omitempty"`
 	TopLogprobs          *int                   `json:"top_logprobs,omitempty"`
 	Truncation           *string                `json:"truncation,omitempty"`
 	Reasoning            *ResponseReasoning     `json:"reasoning,omitempty"`
@@ -760,6 +761,11 @@ type ResponseRequest struct {
 	FrequencyPenalty     *float64               `json:"frequency_penalty,omitempty"`
 	PresencePenalty      *float64               `json:"presence_penalty,omitempty"`
 	MaxToolCalls         *int                   `json:"max_tool_calls,omitempty"`
+}
+
+type ResponseContextEntry struct {
+	Type             string `json:"type"`
+	CompactThreshold *int   `json:"compact_threshold,omitempty"`
 }
 
 type ResponseInputTokenCountRequest struct {

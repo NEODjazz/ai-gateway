@@ -1695,6 +1695,20 @@ value; trailing documents or junk are rejected before forwarding. Regression tes
 compare JSON and SSE counters at precision boundaries and preserve trailing-data
 rejection and integer-valued index representations.
 
+### Responses server-side compaction
+
+Responses accepts one optional `context_management` entry with
+`type="compaction"` and an optional positive `compact_threshold`. Compatible
+JSON and SSE adapters preserve the native object. The gateway validates the
+shape before routing and exposes support in the provider parameter profile;
+native adapters that cannot preserve the setting return an explicit
+`unsupported_parameter` error.
+
+Because compaction can emit opaque state and depends on the provider's current
+context, these requests bypass gateway response caches and are not
+copied to shadow deployments. Provider-reported terminal usage remains the
+authoritative billing settlement.
+
 ### Responses cache outcome policy
 
 Responses exact-cache writes and reads now require `status="completed"` (or the

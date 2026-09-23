@@ -52,6 +52,24 @@ func TestResponseStreamOptionsRequireStreaming(t *testing.T) {
 	}
 }
 
+func TestResponseContextManagementValidation(t *testing.T) {
+	threshold := 1000
+	valid := ResponseRequest{ContextManagement: []ResponseContextEntry{{Type: "compaction", CompactThreshold: &threshold}}}
+	if message := valid.Validate(); message != "" {
+		t.Fatalf("valid context management rejected: %s", message)
+	}
+	zero := 0
+	for _, request := range []ResponseRequest{
+		{ContextManagement: []ResponseContextEntry{{Type: "unknown"}}},
+		{ContextManagement: []ResponseContextEntry{{Type: "compaction", CompactThreshold: &zero}}},
+		{ContextManagement: []ResponseContextEntry{{Type: "compaction"}, {Type: "compaction"}}},
+	} {
+		if message := request.Validate(); message == "" {
+			t.Fatalf("invalid context management accepted: %+v", request.ContextManagement)
+		}
+	}
+}
+
 func TestResponseBackgroundRequiresDurableNonStreamingStorage(t *testing.T) {
 	store := true
 	if message := (ResponseRequest{Background: true, Store: &store}).Validate(); message != "" {

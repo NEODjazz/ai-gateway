@@ -53,6 +53,20 @@ func (r ResponseRequest) Validate() string {
 	if message := ValidateMetadata(r.Metadata); message != "" {
 		return message
 	}
+	if len(r.ContextManagement) > 1 {
+		return "context_management must contain at most one entry"
+	}
+	if r.ContextManagement != nil && len(r.ContextManagement) == 0 {
+		return "context_management must contain one entry when supplied"
+	}
+	for _, entry := range r.ContextManagement {
+		if entry.Type != "compaction" {
+			return "context_management type must be compaction"
+		}
+		if entry.CompactThreshold != nil && *entry.CompactThreshold <= 0 {
+			return "context_management compact_threshold must be positive"
+		}
+	}
 	if message := validateResponseIncludes(r.Include); message != "" {
 		return message
 	}

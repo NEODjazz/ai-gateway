@@ -9414,6 +9414,18 @@ components:
           maxProperties: 16
           propertyNames: {maxLength: 64}
           additionalProperties: {type: string, maxLength: 512}
+        context_management:
+          type: array
+          description: Native server-side compaction configuration. Compatible adapters preserve it, and requests bypass gateway response caches and shadow execution.
+          minItems: 1
+          maxItems: 1
+          items:
+            type: object
+            additionalProperties: false
+            required: [type]
+            properties:
+              type: {type: string, const: compaction}
+              compact_threshold: {type: integer, minimum: 1, description: Provider token threshold at which server-side compaction may run.}
         reasoning:
           type: object
           additionalProperties: false

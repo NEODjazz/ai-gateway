@@ -89,6 +89,7 @@ func (g Groq) ValidateResponseParameters(request openai.ResponseRequest) error {
 	}
 	_, verbositySupplied := openai.ResponseTextVerbosity(request.Text)
 	return rejectParameters("groq",
+		parameterCheck{"context_management", len(request.ContextManagement) > 0},
 		parameterCheck{"include", len(request.Include) > 0},
 		parameterCheck{"store", request.Store != nil && *request.Store},
 		parameterCheck{"truncation", request.Truncation != nil},

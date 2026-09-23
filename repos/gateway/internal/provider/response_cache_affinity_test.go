@@ -207,3 +207,11 @@ func TestResponsesCacheHitStoresAffinityBeforeBilling(t *testing.T) {
 		t.Fatalf("cache hit: response=%+v err=%v upstream=%d commits=%d", cached, err, client.calls, billing.commits)
 	}
 }
+
+func TestResponsesContextManagementIsNotReplaySafe(t *testing.T) {
+	threshold := 1000
+	request := openai.ResponseRequest{Model: "m", Input: "hello", ContextManagement: []openai.ResponseContextEntry{{Type: "compaction", CompactThreshold: &threshold}}}
+	if responseToolsReplaySafe(request) {
+		t.Fatal("server-side compaction request was considered replay safe")
+	}
+}

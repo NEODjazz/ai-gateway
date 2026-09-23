@@ -139,6 +139,36 @@ func TestResponsesRejectsInvalidOptionsBeforeExecution(t *testing.T) {
 	}
 }
 
+func TestResponsesPreservesServerSideCompactionConfiguration(t *testing.T) {
+	upstream := &chatProvider{}
+	handler := NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}}}), upstream)
+	out := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"m","input":"hello","context_management":[{"type":"compaction","compact_threshold":1000}]}`))
+	handler.Responses(out, request)
+	if out.Code != http.StatusOK || upstream.request.ResponseRequest == nil {
+		t.Fatalf("status=%d request=%+v body=%s", out.Code, upstream.request.ResponseRequest, out.Body.String())
+	}
+	entries := upstream.request.ResponseRequest.ContextManagement
+	if len(entries) != 1 || entries[0].Type != "compaction" || entries[0].CompactThreshold == nil || *entries[0].CompactThreshold != 1000 {
+		t.Fatalf("context management was not preserved: %+v", entries)
+	}
+}
+
+func TestResponsesRejectsInvalidServerSideCompactionBeforeExecution(t *testing.T) {
+	for _, value := range []string{
+		`[]`,
+		`[{"type":"unknown"}]`,
+		`[{"type":"compaction","compact_threshold":0}]`,
+		`[{"type":"compaction"},{"type":"compaction"}]`,
+	} {
+		out := httptest.NewRecorder()
+		Handler{}.Responses(out, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"m","input":"hello","context_management":`+value+`}`)))
+		if out.Code != http.StatusBadRequest {
+			t.Fatalf("value=%s status=%d body=%s", value, out.Code, out.Body.String())
+		}
+	}
+}
+
 func TestResponsesValidatesStreamOptionsBeforeExecution(t *testing.T) {
 	handler := Handler{}
 	for _, body := range []string{

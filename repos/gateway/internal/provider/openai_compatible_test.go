@@ -913,10 +913,11 @@ func TestOpenAICompatibleStreamsResponsesWhenEnabled(t *testing.T) {
 	maxResults := 12
 	scoreThreshold := 0.4
 	rewriteQuery := true
+	compactThreshold := 1000
 	webSearch := openai.ResponseTool{Type: "web_search", Filters: map[string]any{"allowed_domains": []string{"example.com"}}, SearchContextSize: "high", UserLocation: &openai.ResponseWebSearchLocation{Type: "approximate", Country: "RU", Timezone: "Europe/Moscow"}}
 	provider := NewOpenAICompatible(server.URL, "", true)
 	response, err := provider.StreamResponses(context.Background(), openai.ResponseRequest{
-		Model: "test-model", Input: "hello", Stream: true, StreamOptions: &openai.ResponseStreamOptions{IncludeObfuscation: &includeObfuscation}, PreviousResponse: "resp-previous", SafetyIdentifier: "provider-user", PromptCacheKey: "tenant-thread",
+		Model: "test-model", Input: "hello", Stream: true, StreamOptions: &openai.ResponseStreamOptions{IncludeObfuscation: &includeObfuscation}, PreviousResponse: "resp-previous", SafetyIdentifier: "provider-user", PromptCacheKey: "tenant-thread", ContextManagement: []openai.ResponseContextEntry{{Type: "compaction", CompactThreshold: &compactThreshold}},
 		Tools: []openai.ResponseTool{
 			{Type: "function", Name: "weather", Parameters: map[string]any{"type": "object"}},
 			{Type: "mcp", ServerLabel: "weather-prod", ServerURL: "https://mcp.example.test", AllowedTools: []string{"forecast"}, RequireApproval: "never", Headers: map[string]string{"X-MCP-Key": "scoped"}},
@@ -938,6 +939,9 @@ func TestOpenAICompatibleStreamsResponsesWhenEnabled(t *testing.T) {
 	}
 	if upstreamRequest.StreamOptions == nil || upstreamRequest.StreamOptions.IncludeObfuscation == nil || *upstreamRequest.StreamOptions.IncludeObfuscation {
 		t.Fatalf("responses stream options were not forwarded: %+v", upstreamRequest.StreamOptions)
+	}
+	if len(upstreamRequest.ContextManagement) != 1 || upstreamRequest.ContextManagement[0].CompactThreshold == nil || *upstreamRequest.ContextManagement[0].CompactThreshold != 1000 {
+		t.Fatalf("stream context management was not forwarded: %+v", upstreamRequest.ContextManagement)
 	}
 	textConfig, _ := upstreamRequest.Text.(map[string]any)
 	container, _ := upstreamRequest.Tools[2].Container.(map[string]any)
@@ -977,11 +981,15 @@ func TestOpenAICompatibleForwardsResponseCacheIdentifiers(t *testing.T) {
 	provider := NewOpenAICompatible(server.URL, "", false)
 	input := []any{map[string]any{"type": "input_file", "file_data": "data:application/pdf;base64,JVBERi0xLjQK", "filename": "input.pdf"}}
 	cacheOptions := &openai.PromptCacheOptions{Mode: "explicit", TTL: "30m", ComparisonResponseID: "resp_baseline"}
-	if _, err := provider.Responses(context.Background(), openai.ResponseRequest{Model: "test-model", Input: input, SafetyIdentifier: "provider-user", PromptCacheKey: "tenant-thread", PromptCacheOptions: cacheOptions, PromptCacheRetention: "24h"}); err != nil {
+	threshold := 1000
+	if _, err := provider.Responses(context.Background(), openai.ResponseRequest{Model: "test-model", Input: input, SafetyIdentifier: "provider-user", PromptCacheKey: "tenant-thread", PromptCacheOptions: cacheOptions, PromptCacheRetention: "24h", ContextManagement: []openai.ResponseContextEntry{{Type: "compaction", CompactThreshold: &threshold}}}); err != nil {
 		t.Fatal(err)
 	}
 	if upstreamRequest.SafetyIdentifier != "provider-user" || upstreamRequest.PromptCacheKey != "tenant-thread" || upstreamRequest.PromptCacheOptions == nil || upstreamRequest.PromptCacheOptions.Mode != "explicit" || upstreamRequest.PromptCacheOptions.TTL != "30m" || upstreamRequest.PromptCacheOptions.ComparisonResponseID != "resp_baseline" || upstreamRequest.PromptCacheRetention != "24h" {
 		t.Fatalf("cache identifiers were not forwarded: %+v", upstreamRequest)
+	}
+	if len(upstreamRequest.ContextManagement) != 1 || upstreamRequest.ContextManagement[0].Type != "compaction" || upstreamRequest.ContextManagement[0].CompactThreshold == nil || *upstreamRequest.ContextManagement[0].CompactThreshold != 1000 {
+		t.Fatalf("context management was not forwarded: %+v", upstreamRequest.ContextManagement)
 	}
 	parts, ok := upstreamRequest.Input.([]any)
 	if !ok || len(parts) != 1 || parts[0].(map[string]any)["type"] != "input_file" {

@@ -284,6 +284,30 @@ func TestNativeResponseAndEmbeddingParameterPolicy(t *testing.T) {
 	assertUnsupportedParameter(t, err, "user")
 }
 
+func TestNativeAdaptersRejectResponseContextManagement(t *testing.T) {
+	threshold := 1_000
+	request := openai.ResponseRequest{
+		Model: "model",
+		Input: "hello",
+		ContextManagement: []openai.ResponseContextEntry{{
+			Type:             "compaction",
+			CompactThreshold: &threshold,
+		}},
+	}
+	for name, validate := range map[string]func(openai.ResponseRequest) error{
+		"anthropic": (Anthropic{}).ValidateResponseParameters,
+		"deepseek":  (DeepSeek{}).ValidateResponseParameters,
+		"demo":      (Demo{}).ValidateResponseParameters,
+		"groq":      (Groq{}).ValidateResponseParameters,
+		"ollama":    (Ollama{}).ValidateResponseParameters,
+		"xai":       (XAI{}).ValidateResponseParameters,
+	} {
+		t.Run(name, func(t *testing.T) {
+			assertUnsupportedParameter(t, validate(request), "context_management")
+		})
+	}
+}
+
 func TestOtherEmbeddingAdaptersRejectMistralMetadata(t *testing.T) {
 	request := openai.EmbeddingRequest{Model: "embed", Input: "text", Metadata: map[string]string{"trace": "one"}}
 	for name, call := range map[string]func() error{

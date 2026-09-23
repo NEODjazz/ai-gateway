@@ -276,6 +276,9 @@ func cacheableResponsesResult(response openai.ResponseResponse) bool {
 // may read mutable state or perform external work, so their execution cannot be
 // safely replayed or replaced with an earlier result.
 func responseToolsReplaySafe(request openai.ResponseRequest) bool {
+	if len(request.ContextManagement) > 0 {
+		return false
+	}
 	for _, tool := range request.Tools {
 		if tool.Type != "function" {
 			return false

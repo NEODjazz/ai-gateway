@@ -669,6 +669,9 @@ func (x XAI) ValidateResponseParameters(request openai.ResponseRequest) error {
 	if request.Background {
 		return xaiUnsupportedParameter("background")
 	}
+	if len(request.ContextManagement) > 0 {
+		return xaiUnsupportedParameter("context_management")
+	}
 	if message := request.Validate(); message != "" {
 		return &Error{Class: FailureClientRequest, Provider: "xai", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New(message)}
 	}
