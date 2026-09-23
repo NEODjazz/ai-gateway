@@ -70,6 +70,29 @@ func TestResponseTerminalSnapshotReplacesAccumulatedOutput(t *testing.T) {
 	}
 }
 
+func TestResponseLifecycleEventRequiresSnapshotBeforeDelivery(t *testing.T) {
+	for _, kind := range []string{"response.created", "response.in_progress", "response.completed", "response.incomplete", "response.failed"} {
+		for _, snapshot := range []string{"", `,"response":null`, `,"response":"invalid"`} {
+			wire := fmt.Sprintf("data: {\"type\":%q%s}\n\n", kind, snapshot)
+			calls := 0
+			_, err := streamResponseData(strings.NewReader(wire+responseTestTerminal), "m", func(string, string) error { calls++; return nil })
+			if err == nil || calls != 0 {
+				t.Fatalf("missing lifecycle snapshot delivered: kind=%s snapshot=%s err=%v calls=%d", kind, snapshot, err, calls)
+			}
+		}
+	}
+}
+
+func TestResponseSnapshotIsIgnoredOutsideLifecycleEvents(t *testing.T) {
+	wire := `data: {"type":"response.output_text.delta","delta":"answer","response":{"id":"injected","output":[]}}` + "\n\n" +
+		`data: {"type":"response.completed","response":{"id":"real","status":"completed"}}` + "\n\n"
+	calls := 0
+	response, err := streamResponseData(strings.NewReader(wire), "m", func(string, string) error { calls++; return nil })
+	if err != nil || calls != 2 || response.ID != "real" || response.OutputText != "answer" {
+		t.Fatalf("non-lifecycle snapshot affected state: response=%+v err=%v calls=%d", response, err, calls)
+	}
+}
+
 func TestResponseTerminalSnapshotReplacesNestedConfiguration(t *testing.T) {
 	created := `{"type":"response.created","response":{"id":"r","object":"response","model":"m","status":"in_progress","reasoning":{"effort":"high","summary":"auto"},"tools":[{"type":"function","name":"lookup","description":"old","parameters":{"type":"object"}}],"prompt_cache_options":{"mode":"explicit","ttl":"30m","comparison_response_id":"resp_old"},"prompt":{"id":"pmpt_1","version":"old","variables":{"old":"value"}}}}`
 	completed := `{"type":"response.completed","response":{"id":"r","object":"response","model":"m","status":"completed","reasoning":{"effort":"low"},"tools":[{"type":"function","name":"lookup","parameters":{"type":"object"}}],"prompt_cache_options":{"mode":"implicit"},"prompt":{"id":"pmpt_1"}}}`

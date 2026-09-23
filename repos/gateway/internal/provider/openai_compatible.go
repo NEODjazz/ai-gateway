@@ -1601,7 +1601,13 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 			*ensureResponseOutputItem(&response, outputIndex) = snapshot
 			response.OutputText = ""
 		}
-		if typed, ok := decoded["response"].(map[string]any); ok {
+		responseSnapshotEvent := event == "response.created" || event == "response.in_progress" ||
+			event == "response.completed" || event == "response.incomplete" || event == "response.failed"
+		if responseSnapshotEvent {
+			typed, ok := decoded["response"].(map[string]any)
+			if !ok {
+				return errors.New("Responses lifecycle event is missing its response")
+			}
 			marshaled, err := json.Marshal(typed)
 			if err != nil {
 				return err
