@@ -41,6 +41,7 @@ type TokenCountRequest struct {
 	GeminiCachedContent        string
 	GeminiMediaResolution      string
 	GeminiFileSearch           *openai.GeminiFileSearchConfig
+	GeminiComputerUse          *openai.GeminiComputerUseConfig
 }
 type TokenCountResult struct {
 	InputTokens         int

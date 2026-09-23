@@ -2053,3 +2053,12 @@ reserve, provider token counts remain authoritative for settlement, and requests
 bypass response caches. Gemini and Vertex routing requires an explicit capability.
 Retrieval grounding metadata is validated and preserved, while file-search execution
 does not create a synthetic search-request charge.
+
+## Native Gemini computer use
+
+Native GenerateContent accepts bounded browser, mobile and desktop computer-use
+configuration. Deployment capability, environment grants and per-policy safety
+override grants fail closed before provider execution. Tool configuration participates
+in TPM and budget reserve, countTokens preserves it, and response caches are bypassed.
+The gateway transports action calls and safety acknowledgements; execution remains
+client-side.

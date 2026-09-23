@@ -145,6 +145,31 @@ func TestGenerateRequestMapsFileSearchTool(t *testing.T) {
 	}
 }
 
+func TestGenerateRequestMapsComputerUseTool(t *testing.T) {
+	var native generateRequest
+	raw := `{"contents":[{"parts":[{"text":"open settings"}]}],"tools":[{"computerUse":{"environment":"ENVIRONMENT_DESKTOP","excludedPredefinedFunctions":["drag_and_drop"],"enablePromptInjectionDetection":true,"disabledSafetyPolicies":["DATA_MODIFICATION"]}}]}`
+	if err := decodeMessagesValue(json.RawMessage(raw), &native); err != nil {
+		t.Fatal(err)
+	}
+	chat, err := native.chat("model", false)
+	if err != nil || chat.GeminiComputerUse == nil || chat.GeminiComputerUse.Environment != "ENVIRONMENT_DESKTOP" || !chat.GeminiComputerUse.EnablePromptInjectionDetection || chat.NativeInputTokens == 0 {
+		t.Fatalf("chat=%+v err=%v", chat, err)
+	}
+	for _, invalid := range []string{
+		`{"contents":[{"parts":[{"text":"act"}]}],"tools":[{"computerUse":{}}]}`,
+		`{"contents":[{"parts":[{"text":"act"}]}],"tools":[{"computerUse":{"environment":"browser"}}]}`,
+		`{"contents":[{"parts":[{"text":"act"}]}],"tools":[{"computerUse":{"environment":"ENVIRONMENT_BROWSER","disabledSafetyPolicies":["UNKNOWN"]}}]}`,
+	} {
+		var request generateRequest
+		if err := decodeMessagesValue(json.RawMessage(invalid), &request); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := request.chat("model", false); err == nil {
+			t.Fatalf("invalid computer use accepted: %s", invalid)
+		}
+	}
+}
+
 func TestGenerateRequestMapsGoogleMapsAndLocation(t *testing.T) {
 	var native generateRequest
 	raw := `{"contents":[{"parts":[{"text":"restaurants near here"}]}],"tools":[{"googleMaps":{}}],"toolConfig":{"retrievalConfig":{"latLng":{"latitude":40.758896,"longitude":-73.98513}}}}`

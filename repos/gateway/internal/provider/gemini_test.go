@@ -188,6 +188,19 @@ func TestGeminiFileSearchRoundTrip(t *testing.T) {
 	}
 }
 
+func TestGeminiForwardsComputerUse(t *testing.T) {
+	config := &openai.GeminiComputerUseConfig{Environment: "ENVIRONMENT_BROWSER", ExcludedPredefinedFunctions: []string{"drag_and_drop"}, EnablePromptInjectionDetection: true, DisabledSafetyPolicies: []string{"FINANCIAL_TRANSACTIONS"}}
+	request := openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "browse"}}, GeminiComputerUse: config}
+	native, err := geminiChatRequest(request)
+	if err != nil || len(native.Tools) != 1 || native.Tools[0].ComputerUse == nil || native.Tools[0].ComputerUse.Environment != "ENVIRONMENT_BROWSER" || !native.Tools[0].ComputerUse.EnablePromptInjectionDetection {
+		t.Fatalf("native=%+v err=%v", native, err)
+	}
+	request.GeminiComputerUse.Environment = "browser"
+	if _, err := geminiChatRequest(request); err == nil {
+		t.Fatal("invalid environment accepted")
+	}
+}
+
 func TestGeminiRejectsInvalidFileSearchGrounding(t *testing.T) {
 	for _, raw := range []string{
 		`{"groundingChunks":[{"retrievedContext":{"fileSearchStore":"wrong"}}]}`,

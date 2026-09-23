@@ -48,6 +48,7 @@ func cachedContentToolIdentifiers(request openai.ChatCompletionRequest) ([]strin
 		identifiers = append(identifiers, "google_maps")
 	}
 	identifiers = append(identifiers, openai.GeminiFileSearchToolIdentifiers(request.GeminiFileSearch)...)
+	identifiers = append(identifiers, openai.GeminiComputerUseToolIdentifiers(request.GeminiComputerUse)...)
 	return identifiers, valid
 }
 

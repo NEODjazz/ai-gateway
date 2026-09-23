@@ -23,10 +23,11 @@ type generateRequest struct {
 		GoogleSearch *struct {
 			TimeRange *openai.GeminiSearchTimeRange `json:"timeRangeFilter,omitempty"`
 		} `json:"googleSearch,omitempty"`
-		GoogleMaps    *struct{}                      `json:"googleMaps,omitempty"`
-		CodeExecution *struct{}                      `json:"codeExecution,omitempty"`
-		URLContext    *struct{}                      `json:"urlContext,omitempty"`
-		FileSearch    *openai.GeminiFileSearchConfig `json:"fileSearch,omitempty"`
+		GoogleMaps    *struct{}                       `json:"googleMaps,omitempty"`
+		CodeExecution *struct{}                       `json:"codeExecution,omitempty"`
+		URLContext    *struct{}                       `json:"urlContext,omitempty"`
+		FileSearch    *openai.GeminiFileSearchConfig  `json:"fileSearch,omitempty"`
+		ComputerUse   *openai.GeminiComputerUseConfig `json:"computerUse,omitempty"`
 	} `json:"tools,omitempty"`
 	ToolConfig *struct {
 		FunctionCalling *struct {
@@ -447,7 +448,7 @@ func (r generateRequest) chatWithContentRequirement(model string, stream, requir
 	}
 	for _, tool := range r.Tools {
 		members := 0
-		for _, present := range []bool{len(tool.Functions) > 0, tool.GoogleSearch != nil, tool.GoogleMaps != nil, tool.CodeExecution != nil, tool.URLContext != nil, tool.FileSearch != nil} {
+		for _, present := range []bool{len(tool.Functions) > 0, tool.GoogleSearch != nil, tool.GoogleMaps != nil, tool.CodeExecution != nil, tool.URLContext != nil, tool.FileSearch != nil, tool.ComputerUse != nil} {
 			if present {
 				members++
 			}
@@ -505,6 +506,17 @@ func (r generateRequest) chatWithContentRequirement(model string, stream, requir
 			config := *tool.FileSearch
 			config.StoreNames = append([]string(nil), tool.FileSearch.StoreNames...)
 			result.GeminiFileSearch = &config
+			result.NativeInputTokens = openai.ReserveTokens(result.NativeInputTokens, openai.EstimateContextTokens(tool))
+			continue
+		}
+		if tool.ComputerUse != nil {
+			if result.GeminiComputerUse != nil || !openai.ValidGeminiComputerUseConfig(tool.ComputerUse) {
+				return fail("computerUse")
+			}
+			config := *tool.ComputerUse
+			config.ExcludedPredefinedFunctions = append([]string(nil), tool.ComputerUse.ExcludedPredefinedFunctions...)
+			config.DisabledSafetyPolicies = append([]string(nil), tool.ComputerUse.DisabledSafetyPolicies...)
+			result.GeminiComputerUse = &config
 			result.NativeInputTokens = openai.ReserveTokens(result.NativeInputTokens, openai.EstimateContextTokens(tool))
 			continue
 		}

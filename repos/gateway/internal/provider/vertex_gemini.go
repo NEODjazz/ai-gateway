@@ -45,22 +45,23 @@ func (v VertexGemini) ValidateResponseParameters(request openai.ResponseRequest)
 	return v.gemini.ValidateResponseParameters(request)
 }
 
-func (VertexGemini) SupportsResponses() bool        { return false }
-func (VertexGemini) SupportsTools() bool            { return true }
-func (VertexGemini) SupportsStructuredOutput() bool { return true }
-func (VertexGemini) SupportsVision() bool           { return true }
-func (VertexGemini) SupportsWebSearch() bool        { return true }
-func (VertexGemini) SupportsCodeExecution() bool    { return true }
-func (VertexGemini) SupportsURLContext() bool       { return true }
-func (VertexGemini) SupportsSearchTimeRange() bool  { return true }
-func (VertexGemini) SupportsGeminiFileSearch() bool { return true }
-func (VertexGemini) SupportsAudioInput() bool       { return true }
-func (VertexGemini) SupportsAudioTimestamp() bool   { return true }
-func (VertexGemini) SupportsMediaResolution() bool  { return true }
-func (VertexGemini) SupportsMediaProcessing() bool  { return true }
-func (VertexGemini) SupportsVideoInput() bool       { return true }
-func (VertexGemini) SupportsFileInput() bool        { return true }
-func (VertexGemini) SupportsReasoningBlocks() bool  { return true }
+func (VertexGemini) SupportsResponses() bool         { return false }
+func (VertexGemini) SupportsTools() bool             { return true }
+func (VertexGemini) SupportsStructuredOutput() bool  { return true }
+func (VertexGemini) SupportsVision() bool            { return true }
+func (VertexGemini) SupportsWebSearch() bool         { return true }
+func (VertexGemini) SupportsCodeExecution() bool     { return true }
+func (VertexGemini) SupportsURLContext() bool        { return true }
+func (VertexGemini) SupportsSearchTimeRange() bool   { return true }
+func (VertexGemini) SupportsGeminiFileSearch() bool  { return true }
+func (VertexGemini) SupportsGeminiComputerUse() bool { return true }
+func (VertexGemini) SupportsAudioInput() bool        { return true }
+func (VertexGemini) SupportsAudioTimestamp() bool    { return true }
+func (VertexGemini) SupportsMediaResolution() bool   { return true }
+func (VertexGemini) SupportsMediaProcessing() bool   { return true }
+func (VertexGemini) SupportsVideoInput() bool        { return true }
+func (VertexGemini) SupportsFileInput() bool         { return true }
+func (VertexGemini) SupportsReasoningBlocks() bool   { return true }
 func (VertexGemini) SupportsUnsignedReasoning() bool {
 	return true
 }

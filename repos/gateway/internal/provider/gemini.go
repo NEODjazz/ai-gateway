@@ -63,18 +63,19 @@ func (g Gemini) authorize(request *http.Request) error {
 	}
 }
 
-func (Gemini) SupportsVision() bool           { return true }
-func (Gemini) SupportsWebSearch() bool        { return true }
-func (Gemini) SupportsCodeExecution() bool    { return true }
-func (Gemini) SupportsURLContext() bool       { return true }
-func (Gemini) SupportsSearchTimeRange() bool  { return true }
-func (Gemini) SupportsGeminiFileSearch() bool { return true }
-func (Gemini) SupportsGoogleMaps() bool       { return true }
-func (Gemini) SupportsAudioInput() bool       { return true }
-func (Gemini) SupportsFileInput() bool        { return true }
-func (Gemini) SupportsVideoInput() bool       { return true }
-func (Gemini) SupportsMediaResolution() bool  { return true }
-func (Gemini) SupportsMediaProcessing() bool  { return true }
+func (Gemini) SupportsVision() bool            { return true }
+func (Gemini) SupportsWebSearch() bool         { return true }
+func (Gemini) SupportsCodeExecution() bool     { return true }
+func (Gemini) SupportsURLContext() bool        { return true }
+func (Gemini) SupportsSearchTimeRange() bool   { return true }
+func (Gemini) SupportsGeminiFileSearch() bool  { return true }
+func (Gemini) SupportsGeminiComputerUse() bool { return true }
+func (Gemini) SupportsGoogleMaps() bool        { return true }
+func (Gemini) SupportsAudioInput() bool        { return true }
+func (Gemini) SupportsFileInput() bool         { return true }
+func (Gemini) SupportsVideoInput() bool        { return true }
+func (Gemini) SupportsMediaResolution() bool   { return true }
+func (Gemini) SupportsMediaProcessing() bool   { return true }
 
 func (Gemini) SupportsResponses() bool { return false }
 
@@ -122,10 +123,11 @@ type geminiTool struct {
 	GoogleSearch *struct {
 		TimeRange *openai.GeminiSearchTimeRange `json:"timeRangeFilter,omitempty"`
 	} `json:"googleSearch,omitempty"`
-	GoogleMaps    *struct{}                      `json:"googleMaps,omitempty"`
-	CodeExecution *struct{}                      `json:"codeExecution,omitempty"`
-	URLContext    *struct{}                      `json:"urlContext,omitempty"`
-	FileSearch    *openai.GeminiFileSearchConfig `json:"fileSearch,omitempty"`
+	GoogleMaps    *struct{}                       `json:"googleMaps,omitempty"`
+	CodeExecution *struct{}                       `json:"codeExecution,omitempty"`
+	URLContext    *struct{}                       `json:"urlContext,omitempty"`
+	FileSearch    *openai.GeminiFileSearchConfig  `json:"fileSearch,omitempty"`
+	ComputerUse   *openai.GeminiComputerUseConfig `json:"computerUse,omitempty"`
 }
 type geminiGeneration struct {
 	MaxOutputTokens    *int                            `json:"maxOutputTokens,omitempty"`
@@ -273,6 +275,9 @@ func geminiChatRequest(request openai.ChatCompletionRequest) (geminiRequest, err
 	}
 	if request.GeminiFileSearch != nil && (!openai.ValidGeminiFileSearchConfig(request.GeminiFileSearch) || len(request.Tools) > 0 || request.WebSearchOptions != nil || request.GeminiCodeExecution || request.GeminiURLContext || request.GeminiGoogleMaps) {
 		return result, geminiInvalid("file_search")
+	}
+	if request.GeminiComputerUse != nil && !openai.ValidGeminiComputerUseConfig(request.GeminiComputerUse) {
+		return result, geminiInvalid("computer_use")
 	}
 	if err := openai.ValidateChatGeminiPartMediaResolutions(request); err != nil {
 		return result, geminiInvalid("messages.content.media_resolution")
@@ -581,6 +586,12 @@ func geminiChatRequest(request openai.ChatCompletionRequest) (geminiRequest, err
 		config := *request.GeminiFileSearch
 		config.StoreNames = append([]string(nil), request.GeminiFileSearch.StoreNames...)
 		result.Tools = append(result.Tools, geminiTool{FileSearch: &config})
+	}
+	if request.GeminiComputerUse != nil {
+		config := *request.GeminiComputerUse
+		config.ExcludedPredefinedFunctions = append([]string(nil), request.GeminiComputerUse.ExcludedPredefinedFunctions...)
+		config.DisabledSafetyPolicies = append([]string(nil), request.GeminiComputerUse.DisabledSafetyPolicies...)
+		result.Tools = append(result.Tools, geminiTool{ComputerUse: &config})
 	}
 	if request.ToolChoice != nil {
 		if len(request.Tools) == 0 {

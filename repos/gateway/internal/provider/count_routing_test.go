@@ -141,6 +141,29 @@ func TestTokenCountPreservesGeminiFileSearch(t *testing.T) {
 	}
 }
 
+func TestTokenCountPreservesGeminiComputerUse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Request struct {
+				Tools []geminiTool `json:"tools"`
+			} `json:"generateContentRequest"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if len(body.Request.Tools) != 1 || body.Request.Tools[0].ComputerUse == nil || body.Request.Tools[0].ComputerUse.Environment != "ENVIRONMENT_BROWSER" {
+			t.Errorf("computer use tool lost: %+v", body.Request.Tools)
+		}
+		_, _ = w.Write([]byte(`{"totalTokens":64}`))
+	}))
+	defer server.Close()
+	router := New(Config{Endpoints: []config.ProviderEndpointConfig{{Name: "gemini", Type: "gemini", BaseURL: server.URL, Models: []string{"model"}, Capabilities: []string{"chat", "gemini_computer_use"}}}}).(*Router)
+	result, err := router.CountTokens(t.Context(), modules.RequestContext{Request: openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "browse"}}, GeminiComputerUse: &openai.GeminiComputerUseConfig{Environment: "ENVIRONMENT_BROWSER"}}})
+	if err != nil || result.InputTokens != 64 {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+}
+
 type countPrePolicy struct{ stopAdmissionModule }
 
 func (*countPrePolicy) Name() string { return "dlp" }

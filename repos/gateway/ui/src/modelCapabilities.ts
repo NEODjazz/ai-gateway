@@ -14,6 +14,7 @@ export const modelCapabilityOptions: ChipOption[] = [
   { value: "gemini_media_processing", label: "Gemini video processing", description: "Static or agentic processing for video inputs" },
   { value: "gemini_search_time_range", label: "Gemini search time range", description: "Bound native Google Search results by time" },
   { value: "gemini_file_search", label: "Gemini file search", description: "Search explicitly authorized provider-managed stores" },
+  { value: "gemini_computer_use", label: "Gemini computer use", description: "Generate client-executed browser, mobile, or desktop actions" },
   { value: "url_context", label: "URL context", description: "Native retrieval of URLs supplied in the prompt" },
   { value: "google_maps", label: "Google Maps grounding", description: "Native location-aware grounding with source metadata" },
   { value: "background_responses", label: "Background responses", description: "Durable asynchronous Responses execution" },

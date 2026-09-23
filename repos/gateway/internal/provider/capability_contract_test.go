@@ -134,6 +134,22 @@ func TestGeminiFileSearchRequiresExplicitNativeCapability(t *testing.T) {
 	}
 }
 
+func TestGeminiComputerUseRequiresExplicitNativeCapability(t *testing.T) {
+	catalog, err := modelcatalog.Parse(`{"version":"v1","models":[]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, endpoint := range []Endpoint{{Name: "gemini", Type: "gemini", Provider: Gemini{}}, {Name: "vertex", Type: "vertex-gemini", Provider: NewVertexGemini("https://us-central1-aiplatform.googleapis.com/v1/projects/project-1/locations/us-central1/publishers/google", false)}} {
+		if supportsCatalogCapabilities(catalog, endpoint, "model", "chat", "gemini_computer_use") {
+			t.Fatalf("legacy endpoint implicitly enabled computer use: %s", endpoint.Type)
+		}
+		endpoint.Capabilities = []string{"chat", "gemini_computer_use"}
+		if !supportsCatalogCapabilities(catalog, endpoint, "model", "chat", "gemini_computer_use") {
+			t.Fatalf("explicit native endpoint rejected computer use: %s", endpoint.Type)
+		}
+	}
+}
+
 func TestRouterSkipsNativeUnsupportedResponseProtocol(t *testing.T) {
 	nativeCalls, compatibleCalls := 0, 0
 	native := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { nativeCalls++; w.WriteHeader(500) }))

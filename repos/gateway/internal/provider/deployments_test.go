@@ -159,6 +159,7 @@ func TestManagedDeploymentRejectsUnsupportedProviderCapabilities(t *testing.T) {
 		{providerType: "openai-compatible", capability: "gemini_media_processing"},
 		{providerType: "openai-compatible", capability: "gemini_search_time_range"},
 		{providerType: "openai-compatible", capability: "gemini_file_search"},
+		{providerType: "openai-compatible", capability: "gemini_computer_use"},
 		{providerType: "openai-compatible", capability: "url_context"},
 		{providerType: "openai-compatible", capability: "google_maps"},
 		{providerType: "vertex-gemini", capability: "responses"},
@@ -191,6 +192,8 @@ func TestManagedDeploymentRejectsUnsupportedProviderCapabilities(t *testing.T) {
 				capabilities = []string{"chat", "web_search", "gemini_search_time_range"}
 			case "gemini_file_search":
 				capabilities = []string{"chat", "gemini_file_search"}
+			case "gemini_computer_use":
+				capabilities = []string{"chat", "gemini_computer_use"}
 			case "background_responses":
 				capabilities = []string{"responses", "background_responses"}
 			case "video_extension":
@@ -343,8 +346,8 @@ func TestManagedDeploymentAcceptsSupportedFeatureCapabilities(t *testing.T) {
 	}{
 		{providerType: "ollama", capabilities: []string{"chat", "tools", "structured_output", "vision"}},
 		{providerType: "anthropic", capabilities: []string{"chat", "tools", "structured_output", "vision", "web_search", "web_fetch", "tool_search", "prompt_cache", "assistant_prefill", "memory_tool", "bash_tool", "text_editor_tool", "computer_toolset", "browser_toolset", "thinking", "zero_output", "inference_geo", "context_management", "tool_result_error", "document_citations", "document_metadata", "document_text", "file_input"}},
-		{providerType: "gemini", capabilities: []string{"chat", "gemini_safety_settings", "gemini_code_execution", "gemini_media_resolution", "gemini_media_processing", "gemini_search_time_range", "gemini_file_search", "url_context", "google_maps", "image_generation", "image_edit", "image_variation", "audio_transcription", "audio_translation", "audio_speech", "ocr", "tools", "structured_output", "vision", "web_search", "audio_input", "video_input", "file_input"}},
-		{providerType: "vertex-gemini", capabilities: []string{"chat", "embeddings", "stream", "gemini_safety_settings", "gemini_code_execution", "gemini_audio_timestamp", "gemini_media_resolution", "gemini_media_processing", "gemini_search_time_range", "gemini_file_search", "url_context", "tools", "structured_output", "vision", "web_search", "audio_input", "video_input", "file_input"}},
+		{providerType: "gemini", capabilities: []string{"chat", "gemini_safety_settings", "gemini_code_execution", "gemini_media_resolution", "gemini_media_processing", "gemini_search_time_range", "gemini_file_search", "gemini_computer_use", "url_context", "google_maps", "image_generation", "image_edit", "image_variation", "audio_transcription", "audio_translation", "audio_speech", "ocr", "tools", "structured_output", "vision", "web_search", "audio_input", "video_input", "file_input"}},
+		{providerType: "vertex-gemini", capabilities: []string{"chat", "embeddings", "stream", "gemini_safety_settings", "gemini_code_execution", "gemini_audio_timestamp", "gemini_media_resolution", "gemini_media_processing", "gemini_search_time_range", "gemini_file_search", "gemini_computer_use", "url_context", "tools", "structured_output", "vision", "web_search", "audio_input", "video_input", "file_input"}},
 		{providerType: "cohere", capabilities: []string{"chat", "tools", "structured_output"}},
 		{providerType: "bedrock", capabilities: []string{"chat", "tools", "prompt_cache", "bedrock_invoke"}},
 		{providerType: "groq", capabilities: []string{"chat", "responses", "audio_transcription", "audio_translation", "audio_speech", "stream", "tools", "structured_output", "mcp", "vision"}},
@@ -463,6 +466,9 @@ func TestManagedProviderCapabilityProfilesMatchAdapterOperations(t *testing.T) {
 	}
 	if !slices.Contains(profilesByType["gemini"].Capabilities, "gemini_file_search") || !slices.Contains(profilesByType["vertex-gemini"].Capabilities, "gemini_file_search") {
 		t.Fatalf("Gemini file search profiles are incomplete: gemini=%+v vertex=%+v", profilesByType["gemini"], profilesByType["vertex-gemini"])
+	}
+	if !slices.Contains(profilesByType["gemini"].Capabilities, "gemini_computer_use") || !slices.Contains(profilesByType["vertex-gemini"].Capabilities, "gemini_computer_use") {
+		t.Fatalf("Gemini computer use profiles are incomplete: gemini=%+v vertex=%+v", profilesByType["gemini"], profilesByType["vertex-gemini"])
 	}
 	if !slices.Contains(profilesByType["gemini"].Capabilities, "url_context") {
 		t.Fatalf("Gemini profile is missing native URL context: %+v", profilesByType["gemini"])

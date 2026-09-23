@@ -473,6 +473,19 @@ func TestGeminiFileSearchDisablesResponseCaches(t *testing.T) {
 	}
 }
 
+func TestGeminiComputerUseDisablesResponseCaches(t *testing.T) {
+	request := modules.RequestContext{CredentialID: "key", Request: openai.ChatCompletionRequest{Model: "test", Messages: []openai.Message{{Role: "user", Content: "browse"}}, GeminiComputerUse: &openai.GeminiComputerUseConfig{Environment: "ENVIRONMENT_BROWSER"}}}
+	if providerCacheKey("chat", request) != "" {
+		t.Fatal("exact cache allowed computer use")
+	}
+	if _, _, ok := semanticRequest(request, Endpoint{Name: "test"}); ok {
+		t.Fatal("semantic cache allowed computer use")
+	}
+	if got := strings.Join(requiredChatCapabilities(request.Request, false), ","); got != "chat,gemini_computer_use" {
+		t.Fatalf("computer use routing requirements=%s", got)
+	}
+}
+
 func TestGeminiCodeExecutionDisablesResponseCaches(t *testing.T) {
 	request := modules.RequestContext{CredentialID: "key", Request: openai.ChatCompletionRequest{Model: "test", Messages: []openai.Message{{Role: "user", Content: "calculate"}}, GeminiCodeExecution: true}}
 	if providerCacheKey("chat", request) != "" {

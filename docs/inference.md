@@ -1274,6 +1274,17 @@ is included in the TPM and budget reserve, native token counting preserves it, a
 exact and semantic response caches are bypassed. Returned retrieval grounding is
 bounded and validated before citations and raw native metadata are exposed.
 
+### Native Gemini computer use
+
+`tools[].computerUse` enables client-executed browser, mobile, or desktop action
+loops. Configuration validates the environment, excluded predefined functions,
+prompt-injection detection flag and safety-policy overrides. Routing requires
+`gemini_computer_use`. Authorization requires `computer_use`, an environment grant
+(`gemini_computer_use:<environment>`) and a dedicated grant for every disabled safety
+policy. Tool configuration enters token reserve and native token counting, while exact
+and semantic response caches are bypassed. Function-call arguments, including provider
+safety decisions, remain in the native GenerateContent continuation contract.
+
 ### Native GenerateContent token counting
 
 POST `/v1beta/models/{model}:countTokens` accepts either `contents` or

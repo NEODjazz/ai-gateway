@@ -307,6 +307,21 @@ func TestGenerateContentFileSearchEnforcesStoreACL(t *testing.T) {
 	}
 }
 
+func TestGenerateContentComputerUseEnforcesSafetyACL(t *testing.T) {
+	body := `{"contents":[{"parts":[{"text":"open settings"}]}],"tools":[{"computerUse":{"environment":"ENVIRONMENT_DESKTOP","disabledSafetyPolicies":["DATA_MODIFICATION"]}}]}`
+	upstream := &fallbackChatProvider{}
+	missingOverride := Routes(NewHandler(modules.NewPipeline([]modules.Module{messagesAuth{accessPolicyModule{models: []string{"*"}, tools: []string{"computer_use", "gemini_computer_use:ENVIRONMENT_DESKTOP"}}}}), upstream))
+	response := generateCall(missingOverride, "/v1beta/models/m:generateContent", body, "gateway-test-key")
+	if response.Code != http.StatusForbidden || upstream.calls != 0 || !strings.Contains(response.Body.String(), "gemini_computer_use:disable:DATA_MODIFICATION") {
+		t.Fatalf("safety override ACL bypassed: status=%d calls=%d body=%s", response.Code, upstream.calls, response.Body.String())
+	}
+	allowed := Routes(NewHandler(modules.NewPipeline([]modules.Module{messagesAuth{accessPolicyModule{models: []string{"*"}, tools: []string{"computer_use", "gemini_computer_use:ENVIRONMENT_DESKTOP", "gemini_computer_use:disable:DATA_MODIFICATION"}}}}), upstream))
+	response = generateCall(allowed, "/v1beta/models/m:generateContent", body, "gateway-test-key")
+	if response.Code == http.StatusForbidden || upstream.calls != 1 || upstream.request.Request.GeminiComputerUse == nil || upstream.request.Request.NativeInputTokens == 0 {
+		t.Fatalf("authorized computer use rejected: status=%d calls=%d request=%+v", response.Code, upstream.calls, upstream.request.Request)
+	}
+}
+
 func TestGenerateContentGeminiCodeExecutionStreamAndACL(t *testing.T) {
 	denied := &fallbackChatProvider{}
 	deniedHandler := Routes(NewHandler(modules.NewPipeline([]modules.Module{messagesAuth{accessPolicyModule{models: []string{"*"}, tools: []string{"safe"}}}}), denied))

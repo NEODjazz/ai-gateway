@@ -41,6 +41,8 @@ type ChatCompletionRequest struct {
 	GeminiMediaResolution string `json:"-"`
 	// GeminiFileSearch contains validated provider-managed retrieval stores.
 	GeminiFileSearch *GeminiFileSearchConfig `json:"-"`
+	// GeminiComputerUse contains validated client-executed computer controls.
+	GeminiComputerUse *GeminiComputerUseConfig `json:"-"`
 	// AnthropicSkills contains validated native Messages skill references.
 	AnthropicSkills      []AnthropicSkillReference `json:"-"`
 	AnthropicContainerID string                    `json:"-"`
