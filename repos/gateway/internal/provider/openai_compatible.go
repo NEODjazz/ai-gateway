@@ -1363,6 +1363,20 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 			response.ID = id
 		}
 		if event == "response.function_call_arguments.delta" || event == "response.function_call_arguments.done" {
+			field := "delta"
+			if event == "response.function_call_arguments.done" {
+				field = "arguments"
+			}
+			value, err := requiredResponseEventString(decoded, field)
+			if err != nil {
+				return err
+			}
+			if event == "response.function_call_arguments.done" {
+				var arguments map[string]json.RawMessage
+				if json.Unmarshal([]byte(value), &arguments) != nil || arguments == nil {
+					return errors.New("Responses function arguments event must contain a JSON object")
+				}
+			}
 			item := ensureResponseOutputItem(&response, outputIndex)
 			item.Type = "function_call"
 			item.Role, item.Content = "", nil
@@ -1370,14 +1384,20 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 				item.ID = id
 			}
 			if event == "response.function_call_arguments.delta" {
-				if delta, ok := decoded["delta"].(string); ok {
-					item.Arguments += delta
-				}
-			} else if arguments, ok := decoded["arguments"].(string); ok {
-				item.Arguments = arguments
+				item.Arguments += value
+			} else {
+				item.Arguments = value
 			}
 		}
 		if event == "response.custom_tool_call_input.delta" || event == "response.custom_tool_call_input.done" {
+			field := "delta"
+			if event == "response.custom_tool_call_input.done" {
+				field = "input"
+			}
+			value, err := requiredResponseEventString(decoded, field)
+			if err != nil {
+				return err
+			}
 			item := ensureResponseOutputItem(&response, outputIndex)
 			item.Type = "custom_tool_call"
 			item.Role, item.Content = "", nil
@@ -1385,11 +1405,9 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 				item.ID = id
 			}
 			if event == "response.custom_tool_call_input.delta" {
-				if delta, ok := decoded["delta"].(string); ok {
-					item.Input += delta
-				}
-			} else if input, ok := decoded["input"].(string); ok {
-				item.Input = input
+				item.Input += value
+			} else {
+				item.Input = value
 			}
 		}
 		if event == "response.apply_patch_call_operation_diff.delta" || event == "response.apply_patch_call_operation_diff.done" {
@@ -1410,6 +1428,18 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 		}
 		if event == "response.refusal.delta" || event == "response.refusal.done" ||
 			event == "response.output_text.delta" || event == "response.output_text.done" {
+			field := "delta"
+			if strings.HasSuffix(event, ".done") {
+				if strings.HasPrefix(event, "response.refusal.") {
+					field = "refusal"
+				} else {
+					field = "text"
+				}
+			}
+			value, err := requiredResponseEventString(decoded, field)
+			if err != nil {
+				return err
+			}
 			contentIndex, err := boundedResponseStreamIndex(decoded, "content_index", maxResponseStreamContentParts)
 			if err != nil {
 				return err
@@ -1442,21 +1472,17 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 					}
 				}
 				if event == "response.output_text.delta" {
-					if delta, ok := decoded["delta"].(string); ok {
-						part.Text += delta
-					}
-				} else if text, ok := decoded["text"].(string); ok {
-					part.Text = text
+					part.Text += value
+				} else {
+					part.Text = value
 				}
 			case "response.refusal.delta", "response.refusal.done":
 				part.Type, part.Text = "refusal", ""
 				part.Annotations, part.Logprobs = nil, nil
 				if event == "response.refusal.delta" {
-					if delta, ok := decoded["delta"].(string); ok {
-						part.Refusal += delta
-					}
-				} else if refusal, ok := decoded["refusal"].(string); ok {
-					part.Refusal = refusal
+					part.Refusal += value
+				} else {
+					part.Refusal = value
 				}
 			}
 			if err := validateResponseOutputContent(*part); err != nil {
@@ -1660,6 +1686,14 @@ func boundedResponseStreamIndex(decoded map[string]any, field string, limit int)
 		return 0, fmt.Errorf("invalid upstream response %s", field)
 	}
 	return int(value), nil
+}
+
+func requiredResponseEventString(decoded map[string]any, field string) (string, error) {
+	value, ok := decoded[field].(string)
+	if !ok {
+		return "", fmt.Errorf("Responses event is missing string field %s", field)
+	}
+	return value, nil
 }
 
 func ensureResponseOutputItem(response *openai.ResponseResponse, index int) *openai.ResponseOutputItem {
