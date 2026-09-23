@@ -44,6 +44,27 @@ func TestResponsesRejectsInvalidUsageBeforeDelivery(t *testing.T) {
 	}
 }
 
+func TestResponsesRejectsUnknownUsageCountersBeforeDelivery(t *testing.T) {
+	for _, usage := range []string{
+		`{"input_token":1}`,
+		`{"input_tokens_details":{"cached_token":1}}`,
+		`{"output_tokens_details":{"reasoning_token":1}}`,
+		`{"server_side_tool_usage_details":{"x_post_fetched":1}}`,
+	} {
+		t.Run(usage, func(t *testing.T) {
+			document := fmt.Sprintf(`{"id":"r","object":"response","model":"m","status":"completed","usage":%s}`, usage)
+			if _, err := decodeResponseJSON(strings.NewReader(document)); err == nil {
+				t.Fatal("unknown JSON usage counter accepted")
+			}
+			callbacks := 0
+			wire := "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":" + document + "}\n\n"
+			if _, err := streamResponseData(strings.NewReader(wire), "m", func(string, string) error { callbacks++; return nil }); err == nil || callbacks != 0 {
+				t.Fatalf("unknown SSE usage counter delivered: err=%v callbacks=%d", err, callbacks)
+			}
+		})
+	}
+}
+
 func TestResponseUsageRangeBoundary(t *testing.T) {
 	maxInt := int(^uint(0) >> 1)
 	for _, usage := range []openai.ResponseUsage{{}, {InputTokens: maxInt - 1, OutputTokens: 1, TotalTokens: maxInt}, {InputTokens: 7, OutputTokens: 2, TotalTokens: 9}, {InputTokens: 7}} {

@@ -1086,7 +1086,9 @@ func (u *ResponseUsage) UnmarshalJSON(data []byte) error {
 		responseUsage
 		ProviderCostUSDTicks *int64 `json:"cost_in_usd_ticks"`
 	}
-	if err := json.Unmarshal(data, &wire); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&wire); err != nil {
 		return err
 	}
 	*u = ResponseUsage(wire.responseUsage)

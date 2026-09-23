@@ -1679,11 +1679,19 @@ range, using subtraction before any addition. SSE validation happens before the
 containing response event is forwarded; JSON validation happens before the
 adapter returns a successful result to provider post-response modules.
 
+The `usage` object and its token-detail and server-side-tool-detail objects are
+decoded against an explicit field allowlist. Unknown counters are rejected
+instead of being silently discarded, so a provider schema change cannot produce
+an apparently successful response with incomplete billing data. The internal
+provider cost counter and the documented provider-specific source and tool
+counters remain accepted.
+
 This preserves the existing treatment of absent or partial usage, and does not
 assert that every provider's total equals the input/output sum. Usage estimation
 and missing-versus-explicit-zero handling are separate concerns. Regression tests
-cover both decoders, invalid cache detail counters, overflowing sums, exact integer
-boundaries, and compatible missing/partial usage.
+cover both decoders, unknown counters at every usage level, invalid cache detail
+counters, overflowing sums, exact integer boundaries, and compatible
+missing/partial usage.
 
 ### Reported zero versus missing Responses input usage
 
