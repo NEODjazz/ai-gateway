@@ -535,7 +535,7 @@ func TestManagedProviderCapabilityProfilesExposeValidatedChatParameters(t *testi
 		"mistral":           {ReasoningEffort: []string{"none", "minimal", "low", "medium", "high", "xhigh"}, Logprobs: []string{}, ServiceTier: []string{}},
 		"deepseek":          {ReasoningEffort: []string{}, Logprobs: []string{"false", "true"}, ServiceTier: []string{}},
 		"xai":               {ReasoningEffort: []string{"none", "low", "medium", "high", "xhigh"}, Logprobs: []string{"false", "true"}, ServiceTier: []string{"default", "priority"}},
-		"groq":              {ReasoningEffort: allReasoning, Logprobs: []string{}, ServiceTier: []string{"auto", "on_demand", "flex", "performance"}},
+		"groq":              {ReasoningEffort: allReasoning, ReasoningFormat: []string{"hidden", "raw", "parsed"}, Logprobs: []string{}, ServiceTier: []string{"auto", "on_demand", "flex", "performance"}},
 		"openrouter":        {ReasoningEffort: allReasoning, Logprobs: []string{"false", "true"}, ServiceTier: allTiers},
 		"openai-compatible": {ReasoningEffort: allReasoning, Logprobs: []string{"false", "true"}, ServiceTier: []string{}},
 		"openai":            {ReasoningEffort: allReasoning, Logprobs: []string{"false", "true"}, ServiceTier: []string{"auto", "default", "flex", "priority", "fast", "ultrafast"}},
@@ -543,7 +543,7 @@ func TestManagedProviderCapabilityProfilesExposeValidatedChatParameters(t *testi
 	}
 	for providerType, expected := range tests {
 		actual, found := byType[providerType]
-		if !found || !slices.Equal(actual.ReasoningEffort, expected.ReasoningEffort) || !slices.Equal(actual.Logprobs, expected.Logprobs) || !slices.Equal(actual.ServiceTier, expected.ServiceTier) {
+		if !found || !slices.Equal(actual.ReasoningEffort, expected.ReasoningEffort) || !slices.Equal(actual.ReasoningFormat, expected.ReasoningFormat) || !slices.Equal(actual.Logprobs, expected.Logprobs) || !slices.Equal(actual.ServiceTier, expected.ServiceTier) {
 			t.Fatalf("%s chat parameters=%+v want=%+v", providerType, actual, expected)
 		}
 	}
@@ -570,7 +570,7 @@ func TestManagedProviderCapabilityProfilesExposeAllValidatedChatOptions(t *testi
 		"cohere":            {"logprobs", "frequency_penalty", "presence_penalty", "top_k"},
 		"mistral":           {"metadata", "safe_prompt", "n", "prompt_cache_key", "prompt_mode", "prediction", "frequency_penalty", "presence_penalty", "reasoning_effort"},
 		"bedrock":           {"service_tier"},
-		"groq":              {"user", "reasoning_effort", "service_tier"},
+		"groq":              {"include_reasoning", "user", "reasoning_effort", "reasoning_format", "service_tier"},
 		"deepseek":          {"user", "logprobs", "top_logprobs"},
 		"xai":               {"n", "prompt_cache_key", "user", "web_search_options", "logprobs", "top_logprobs", "frequency_penalty", "presence_penalty", "reasoning_effort", "service_tier"},
 	}

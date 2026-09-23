@@ -56,6 +56,7 @@ type ProviderCapabilityProfile struct {
 type ProviderChatParameterPolicy struct {
 	SupportedOptions []string `json:"supported_options"`
 	ReasoningEffort  []string `json:"reasoning_effort"`
+	ReasoningFormat  []string `json:"reasoning_format"`
 	Logprobs         []string `json:"logprobs"`
 	ServiceTier      []string `json:"service_tier"`
 }
@@ -1239,7 +1240,7 @@ func managedProviderChatParameterPolicy(client Client, supportsChat bool) Provid
 }
 
 func managedProviderChatParameterPolicyForModel(client Client, supportsChat bool, model string) ProviderChatParameterPolicy {
-	policy := ProviderChatParameterPolicy{SupportedOptions: []string{}, ReasoningEffort: []string{}, Logprobs: []string{}, ServiceTier: []string{}}
+	policy := ProviderChatParameterPolicy{SupportedOptions: []string{}, ReasoningEffort: []string{}, ReasoningFormat: []string{}, Logprobs: []string{}, ServiceTier: []string{}}
 	if !supportsChat {
 		return policy
 	}
@@ -1249,6 +1250,13 @@ func managedProviderChatParameterPolicyForModel(client Client, supportsChat bool
 		request.ReasoningEffort = value
 		if validateChatAdapter(client, request) == nil {
 			policy.ReasoningEffort = append(policy.ReasoningEffort, value)
+		}
+	}
+	for _, value := range []string{"hidden", "raw", "parsed"} {
+		request := baseline
+		request.ReasoningFormat = value
+		if validateChatAdapter(client, request) == nil {
+			policy.ReasoningFormat = append(policy.ReasoningFormat, value)
 		}
 	}
 	for _, value := range []bool{false, true} {
@@ -1274,6 +1282,9 @@ func managedProviderChatParameterPolicyForModel(client Client, supportsChat bool
 	}
 	if len(policy.ReasoningEffort) > 0 {
 		policy.SupportedOptions = append(policy.SupportedOptions, "reasoning_effort")
+	}
+	if len(policy.ReasoningFormat) > 0 {
+		policy.SupportedOptions = append(policy.SupportedOptions, "reasoning_format")
 	}
 	if len(policy.ServiceTier) > 0 {
 		policy.SupportedOptions = append(policy.SupportedOptions, "service_tier")
@@ -1304,6 +1315,7 @@ func managedChatOptionProbes() []managedChatOptionProbe {
 			request.Moderation = &openai.ProviderModeration{Model: "omni-moderation-latest", Policy: &openai.ProviderModerationPolicy{Input: &openai.ProviderModerationRule{Mode: "block"}}}
 		}},
 		{name: "clear_thinking", apply: setBool(func(request *openai.ChatCompletionRequest) **bool { return &request.ClearThinking }, true)},
+		{name: "include_reasoning", apply: setBool(func(request *openai.ChatCompletionRequest) **bool { return &request.IncludeReasoning }, true)},
 		{name: "safe_prompt", apply: setBool(func(request *openai.ChatCompletionRequest) **bool { return &request.SafePrompt }, true)},
 		{name: "n", apply: func(request *openai.ChatCompletionRequest) { value := 2; request.N = &value }},
 		{name: "safety_identifier", apply: func(request *openai.ChatCompletionRequest) { request.SafetyIdentifier = "profile-probe" }},

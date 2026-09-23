@@ -2,7 +2,9 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 
 	"ai-gateway-gateway/internal/openai"
@@ -61,14 +63,34 @@ func (g Groq) ChatCompletions(ctx context.Context, request openai.ChatCompletion
 	if err := g.ValidateChatParameters(request); err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
-	return g.compatible.ChatCompletions(ctx, request)
+	return g.compatible.chatCompletions(ctx, request, decodeGroqChatCompletionResponse, normalizeGroqChatStreamPayload)
 }
 
 func (g Groq) StreamChatCompletions(ctx context.Context, request openai.ChatCompletionRequest, write ChatCompletionStreamWriter) (openai.ChatCompletionResponse, error) {
 	if err := g.ValidateChatParameters(request); err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
-	return g.compatible.StreamChatCompletions(ctx, request, write)
+	return g.compatible.streamChatCompletions(ctx, request, write, normalizeGroqChatStreamPayload)
+}
+
+func decodeGroqChatCompletionResponse(reader io.Reader, target *openai.ChatCompletionResponse) error {
+	payload, err := io.ReadAll(io.LimitReader(reader, maxChatCompletionResponseBytes+1))
+	if err != nil {
+		return err
+	}
+	if len(payload) > maxChatCompletionResponseBytes {
+		return errors.New("chat completion response exceeds limit")
+	}
+	normalized, err := normalizeChatReasoningAliasPayload("Groq", payload, "message")
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(normalized, target)
+}
+
+func normalizeGroqChatStreamPayload(payload string) (string, error) {
+	normalized, err := normalizeChatReasoningAliasPayload("Groq", []byte(payload), "delta")
+	return string(normalized), err
 }
 
 func (g Groq) ValidateResponseParameters(request openai.ResponseRequest) error {

@@ -95,6 +95,22 @@ func TestOpenAPIProviderProfilesExposeModelSpecificChatPolicy(t *testing.T) {
 	}
 }
 
+func TestOpenAPIGroqReasoningControlsAndCapabilityPolicy(t *testing.T) {
+	document := loadDocument(t)
+	chat := document.Components.Schemas["ChatCompletionRequest"].Value
+	if chat == nil || chat.Properties["include_reasoning"] == nil || chat.Properties["reasoning_format"] == nil {
+		t.Fatal("ChatCompletionRequest is missing Groq reasoning controls")
+	}
+	formats := chat.Properties["reasoning_format"].Value.Enum
+	if len(formats) != 3 || formats[0] != "hidden" || formats[1] != "raw" || formats[2] != "parsed" {
+		t.Fatalf("reasoning_format values=%v", formats)
+	}
+	policy := document.Components.Schemas["ProviderChatParameterPolicy"].Value
+	if policy == nil || policy.Properties["reasoning_format"] == nil {
+		t.Fatal("ProviderChatParameterPolicy is missing reasoning_format")
+	}
+}
+
 func TestOpenAPITopKBelongsToMessagesRequest(t *testing.T) {
 	document := loadDocument(t)
 	messages := document.Components.Schemas["MessagesRequest"].Value

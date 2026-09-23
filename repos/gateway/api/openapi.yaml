@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.470
+  version: 0.1.471
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -8860,6 +8860,8 @@ components:
             - $ref: '#/components/schemas/ProviderModeration'
           description: Provider-side input and output moderation for compatible, OpenAI, and Azure OpenAI deployments. Requests bypass gateway response caches and shadow execution.
         clear_thinking: {type: boolean, description: "Native Cerebras history control supported only by the exact upstream model zai-glm-4.7; explicit false is preserved. Other models and adapters reject the field."}
+        include_reasoning: {type: boolean, description: "Native Groq reasoning-output control. Mutually exclusive with reasoning_format and rejected by other adapters."}
+        reasoning_format: {type: string, enum: [hidden, raw, parsed], description: "Native Groq reasoning-output format. Mutually exclusive with include_reasoning and rejected by other adapters."}
         reasoning_effort: {type: string, enum: [none, minimal, low, medium, high, xhigh, max, default], description: Native Gemini maps minimal through high to thinkingConfig.thinkingLevel; native Ollama maps none to think=false; available levels depend on the selected model.}
         safe_prompt: {type: boolean, description: Enables provider-managed prompt safety for native Mistral Chat deployments; rejected by other adapters.}
         n: {type: integer, minimum: 1, maximum: 128, default: 1, description: Native Gemini supports values up to 20; compatible deployment limits are provider-specific.}
@@ -11356,17 +11358,21 @@ components:
     ProviderChatParameterPolicy:
       type: object
       additionalProperties: false
-      required: [supported_options, reasoning_effort, logprobs, service_tier]
+      required: [supported_options, reasoning_effort, reasoning_format, logprobs, service_tier]
       description: Chat Completions options accepted by the runtime adapter validator. Missing option names and empty value arrays mean the parameter is rejected. Availability can still depend on the upstream model.
       properties:
         supported_options:
           type: array
           uniqueItems: true
-          items: {type: string, enum: [metadata, store, modalities, audio, clear_thinking, safe_prompt, n, safety_identifier, prompt_cache_key, prompt_cache_options, prompt_cache_retention, prompt_mode, prediction, user, verbosity, web_search_options, web_fetch_options, logprobs, top_logprobs, frequency_penalty, presence_penalty, min_p, top_k, top_a, repetition_penalty, logit_bias, reasoning_effort, service_tier]}
+          items: {type: string, enum: [metadata, store, modalities, audio, clear_thinking, include_reasoning, reasoning_format, safe_prompt, n, safety_identifier, prompt_cache_key, prompt_cache_options, prompt_cache_retention, prompt_mode, prediction, user, verbosity, web_search_options, web_fetch_options, logprobs, top_logprobs, frequency_penalty, presence_penalty, min_p, top_k, top_a, repetition_penalty, logit_bias, reasoning_effort, service_tier]}
         reasoning_effort:
           type: array
           uniqueItems: true
           items: {type: string, enum: [none, minimal, low, medium, high, xhigh, max, default]}
+        reasoning_format:
+          type: array
+          uniqueItems: true
+          items: {type: string, enum: [hidden, raw, parsed]}
         logprobs:
           type: array
           uniqueItems: true

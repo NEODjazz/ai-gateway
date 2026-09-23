@@ -21,20 +21,20 @@ func TestGroqChatMapsSupportedContract(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatal(err)
 		}
-		if body["model"] != "model" || body["max_completion_tokens"] != float64(32) || body["service_tier"] != "performance" || body["user"] != "tenant-user" || len(body["tools"].([]any)) != 1 || body["response_format"] == nil {
+		if body["model"] != "model" || body["max_completion_tokens"] != float64(32) || body["service_tier"] != "performance" || body["user"] != "tenant-user" || body["reasoning_format"] != "parsed" || len(body["tools"].([]any)) != 1 || body["response_format"] == nil {
 			t.Fatalf("request=%#v", body)
 		}
-		_, _ = fmt.Fprint(w, `{"id":"chat","object":"chat.completion","model":"model","service_tier":"performance","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}`)
+		_, _ = fmt.Fprint(w, `{"id":"chat","object":"chat.completion","model":"model","service_tier":"performance","choices":[{"index":0,"message":{"role":"assistant","content":"ok","reasoning":"private plan"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}`)
 	}))
 	defer server.Close()
 	maxTokens := 32
 	client := NewGroq(server.URL+"/openai/v1", "groq-key", true)
 	response, err := client.ChatCompletions(t.Context(), openai.ChatCompletionRequest{
-		Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}}, MaxCompletionTokens: &maxTokens, ChatGenerationOptions: openai.ChatGenerationOptions{ServiceTier: "performance", User: "tenant-user"},
+		Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}}, MaxCompletionTokens: &maxTokens, ChatGenerationOptions: openai.ChatGenerationOptions{ServiceTier: "performance", User: "tenant-user", ReasoningFormat: "parsed"},
 		Tools:          []openai.Tool{{Type: "function", Function: openai.FunctionDefinition{Name: "lookup", Parameters: map[string]any{"type": "object"}}}},
 		ResponseFormat: &openai.ResponseFormat{Type: "json_object"},
 	})
-	if err != nil || response.Usage.TotalTokens != 3 || response.ServiceTier != "performance" || openai.ContentText(response.Choices[0].Message.Content) != "ok" {
+	if err != nil || response.Usage.TotalTokens != 3 || response.ServiceTier != "performance" || openai.ContentText(response.Choices[0].Message.Content) != "ok" || response.Choices[0].Message.ReasoningContent != "private plan" {
 		t.Fatalf("response=%+v err=%v", response, err)
 	}
 }
@@ -80,17 +80,85 @@ func TestGroqRejectsUnsupportedParametersBeforeHTTP(t *testing.T) {
 
 func TestGroqStreamsWithUsage(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = fmt.Fprint(w, "data: {\"id\":\"chat\",\"model\":\"model\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"ok\"}}]}\n\ndata: {\"id\":\"chat\",\"model\":\"model\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":1,\"total_tokens\":3}}\n\ndata: [DONE]\n\n")
+		var body map[string]any
+		if json.NewDecoder(r.Body).Decode(&body) != nil || body["include_reasoning"] != true {
+			t.Fatalf("request=%#v", body)
+		}
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"chat\",\"model\":\"model\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"reasoning\":\"private \"}}]}\n\ndata: {\"id\":\"chat\",\"model\":\"model\",\"choices\":[{\"index\":0,\"delta\":{\"reasoning\":\"plan\",\"content\":\"ok\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":1,\"total_tokens\":3}}\n\ndata: [DONE]\n\n")
 	}))
 	defer server.Close()
 	client := NewGroq(server.URL, "key", true)
 	var payloads []string
-	response, err := client.StreamChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}}, Stream: true}, func(payload string) error {
+	includeReasoning := true
+	response, err := client.StreamChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}}, Stream: true, ChatGenerationOptions: openai.ChatGenerationOptions{IncludeReasoning: &includeReasoning}}, func(payload string) error {
 		payloads = append(payloads, payload)
 		return nil
 	})
-	if err != nil || response.Usage.TotalTokens != 3 || len(payloads) != 2 {
+	if err != nil || response.Usage.TotalTokens != 3 || response.Choices[0].Message.ReasoningContent != "private plan" || len(payloads) != 2 || strings.Contains(strings.Join(payloads, "\n"), `"reasoning":`) || !strings.Contains(strings.Join(payloads, "\n"), `"reasoning_content":`) {
 		t.Fatalf("response=%+v payloads=%v err=%v", response, payloads, err)
+	}
+}
+
+func TestGroqRejectsInvalidReasoningControlsBeforeHTTP(t *testing.T) {
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
+	defer server.Close()
+	client := NewGroq(server.URL, "key", true)
+	include := true
+	tests := []openai.ChatGenerationOptions{
+		{ReasoningFormat: "invalid"},
+		{IncludeReasoning: &include, ReasoningFormat: "parsed"},
+	}
+	for _, options := range tests {
+		_, err := client.ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}}, ChatGenerationOptions: options})
+		if err == nil || called {
+			t.Fatalf("options=%+v err=%v called=%v", options, err, called)
+		}
+	}
+}
+
+func TestGroqPreservesExplicitFalseIncludeReasoning(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if json.NewDecoder(r.Body).Decode(&body) != nil {
+			t.Fatal("decode request")
+		}
+		value, found := body["include_reasoning"]
+		if !found || value != false {
+			t.Fatalf("include_reasoning=%#v found=%v", value, found)
+		}
+		_, _ = fmt.Fprint(w, `{"id":"chat","model":"model","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`)
+	}))
+	defer server.Close()
+
+	include := false
+	_, err := NewGroq(server.URL, "key", false).ChatCompletions(t.Context(), openai.ChatCompletionRequest{
+		Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}},
+		ChatGenerationOptions: openai.ChatGenerationOptions{IncludeReasoning: &include},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestGroqReasoningControlsAreAdapterIsolated(t *testing.T) {
+	include := false
+	for name, validate := range map[string]func(openai.ChatCompletionRequest) error{
+		"compatible": NewOpenAICompatible("http://unused.invalid", "", false).ValidateChatParameters,
+		"cerebras":   NewCerebras("http://unused.invalid", "", false).ValidateChatParameters,
+	} {
+		t.Run(name, func(t *testing.T) {
+			for parameter, options := range map[string]openai.ChatGenerationOptions{
+				"include_reasoning": {IncludeReasoning: &include},
+				"reasoning_format":  {ReasoningFormat: "raw"},
+			} {
+				var failure *Error
+				err := validate(openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}}, ChatGenerationOptions: options})
+				if !errors.As(err, &failure) || failure.Param != parameter || failure.UpstreamCode != "unsupported_parameter" {
+					t.Fatalf("%s: %v", parameter, err)
+				}
+			}
+		})
 	}
 }
 
