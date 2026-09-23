@@ -21,6 +21,7 @@ func TestResponsesRejectsInvalidUsageBeforeDelivery(t *testing.T) {
 		`{"input_tokens":1,"input_tokens_details":{"text_tokens":-1}}`,
 		`{"output_tokens":1,"output_tokens_details":{"accepted_prediction_tokens":-1}}`,
 		`{"output_tokens":1,"output_tokens_details":{"audio_tokens":-1}}`,
+		`{"output_tokens":1,"output_tokens_details":{"cached_tokens":-1}}`,
 		`{"output_tokens":1,"output_tokens_details":{"rejected_prediction_tokens":-1}}`,
 		`{"output_tokens":1,"output_tokens_details":{"text_tokens":-1}}`,
 	} {

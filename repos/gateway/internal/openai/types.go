@@ -580,6 +580,7 @@ func (u *Usage) UnmarshalJSON(data []byte) error {
 type CompletionTokenDetails struct {
 	AcceptedPredictionTokens int `json:"accepted_prediction_tokens,omitempty"`
 	AudioTokens              int `json:"audio_tokens,omitempty"`
+	CachedTokens             int `json:"cached_tokens,omitempty"`
 	ReasoningTokens          int `json:"reasoning_tokens,omitempty"`
 	RejectedPredictionTokens int `json:"rejected_prediction_tokens,omitempty"`
 	TextTokens               int `json:"text_tokens,omitempty"`

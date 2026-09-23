@@ -1668,7 +1668,7 @@ contracts, and is separate from the native Responses SSE wire budget.
 ### Responses usage range validation
 
 The OpenAI-compatible Responses JSON and native SSE decoders reject negative
-input, output, total, cached, cache-write, and cache-creation token counters.
+input, output, total, input/output cached, cache-write, and cache-creation token counters.
 They also reject input/output values whose sum exceeds the platform integer
 range, using subtraction before any addition. SSE validation happens before the
 containing response event is forwarded; JSON validation happens before the
@@ -1967,8 +1967,9 @@ tests verify all five fields on the wire for both adapters and modes, alongside
 unsupported-adapter rejection. Fields follow the
 [Responses create contract](https://developers.openai.com/api/reference/cli/resources/responses/methods/create).
 
-Responses usage now retains optional `output_tokens_details.reasoning_tokens`,
-using the existing completion-token detail type. Negative values are rejected
+Responses usage now retains optional `output_tokens_details.reasoning_tokens` and
+`output_tokens_details.cached_tokens`, using the existing completion-token detail
+type. Negative values are rejected
 before forwarding a native SSE event or returning decoded JSON. This detail is
 not added to `output_tokens` or `total_tokens`; those reported counters remain
 unchanged. Tests cover positive/zero details, negative rejection and unchanged
@@ -2115,7 +2116,7 @@ requested provider prefix-cache boundary.
 Chat and Responses usage preserve provider-reported modality and predicted-output
 breakdowns: input/prompt `audio_tokens`, `image_tokens`, `text_tokens`, and output
 `accepted_prediction_tokens`, `rejected_prediction_tokens`, `audio_tokens`,
-`reasoning_tokens`, `text_tokens`. Negative detail counts are rejected before a
+`cached_tokens`, `reasoning_tokens`, `text_tokens`. Negative detail counts are rejected before a
 JSON response or SSE event is delivered. Billing continues to settle from the
 provider's aggregate input/output counts, which already include rejected predicted
 tokens, so detail fields are observability data and are not added a second time.
