@@ -183,6 +183,44 @@ func TestResponsesRejectInvalidOutputItemIDsBeforeDelivery(t *testing.T) {
 	}
 }
 
+func TestResponsesValidateOutputItemStatuses(t *testing.T) {
+	valid := map[string][]string{
+		"message":                 {"in_progress", "completed", "incomplete"},
+		"function_call":           {"in_progress", "completed", "incomplete"},
+		"web_search_call":         {"in_progress", "searching", "completed", "failed", "incomplete"},
+		"file_search_call":        {"in_progress", "searching", "completed", "failed", "incomplete"},
+		"code_interpreter_call":   {"in_progress", "interpreting", "completed", "incomplete", "failed"},
+		"image_generation_call":   {"in_progress", "generating", "completed", "failed"},
+		"mcp_call":                {"in_progress", "calling", "completed", "incomplete", "failed"},
+		"shell_call":              {"in_progress", "completed", "incomplete"},
+		"apply_patch_call":        {"in_progress", "completed"},
+		"apply_patch_call_output": {"completed", "failed"},
+	}
+	for itemType, statuses := range valid {
+		for _, status := range statuses {
+			if !validResponseOutputItemStatus(itemType, status) {
+				t.Fatalf("valid status rejected: type=%s status=%s", itemType, status)
+			}
+		}
+		if validResponseOutputItemStatus(itemType, "unknown") {
+			t.Fatalf("unknown status accepted: type=%s", itemType)
+		}
+	}
+	if !validResponseOutputItemStatus("future_item", "future_status") || !validResponseOutputItemStatus("message", "") {
+		t.Fatal("extensible or omitted status rejected")
+	}
+
+	document := `{"id":"r","output":[{"type":"message","status":"unknown","content":[{"type":"output_text","text":"answer"}]}]}`
+	if _, err := decodeResponseJSON(strings.NewReader(document)); err == nil {
+		t.Fatal("invalid JSON output item status accepted")
+	}
+	callbacks := 0
+	wire := `data: {"type":"response.output_item.done","item":{"type":"message","status":"unknown","content":[{"type":"output_text","text":"answer"}]}}` + "\n\n" + responseTestTerminal
+	if _, err := streamResponseData(strings.NewReader(wire), "m", func(string, string) error { callbacks++; return nil }); err == nil || callbacks != 0 {
+		t.Fatalf("invalid SSE output item status delivered: err=%v callbacks=%d", err, callbacks)
+	}
+}
+
 func TestResponsesRejectsInvalidJSONDocuments(t *testing.T) {
 	for _, body := range []string{"null", `{"id":"r"} {"id":"second"}`, `{"id":"r"} trailing`, `{"id":`} {
 		t.Run(body, func(t *testing.T) {

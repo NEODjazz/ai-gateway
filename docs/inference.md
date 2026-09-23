@@ -1934,6 +1934,12 @@ The same validation runs on `item_id` in every native streaming event before the
 event is forwarded, preventing malformed identifiers from entering accumulated
 state or reaching clients.
 
+Known output item families validate their lifecycle status against the provider
+contract. Message, reasoning and client-owned calls use the basic lifecycle;
+search, code execution, image generation, MCP and patch items additionally accept
+only their documented intermediate or failure states. Omitted statuses and
+unknown future item families remain compatible.
+
 Regression tests cover interleaved messages and parts, text completion events,
 empty and populated terminal snapshots, invalid content indices and JSON text
 aggregation. The tests also reproduced the earlier behavior through a temporary

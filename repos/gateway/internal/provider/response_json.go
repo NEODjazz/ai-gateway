@@ -7,6 +7,7 @@ import (
 	"io"
 	"math"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -461,6 +462,9 @@ func validateResponseOutputItemsMode(items []openai.ResponseOutputItem, allowSpa
 		if item.ID != "" && !validResponseResourceID(item.ID) {
 			return errors.New("provider returned response output item with an invalid ID")
 		}
+		if !validResponseOutputItemStatus(item.Type, item.Status) {
+			return errors.New("provider returned response output item with an invalid status")
+		}
 		if len(item.Content) > maxResponseStreamContentParts || len(item.Summary) > maxResponseStreamContentParts {
 			return errors.New("provider returned too many response output content parts")
 		}
@@ -557,6 +561,33 @@ func validateResponseOutputItemsMode(items []openai.ResponseOutputItem, allowSpa
 		}
 	}
 	return nil
+}
+
+func validResponseOutputItemStatus(itemType, status string) bool {
+	if status == "" {
+		return true
+	}
+	allowed := func(values ...string) bool {
+		return slices.Contains(values, status)
+	}
+	switch itemType {
+	case "message", "reasoning", "function_call", "custom_tool_call", "computer_call", "shell_call", "shell_call_output":
+		return allowed("in_progress", "completed", "incomplete")
+	case "web_search_call", "file_search_call":
+		return allowed("in_progress", "searching", "completed", "failed", "incomplete")
+	case "code_interpreter_call":
+		return allowed("in_progress", "completed", "incomplete", "interpreting", "failed")
+	case "image_generation_call":
+		return allowed("in_progress", "completed", "generating", "failed")
+	case "mcp_call":
+		return allowed("in_progress", "completed", "incomplete", "calling", "failed")
+	case "apply_patch_call":
+		return allowed("in_progress", "completed")
+	case "apply_patch_call_output":
+		return allowed("completed", "failed")
+	default:
+		return true
+	}
 }
 
 func validateResponseOutputContent(part openai.ResponseOutputContent) error {
