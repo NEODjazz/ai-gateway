@@ -2482,3 +2482,19 @@ with image ID `sha256:bb27a5ea5a6dd91c17df23d9883ab4ca08daa1d204a2a2d52881bcbf28
 Gateway Helm revision 605 completed successfully. Pod
 `ai-gateway-gateway-776699cbdf-zgbtf` became Ready with zero restarts, and
 direct service liveness and readiness both returned 204.
+
+## Groq Responses hosted-tool contract validation
+
+Source `4e2a6783` rejects unsupported native Groq Responses tool types before
+provider execution. Code interpreter requests are restricted to the two GPT-OSS
+models and an automatic container with no extra options. The documented wire
+form, provider usage and pre-HTTP failures have regression coverage. The full
+Go test and race suites, vet and build passed; no live provider credential was
+used. Hosted execution remains unavailable as a managed deployment capability
+until its separate cost can be reserved and settled.
+
+Rancher Desktop built `ai-gateway-gateway:groq-tools-4e2a6783` with image ID
+`sha256:3940e117fe014fc73b41e6b2c7872ed7f2381160b8ce2c6594d46368a96320b4`.
+Gateway Helm revision 606 completed successfully. Pod
+`ai-gateway-gateway-8685749d55-789g2` became Ready with zero restarts, and
+direct service liveness and readiness both returned 204.
