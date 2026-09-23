@@ -325,6 +325,7 @@ func rejectGenerationOptions(adapter string, options openai.ChatGenerationOption
 		parameterCheck{"modalities", options.Modalities != nil},
 		parameterCheck{"audio", options.Audio != nil},
 		parameterCheck{"moderation", options.Moderation != nil},
+		parameterCheck{"clear_thinking", options.ClearThinking != nil},
 		parameterCheck{"reasoning_effort", options.ReasoningEffort != ""},
 		parameterCheck{"safe_prompt", options.SafePrompt != nil},
 		parameterCheck{"n", options.N != nil},
@@ -408,6 +409,7 @@ func (p OpenAICompatible) ValidateChatParameters(request openai.ChatCompletionRe
 	}
 	return rejectParameters(providerName,
 		parameterCheck{"store", request.Store != nil && *request.Store},
+		parameterCheck{"clear_thinking", request.ClearThinking != nil && providerName != "cerebras"},
 		parameterCheck{"safe_prompt", request.SafePrompt != nil && !p.supportsSafePrompt},
 		parameterCheck{"prompt_mode", request.PromptMode != "" && !p.supportsPromptMode},
 		parameterCheck{"service_tier", !supportedCompatibleServiceTier(providerName, request.ServiceTier)},

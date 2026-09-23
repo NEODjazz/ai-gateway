@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.468
+  version: 0.1.469
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -8859,6 +8859,7 @@ components:
           allOf:
             - $ref: '#/components/schemas/ProviderModeration'
           description: Provider-side input and output moderation for compatible, OpenAI, and Azure OpenAI deployments. Requests bypass gateway response caches and shadow execution.
+        clear_thinking: {type: boolean, description: "Native Cerebras history control supported only by the exact upstream model zai-glm-4.7; explicit false is preserved. Other models and adapters reject the field."}
         reasoning_effort: {type: string, enum: [none, minimal, low, medium, high, xhigh, max, default], description: Native Gemini maps minimal through high to thinkingConfig.thinkingLevel; native Ollama maps none to think=false; available levels depend on the selected model.}
         safe_prompt: {type: boolean, description: Enables provider-managed prompt safety for native Mistral Chat deployments; rejected by other adapters.}
         n: {type: integer, minimum: 1, maximum: 128, default: 1, description: Native Gemini supports values up to 20; compatible deployment limits are provider-specific.}
@@ -11361,7 +11362,7 @@ components:
         supported_options:
           type: array
           uniqueItems: true
-          items: {type: string, enum: [metadata, store, modalities, audio, safe_prompt, n, safety_identifier, prompt_cache_key, prompt_cache_options, prompt_cache_retention, prompt_mode, prediction, user, verbosity, web_search_options, web_fetch_options, logprobs, top_logprobs, frequency_penalty, presence_penalty, min_p, top_k, top_a, repetition_penalty, logit_bias, reasoning_effort, service_tier]}
+          items: {type: string, enum: [metadata, store, modalities, audio, clear_thinking, safe_prompt, n, safety_identifier, prompt_cache_key, prompt_cache_options, prompt_cache_retention, prompt_mode, prediction, user, verbosity, web_search_options, web_fetch_options, logprobs, top_logprobs, frequency_penalty, presence_penalty, min_p, top_k, top_a, repetition_penalty, logit_bias, reasoning_effort, service_tier]}
         reasoning_effort:
           type: array
           uniqueItems: true
@@ -11387,7 +11388,7 @@ components:
         supported_options:
           type: array
           uniqueItems: true
-          items: {type: string, enum: [reasoning_effort]}
+          items: {type: string, enum: [clear_thinking, reasoning_effort]}
         reasoning_effort:
           type: array
           uniqueItems: true

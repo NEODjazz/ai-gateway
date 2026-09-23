@@ -71,6 +71,7 @@ func TestCacheIsolationIncludesNativeChatState(t *testing.T) {
 			request.Messages[0].AnthropicDocumentMetadata = []openai.DocumentMetadata{{Title: "Report", Context: "Audited"}}
 		}},
 		{"native token reserve", func(request *openai.ChatCompletionRequest) { request.NativeInputTokens = 1 }},
+		{"clear thinking", func(request *openai.ChatCompletionRequest) { value := true; request.ClearThinking = &value }},
 		{"service tier", func(request *openai.ChatCompletionRequest) { request.BedrockServiceTier = "priority" }},
 		{"performance latency", func(request *openai.ChatCompletionRequest) { request.BedrockPerformanceLatency = "optimized" }},
 		{"additional response fields", func(request *openai.ChatCompletionRequest) {

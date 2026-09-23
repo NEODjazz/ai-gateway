@@ -27,6 +27,8 @@ func (Cerebras) SupportsTools() bool            { return true }
 func (Cerebras) SupportsStructuredOutput() bool { return true }
 func (Cerebras) SupportsResponses() bool        { return false }
 
+func (Cerebras) ManagedChatModelProbes() []string { return []string{"zai-glm-4.7"} }
+
 func (Cerebras) Responses(context.Context, openai.ResponseRequest) (openai.ResponseResponse, error) {
 	return openai.ResponseResponse{}, rejectParameters("cerebras", parameterCheck{"responses", true})
 }
@@ -68,6 +70,9 @@ func (c Cerebras) ValidateChatParameters(request openai.ChatCompletionRequest) e
 	}
 	if request.N != nil && *request.N != 1 {
 		return unsupportedCerebrasParameter("n")
+	}
+	if request.ClearThinking != nil && request.Model != "zai-glm-4.7" {
+		return &Error{Class: FailureClientRequest, Provider: "cerebras", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "clear_thinking", Err: errors.New("clear_thinking is only supported by zai-glm-4.7")}
 	}
 	if request.ReasoningEffort != "" {
 		switch request.ReasoningEffort {

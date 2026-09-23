@@ -1303,6 +1303,7 @@ func managedChatOptionProbes() []managedChatOptionProbe {
 		{name: "moderation", apply: func(request *openai.ChatCompletionRequest) {
 			request.Moderation = &openai.ProviderModeration{Model: "omni-moderation-latest", Policy: &openai.ProviderModerationPolicy{Input: &openai.ProviderModerationRule{Mode: "block"}}}
 		}},
+		{name: "clear_thinking", apply: setBool(func(request *openai.ChatCompletionRequest) **bool { return &request.ClearThinking }, true)},
 		{name: "safe_prompt", apply: setBool(func(request *openai.ChatCompletionRequest) **bool { return &request.SafePrompt }, true)},
 		{name: "n", apply: func(request *openai.ChatCompletionRequest) { value := 2; request.N = &value }},
 		{name: "safety_identifier", apply: func(request *openai.ChatCompletionRequest) { request.SafetyIdentifier = "profile-probe" }},

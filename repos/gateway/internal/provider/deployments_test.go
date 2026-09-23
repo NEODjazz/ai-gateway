@@ -581,6 +581,20 @@ func TestManagedProviderCapabilityProfilesExposeAllValidatedChatOptions(t *testi
 	}
 }
 
+func TestClearThinkingIsOnlyAdvertisedForCerebrasModel(t *testing.T) {
+	for _, profile := range ManagedProviderCapabilityProfiles() {
+		if slices.Contains(profile.ChatParameters.SupportedOptions, "clear_thinking") {
+			t.Fatalf("%s advertises provider-wide clear_thinking", profile.Type)
+		}
+		for _, policy := range profile.ChatModelParameters {
+			advertised := slices.Contains(policy.SupportedOptions, "clear_thinking")
+			if advertised != (profile.Type == "cerebras" && policy.Model == "zai-glm-4.7") {
+				t.Fatalf("%s/%s clear_thinking=%v", profile.Type, policy.Model, advertised)
+			}
+		}
+	}
+}
+
 func TestManagedProviderCapabilityProfilesExposeAllValidatedResponseOptions(t *testing.T) {
 	profiles := ManagedProviderCapabilityProfiles()
 	byType := make(map[string]ProviderResponseParameterPolicy, len(profiles))

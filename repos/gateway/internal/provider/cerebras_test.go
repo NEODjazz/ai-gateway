@@ -124,6 +124,45 @@ func TestCerebrasStreamsEffectiveAutoServiceTier(t *testing.T) {
 	}
 }
 
+func TestCerebrasForwardsModelScopedClearThinking(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if value, found := body["clear_thinking"]; !found || value != false {
+			t.Fatalf("request=%#v", body)
+		}
+		_, _ = fmt.Fprint(w, `{"id":"chat","object":"chat.completion","model":"zai-glm-4.7","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`)
+	}))
+	defer server.Close()
+	clearThinking := false
+	client := NewCerebras(server.URL, "key", true)
+	_, err := client.ChatCompletions(t.Context(), openai.ChatCompletionRequest{
+		Model: "zai-glm-4.7", Messages: []openai.Message{{Role: "user", Content: "hello"}},
+		ChatGenerationOptions: openai.ChatGenerationOptions{ClearThinking: &clearThinking},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCerebrasRejectsClearThinkingForOtherModelsBeforeHTTP(t *testing.T) {
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
+	defer server.Close()
+	clearThinking := true
+	client := NewCerebras(server.URL, "key", true)
+	_, err := client.ChatCompletions(t.Context(), openai.ChatCompletionRequest{
+		Model: "gpt-oss-120b", Messages: []openai.Message{{Role: "user", Content: "hello"}},
+		ChatGenerationOptions: openai.ChatGenerationOptions{ClearThinking: &clearThinking},
+	})
+	var failure *Error
+	if !errors.As(err, &failure) || failure.Param != "clear_thinking" || failure.UpstreamCode != "invalid_request" || called {
+		t.Fatalf("failure=%+v err=%v called=%v", failure, err, called)
+	}
+}
+
 func TestCerebrasRejectsInvalidReasoningResponses(t *testing.T) {
 	for _, test := range []struct {
 		name    string
@@ -210,6 +249,9 @@ func TestManagedCerebrasDiscoveryAndCapabilityProfile(t *testing.T) {
 		}
 		if fmt.Sprint(profile.ChatParameters.ReasoningEffort) != "[none low medium high]" || fmt.Sprint(profile.ChatParameters.ServiceTier) != "[auto default flex priority]" {
 			t.Fatalf("parameters=%+v", profile.ChatParameters)
+		}
+		if len(profile.ChatModelParameters) != 1 || profile.ChatModelParameters[0].Model != "zai-glm-4.7" || fmt.Sprint(profile.ChatModelParameters[0].SupportedOptions) != "[clear_thinking]" {
+			t.Fatalf("model parameters=%+v", profile.ChatModelParameters)
 		}
 		return
 	}

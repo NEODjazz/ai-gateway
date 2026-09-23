@@ -67,6 +67,10 @@ func TestOpenAPICachedContentLifecycleIsOwnerScopedAndBounded(t *testing.T) {
 
 func TestOpenAPIProviderProfilesExposeModelSpecificChatPolicy(t *testing.T) {
 	document := loadDocument(t)
+	chat := document.Components.Schemas["ChatCompletionRequest"].Value
+	if chat == nil || chat.Properties["clear_thinking"] == nil {
+		t.Fatal("ChatCompletionRequest is missing clear_thinking")
+	}
 	profile := document.Components.Schemas["ProviderCapabilityProfile"].Value
 	if profile == nil || profile.Properties["chat_model_parameters"] == nil {
 		t.Fatal("ProviderCapabilityProfile is missing chat_model_parameters")
@@ -78,6 +82,16 @@ func TestOpenAPIProviderProfilesExposeModelSpecificChatPolicy(t *testing.T) {
 	model := policy.Properties["model"].Value
 	if len(model.Enum) != 0 || model.MinLength != 1 {
 		t.Fatalf("model-specific chat policy model schema=%+v", model)
+	}
+	options := policy.Properties["supported_options"].Value.Items.Value.Enum
+	found := false
+	for _, option := range options {
+		if option == "clear_thinking" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("model-specific supported options=%v", options)
 	}
 }
 
