@@ -911,7 +911,9 @@ type ResponseResponse struct {
 	Status              string                     `json:"status,omitempty"`
 	Model               string                     `json:"model"`
 	ServiceTier         string                     `json:"service_tier,omitempty"`
+	MaxOutputTokens     *int                       `json:"max_output_tokens,omitempty"`
 	MaxToolCalls        *int                       `json:"max_tool_calls,omitempty"`
+	ParallelToolCalls   *bool                      `json:"parallel_tool_calls,omitempty"`
 	Citations           []string                   `json:"citations,omitempty"`
 	Conversation        *ResponseConversation      `json:"conversation,omitempty"`
 	Output              []ResponseOutputItem       `json:"output,omitempty"`

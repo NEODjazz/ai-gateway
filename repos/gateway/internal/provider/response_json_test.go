@@ -39,10 +39,10 @@ func TestResponsesRejectsInvalidJSONDocuments(t *testing.T) {
 	}
 }
 
-func TestResponsesPreserveAndValidateMaxToolCalls(t *testing.T) {
+func TestResponsesPreserveAndValidateExecutionControls(t *testing.T) {
 	for _, stream := range []bool{false, true} {
 		t.Run(fmt.Sprintf("stream=%v", stream), func(t *testing.T) {
-			document := `{"id":"r","object":"response","model":"m","status":"completed","max_tool_calls":0,"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`
+			document := `{"id":"r","object":"response","model":"m","status":"completed","max_output_tokens":64,"max_tool_calls":0,"parallel_tool_calls":false,"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`
 			var response openai.ResponseResponse
 			var err error
 			if stream {
@@ -50,14 +50,22 @@ func TestResponsesPreserveAndValidateMaxToolCalls(t *testing.T) {
 			} else {
 				response, err = decodeResponseJSON(strings.NewReader(document))
 			}
-			if err != nil || response.MaxToolCalls == nil || *response.MaxToolCalls != 0 {
+			if err != nil || response.MaxOutputTokens == nil || *response.MaxOutputTokens != 64 || response.MaxToolCalls == nil || *response.MaxToolCalls != 0 || response.ParallelToolCalls == nil || *response.ParallelToolCalls {
 				t.Fatalf("response=%+v err=%v", response, err)
 			}
 			encoded, err := json.Marshal(response)
-			if err != nil || !strings.Contains(string(encoded), `"max_tool_calls":0`) {
+			if err != nil || !strings.Contains(string(encoded), `"max_output_tokens":64`) || !strings.Contains(string(encoded), `"max_tool_calls":0`) || !strings.Contains(string(encoded), `"parallel_tool_calls":false`) {
 				t.Fatalf("encoded=%s err=%v", encoded, err)
 			}
 		})
+	}
+	for _, invalid := range []string{
+		`{"id":"r","object":"response","model":"m","status":"completed","max_output_tokens":0}`,
+		`{"id":"r","object":"response","model":"m","status":"completed","max_output_tokens":-1}`,
+	} {
+		if _, err := decodeResponseJSON(strings.NewReader(invalid)); err == nil {
+			t.Fatalf("invalid JSON max_output_tokens accepted: %s", invalid)
+		}
 	}
 
 	document := `{"id":"r","object":"response","model":"m","status":"completed","max_tool_calls":-1}`

@@ -50,6 +50,9 @@ func decodeResponseJSON(reader io.Reader) (openai.ResponseResponse, error) {
 }
 
 func validateResponseControls(response openai.ResponseResponse) error {
+	if response.MaxOutputTokens != nil && *response.MaxOutputTokens <= 0 {
+		return errors.New("provider returned invalid max_output_tokens")
+	}
 	if response.MaxToolCalls != nil && *response.MaxToolCalls < 0 {
 		return errors.New("provider returned invalid negative max_tool_calls")
 	}
