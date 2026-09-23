@@ -997,12 +997,14 @@ type ResponseOutputContent struct {
 }
 
 type ResponseUsage struct {
-	ProviderCostUSDTicks *int64                  `json:"-"`
-	OutputTokensDetails  *CompletionTokenDetails `json:"output_tokens_details,omitempty"`
-	InputTokens          int                     `json:"input_tokens,omitempty"`
-	OutputTokens         int                     `json:"output_tokens,omitempty"`
-	TotalTokens          int                     `json:"total_tokens,omitempty"`
-	InputTokensDetails   *InputTokenDetails      `json:"input_tokens_details,omitempty"`
+	ProviderCostUSDTicks   *int64                  `json:"-"`
+	NumSourcesUsed         *int                    `json:"num_sources_used,omitempty"`
+	NumServerSideToolsUsed *int                    `json:"num_server_side_tools_used,omitempty"`
+	OutputTokensDetails    *CompletionTokenDetails `json:"output_tokens_details,omitempty"`
+	InputTokens            int                     `json:"input_tokens,omitempty"`
+	OutputTokens           int                     `json:"output_tokens,omitempty"`
+	TotalTokens            int                     `json:"total_tokens,omitempty"`
+	InputTokensDetails     *InputTokenDetails      `json:"input_tokens_details,omitempty"`
 }
 
 func (u *ResponseUsage) UnmarshalJSON(data []byte) error {

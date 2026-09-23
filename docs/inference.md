@@ -1973,6 +1973,10 @@ type, plus compatible `input_tokens_details.reasoning_tokens`. Negative values
 are rejected before forwarding a native SSE event or returning decoded JSON.
 The provider-assigned `service_tier` is retained in JSON and terminal SSE
 responses so callers can verify the tier that actually served the request.
+Compatible Responses also retains nonnegative provider-reported
+`num_sources_used` and `num_server_side_tools_used`, including explicit zeroes.
+These observability counters remain separate from token totals and local tool
+billing dimensions.
 This detail is not added to `output_tokens` or `total_tokens`; those reported
 counters remain unchanged. Tests cover positive/zero details, negative rejection
 and unchanged totals for JSON and native streaming. The OpenAPI response schema

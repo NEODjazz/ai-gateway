@@ -12,6 +12,8 @@ func TestResponsesRejectsInvalidUsageBeforeDelivery(t *testing.T) {
 		`{"input_tokens":-1,"output_tokens":1,"total_tokens":0}`,
 		`{"input_tokens":1,"output_tokens":-1,"total_tokens":0}`,
 		`{"total_tokens":-1}`,
+		`{"num_sources_used":-1}`,
+		`{"num_server_side_tools_used":-1}`,
 		fmt.Sprintf(`{"input_tokens":%d,"output_tokens":1}`, int(^uint(0)>>1)),
 		`{"input_tokens":1,"input_tokens_details":{"cached_tokens":-1}}`,
 		`{"input_tokens":1,"input_tokens_details":{"cache_write_tokens":-1}}`,

@@ -106,3 +106,30 @@ func TestResponsesInputReasoningUsagePreserved(t *testing.T) {
 		})
 	}
 }
+
+func TestResponsesProviderUsageCountersPreserved(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		for _, count := range []int{0, 3} {
+			t.Run(fmt.Sprintf("stream=%v/count=%d", stream, count), func(t *testing.T) {
+				body := fmt.Sprintf(`{"id":"r","status":"completed","usage":{"input_tokens":4,"output_tokens":3,"total_tokens":7,"num_sources_used":%d,"num_server_side_tools_used":%d}}`, count, count)
+				var response openai.ResponseResponse
+				var err error
+				if stream {
+					response, err = streamResponseData(strings.NewReader("data: {\"type\":\"response.completed\",\"response\":"+body+"}\n\n"), "m", func(string, string) error { return nil })
+				} else {
+					response, err = decodeResponseJSON(strings.NewReader(body))
+				}
+				if err != nil || response.Usage.NumSourcesUsed == nil || *response.Usage.NumSourcesUsed != count || response.Usage.NumServerSideToolsUsed == nil || *response.Usage.NumServerSideToolsUsed != count {
+					t.Fatalf("response=%+v err=%v", response, err)
+				}
+				encoded, err := json.Marshal(response)
+				if err != nil || !strings.Contains(string(encoded), fmt.Sprintf(`"num_sources_used":%d`, count)) || !strings.Contains(string(encoded), fmt.Sprintf(`"num_server_side_tools_used":%d`, count)) {
+					t.Fatalf("encoded=%s err=%v", encoded, err)
+				}
+				if response.Usage.InputTokens != 4 || response.Usage.OutputTokens != 3 || response.Usage.TotalTokens != 7 {
+					t.Fatalf("provider counters changed token totals: %+v", response.Usage)
+				}
+			})
+		}
+	}
+}
