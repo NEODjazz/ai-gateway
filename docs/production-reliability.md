@@ -2561,3 +2561,18 @@ with image ID
 Gateway Helm revision 610 completed successfully. Pod
 `ai-gateway-gateway-fd494d897-qt4xj` became Ready with zero restarts, and
 direct service liveness and readiness both returned 204.
+
+## xAI Grok Build alias parameter policy
+
+Source `9a4df800` applies the published Grok 4.5 parameter policy to
+`grok-build-latest` in Chat and Responses. The alias now accepts the validated
+reasoning effort levels and rejects controls that the underlying model ignores
+or does not support. Its exact capability-profile entries match the runtime
+validator. Regression tests, the full Go test and race suites, vet and build
+passed; no live provider credential was used.
+
+Rancher Desktop built `ai-gateway-gateway:xai-build-alias-9a4df800` with image
+ID `sha256:132ae72fba028848e7d147220e7d620f43f3424d83645b80e52cd30db99b2df9`.
+Gateway Helm revision 611 completed successfully. Pod
+`ai-gateway-gateway-675bd696f6-gwppt` became Ready with zero restarts, and
+direct service liveness and readiness both returned 204.
