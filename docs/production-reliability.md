@@ -2272,3 +2272,22 @@ service checks returned 204 for liveness and readiness, OpenAPI 0.1.473 was
 served, the live Groq profile reported both citation values, other inspected
 provider profiles omitted them, and the three exact Groq reasoning policies
 remained intact.
+
+## Native DeepSeek thinking controls
+
+Source `0ebec2c` exposes the native Chat `thinking.type` switch and validated
+reasoning effort while preserving the gateway's prior non-thinking default when
+both controls are omitted. Conflicting switch and effort values, temperature,
+out-of-range thinking-mode nucleus sampling, and required or named tool choices
+fail before provider execution. The controls are isolated from other adapters,
+participate in exact and semantic cache identity, and appear in the runtime
+capability profile. Contract, wire, rejection, adapter, cache, capability and
+OpenAPI regressions passed together with vet, build and the full race suite.
+
+Rancher Desktop built `ai-gateway-gateway:deepseek-thinking-0ebec2cd` with image
+ID `sha256:43f39c783d62bb9e377189ab5e910b18ad43a5e9fc96fb46ff84d7b1175a7f66`.
+Gateway Helm revision 592 completed successfully. Pod
+`ai-gateway-gateway-5ddf9c469f-2m22d` became Ready with zero restarts. Direct
+service checks returned 204 for liveness and readiness, OpenAPI 0.1.474 was
+served, the live DeepSeek profile reported both thinking values and seven
+validated effort values, and the Groq controls remained isolated.
