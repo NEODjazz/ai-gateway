@@ -1971,6 +1971,8 @@ Responses usage now retains optional `output_tokens_details.reasoning_tokens` an
 `output_tokens_details.cached_tokens`, using the existing completion-token detail
 type, plus compatible `input_tokens_details.reasoning_tokens`. Negative values
 are rejected before forwarding a native SSE event or returning decoded JSON.
+The provider-assigned `service_tier` is retained in JSON and terminal SSE
+responses so callers can verify the tier that actually served the request.
 This detail is not added to `output_tokens` or `total_tokens`; those reported
 counters remain unchanged. Tests cover positive/zero details, negative rejection
 and unchanged totals for JSON and native streaming. The OpenAPI response schema

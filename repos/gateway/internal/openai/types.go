@@ -910,6 +910,7 @@ type ResponseResponse struct {
 	CreatedAt           int64                      `json:"created_at,omitempty"`
 	Status              string                     `json:"status,omitempty"`
 	Model               string                     `json:"model"`
+	ServiceTier         string                     `json:"service_tier,omitempty"`
 	Conversation        *ResponseConversation      `json:"conversation,omitempty"`
 	Output              []ResponseOutputItem       `json:"output,omitempty"`
 	OutputText          string                     `json:"output_text,omitempty"`
