@@ -1954,6 +1954,12 @@ increase across the stream. Providers that omit the field remain compatible;
 once present, duplicate or reordered values stop processing before the offending
 frame reaches the client.
 
+Non-empty output item IDs are unique within a response. Tool-producing output
+items also use unique `call_id` values, while matching call-output items may retain
+their referenced call ID. JSON and terminal snapshots are checked as a whole;
+incremental events are checked against previously accumulated output before the
+conflicting frame is forwarded.
+
 Regression tests cover interleaved messages and parts, text completion events,
 empty and populated terminal snapshots, invalid content indices and JSON text
 aggregation. The tests also reproduced the earlier behavior through a temporary

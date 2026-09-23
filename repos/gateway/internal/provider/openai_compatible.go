@@ -1354,6 +1354,11 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 		if err != nil {
 			return err
 		}
+		if itemID, present := decoded["item_id"].(string); present {
+			if err := validateResponseStreamOutputIdentity(response.Output, outputIndex, openai.ResponseOutputItem{ID: itemID}); err != nil {
+				return err
+			}
+		}
 		if id, ok := decoded["response_id"].(string); ok && response.ID == "" {
 			response.ID = id
 		}
@@ -1536,6 +1541,9 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 			}
 			var snapshot openai.ResponseOutputItem
 			if err := json.Unmarshal(marshaled, &snapshot); err != nil {
+				return err
+			}
+			if err := validateResponseStreamOutputIdentity(response.Output, outputIndex, snapshot); err != nil {
 				return err
 			}
 			if event == "response.output_item.added" && snapshot.Type == "apply_patch_call" {

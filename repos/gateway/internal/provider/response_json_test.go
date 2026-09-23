@@ -252,6 +252,41 @@ func TestResponsesValidateStableStreamResponseID(t *testing.T) {
 	}
 }
 
+func TestResponsesRejectDuplicateOutputIdentities(t *testing.T) {
+	for name, output := range map[string]string{
+		"item ID": `[{"id":"same","type":"message","content":[{"type":"output_text","text":"A"}]},{"id":"same","type":"reasoning"}]`,
+		"call ID": `[{"type":"function_call","call_id":"same","name":"first","arguments":"{}"},{"type":"custom_tool_call","call_id":"same","name":"second","input":"value"}]`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			document := `{"id":"r","output":` + output + `}`
+			if _, err := decodeResponseJSON(strings.NewReader(document)); err == nil {
+				t.Fatalf("duplicate output identity accepted: %s", output)
+			}
+			callbacks := 0
+			wire := "data: {\"type\":\"response.completed\",\"response\":" + document + "}\n\n"
+			if _, err := streamResponseData(strings.NewReader(wire), "m", func(string, string) error { callbacks++; return nil }); err == nil || callbacks != 0 {
+				t.Fatalf("duplicate terminal identity delivered: err=%v callbacks=%d", err, callbacks)
+			}
+		})
+	}
+}
+
+func TestResponsesRejectDuplicateStreamingOutputIdentities(t *testing.T) {
+	for name, wire := range map[string]string{
+		"item ID": `data: {"type":"response.output_text.delta","output_index":0,"item_id":"same","delta":"A"}` + "\n\n" +
+			`data: {"type":"response.output_text.delta","output_index":1,"item_id":"same","delta":"B"}` + "\n\n",
+		"call ID": `data: {"type":"response.output_item.added","output_index":0,"item":{"id":"first","type":"function_call","call_id":"same","name":"first","arguments":""}}` + "\n\n" +
+			`data: {"type":"response.output_item.added","output_index":1,"item":{"id":"second","type":"custom_tool_call","call_id":"same","name":"second","input":""}}` + "\n\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			callbacks := 0
+			if _, err := streamResponseData(strings.NewReader(wire+responseTestTerminal), "m", func(string, string) error { callbacks++; return nil }); err == nil || callbacks != 1 {
+				t.Fatalf("duplicate streaming identity delivered: err=%v callbacks=%d", err, callbacks)
+			}
+		})
+	}
+}
+
 func TestResponsesRejectsInvalidJSONDocuments(t *testing.T) {
 	for _, body := range []string{"null", `{"id":"r"} {"id":"second"}`, `{"id":"r"} trailing`, `{"id":`} {
 		t.Run(body, func(t *testing.T) {

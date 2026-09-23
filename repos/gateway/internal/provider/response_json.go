@@ -452,6 +452,9 @@ func validateResponseOutputItemsMode(items []openai.ResponseOutputItem, allowSpa
 	if len(items) > maxResponseStreamOutputItems {
 		return errors.New("provider returned too many response output items")
 	}
+	if err := validateResponseOutputIdentityUniqueness(items); err != nil {
+		return err
+	}
 	for _, item := range items {
 		if item.Type == "" {
 			if allowSparse {
@@ -558,6 +561,51 @@ func validateResponseOutputItemsMode(items []openai.ResponseOutputItem, allowSpa
 		decoder := base64.NewDecoder(base64.StdEncoding.Strict(), strings.NewReader(encoded))
 		if _, err := io.Copy(io.Discard, decoder); err != nil {
 			return errors.New("provider image generation result is malformed base64")
+		}
+	}
+	return nil
+}
+
+func validateResponseOutputIdentityUniqueness(items []openai.ResponseOutputItem) error {
+	itemIDs := make(map[string]struct{}, len(items))
+	callIDs := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		if item.ID != "" {
+			if _, duplicate := itemIDs[item.ID]; duplicate {
+				return errors.New("provider returned duplicate response output item ID")
+			}
+			itemIDs[item.ID] = struct{}{}
+		}
+		if item.CallID == "" || !responseOutputItemOwnsCallID(item.Type) {
+			continue
+		}
+		if _, duplicate := callIDs[item.CallID]; duplicate {
+			return errors.New("provider returned duplicate response tool call ID")
+		}
+		callIDs[item.CallID] = struct{}{}
+	}
+	return nil
+}
+
+func responseOutputItemOwnsCallID(itemType string) bool {
+	switch itemType {
+	case "function_call", "custom_tool_call", "computer_call", "shell_call", "apply_patch_call":
+		return true
+	default:
+		return false
+	}
+}
+
+func validateResponseStreamOutputIdentity(items []openai.ResponseOutputItem, outputIndex int, candidate openai.ResponseOutputItem) error {
+	for index, item := range items {
+		if index == outputIndex {
+			continue
+		}
+		if candidate.ID != "" && item.ID == candidate.ID {
+			return errors.New("provider returned duplicate response output item ID")
+		}
+		if candidate.CallID != "" && responseOutputItemOwnsCallID(candidate.Type) && responseOutputItemOwnsCallID(item.Type) && item.CallID == candidate.CallID {
+			return errors.New("provider returned duplicate response tool call ID")
 		}
 	}
 	return nil
