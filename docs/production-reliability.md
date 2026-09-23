@@ -2576,3 +2576,21 @@ ID `sha256:132ae72fba028848e7d147220e7d620f43f3424d83645b80e52cd30db99b2df9`.
 Gateway Helm revision 611 completed successfully. Pod
 `ai-gateway-gateway-675bd696f6-gwppt` became Ready with zero restarts, and
 direct service liveness and readiness both returned 204.
+
+## RAG JSON source citations
+
+Source `7ead4290` maps model-written `[n]` markers in synchronous RAG Chat
+answers to `source_citation` annotations for the n-th owner-scoped retrieved
+excerpt after optional reranking. The annotation contains the owned file ID,
+filename, retrieved chunk index and Unicode-correct marker offsets; unknown
+numbers, Markdown links and code spans are ignored. A citation records the
+model's selected source, not independent verification of its claim. The
+incremental SSE response remains unchanged. Handler and parser regressions,
+the full Go test and race suites, vet and build passed; no live provider
+credential was used.
+
+Rancher Desktop built `ai-gateway-gateway:rag-citations-7ead4290` with image
+ID `sha256:79fc492d6c46fd03a1507eeeaaf9c8645982901e6b4038c7f43f7a6f549260a0`.
+Gateway Helm revision 612 completed successfully. Pod
+`ai-gateway-gateway-6bbf8dc8d9-66g76` became Ready with zero restarts, and
+direct service liveness and readiness both returned 204.
