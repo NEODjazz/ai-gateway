@@ -627,6 +627,17 @@ func (x XAI) ValidateChatParameters(request openai.ChatCompletionRequest) error 
 	if request.ReasoningEffort != "" && !xaiSupportsReasoningEffort(request.Model, request.ReasoningEffort, false) {
 		return xaiParameterError("reasoning_effort", "reasoning_effort is not supported by this xAI model")
 	}
+	if xaiReasoningChatModel(request.Model) {
+		for _, check := range []parameterCheck{
+			{"stop", request.Stop != nil},
+			{"frequency_penalty", request.FrequencyPenalty != nil},
+			{"presence_penalty", request.PresencePenalty != nil},
+		} {
+			if check.supplied {
+				return xaiParameterError(check.name, check.name+" is not supported by this xAI reasoning model")
+			}
+		}
+	}
 	if xaiIgnoresLogprobs(request.Model) {
 		if request.TopLogprobs != nil {
 			return xaiParameterError("top_logprobs", "top_logprobs is not supported by this xAI model")
@@ -794,6 +805,15 @@ func xaiSupportsReasoningEffort(model, effort string, responses bool) bool {
 	default:
 		return false
 	}
+}
+
+func xaiReasoningChatModel(model string) bool {
+	for _, family := range []string{"grok-4.5", "grok-4.6", "grok-4.7"} {
+		if model == family || strings.HasPrefix(model, family+"-") {
+			return true
+		}
+	}
+	return false
 }
 
 func xaiIgnoresLogprobs(model string) bool {

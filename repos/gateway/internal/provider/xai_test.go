@@ -223,6 +223,33 @@ func TestXAIRejectsSilentlyIgnoredLogprobs(t *testing.T) {
 	}
 }
 
+func TestXAIReasoningModelsRejectUnsupportedSamplingControls(t *testing.T) {
+	client := NewXAI("http://unused.invalid", "", false)
+	penalty := 0.5
+	for _, test := range []struct {
+		model   string
+		param   string
+		request openai.ChatCompletionRequest
+	}{
+		{model: "grok-4.5", param: "stop", request: openai.ChatCompletionRequest{Stop: "END"}},
+		{model: "grok-4.6-latest", param: "frequency_penalty", request: openai.ChatCompletionRequest{ChatGenerationOptions: openai.ChatGenerationOptions{FrequencyPenalty: &penalty}}},
+		{model: "grok-4.7", param: "presence_penalty", request: openai.ChatCompletionRequest{ChatGenerationOptions: openai.ChatGenerationOptions{PresencePenalty: &penalty}}},
+	} {
+		t.Run(test.model+"/"+test.param, func(t *testing.T) {
+			request := test.request
+			request.Model = test.model
+			request.Messages = []openai.Message{{Role: "user", Content: "hello"}}
+			if err := client.ValidateChatParameters(request); !xaiFailure(err, test.param, "invalid_request") {
+				t.Fatalf("error=%v", err)
+			}
+		})
+	}
+	request := openai.ChatCompletionRequest{Model: "custom-model", Messages: []openai.Message{{Role: "user", Content: "hello"}}, Stop: "END", ChatGenerationOptions: openai.ChatGenerationOptions{FrequencyPenalty: &penalty, PresencePenalty: &penalty}}
+	if err := client.ValidateChatParameters(request); err != nil {
+		t.Fatalf("unknown model should retain pass-through controls: %v", err)
+	}
+}
+
 func TestXAICapabilityProfilePublishesReasoningByModel(t *testing.T) {
 	for _, profile := range ManagedProviderCapabilityProfiles() {
 		if profile.Type != "xai" {
@@ -234,9 +261,9 @@ func TestXAICapabilityProfilePublishesReasoningByModel(t *testing.T) {
 		wantChat := []ProviderChatModelParameterPolicy{
 			{Model: "grok-4.20", SupportedOptions: []string{}, UnsupportedOptions: []string{"logprobs", "top_logprobs"}, ReasoningEffort: []string{}, ReasoningFormat: []string{}},
 			{Model: "grok-4.3", SupportedOptions: []string{}, UnsupportedOptions: []string{"logprobs", "top_logprobs"}, ReasoningEffort: []string{}, ReasoningFormat: []string{}},
-			{Model: "grok-4.5", SupportedOptions: []string{"reasoning_effort"}, UnsupportedOptions: []string{"logprobs", "top_logprobs"}, ReasoningEffort: []string{"low", "medium", "high"}, ReasoningFormat: []string{}},
-			{Model: "grok-4.6", SupportedOptions: []string{"reasoning_effort"}, UnsupportedOptions: []string{"logprobs", "top_logprobs"}, ReasoningEffort: []string{"low", "medium", "high", "xhigh"}, ReasoningFormat: []string{}},
-			{Model: "grok-4.7", SupportedOptions: []string{"reasoning_effort"}, UnsupportedOptions: []string{"logprobs", "top_logprobs"}, ReasoningEffort: []string{"low", "medium", "high", "xhigh"}, ReasoningFormat: []string{}},
+			{Model: "grok-4.5", SupportedOptions: []string{"reasoning_effort"}, UnsupportedOptions: []string{"logprobs", "top_logprobs", "frequency_penalty", "presence_penalty"}, ReasoningEffort: []string{"low", "medium", "high"}, ReasoningFormat: []string{}},
+			{Model: "grok-4.6", SupportedOptions: []string{"reasoning_effort"}, UnsupportedOptions: []string{"logprobs", "top_logprobs", "frequency_penalty", "presence_penalty"}, ReasoningEffort: []string{"low", "medium", "high", "xhigh"}, ReasoningFormat: []string{}},
+			{Model: "grok-4.7", SupportedOptions: []string{"reasoning_effort"}, UnsupportedOptions: []string{"logprobs", "top_logprobs", "frequency_penalty", "presence_penalty"}, ReasoningEffort: []string{"low", "medium", "high", "xhigh"}, ReasoningFormat: []string{}},
 		}
 		if fmt.Sprint(profile.ChatModelParameters) != fmt.Sprint(wantChat) {
 			t.Fatalf("chat model policies=%+v want=%+v", profile.ChatModelParameters, wantChat)

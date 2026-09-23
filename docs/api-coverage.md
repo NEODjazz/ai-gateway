@@ -69,15 +69,18 @@ availability is not inferred from these tests.
 | Azure | Native resource-root `/openai/v1` and explicit deployment paths, API version forwarding, API-key and Entra bearer authentication, public/US Government/China authority and resource audience selection, ambient AKS federation and App Service/Container Apps/VM managed identity with refresh, discovery and shared inference lifecycle; Realtime WebSocket uses the native GA model query or preview deployment/API-version query and the same credential chain | Additional sovereign-cloud contracts after provider availability is confirmed |
 | Workload identity | Bedrock SigV4 supports encrypted explicit credentials, environment keys, bounded shared credentials profiles, regional web-identity STS exchange, refreshable ECS/EKS container roles and EC2 IMDSv2 instance roles; Azure Entra supports public/US Government/China audiences, AKS projected-token federation, local managed-identity endpoints and IMDS; Gemini supports short-lived GCE/GKE metadata tokens | Additional sovereign Azure clouds and federated profile types when justified |
 | Model tokenization | Context estimate including tool schemas; native Anthropic, Gemini, Bedrock and NVIDIA NIM counter APIs | Exact model tokenizers/counters with versioned provenance |
-
-For Chat model parameter overrides, `supported_options` adds model-specific
-controls to the provider policy and `unsupported_options` removes controls the
-selected model ignores. Native xAI Chat rejects `logprobs` and `top_logprobs`
-for the known Grok 4.20-and-newer model families before provider execution.
 | Catalog synchronization | Versioned catalog and hot update; xAI discovery atomically merges the separately published text and embedding catalogs | Validated upstream sync for additional providers, rollback and price provenance |
 | Arbitrary passthrough | Not implemented | Explicit route allowlists, identity isolation and accounting |
 | Parameter policy | Strict unknown-field decoding; native adapter rejection; generation control validation; machine-readable per-adapter Chat, Completions, Responses, Interactions, Embeddings, Rerank, Moderation, Search, Image Generation, Image Edit, Image Variation, Audio Transcription, Audio Translation, Text-to-Speech, OCR, Video, Fine-tuning and Container creation support, including accepted values and input/document/prompt/query forms, all derived from runtime validators and locked by profile regressions | Model-specific overrides and equivalent matrices for other API families |
 | Provider and deployment quotas | Atomic fixed-window RPM/TPM across inference, token-count, shadow and owned response lifecycle calls; provider totals shared by all linked deployments; bounded memory mode and shared Redis counters; quota-aware fallback | Additional quota dimensions only when backed by an upstream contract |
+
+For Chat model parameter overrides, `supported_options` adds model-specific
+controls to the provider policy and `unsupported_options` removes controls the
+selected model rejects. Native xAI Chat rejects `logprobs` and `top_logprobs`
+for the known Grok 4.20-and-newer model families, and rejects `stop`,
+`frequency_penalty` and `presence_penalty` for known reasoning models before
+provider execution. The latter two appear in the model-specific
+unsupported-option list.
 
 ## Completed increments
 
