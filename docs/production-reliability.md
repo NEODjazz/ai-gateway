@@ -2468,3 +2468,17 @@ ID `sha256:9372822445db5a3ae19f0bd412d71a54d3805bd4b41cf8716e056ec3c0a85131`.
 Gateway Helm revision 604 completed successfully. Pod
 `ai-gateway-gateway-54cbb6656f-scmtz` became Ready with zero restarts, and
 direct service liveness and readiness both returned 204.
+
+## Responses model-specific capability profile
+
+Source `6490241f` publishes exact upstream-model Responses parameter overrides in
+`response_model_parameters`. For Groq, the provider-wide policy no longer
+claims that `reasoning.effort` works on every model; the two GPT-OSS models and
+Qwen expose their validated value sets separately. OpenAPI and profile
+regressions passed with the full Go test and race suites, vet and build.
+
+Rancher Desktop built `ai-gateway-gateway:response-model-profile-6490241f`
+with image ID `sha256:bb27a5ea5a6dd91c17df23d9883ab4ca08daa1d204a2a2d52881bcbf28a1de7b`.
+Gateway Helm revision 605 completed successfully. Pod
+`ai-gateway-gateway-776699cbdf-zgbtf` became Ready with zero restarts, and
+direct service liveness and readiness both returned 204.
