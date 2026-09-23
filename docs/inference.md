@@ -1922,8 +1922,9 @@ partial arguments; the completed value is validated at the terminal boundary.
 Incoming Responses `custom_tool_call` history requires a valid name and call ID.
 Its tool name is checked against credential and access-group grants even when no
 new tool definition is sent. Custom calls and outputs require a deployment with
-`custom_tools`; an output without an attributable call or declared custom tool
-is rejected before execution.
+`custom_tools`. An output without an attributable call or declared custom tool
+needs `previous_response_id` and wildcard tool grants; otherwise it is rejected
+before execution. Scoped credentials can repeat the tool declaration.
 
 The output union also keeps branch-specific fields isolated. Only `message` items
 may contain `content` or an optional `assistant` role, and only `reasoning` items

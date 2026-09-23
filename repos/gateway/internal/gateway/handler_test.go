@@ -217,6 +217,27 @@ func TestResponsesCustomToolHistoryRequiresToolGrant(t *testing.T) {
 	}
 }
 
+func TestResponsesUnattributedCustomOutputNeedsBroadGrantAndPreviousResponse(t *testing.T) {
+	body := `{"model":"test","previous_response_id":"resp_1","input":[{"type":"custom_tool_call_output","call_id":"call_1","output":"ok"}]}`
+	for _, test := range []struct {
+		name   string
+		grants []string
+		status int
+	}{
+		{name: "wildcard grant", grants: []string{"*"}, status: http.StatusOK},
+		{name: "scoped grant", grants: []string{"safe_dsl"}, status: http.StatusForbidden},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			handler := NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}, tools: test.grants}}), &chatProvider{})
+			out := httptest.NewRecorder()
+			handler.Responses(out, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(body)))
+			if out.Code != test.status {
+				t.Fatalf("status=%d body=%s", out.Code, out.Body.String())
+			}
+		})
+	}
+}
+
 func TestResponsesImageGenerationACLUsesCanonicalToolName(t *testing.T) {
 	handler := NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}, tools: []string{"image_generation"}}}), &chatProvider{})
 	allowedResponse := httptest.NewRecorder()

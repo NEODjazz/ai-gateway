@@ -220,7 +220,10 @@ func responseRequestToolIdentifiers(request openai.ResponseRequest) ([]string, b
 			}
 		}
 		if !declared {
-			return nil, false
+			if request.PreviousResponse == "" {
+				return nil, false
+			}
+			identifiers = append(identifiers, "*")
 		}
 	}
 	computerOutputs, message := openai.InspectResponseComputerCallOutputs(request.Input)
