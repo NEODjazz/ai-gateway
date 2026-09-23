@@ -1929,6 +1929,11 @@ log probabilities have bounded token and byte data, accept only finite
 non-positive values, and allow at most 20 alternatives per token. JSON snapshots
 and SSE content or text events use the same validation before client delivery.
 
+Output item IDs are limited to 1–256 letters, digits, underscores or hyphens.
+The same validation runs on `item_id` in every native streaming event before the
+event is forwarded, preventing malformed identifiers from entering accumulated
+state or reaching clients.
+
 Regression tests cover interleaved messages and parts, text completion events,
 empty and populated terminal snapshots, invalid content indices and JSON text
 aggregation. The tests also reproduced the earlier behavior through a temporary

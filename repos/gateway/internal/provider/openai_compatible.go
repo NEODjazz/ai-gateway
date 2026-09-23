@@ -1310,6 +1310,12 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 		if event == "" {
 			event = eventName(decoded)
 		}
+		if value, present := decoded["item_id"]; present {
+			itemID, ok := value.(string)
+			if !ok || !validResponseResourceID(itemID) {
+				return errors.New("Responses event contains an invalid item_id")
+			}
+		}
 		outputIndex, err := responseOutputIndex(decoded)
 		if err != nil {
 			return err

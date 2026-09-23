@@ -458,6 +458,9 @@ func validateResponseOutputItemsMode(items []openai.ResponseOutputItem, allowSpa
 			}
 			return errors.New("provider returned response output item without type")
 		}
+		if item.ID != "" && !validResponseResourceID(item.ID) {
+			return errors.New("provider returned response output item with an invalid ID")
+		}
 		if len(item.Content) > maxResponseStreamContentParts || len(item.Summary) > maxResponseStreamContentParts {
 			return errors.New("provider returned too many response output content parts")
 		}

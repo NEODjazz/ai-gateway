@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -159,6 +160,26 @@ func TestResponsesValidateOutputItemUnionFields(t *testing.T) {
 	response, err := decodeResponseJSON(strings.NewReader(valid))
 	if err != nil || response.OutputText != "answer" {
 		t.Fatalf("valid output union rejected: response=%+v err=%v", response, err)
+	}
+}
+
+func TestResponsesRejectInvalidOutputItemIDsBeforeDelivery(t *testing.T) {
+	for _, itemID := range []string{"bad/id", " bad", strings.Repeat("i", 257)} {
+		document := `{"id":"r","output":[{"id":` + strconv.Quote(itemID) + `,"type":"message","content":[{"type":"output_text","text":"answer"}]}]}`
+		if _, err := decodeResponseJSON(strings.NewReader(document)); err == nil {
+			t.Fatalf("invalid JSON output item ID accepted: %q", itemID)
+		}
+		callbacks := 0
+		wire := "data: {\"type\":\"response.completed\",\"response\":" + document + "}\n\n"
+		if _, err := streamResponseData(strings.NewReader(wire), "m", func(string, string) error { callbacks++; return nil }); err == nil || callbacks != 0 {
+			t.Fatalf("invalid terminal output item ID delivered: id=%q err=%v callbacks=%d", itemID, err, callbacks)
+		}
+	}
+
+	callbacks := 0
+	wire := `data: {"type":"response.output_text.delta","item_id":"bad/id","delta":"answer"}` + "\n\n" + responseTestTerminal
+	if _, err := streamResponseData(strings.NewReader(wire), "m", func(string, string) error { callbacks++; return nil }); err == nil || callbacks != 0 {
+		t.Fatalf("invalid incremental item_id delivered: err=%v callbacks=%d", err, callbacks)
 	}
 }
 
