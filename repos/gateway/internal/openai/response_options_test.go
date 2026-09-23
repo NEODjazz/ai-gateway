@@ -512,6 +512,26 @@ func TestResponseSafetyIdentifierUsesUnicodeCharacterLimit(t *testing.T) {
 	}
 }
 
+func TestResponseIsolationIdentifiersUseUnicodeCharacterLimits(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		request ResponseRequest
+		valid   bool
+	}{
+		{name: "64 character prompt cache key", request: ResponseRequest{PromptCacheKey: strings.Repeat("я", 64)}, valid: true},
+		{name: "65 character prompt cache key", request: ResponseRequest{PromptCacheKey: strings.Repeat("я", 65)}, valid: false},
+		{name: "256 character user", request: ResponseRequest{User: strings.Repeat("я", 256)}, valid: true},
+		{name: "257 character user", request: ResponseRequest{User: strings.Repeat("я", 257)}, valid: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			message := tc.request.Validate()
+			if (message == "") != tc.valid {
+				t.Fatalf("validation result %q, valid=%v", message, tc.valid)
+			}
+		})
+	}
+}
+
 func TestResponseRejectsNonPositiveOutputLimits(t *testing.T) {
 	for _, value := range []int{-1, 0} {
 		for _, request := range []ResponseRequest{{MaxOutputTokens: &value}, {MaxTokens: &value}} {

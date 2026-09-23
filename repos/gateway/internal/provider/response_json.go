@@ -102,6 +102,15 @@ func validateResponseControls(response openai.ResponseResponse) error {
 	if response.PreviousResponseID != nil && (*response.PreviousResponseID == "" || strings.TrimSpace(*response.PreviousResponseID) != *response.PreviousResponseID || utf8.RuneCountInString(*response.PreviousResponseID) > 512) {
 		return errors.New("provider returned invalid previous_response_id")
 	}
+	if utf8.RuneCountInString(response.User) > 256 {
+		return errors.New("provider returned invalid user")
+	}
+	if utf8.RuneCountInString(response.SafetyIdentifier) > 64 {
+		return errors.New("provider returned invalid safety_identifier")
+	}
+	if utf8.RuneCountInString(response.PromptCacheKey) > 64 {
+		return errors.New("provider returned invalid prompt_cache_key")
+	}
 	if response.MaxOutputTokens != nil && *response.MaxOutputTokens <= 0 {
 		return errors.New("provider returned invalid max_output_tokens")
 	}

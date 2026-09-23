@@ -928,6 +928,9 @@ type ResponseResponse struct {
 	Text                any                        `json:"text,omitempty"`
 	Tools               []ResponseTool             `json:"tools,omitempty"`
 	ToolChoice          any                        `json:"tool_choice,omitempty"`
+	User                string                     `json:"user,omitempty"`
+	SafetyIdentifier    string                     `json:"safety_identifier,omitempty"`
+	PromptCacheKey      string                     `json:"prompt_cache_key,omitempty"`
 	Citations           []string                   `json:"citations,omitempty"`
 	Conversation        *ResponseConversation      `json:"conversation,omitempty"`
 	Output              []ResponseOutputItem       `json:"output,omitempty"`

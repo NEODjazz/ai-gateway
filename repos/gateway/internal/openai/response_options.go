@@ -102,6 +102,12 @@ func (r ResponseRequest) Validate() string {
 	if utf8.RuneCountInString(r.SafetyIdentifier) > 64 {
 		return "safety_identifier must contain at most 64 characters"
 	}
+	if utf8.RuneCountInString(r.User) > 256 {
+		return "user must contain at most 256 characters"
+	}
+	if utf8.RuneCountInString(r.PromptCacheKey) > 64 {
+		return "prompt_cache_key must contain at most 64 characters"
+	}
 	if message := ValidatePromptCacheOptions(r.PromptCacheOptions); message != "" {
 		return message
 	}

@@ -120,6 +120,45 @@ func TestResponsesPreserveAndValidateLifecycleMetadata(t *testing.T) {
 	}
 }
 
+func TestResponsesPreserveAndValidateIsolationIdentifiers(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprintf("stream=%v", stream), func(t *testing.T) {
+			document := `{"id":"r","object":"response","model":"m","status":"completed","user":"legacy-user","safety_identifier":"hashed-user","prompt_cache_key":"tenant-thread"}`
+			var response openai.ResponseResponse
+			var err error
+			if stream {
+				response, err = streamResponseData(strings.NewReader("data: {\"type\":\"response.completed\",\"response\":"+document+"}\n\n"), "m", func(string, string) error { return nil })
+			} else {
+				response, err = decodeResponseJSON(strings.NewReader(document))
+			}
+			if err != nil || response.User != "legacy-user" || response.SafetyIdentifier != "hashed-user" || response.PromptCacheKey != "tenant-thread" {
+				t.Fatalf("response=%+v err=%v", response, err)
+			}
+			encoded, err := json.Marshal(response)
+			for _, field := range []string{`"user":"legacy-user"`, `"safety_identifier":"hashed-user"`, `"prompt_cache_key":"tenant-thread"`} {
+				if err != nil || !strings.Contains(string(encoded), field) {
+					t.Fatalf("encoded=%s missing=%s err=%v", encoded, field, err)
+				}
+			}
+		})
+	}
+
+	for _, document := range []string{
+		`{"id":"r","object":"response","model":"m","user":"` + strings.Repeat("x", 257) + `"}`,
+		`{"id":"r","object":"response","model":"m","safety_identifier":"` + strings.Repeat("x", 65) + `"}`,
+		`{"id":"r","object":"response","model":"m","prompt_cache_key":"` + strings.Repeat("x", 65) + `"}`,
+	} {
+		if _, err := decodeResponseJSON(strings.NewReader(document)); err == nil {
+			t.Fatalf("invalid isolation identifier accepted: %s", document)
+		}
+		callbacks := 0
+		wire := "data: {\"type\":\"response.completed\",\"response\":" + document + "}\n\n"
+		if _, err := streamResponseData(strings.NewReader(wire), "m", func(string, string) error { callbacks++; return nil }); err == nil || callbacks != 0 {
+			t.Fatalf("invalid isolation identifier delivered: err=%v callbacks=%d", err, callbacks)
+		}
+	}
+}
+
 func TestResponsesPreserveAndValidateGenerationSettings(t *testing.T) {
 	for _, stream := range []bool{false, true} {
 		t.Run(fmt.Sprintf("stream=%v", stream), func(t *testing.T) {

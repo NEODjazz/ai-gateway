@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.429
+  version: 0.1.430
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -9674,9 +9674,9 @@ components:
               required: [id]
               properties:
                 id: {type: string, maxLength: 128, pattern: '^conv_[A-Za-z0-9_-]+$'}
-        user: {type: string, description: Provider-specific end-user isolation identifier; compatible adapters forward it and native adapters reject or validate it according to their contract.}
+        user: {type: string, maxLength: 256, description: Provider-specific end-user isolation identifier; compatible adapters forward it and native adapters reject or validate it according to their contract.}
         safety_identifier: {type: string, maxLength: 64}
-        prompt_cache_key: {type: string}
+        prompt_cache_key: {type: string, maxLength: 64}
         prompt_cache_options:
           type: object
           additionalProperties: false
@@ -10069,6 +10069,9 @@ components:
         text: {$ref: '#/components/schemas/ResponseRequest/properties/text'}
         tools: {$ref: '#/components/schemas/ResponseRequest/properties/tools'}
         tool_choice: {$ref: '#/components/schemas/ResponseRequest/properties/tool_choice'}
+        user: {type: string, maxLength: 256, deprecated: true}
+        safety_identifier: {type: string, maxLength: 64}
+        prompt_cache_key: {type: string, maxLength: 64}
         citations:
           type: array
           maxItems: 1024
