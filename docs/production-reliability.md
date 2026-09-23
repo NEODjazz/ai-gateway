@@ -2214,3 +2214,23 @@ ID `sha256:fe5cb57869a63f89fe97c3142c5003662e2720ef9e75dc98fe6832c6ca35f3ea`.
 Gateway Helm revision 588 completed successfully. Pod
 `ai-gateway-gateway-86995544c4-nlsb5` became Ready with zero restarts. Live
 liveness and readiness returned 204 and OpenAPI 0.1.470 was served.
+
+## Native Groq reasoning output controls
+
+Source `43656e9` adds the mutually exclusive Chat controls
+`include_reasoning` and `reasoning_format`, validates the latter as `hidden`,
+`raw` or `parsed`, and preserves explicit false values on the native wire.
+Groq JSON and SSE reasoning strings are bounded and normalized to public
+`reasoning_content`; conflicting or malformed aliases fail closed. The controls
+participate in exact and semantic cache identity, and other adapters reject them
+before provider execution. Runtime capabilities expose the supported formats.
+OpenAI contract, adapter-isolation, capability, cache, OpenAPI, JSON and SSE
+regressions passed together with vet, build and the full race suite.
+
+Rancher Desktop built `ai-gateway-gateway:groq-reasoning-43656e9a` with image
+ID `sha256:92edabf53fc5d9d79b2cdb8641aa5c81246f2cd576972bd71827f33c87e13143`.
+Gateway Helm revision 589 completed successfully. Pod
+`ai-gateway-gateway-67ffcc555c-thqxg` became Ready with zero restarts. Live
+liveness and readiness returned 204, OpenAPI 0.1.471 was served, and the live
+Groq capability profile reported `include_reasoning` plus the three validated
+formats while every other provider profile omitted both controls.
