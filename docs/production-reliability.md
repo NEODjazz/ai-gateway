@@ -2529,3 +2529,19 @@ Rancher Desktop built `ai-gateway-gateway:xai-reasoning-6578bff4` with image ID
 Gateway Helm revision 608 completed successfully. Pod
 `ai-gateway-gateway-58b469c4cc-zg6qn` became Ready with zero restarts, and
 direct service liveness and readiness both returned 204.
+
+## xAI model-scoped log probability controls
+
+Source `40e57e84` rejects `logprobs` and `top_logprobs` for the known Grok
+4.20-and-newer model families that ignore these Chat controls. The additive
+`chat_model_parameters.unsupported_options` field exposes the exceptions to
+the provider-wide profile; clients applying model overrides should subtract
+these options. Unknown model IDs retain the existing pass-through behavior.
+Adapter and OpenAPI regression tests, the full Go test and race suites, vet and
+build passed; no live provider credential was used.
+
+Rancher Desktop built `ai-gateway-gateway:xai-logprobs-40e57e84` with image ID
+`sha256:01637b0e9e576e14d93fd2d49c412e70952525d852a710ab6ba9412d279d59d5`.
+Gateway Helm revision 609 completed successfully. Pod
+`ai-gateway-gateway-5c465f7cfc-dk84k` became Ready with zero restarts, and
+direct service liveness and readiness both returned 204.
