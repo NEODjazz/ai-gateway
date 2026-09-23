@@ -75,9 +75,9 @@ func TestOpenAPIProviderProfilesExposeModelSpecificChatPolicy(t *testing.T) {
 	if policy == nil || policy.Properties["model"] == nil || policy.Properties["reasoning_effort"] == nil {
 		t.Fatal("ProviderChatModelParameterPolicy is incomplete")
 	}
-	models := policy.Properties["model"].Value.Enum
-	if len(models) != 3 || models[0] != "openai/gpt-oss-20b" || models[1] != "openai/gpt-oss-120b" || models[2] != "deepseek-ai/DeepSeek-V4-Pro-0813" {
-		t.Fatalf("model-specific chat policy models=%v", models)
+	model := policy.Properties["model"].Value
+	if len(model.Enum) != 0 || model.MinLength != 1 {
+		t.Fatalf("model-specific chat policy model schema=%+v", model)
 	}
 }
 

@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.467
+  version: 0.1.468
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -11382,7 +11382,8 @@ components:
       properties:
         model:
           type: string
-          enum: [openai/gpt-oss-20b, openai/gpt-oss-120b, deepseek-ai/DeepSeek-V4-Pro-0813]
+          minLength: 1
+          description: Exact upstream model identifier published by the runtime adapter validator.
         supported_options:
           type: array
           uniqueItems: true
