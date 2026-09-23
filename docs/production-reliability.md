@@ -2113,3 +2113,20 @@ Gateway Helm revision 582 completed successfully. Pod
 liveness and readiness returned 204, OpenAPI 0.1.463 was served, and a direct
 request using the configured `test` policy returned one replacement as
 `{{EMAIL_1}}` without raw content or stored content.
+
+## Managed OpenAI fast service tiers
+
+Source `1021b1e` accepts and forwards the documented `fast` and `ultrafast`
+service tiers for managed OpenAI Chat and Responses requests. The runtime-derived
+capability profile publishes both values, while unsupported tiers still fail before
+provider execution. Transport regressions cover both endpoints and exact forwarded
+values. Provider and OpenAPI tests, vet, build, the full Go suite and the full race
+suite passed.
+
+Rancher Desktop built `ai-gateway-gateway:service-tiers-1021b1e2` with image ID
+`sha256:9c36e926ca0fa3d1fe699526979dc7d3c64d553d5f638bd6609fe276a2011b79`.
+Gateway Helm revision 583 completed successfully. Pod
+`ai-gateway-gateway-c647c5b87-kmlf2` became Ready with zero restarts. Live
+liveness and readiness returned 204, OpenAPI 0.1.464 was served, and the live
+provider-capability endpoint reported `fast` and `ultrafast` for managed OpenAI
+Chat and Responses without executing model inference.
