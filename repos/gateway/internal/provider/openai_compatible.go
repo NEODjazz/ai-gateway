@@ -1414,6 +1414,9 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 					part.Refusal = refusal
 				}
 			}
+			if err := validateResponseOutputContent(*part); err != nil {
+				return err
+			}
 		}
 		if event == "response.content_part.added" || event == "response.content_part.done" {
 			contentIndex, err := boundedResponseStreamIndex(decoded, "content_index", maxResponseStreamContentParts)
@@ -1430,6 +1433,9 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 			}
 			var snapshot openai.ResponseOutputContent
 			if err := json.Unmarshal(payload, &snapshot); err != nil {
+				return err
+			}
+			if err := validateResponseOutputContent(snapshot); err != nil {
 				return err
 			}
 			item := ensureResponseOutputItem(&response, outputIndex)

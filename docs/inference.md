@@ -1924,6 +1924,11 @@ may contain `content` or an optional `assistant` role, and only `reasoning` item
 may contain `summary`. A provider cannot inject text through a reasoning or tool
 item and have it included in the derived `output_text`.
 
+Response content annotations are limited to 128 object-or-null entries. Token
+log probabilities have bounded token and byte data, accept only finite
+non-positive values, and allow at most 20 alternatives per token. JSON snapshots
+and SSE content or text events use the same validation before client delivery.
+
 Regression tests cover interleaved messages and parts, text completion events,
 empty and populated terminal snapshots, invalid content indices and JSON text
 aggregation. The tests also reproduced the earlier behavior through a temporary

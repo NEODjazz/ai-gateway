@@ -14,7 +14,13 @@ import (
 	"ai-gateway-gateway/internal/openai"
 )
 
-const maxResponseJSONBytes = 32 << 20
+const (
+	maxResponseJSONBytes       = 32 << 20
+	maxResponseContentLogprobs = 1 << 20
+	maxResponseTopLogprobs     = 20
+	maxResponseTokenBytes      = 8192
+	maxResponseTokenCharacters = 8192
+)
 
 func decodeResponseJSON(reader io.Reader) (openai.ResponseResponse, error) {
 	payload, err := io.ReadAll(io.LimitReader(reader, maxResponseJSONBytes+1))
@@ -473,6 +479,9 @@ func validateResponseOutputItemsMode(items []openai.ResponseOutputItem, allowSpa
 				if part.Type == "" && !allowSparse {
 					return errors.New("provider returned response output content without type")
 				}
+				if err := validateResponseOutputContent(part); err != nil {
+					return err
+				}
 			}
 		}
 		if item.Type == "message" {
@@ -542,6 +551,50 @@ func validateResponseOutputItemsMode(items []openai.ResponseOutputItem, allowSpa
 		decoder := base64.NewDecoder(base64.StdEncoding.Strict(), strings.NewReader(encoded))
 		if _, err := io.Copy(io.Discard, decoder); err != nil {
 			return errors.New("provider image generation result is malformed base64")
+		}
+	}
+	return nil
+}
+
+func validateResponseOutputContent(part openai.ResponseOutputContent) error {
+	if len(part.Annotations) > maxResponseStreamContentParts {
+		return errors.New("provider returned too many response output annotations")
+	}
+	for _, annotation := range part.Annotations {
+		if string(annotation) == "null" {
+			continue
+		}
+		var object map[string]json.RawMessage
+		if json.Unmarshal(annotation, &object) != nil || object == nil {
+			return errors.New("provider returned an invalid response output annotation")
+		}
+	}
+	if len(part.Logprobs) > maxResponseContentLogprobs {
+		return errors.New("provider returned too many response output logprobs")
+	}
+	for _, logprob := range part.Logprobs {
+		if err := validateResponseTokenLogprob(logprob.Token, logprob.Logprob, logprob.Bytes); err != nil {
+			return err
+		}
+		if len(logprob.TopLogprobs) > maxResponseTopLogprobs {
+			return errors.New("provider returned too many response top logprobs")
+		}
+		for _, top := range logprob.TopLogprobs {
+			if err := validateResponseTokenLogprob(top.Token, top.Logprob, top.Bytes); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func validateResponseTokenLogprob(token string, logprob float64, tokenBytes []int) error {
+	if utf8.RuneCountInString(token) > maxResponseTokenCharacters || math.IsNaN(logprob) || math.IsInf(logprob, 0) || logprob > 0 || len(tokenBytes) > maxResponseTokenBytes {
+		return errors.New("provider returned an invalid response token logprob")
+	}
+	for _, value := range tokenBytes {
+		if value < 0 || value > 255 {
+			return errors.New("provider returned invalid response token bytes")
 		}
 	}
 	return nil
