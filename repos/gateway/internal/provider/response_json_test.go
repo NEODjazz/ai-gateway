@@ -39,6 +39,55 @@ func TestResponsesRejectsInvalidJSONDocuments(t *testing.T) {
 	}
 }
 
+func TestResponsesPreserveAndValidateMisalignmentError(t *testing.T) {
+	valid := `{"code":"misalignment_policy_violation","message":"request blocked","misalignment":{"detailed_explanation":"unsafe transfer","error_type":"potentially_unintended_data_transfer","steer":{"message":"continue without private data"}}}`
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprintf("stream=%v", stream), func(t *testing.T) {
+			document := `{"id":"r","object":"response","model":"m","status":"failed","error":` + valid + `}`
+			var response openai.ResponseResponse
+			var err error
+			if stream {
+				response, err = streamResponseData(strings.NewReader("data: {\"type\":\"response.failed\",\"response\":"+document+"}\n\n"), "m", func(string, string) error { return nil })
+			} else {
+				response, err = decodeResponseJSON(strings.NewReader(document))
+			}
+			if err != nil || response.Error == nil || response.Error.Misalignment == nil || response.Error.Misalignment.Steer == nil || response.Error.Misalignment.Steer.Message != "continue without private data" {
+				t.Fatalf("response=%+v err=%v", response, err)
+			}
+			encoded, err := json.Marshal(response)
+			if err != nil || !strings.Contains(string(encoded), `"error_type":"potentially_unintended_data_transfer"`) {
+				t.Fatalf("encoded=%s err=%v", encoded, err)
+			}
+		})
+	}
+
+	for _, responseError := range []string{
+		`{"code":"misalignment_policy_violation","message":"request blocked","unknown":true}`,
+		`{"code":"misalignment_policy_violation","message":"request blocked","misalignment":{"unknown":true}}`,
+		`{"code":"misalignment_policy_violation","message":"request blocked","misalignment":{"steer":{"message":"continue","unknown":true}}}`,
+		`{"code":"","message":"request blocked"}`,
+		`{"code":" misalignment_policy_violation","message":"request blocked"}`,
+		`{"code":"misalignment_policy_violation","message":" "}`,
+		`{"code":"misalignment_policy_violation","message":"request blocked","misalignment":{"error_type":" invalid"}}`,
+		`{"code":"misalignment_policy_violation","message":"request blocked","misalignment":{"steer":{"message":" "}}}`,
+		`{"code":"` + strings.Repeat("c", 129) + `","message":"request blocked"}`,
+		`{"code":"misalignment_policy_violation","message":"` + strings.Repeat("m", 8193) + `"}`,
+		`{"code":"misalignment_policy_violation","message":"request blocked","misalignment":{"detailed_explanation":"` + strings.Repeat("d", 8193) + `"}}`,
+		`{"code":"misalignment_policy_violation","message":"request blocked","misalignment":{"error_type":"` + strings.Repeat("e", 129) + `"}}`,
+		`{"code":"misalignment_policy_violation","message":"request blocked","misalignment":{"steer":{"message":"` + strings.Repeat("s", 8193) + `"}}}`,
+	} {
+		document := `{"id":"r","object":"response","model":"m","status":"failed","error":` + responseError + `}`
+		if _, err := decodeResponseJSON(strings.NewReader(document)); err == nil {
+			t.Fatalf("invalid response error accepted: %s", responseError)
+		}
+		callbacks := 0
+		wire := "data: {\"type\":\"response.failed\",\"response\":" + document + "}\n\n"
+		if _, err := streamResponseData(strings.NewReader(wire), "m", func(string, string) error { callbacks++; return nil }); err == nil || callbacks != 0 {
+			t.Fatalf("invalid response error delivered: response_error=%s err=%v callbacks=%d", responseError, err, callbacks)
+		}
+	}
+}
+
 func TestResponsesPreserveAndValidateExecutionControls(t *testing.T) {
 	for _, stream := range []bool{false, true} {
 		t.Run(fmt.Sprintf("stream=%v", stream), func(t *testing.T) {

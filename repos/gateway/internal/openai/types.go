@@ -996,7 +996,18 @@ type CompactedResponse struct {
 }
 
 type ResponseError struct {
-	Code    string `json:"code"`
+	Code         string                `json:"code"`
+	Message      string                `json:"message"`
+	Misalignment *ResponseMisalignment `json:"misalignment,omitempty"`
+}
+
+type ResponseMisalignment struct {
+	DetailedExplanation string                     `json:"detailed_explanation,omitempty"`
+	ErrorType           string                     `json:"error_type,omitempty"`
+	Steer               *ResponseMisalignmentSteer `json:"steer,omitempty"`
+}
+
+type ResponseMisalignmentSteer struct {
 	Message string `json:"message"`
 }
 

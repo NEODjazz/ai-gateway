@@ -63,6 +63,7 @@ func validateResponseConfigurationPayload(payload []byte, response *openai.Respo
 		Moderation             json.RawMessage `json:"moderation"`
 		PromptCacheDiagnostics json.RawMessage `json:"prompt_cache_diagnostics"`
 		ContextManagement      json.RawMessage `json:"context_management"`
+		Error                  json.RawMessage `json:"error"`
 	}
 	if err := json.Unmarshal(payload, &wire); err != nil {
 		return err
@@ -105,6 +106,11 @@ func validateResponseConfigurationPayload(payload []byte, response *openai.Respo
 	if len(wire.ContextManagement) > 0 && string(wire.ContextManagement) != "null" {
 		if err := decodeStrictResponseConfiguration(wire.ContextManagement, &response.ContextManagement); err != nil {
 			return errors.New("provider returned invalid response context_management")
+		}
+	}
+	if len(wire.Error) > 0 && string(wire.Error) != "null" {
+		if err := decodeStrictResponseConfiguration(wire.Error, &response.Error); err != nil {
+			return errors.New("provider returned invalid response error")
 		}
 	}
 	if message := openai.ValidateResponseConfiguration(response.Tools, response.ToolChoice, response.Reasoning, response.Text); message != "" {
@@ -153,6 +159,9 @@ func validateResponseControls(response openai.ResponseResponse) error {
 	if message := openai.ValidateResponseContextManagement(response.ContextManagement); message != "" {
 		return errors.New("provider returned invalid response context_management: " + message)
 	}
+	if err := validateResponseError(response.Error); err != nil {
+		return err
+	}
 	if response.MaxOutputTokens != nil && *response.MaxOutputTokens <= 0 {
 		return errors.New("provider returned invalid max_output_tokens")
 	}
@@ -175,6 +184,32 @@ func validateResponseControls(response openai.ResponseResponse) error {
 	}
 	if response.Truncation != nil && *response.Truncation != "auto" && *response.Truncation != "disabled" {
 		return errors.New("provider returned invalid truncation")
+	}
+	return nil
+}
+
+func validateResponseError(responseError *openai.ResponseError) error {
+	if responseError == nil {
+		return nil
+	}
+	if strings.TrimSpace(responseError.Code) != responseError.Code || responseError.Code == "" || utf8.RuneCountInString(responseError.Code) > 128 {
+		return errors.New("provider returned invalid response error code")
+	}
+	if strings.TrimSpace(responseError.Message) == "" || utf8.RuneCountInString(responseError.Message) > 8192 {
+		return errors.New("provider returned invalid response error message")
+	}
+	misalignment := responseError.Misalignment
+	if misalignment == nil {
+		return nil
+	}
+	if utf8.RuneCountInString(misalignment.DetailedExplanation) > 8192 {
+		return errors.New("provider returned oversized response misalignment explanation")
+	}
+	if strings.TrimSpace(misalignment.ErrorType) != misalignment.ErrorType || utf8.RuneCountInString(misalignment.ErrorType) > 128 {
+		return errors.New("provider returned invalid response misalignment error type")
+	}
+	if misalignment.Steer != nil && (strings.TrimSpace(misalignment.Steer.Message) == "" || utf8.RuneCountInString(misalignment.Steer.Message) > 8192) {
+		return errors.New("provider returned invalid response misalignment steer")
 	}
 	return nil
 }

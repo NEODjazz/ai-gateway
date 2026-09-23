@@ -1740,6 +1740,19 @@ bypass gateway response caches and shadow execution because the provider's
 moderation policy can change independently. Terminal provider usage remains
 authoritative for billing.
 
+### Responses misalignment details
+
+Failed compatible Responses preserve the provider's optional structured
+`error.misalignment` detail, including its public explanation, classification
+and continuation instruction. JSON and terminal SSE snapshots use the same
+strict shape and bounded strings. Unknown nested fields, empty required error
+identity, invalid whitespace in identifiers and empty continuation instructions
+fail before the response object is returned or a terminal SSE event is delivered.
+
+The classification remains forward compatible: providers may add values beyond
+the currently documented categories. These diagnostic fields do not affect
+routing, retries, policy decisions or billing settlement.
+
 ### Responses prompt-cache prewarming
 
 Responses accepts `prompt_cache_options.prewarm=true` on compatible adapters to
