@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.462
+  version: 0.1.463
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -3273,7 +3273,7 @@ paths:
       operationId: applyGuardrail
       tags: [Guardrails]
       summary: Execute an enabled guardrail policy without model inference
-      description: Authenticates the caller, enforces access groups, model policy when supplied, attached-policy authorization, RPM/TPM and durable audit. Admin credentials may execute any enabled policy. Request content is sent only to the configured scanners and is never returned or written to audit. This operation does not open a generation billing lifecycle.
+      description: Authenticates the caller, enforces access groups, model policy when supplied, attached-policy authorization, RPM/TPM and durable audit. Admin credentials may execute any enabled policy. Request content is sent only to enabled policy modules and is never written to audit; when anonymization is enabled, only the transformed text is returned. This operation does not open a generation billing lifecycle.
       requestBody:
         required: true
         content:
@@ -3282,7 +3282,7 @@ paths:
             example: {guardrail_name: strict, text: Text to inspect, model: gpt-5-mini}
       responses:
         '200':
-          description: Bounded scanner decision without request content
+          description: Bounded policy decision with optional anonymized text
           headers:
             X-Execution-ID: {$ref: '#/components/headers/XExecutionID'}
             X-Request-ID: {$ref: '#/components/headers/XRequestID'}
@@ -11848,7 +11848,7 @@ components:
     GuardrailApplyResponse:
       type: object
       additionalProperties: false
-      required: [execution_id, guardrail_name, allowed, checks, content_stored]
+      required: [execution_id, guardrail_name, allowed, checks, content_stored, replacements]
       properties:
         execution_id: {type: string, minLength: 1, maxLength: 128, description: Server-generated execution identifier; independent of the caller correlation ID.}
         guardrail_name: {type: string, minLength: 1, maxLength: 128}
@@ -11856,11 +11856,14 @@ components:
         checks:
           type: object
           additionalProperties: false
-          required: [dlp, av]
+          required: [dlp, av, anonymizer]
           properties:
             dlp: {type: string, enum: [disabled, passed, rejected]}
             av: {type: string, enum: [disabled, passed, rejected]}
+            anonymizer: {type: string, enum: [disabled, passed, unavailable]}
         content_stored: {type: boolean, const: false}
+        anonymized_text: {type: string, maxLength: 65536, description: Present only when the selected policy enables anonymization. The submitted raw text is never returned.}
+        replacements: {type: integer, minimum: 0}
     GuardrailPolicy:
       allOf:
         - {$ref: '#/components/schemas/GuardrailPolicyInput'}

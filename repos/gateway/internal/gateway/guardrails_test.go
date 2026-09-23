@@ -122,6 +122,7 @@ func TestApplyGuardrailUsesAttachedPolicyRateLimitMonitorAndAudit(t *testing.T) 
 	rates := &guardrailRateStore{allowed: true}
 	handler := NewHandlerWithRateLimitStore(modulesPipeline("inference"), runtime, rates).
 		WithComplianceModules(NewGuardrailMonitoringModule(dlp, monitor), NewGuardrailMonitoringModule(av, monitor)).
+		WithAnonymizerModule(modules.NewAnonymizerModule(true, "all")).
 		WithGuardrailMonitor(monitor).WithAccessRegistry(access).WithAudit(audit)
 
 	response := httptest.NewRecorder()
@@ -145,6 +146,52 @@ func TestApplyGuardrailUsesAttachedPolicyRateLimitMonitorAndAudit(t *testing.T) 
 	snapshot := monitor.Snapshot(10)
 	if snapshot.Summary.Total != 2 || snapshot.Summary.Rejected != 1 || snapshot.Events[0].Source != "guardrail_api" || snapshot.Events[0].Policy != "strict" {
 		t.Fatalf("guardrail execution was not monitored: %+v", snapshot)
+	}
+}
+
+func TestApplyGuardrailExecutesAnonymizationOnlyPolicy(t *testing.T) {
+	runtime := provider.New(provider.Config{})
+	_, err := runtime.(provider.GuardrailController).UpdateGuardrailPolicy("privacy", provider.GuardrailPolicy{Anonymization: "custom", AnonymizationRules: []string{modules.RuleEmail}, Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	audit := &recordingAuditClient{}
+	handler := NewHandler(modulesPipeline("admin"), runtime).
+		WithAnonymizerModule(modules.NewAnonymizerModule(true, modules.RuleEmail)).
+		WithAudit(audit)
+
+	response := httptest.NewRecorder()
+	Routes(handler).ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/guardrails/apply_guardrail", strings.NewReader(`{"guardrail_name":"privacy","text":"user@example.com"}`)))
+	body := response.Body.String()
+	if response.Code != http.StatusOK || !strings.Contains(body, `"allowed":true`) || !strings.Contains(body, `"anonymizer":"passed"`) || !strings.Contains(body, `"anonymized_text":"{{EMAIL_1}}"`) || !strings.Contains(body, `"replacements":1`) || strings.Contains(body, "user@example.com") {
+		t.Fatalf("anonymization policy was not applied safely: status=%d body=%s", response.Code, body)
+	}
+	if len(audit.events) != 2 || strings.Contains(audit.events[0].TargetID, "user@example.com") {
+		t.Fatalf("guardrail audit is incomplete or unsafe: %+v", audit.events)
+	}
+}
+
+func TestApplyGuardrailRequiresOnlyEnabledModules(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		policy provider.GuardrailPolicy
+	}{
+		{name: "dlp", policy: provider.GuardrailPolicy{DLP: true, Enabled: true}},
+		{name: "av", policy: provider.GuardrailPolicy{AV: true, Enabled: true}},
+		{name: "anonymizer", policy: provider.GuardrailPolicy{Anonymization: "custom", AnonymizationRules: []string{modules.RuleEmail}, Enabled: true}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			runtime := provider.New(provider.Config{})
+			if _, err := runtime.(provider.GuardrailController).UpdateGuardrailPolicy("required", test.policy); err != nil {
+				t.Fatal(err)
+			}
+			handler := NewHandler(modulesPipeline("admin"), runtime).WithAudit(&recordingAuditClient{})
+			response := httptest.NewRecorder()
+			Routes(handler).ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/guardrails/apply_guardrail", strings.NewReader(`{"guardrail_name":"required","text":"fixture"}`)))
+			if response.Code != http.StatusServiceUnavailable || !strings.Contains(response.Body.String(), `"code":"guardrail_unavailable"`) || strings.Contains(response.Body.String(), "fixture") {
+				t.Fatalf("missing enabled module did not fail closed: status=%d body=%s", response.Code, response.Body.String())
+			}
+		})
 	}
 }
 
