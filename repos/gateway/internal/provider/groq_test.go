@@ -21,7 +21,7 @@ func TestGroqChatMapsSupportedContract(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatal(err)
 		}
-		if body["model"] != "model" || body["max_completion_tokens"] != float64(32) || body["service_tier"] != "performance" || body["user"] != "tenant-user" || body["reasoning_format"] != "parsed" || len(body["tools"].([]any)) != 1 || body["response_format"] == nil {
+		if body["model"] != "qwen/qwen3.8-27b" || body["max_completion_tokens"] != float64(32) || body["service_tier"] != "performance" || body["user"] != "tenant-user" || body["reasoning_format"] != "parsed" || len(body["tools"].([]any)) != 1 || body["response_format"] == nil {
 			t.Fatalf("request=%#v", body)
 		}
 		_, _ = fmt.Fprint(w, `{"id":"chat","object":"chat.completion","model":"model","service_tier":"performance","choices":[{"index":0,"message":{"role":"assistant","content":"ok","reasoning":"private plan"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}`)
@@ -30,7 +30,7 @@ func TestGroqChatMapsSupportedContract(t *testing.T) {
 	maxTokens := 32
 	client := NewGroq(server.URL+"/openai/v1", "groq-key", true)
 	response, err := client.ChatCompletions(t.Context(), openai.ChatCompletionRequest{
-		Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}}, MaxCompletionTokens: &maxTokens, ChatGenerationOptions: openai.ChatGenerationOptions{ServiceTier: "performance", User: "tenant-user", ReasoningFormat: "parsed"},
+		Model: "qwen/qwen3.8-27b", Messages: []openai.Message{{Role: "user", Content: "hello"}}, MaxCompletionTokens: &maxTokens, ChatGenerationOptions: openai.ChatGenerationOptions{ServiceTier: "performance", User: "tenant-user", ReasoningFormat: "parsed"},
 		Tools:          []openai.Tool{{Type: "function", Function: openai.FunctionDefinition{Name: "lookup", Parameters: map[string]any{"type": "object"}}}},
 		ResponseFormat: &openai.ResponseFormat{Type: "json_object"},
 	})
@@ -90,7 +90,7 @@ func TestGroqStreamsWithUsage(t *testing.T) {
 	client := NewGroq(server.URL, "key", true)
 	var payloads []string
 	includeReasoning := true
-	response, err := client.StreamChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}}, Stream: true, ChatGenerationOptions: openai.ChatGenerationOptions{IncludeReasoning: &includeReasoning}}, func(payload string) error {
+	response, err := client.StreamChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "openai/gpt-oss-20b", Messages: []openai.Message{{Role: "user", Content: "hello"}}, Stream: true, ChatGenerationOptions: openai.ChatGenerationOptions{IncludeReasoning: &includeReasoning}}, func(payload string) error {
 		payloads = append(payloads, payload)
 		return nil
 	})
@@ -110,7 +110,7 @@ func TestGroqRejectsInvalidReasoningControlsBeforeHTTP(t *testing.T) {
 		{IncludeReasoning: &include, ReasoningFormat: "parsed"},
 	}
 	for _, options := range tests {
-		_, err := client.ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}}, ChatGenerationOptions: options})
+		_, err := client.ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "qwen/qwen3.8-27b", Messages: []openai.Message{{Role: "user", Content: "hello"}}, ChatGenerationOptions: options})
 		if err == nil || called {
 			t.Fatalf("options=%+v err=%v called=%v", options, err, called)
 		}
@@ -133,11 +133,71 @@ func TestGroqPreservesExplicitFalseIncludeReasoning(t *testing.T) {
 
 	include := false
 	_, err := NewGroq(server.URL, "key", false).ChatCompletions(t.Context(), openai.ChatCompletionRequest{
-		Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}},
+		Model: "openai/gpt-oss-20b", Messages: []openai.Message{{Role: "user", Content: "hello"}},
 		ChatGenerationOptions: openai.ChatGenerationOptions{IncludeReasoning: &include},
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestGroqReasoningControlsAreModelScoped(t *testing.T) {
+	client := NewGroq("http://unused.invalid", "", false)
+	include := true
+	tools := []openai.Tool{{Type: "function", Function: openai.FunctionDefinition{Name: "lookup", Parameters: map[string]any{"type": "object"}}}}
+	tests := []struct {
+		name, model, parameter string
+		options                openai.ChatGenerationOptions
+		tools                  []openai.Tool
+		valid                  bool
+	}{
+		{name: "gpt low", model: "openai/gpt-oss-20b", options: openai.ChatGenerationOptions{ReasoningEffort: "low"}, valid: true},
+		{name: "gpt high", model: "openai/gpt-oss-120b", options: openai.ChatGenerationOptions{ReasoningEffort: "high"}, valid: true},
+		{name: "gpt none", model: "openai/gpt-oss-20b", parameter: "reasoning_effort", options: openai.ChatGenerationOptions{ReasoningEffort: "none"}},
+		{name: "gpt format", model: "openai/gpt-oss-20b", parameter: "reasoning_format", options: openai.ChatGenerationOptions{ReasoningFormat: "parsed"}},
+		{name: "gpt include", model: "openai/gpt-oss-20b", options: openai.ChatGenerationOptions{IncludeReasoning: &include}, valid: true},
+		{name: "qwen none", model: "qwen/qwen3.8-27b", options: openai.ChatGenerationOptions{ReasoningEffort: "none"}, valid: true},
+		{name: "qwen default", model: "qwen/qwen3.8-27b", options: openai.ChatGenerationOptions{ReasoningEffort: "default"}, valid: true},
+		{name: "qwen parsed", model: "qwen/qwen3.8-27b", options: openai.ChatGenerationOptions{ReasoningFormat: "parsed"}, valid: true},
+		{name: "qwen raw tools", model: "qwen/qwen3.8-27b", parameter: "reasoning_format", options: openai.ChatGenerationOptions{ReasoningFormat: "raw"}, tools: tools},
+		{name: "qwen include", model: "qwen/qwen3.8-27b", parameter: "include_reasoning", options: openai.ChatGenerationOptions{IncludeReasoning: &include}},
+		{name: "unknown effort", model: "other", parameter: "reasoning_effort", options: openai.ChatGenerationOptions{ReasoningEffort: "high"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := client.ValidateChatParameters(openai.ChatCompletionRequest{Model: test.model, Messages: []openai.Message{{Role: "user", Content: "hello"}}, Tools: test.tools, ChatGenerationOptions: test.options})
+			if test.valid {
+				if err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+			var failure *Error
+			if !errors.As(err, &failure) || failure.Param != test.parameter || failure.UpstreamCode != "invalid_request" {
+				t.Fatalf("failure=%+v err=%v", failure, err)
+			}
+		})
+	}
+}
+
+func TestGroqCapabilityProfilePublishesExactReasoningPolicies(t *testing.T) {
+	var policies []ProviderChatModelParameterPolicy
+	for _, profile := range ManagedProviderCapabilityProfiles() {
+		if profile.Type == "groq" {
+			if len(profile.ChatParameters.ReasoningEffort) != 0 || len(profile.ChatParameters.ReasoningFormat) != 0 || slicesContain(profile.ChatParameters.SupportedOptions, "include_reasoning") || slicesContain(profile.ChatParameters.SupportedOptions, "reasoning_format") {
+				t.Fatalf("provider-wide reasoning policy=%+v", profile.ChatParameters)
+			}
+			policies = profile.ChatModelParameters
+			break
+		}
+	}
+	want := []ProviderChatModelParameterPolicy{
+		{Model: "openai/gpt-oss-20b", SupportedOptions: []string{"include_reasoning", "reasoning_effort"}, ReasoningEffort: []string{"low", "medium", "high"}, ReasoningFormat: []string{}},
+		{Model: "openai/gpt-oss-120b", SupportedOptions: []string{"include_reasoning", "reasoning_effort"}, ReasoningEffort: []string{"low", "medium", "high"}, ReasoningFormat: []string{}},
+		{Model: "qwen/qwen3.8-27b", SupportedOptions: []string{"reasoning_effort", "reasoning_format"}, ReasoningEffort: []string{"none", "low", "medium", "high", "default"}, ReasoningFormat: []string{"hidden", "raw", "parsed"}},
+	}
+	if fmt.Sprint(policies) != fmt.Sprint(want) {
+		t.Fatalf("policies=%+v want=%+v", policies, want)
 	}
 }
 

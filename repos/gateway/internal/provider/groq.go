@@ -29,6 +29,10 @@ func (Groq) SupportsTools() bool              { return true }
 func (Groq) SupportsStructuredOutput() bool   { return true }
 func (Groq) SupportsVision() bool             { return true }
 
+func (Groq) ManagedChatModelProbes() []string {
+	return []string{"openai/gpt-oss-20b", "openai/gpt-oss-120b", "qwen/qwen3.8-27b"}
+}
+
 func (g Groq) ValidateChatParameters(request openai.ChatCompletionRequest) error {
 	if err := rejectChatModeration("groq", request); err != nil {
 		return err
@@ -51,12 +55,49 @@ func (g Groq) ValidateChatParameters(request openai.ChatCompletionRequest) error
 	); err != nil {
 		return err
 	}
+	if err := validateGroqReasoningControls(request); err != nil {
+		return err
+	}
 	switch request.ServiceTier {
 	case "", "auto", "on_demand", "flex", "performance":
 	default:
 		return &Error{Class: FailureClientRequest, Provider: "groq", StatusCode: http.StatusBadRequest, UpstreamCode: "unsupported_parameter", Param: "service_tier", Err: errUnsupportedServiceTier}
 	}
 	return g.compatible.ValidateChatParameters(request)
+}
+
+func validateGroqReasoningControls(request openai.ChatCompletionRequest) error {
+	invalid := func(parameter, message string) error {
+		return &Error{Class: FailureClientRequest, Provider: "groq", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: parameter, Err: errors.New(message)}
+	}
+	if request.IncludeReasoning != nil {
+		switch request.Model {
+		case "openai/gpt-oss-20b", "openai/gpt-oss-120b":
+		default:
+			return invalid("include_reasoning", "include_reasoning is not supported by this Groq model")
+		}
+	}
+	if request.ReasoningFormat != "" {
+		if request.Model != "qwen/qwen3.8-27b" {
+			return invalid("reasoning_format", "reasoning_format is not supported by this Groq model")
+		}
+		if request.ReasoningFormat == "raw" && (len(request.Tools) > 0 || request.ResponseFormat != nil && request.ResponseFormat.Type != "text") {
+			return invalid("reasoning_format", "reasoning_format=raw cannot be combined with tools or JSON response formats")
+		}
+	}
+	if request.ReasoningEffort != "" {
+		valid := false
+		switch request.Model {
+		case "openai/gpt-oss-20b", "openai/gpt-oss-120b":
+			valid = request.ReasoningEffort == "low" || request.ReasoningEffort == "medium" || request.ReasoningEffort == "high"
+		case "qwen/qwen3.8-27b":
+			valid = request.ReasoningEffort == "none" || request.ReasoningEffort == "default" || request.ReasoningEffort == "low" || request.ReasoningEffort == "medium" || request.ReasoningEffort == "high"
+		}
+		if !valid {
+			return invalid("reasoning_effort", "reasoning_effort is not supported by this Groq model")
+		}
+	}
+	return nil
 }
 
 func (g Groq) ChatCompletions(ctx context.Context, request openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {

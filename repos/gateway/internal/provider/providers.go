@@ -65,6 +65,7 @@ type ProviderChatModelParameterPolicy struct {
 	Model            string   `json:"model"`
 	SupportedOptions []string `json:"supported_options"`
 	ReasoningEffort  []string `json:"reasoning_effort"`
+	ReasoningFormat  []string `json:"reasoning_format"`
 }
 
 type ProviderResponseParameterPolicy struct {
@@ -461,7 +462,7 @@ func managedProviderChatModelParameterPolicies(client Client, supported bool) []
 				options = append(options, option)
 			}
 		}
-		result = append(result, ProviderChatModelParameterPolicy{Model: model, SupportedOptions: options, ReasoningEffort: policy.ReasoningEffort})
+		result = append(result, ProviderChatModelParameterPolicy{Model: model, SupportedOptions: options, ReasoningEffort: policy.ReasoningEffort, ReasoningFormat: policy.ReasoningFormat})
 	}
 	return result
 }

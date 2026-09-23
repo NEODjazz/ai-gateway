@@ -76,7 +76,7 @@ func TestOpenAPIProviderProfilesExposeModelSpecificChatPolicy(t *testing.T) {
 		t.Fatal("ProviderCapabilityProfile is missing chat_model_parameters")
 	}
 	policy := document.Components.Schemas["ProviderChatModelParameterPolicy"].Value
-	if policy == nil || policy.Properties["model"] == nil || policy.Properties["reasoning_effort"] == nil {
+	if policy == nil || policy.Properties["model"] == nil || policy.Properties["reasoning_effort"] == nil || policy.Properties["reasoning_format"] == nil {
 		t.Fatal("ProviderChatModelParameterPolicy is incomplete")
 	}
 	model := policy.Properties["model"].Value

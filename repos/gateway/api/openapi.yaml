@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.471
+  version: 0.1.472
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -11384,7 +11384,7 @@ components:
     ProviderChatModelParameterPolicy:
       type: object
       additionalProperties: false
-      required: [model, supported_options, reasoning_effort]
+      required: [model, supported_options, reasoning_effort, reasoning_format]
       description: Options accepted only for this exact upstream model. The values are derived by probing the runtime adapter validator and take precedence over the provider-wide value arrays.
       properties:
         model:
@@ -11394,11 +11394,15 @@ components:
         supported_options:
           type: array
           uniqueItems: true
-          items: {type: string, enum: [clear_thinking, reasoning_effort]}
+          items: {type: string, enum: [clear_thinking, include_reasoning, reasoning_format, reasoning_effort]}
         reasoning_effort:
           type: array
           uniqueItems: true
-          items: {type: string, enum: [low, medium, high, max]}
+          items: {type: string, enum: [none, minimal, low, medium, high, xhigh, max, default]}
+        reasoning_format:
+          type: array
+          uniqueItems: true
+          items: {type: string, enum: [hidden, raw, parsed]}
     ProviderResponseParameterPolicy:
       type: object
       additionalProperties: false
