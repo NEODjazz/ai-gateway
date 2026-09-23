@@ -2,6 +2,7 @@ package provider
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -20,6 +21,36 @@ func TestResponseStreamItemSnapshotReplacesAccumulatedItem(t *testing.T) {
 				t.Fatalf("stale snapshot fields: result=%+v", result)
 			}
 		})
+	}
+}
+
+func TestResponseOutputItemEventRequiresSnapshotBeforeDelivery(t *testing.T) {
+	for _, kind := range []string{"response.output_item.added", "response.output_item.done"} {
+		for _, item := range []string{"", `,"item":null`, `,"item":"invalid"`} {
+			wire := fmt.Sprintf("data: {\"type\":%q%s}\n\n", kind, item)
+			calls := 0
+			_, err := streamResponseData(strings.NewReader(wire+responseTestTerminal), "m", func(string, string) error { calls++; return nil })
+			if err == nil || calls != 0 {
+				t.Fatalf("missing output item delivered: kind=%s item=%s err=%v calls=%d", kind, item, err, calls)
+			}
+		}
+	}
+}
+
+func TestResponseOutputItemEventValidatesEnvelopeIdentity(t *testing.T) {
+	for _, kind := range []string{"response.output_item.added", "response.output_item.done"} {
+		wire := fmt.Sprintf(`data: {"type":%q,"item_id":"outer","item":{"id":"inner","type":"message","content":[]}}`+"\n\n", kind)
+		calls := 0
+		_, err := streamResponseData(strings.NewReader(wire+responseTestTerminal), "m", func(string, string) error { calls++; return nil })
+		if err == nil || calls != 0 {
+			t.Fatalf("contradictory output item identity delivered: kind=%s err=%v calls=%d", kind, err, calls)
+		}
+	}
+
+	wire := `data: {"type":"response.output_item.done","item_id":"outer","item":{"type":"message","content":[]}}` + "\n\n"
+	response, err := streamResponseData(strings.NewReader(wire+responseTestTerminal), "m", nil)
+	if err != nil || response.Output[0].ID != "outer" {
+		t.Fatalf("top-level output item identity was not retained: response=%+v err=%v", response, err)
 	}
 }
 

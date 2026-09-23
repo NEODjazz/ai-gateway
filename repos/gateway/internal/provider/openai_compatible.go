@@ -1563,7 +1563,11 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 			}
 			part.Annotations[annotationIndex] = encoded
 		}
-		if itemValue, ok := decoded["item"].(map[string]any); ok {
+		if event == "response.output_item.added" || event == "response.output_item.done" {
+			itemValue, ok := decoded["item"].(map[string]any)
+			if !ok {
+				return errors.New("Responses output item event is missing its item")
+			}
 			marshaled, err := json.Marshal(itemValue)
 			if err != nil {
 				return err
@@ -1571,6 +1575,14 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 			var snapshot openai.ResponseOutputItem
 			if err := json.Unmarshal(marshaled, &snapshot); err != nil {
 				return err
+			}
+			if eventItemID, present := decoded["item_id"].(string); present {
+				if snapshot.ID != "" && snapshot.ID != eventItemID {
+					return errors.New("Responses output item event contains contradictory item IDs")
+				}
+				if snapshot.ID == "" {
+					snapshot.ID = eventItemID
+				}
 			}
 			if err := validateResponseStreamOutputIdentity(response.Output, outputIndex, snapshot); err != nil {
 				return err
