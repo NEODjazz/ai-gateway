@@ -67,6 +67,9 @@ func (r ResponseRequest) Validate() string {
 			return "context_management compact_threshold must be positive"
 		}
 	}
+	if message := validateResponseModeration(r.Moderation); message != "" {
+		return message
+	}
 	if message := validateResponseIncludes(r.Include); message != "" {
 		return message
 	}
@@ -131,6 +134,24 @@ func (r ResponseRequest) Validate() string {
 	}
 	if r.MaxToolCalls != nil && (*r.MaxToolCalls < 0 || *r.MaxToolCalls > 1000) {
 		return "max_tool_calls must be between 0 and 1000"
+	}
+	return ""
+}
+
+func validateResponseModeration(moderation *ResponseModeration) string {
+	if moderation == nil {
+		return ""
+	}
+	if strings.TrimSpace(moderation.Model) == "" || utf8.RuneCountInString(moderation.Model) > 256 {
+		return "moderation.model must contain between 1 and 256 characters"
+	}
+	if moderation.Policy == nil {
+		return ""
+	}
+	for _, rule := range []*ResponseModerationRule{moderation.Policy.Input, moderation.Policy.Output} {
+		if rule != nil && rule.Mode != "score" && rule.Mode != "block" {
+			return "moderation policy mode must be score or block"
+		}
 	}
 	return ""
 }

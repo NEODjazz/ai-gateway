@@ -731,6 +731,7 @@ type ResponseRequest struct {
 	NativeInputTokens    int                    `json:"-"`
 	Metadata             map[string]string      `json:"metadata,omitempty"`
 	ContextManagement    []ResponseContextEntry `json:"context_management,omitempty"`
+	Moderation           *ResponseModeration    `json:"moderation,omitempty"`
 	TopLogprobs          *int                   `json:"top_logprobs,omitempty"`
 	Truncation           *string                `json:"truncation,omitempty"`
 	Reasoning            *ResponseReasoning     `json:"reasoning,omitempty"`
@@ -766,6 +767,20 @@ type ResponseRequest struct {
 type ResponseContextEntry struct {
 	Type             string `json:"type"`
 	CompactThreshold *int   `json:"compact_threshold,omitempty"`
+}
+
+type ResponseModeration struct {
+	Model  string                    `json:"model"`
+	Policy *ResponseModerationPolicy `json:"policy,omitempty"`
+}
+
+type ResponseModerationPolicy struct {
+	Input  *ResponseModerationRule `json:"input,omitempty"`
+	Output *ResponseModerationRule `json:"output,omitempty"`
+}
+
+type ResponseModerationRule struct {
+	Mode string `json:"mode"`
 }
 
 type ResponseInputTokenCountRequest struct {

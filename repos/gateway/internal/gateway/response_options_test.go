@@ -169,6 +169,35 @@ func TestResponsesRejectsInvalidServerSideCompactionBeforeExecution(t *testing.T
 	}
 }
 
+func TestResponsesPreservesProviderModerationConfiguration(t *testing.T) {
+	upstream := &chatProvider{}
+	handler := NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}}}), upstream)
+	out := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"m","input":"hello","moderation":{"model":"omni-moderation-latest","policy":{"input":{"mode":"block"},"output":{"mode":"score"}}}}`))
+	handler.Responses(out, request)
+	if out.Code != http.StatusOK || upstream.request.ResponseRequest == nil || upstream.request.ResponseRequest.Moderation == nil {
+		t.Fatalf("status=%d request=%+v body=%s", out.Code, upstream.request.ResponseRequest, out.Body.String())
+	}
+	moderation := upstream.request.ResponseRequest.Moderation
+	if moderation.Model != "omni-moderation-latest" || moderation.Policy == nil || moderation.Policy.Input == nil || moderation.Policy.Input.Mode != "block" || moderation.Policy.Output == nil || moderation.Policy.Output.Mode != "score" {
+		t.Fatalf("moderation was not preserved: %+v", moderation)
+	}
+}
+
+func TestResponsesRejectsInvalidProviderModerationBeforeExecution(t *testing.T) {
+	for _, value := range []string{
+		`{}`,
+		`{"model":"moderation","policy":{"input":{"mode":"allow"}}}`,
+		`{"model":"moderation","policy":{"output":{}}}`,
+	} {
+		out := httptest.NewRecorder()
+		Handler{}.Responses(out, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"m","input":"hello","moderation":`+value+`}`)))
+		if out.Code != http.StatusBadRequest {
+			t.Fatalf("value=%s status=%d body=%s", value, out.Code, out.Body.String())
+		}
+	}
+}
+
 func TestResponsesValidatesStreamOptionsBeforeExecution(t *testing.T) {
 	handler := Handler{}
 	for _, body := range []string{

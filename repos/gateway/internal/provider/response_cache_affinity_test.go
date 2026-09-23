@@ -211,7 +211,14 @@ func TestResponsesCacheHitStoresAffinityBeforeBilling(t *testing.T) {
 func TestResponsesContextManagementIsNotReplaySafe(t *testing.T) {
 	threshold := 1000
 	request := openai.ResponseRequest{Model: "m", Input: "hello", ContextManagement: []openai.ResponseContextEntry{{Type: "compaction", CompactThreshold: &threshold}}}
-	if responseToolsReplaySafe(request) {
+	if responseReplaySafe(request) {
 		t.Fatal("server-side compaction request was considered replay safe")
+	}
+}
+
+func TestResponsesModerationIsNotReplaySafe(t *testing.T) {
+	request := openai.ResponseRequest{Model: "m", Input: "hello", Moderation: &openai.ResponseModeration{Model: "moderation"}}
+	if responseReplaySafe(request) {
+		t.Fatal("provider-moderated request was considered replay safe")
 	}
 }

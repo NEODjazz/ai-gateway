@@ -308,6 +308,22 @@ func TestNativeAdaptersRejectResponseContextManagement(t *testing.T) {
 	}
 }
 
+func TestNativeAdaptersRejectResponseModeration(t *testing.T) {
+	request := openai.ResponseRequest{Model: "model", Input: "hello", Moderation: &openai.ResponseModeration{Model: "moderation"}}
+	for name, validate := range map[string]func(openai.ResponseRequest) error{
+		"anthropic": (Anthropic{}).ValidateResponseParameters,
+		"deepseek":  (DeepSeek{}).ValidateResponseParameters,
+		"demo":      (Demo{}).ValidateResponseParameters,
+		"groq":      (Groq{}).ValidateResponseParameters,
+		"ollama":    (Ollama{}).ValidateResponseParameters,
+		"xai":       (XAI{}).ValidateResponseParameters,
+	} {
+		t.Run(name, func(t *testing.T) {
+			assertUnsupportedParameter(t, validate(request), "moderation")
+		})
+	}
+}
+
 func TestOtherEmbeddingAdaptersRejectMistralMetadata(t *testing.T) {
 	request := openai.EmbeddingRequest{Model: "embed", Input: "text", Metadata: map[string]string{"trace": "one"}}
 	for name, call := range map[string]func() error{

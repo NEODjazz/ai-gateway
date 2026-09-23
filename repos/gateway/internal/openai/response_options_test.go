@@ -70,6 +70,29 @@ func TestResponseContextManagementValidation(t *testing.T) {
 	}
 }
 
+func TestResponseModerationValidation(t *testing.T) {
+	valid := ResponseRequest{Moderation: &ResponseModeration{
+		Model: "omni-moderation-latest",
+		Policy: &ResponseModerationPolicy{
+			Input:  &ResponseModerationRule{Mode: "block"},
+			Output: &ResponseModerationRule{Mode: "score"},
+		},
+	}}
+	if message := valid.Validate(); message != "" {
+		t.Fatalf("valid moderation rejected: %s", message)
+	}
+	for _, moderation := range []*ResponseModeration{
+		{},
+		{Model: strings.Repeat("м", 257)},
+		{Model: "moderation", Policy: &ResponseModerationPolicy{Input: &ResponseModerationRule{Mode: "allow"}}},
+		{Model: "moderation", Policy: &ResponseModerationPolicy{Output: &ResponseModerationRule{}}},
+	} {
+		if message := (ResponseRequest{Moderation: moderation}).Validate(); message == "" {
+			t.Fatalf("invalid moderation accepted: %+v", moderation)
+		}
+	}
+}
+
 func TestResponseBackgroundRequiresDurableNonStreamingStorage(t *testing.T) {
 	store := true
 	if message := (ResponseRequest{Background: true, Store: &store}).Validate(); message != "" {

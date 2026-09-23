@@ -1087,7 +1087,7 @@ func (r Router) Responses(ctx context.Context, req modules.RequestContext) (open
 		started := time.Now()
 		lastAttempt = &attemptCtx
 		cacheKey := ""
-		if !persistentResponseRequested(*attemptCtx.ResponseRequest) && responseToolsReplaySafe(*attemptCtx.ResponseRequest) {
+		if !persistentResponseRequested(*attemptCtx.ResponseRequest) && responseReplaySafe(*attemptCtx.ResponseRequest) {
 			cacheKey = providerCacheKey("responses", attemptCtx)
 		}
 		if payload, found, cacheErr := r.cacheGet(ctx, cacheKey); found {
@@ -1110,7 +1110,7 @@ func (r Router) Responses(ctx context.Context, req modules.RequestContext) (open
 			attemptCtx.Metadata["provider.cache.status"] = "error"
 			log.Printf("provider cache get failed: %v", cacheErr)
 		}
-		if !mirrored && !persistentResponseRequested(*attemptCtx.ResponseRequest) && responseToolsReplaySafe(*attemptCtx.ResponseRequest) {
+		if !mirrored && !persistentResponseRequested(*attemptCtx.ResponseRequest) && responseReplaySafe(*attemptCtx.ResponseRequest) {
 			r.mirrorResponses(ctx, req.RequestID, *attemptCtx.ResponseRequest, request.Model, requiredResponseCapabilities(request, false)...)
 			mirrored = true
 		}
@@ -2071,7 +2071,7 @@ func (r Router) StreamResponses(ctx context.Context, req modules.RequestContext,
 			return openai.ResponseResponse{}, true, err
 		}
 		lastAttempt = &attemptCtx
-		if !mirrored && !persistentResponseRequested(*attemptCtx.ResponseRequest) && responseToolsReplaySafe(*attemptCtx.ResponseRequest) {
+		if !mirrored && !persistentResponseRequested(*attemptCtx.ResponseRequest) && responseReplaySafe(*attemptCtx.ResponseRequest) {
 			r.mirrorResponses(ctx, req.RequestID, *attemptCtx.ResponseRequest, request.Model, requiredResponseCapabilities(request, true)...)
 			mirrored = true
 		}

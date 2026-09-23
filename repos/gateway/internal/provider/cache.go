@@ -271,12 +271,11 @@ func cacheableResponsesResult(response openai.ResponseResponse) bool {
 	return response.Error == nil && response.IncompleteDetails == nil && (response.Status == "" || response.Status == "completed")
 }
 
-// responseToolsReplaySafe reports whether a Responses request can be served
-// from an exact cache or copied to a shadow deployment. Provider-managed tools
-// may read mutable state or perform external work, so their execution cannot be
-// safely replayed or replaced with an earlier result.
-func responseToolsReplaySafe(request openai.ResponseRequest) bool {
-	if len(request.ContextManagement) > 0 {
+// responseReplaySafe reports whether a Responses request can be served from an
+// exact cache or copied to a shadow deployment. Provider-managed state and
+// server-side tools may change independently or perform external work.
+func responseReplaySafe(request openai.ResponseRequest) bool {
+	if len(request.ContextManagement) > 0 || request.Moderation != nil {
 		return false
 	}
 	for _, tool := range request.Tools {

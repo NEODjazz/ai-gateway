@@ -1709,6 +1709,19 @@ context, these requests bypass gateway response caches and are not
 copied to shadow deployments. Provider-reported terminal usage remains the
 authoritative billing settlement.
 
+### Responses provider moderation
+
+Responses accepts an optional provider-side `moderation` object with a required
+model and optional input/output policy modes. Each mode is validated as `score`
+or `block`. Compatible JSON and SSE adapters preserve this object, while native
+adapters that cannot represent it return `unsupported_parameter`.
+
+Provider moderation supplements the gateway's effective content policy; it
+does not disable or replace gateway DLP, AV or output checks. These requests
+bypass gateway response caches and shadow execution because the provider's
+moderation policy can change independently. Terminal provider usage remains
+authoritative for billing.
+
 ### Responses cache outcome policy
 
 Responses exact-cache writes and reads now require `status="completed"` (or the

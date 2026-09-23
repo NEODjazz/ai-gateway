@@ -917,7 +917,7 @@ func TestOpenAICompatibleStreamsResponsesWhenEnabled(t *testing.T) {
 	webSearch := openai.ResponseTool{Type: "web_search", Filters: map[string]any{"allowed_domains": []string{"example.com"}}, SearchContextSize: "high", UserLocation: &openai.ResponseWebSearchLocation{Type: "approximate", Country: "RU", Timezone: "Europe/Moscow"}}
 	provider := NewOpenAICompatible(server.URL, "", true)
 	response, err := provider.StreamResponses(context.Background(), openai.ResponseRequest{
-		Model: "test-model", Input: "hello", Stream: true, StreamOptions: &openai.ResponseStreamOptions{IncludeObfuscation: &includeObfuscation}, PreviousResponse: "resp-previous", SafetyIdentifier: "provider-user", PromptCacheKey: "tenant-thread", ContextManagement: []openai.ResponseContextEntry{{Type: "compaction", CompactThreshold: &compactThreshold}},
+		Model: "test-model", Input: "hello", Stream: true, StreamOptions: &openai.ResponseStreamOptions{IncludeObfuscation: &includeObfuscation}, PreviousResponse: "resp-previous", SafetyIdentifier: "provider-user", PromptCacheKey: "tenant-thread", ContextManagement: []openai.ResponseContextEntry{{Type: "compaction", CompactThreshold: &compactThreshold}}, Moderation: &openai.ResponseModeration{Model: "moderation", Policy: &openai.ResponseModerationPolicy{Input: &openai.ResponseModerationRule{Mode: "block"}}},
 		Tools: []openai.ResponseTool{
 			{Type: "function", Name: "weather", Parameters: map[string]any{"type": "object"}},
 			{Type: "mcp", ServerLabel: "weather-prod", ServerURL: "https://mcp.example.test", AllowedTools: []string{"forecast"}, RequireApproval: "never", Headers: map[string]string{"X-MCP-Key": "scoped"}},
@@ -942,6 +942,9 @@ func TestOpenAICompatibleStreamsResponsesWhenEnabled(t *testing.T) {
 	}
 	if len(upstreamRequest.ContextManagement) != 1 || upstreamRequest.ContextManagement[0].CompactThreshold == nil || *upstreamRequest.ContextManagement[0].CompactThreshold != 1000 {
 		t.Fatalf("stream context management was not forwarded: %+v", upstreamRequest.ContextManagement)
+	}
+	if upstreamRequest.Moderation == nil || upstreamRequest.Moderation.Model != "moderation" || upstreamRequest.Moderation.Policy == nil || upstreamRequest.Moderation.Policy.Input == nil || upstreamRequest.Moderation.Policy.Input.Mode != "block" {
+		t.Fatalf("stream moderation was not forwarded: %+v", upstreamRequest.Moderation)
 	}
 	textConfig, _ := upstreamRequest.Text.(map[string]any)
 	container, _ := upstreamRequest.Tools[2].Container.(map[string]any)
@@ -982,7 +985,7 @@ func TestOpenAICompatibleForwardsResponseCacheIdentifiers(t *testing.T) {
 	input := []any{map[string]any{"type": "input_file", "file_data": "data:application/pdf;base64,JVBERi0xLjQK", "filename": "input.pdf"}}
 	cacheOptions := &openai.PromptCacheOptions{Mode: "explicit", TTL: "30m", ComparisonResponseID: "resp_baseline"}
 	threshold := 1000
-	if _, err := provider.Responses(context.Background(), openai.ResponseRequest{Model: "test-model", Input: input, SafetyIdentifier: "provider-user", PromptCacheKey: "tenant-thread", PromptCacheOptions: cacheOptions, PromptCacheRetention: "24h", ContextManagement: []openai.ResponseContextEntry{{Type: "compaction", CompactThreshold: &threshold}}}); err != nil {
+	if _, err := provider.Responses(context.Background(), openai.ResponseRequest{Model: "test-model", Input: input, SafetyIdentifier: "provider-user", PromptCacheKey: "tenant-thread", PromptCacheOptions: cacheOptions, PromptCacheRetention: "24h", ContextManagement: []openai.ResponseContextEntry{{Type: "compaction", CompactThreshold: &threshold}}, Moderation: &openai.ResponseModeration{Model: "moderation", Policy: &openai.ResponseModerationPolicy{Output: &openai.ResponseModerationRule{Mode: "score"}}}}); err != nil {
 		t.Fatal(err)
 	}
 	if upstreamRequest.SafetyIdentifier != "provider-user" || upstreamRequest.PromptCacheKey != "tenant-thread" || upstreamRequest.PromptCacheOptions == nil || upstreamRequest.PromptCacheOptions.Mode != "explicit" || upstreamRequest.PromptCacheOptions.TTL != "30m" || upstreamRequest.PromptCacheOptions.ComparisonResponseID != "resp_baseline" || upstreamRequest.PromptCacheRetention != "24h" {
@@ -990,6 +993,9 @@ func TestOpenAICompatibleForwardsResponseCacheIdentifiers(t *testing.T) {
 	}
 	if len(upstreamRequest.ContextManagement) != 1 || upstreamRequest.ContextManagement[0].Type != "compaction" || upstreamRequest.ContextManagement[0].CompactThreshold == nil || *upstreamRequest.ContextManagement[0].CompactThreshold != 1000 {
 		t.Fatalf("context management was not forwarded: %+v", upstreamRequest.ContextManagement)
+	}
+	if upstreamRequest.Moderation == nil || upstreamRequest.Moderation.Policy == nil || upstreamRequest.Moderation.Policy.Output == nil || upstreamRequest.Moderation.Policy.Output.Mode != "score" {
+		t.Fatalf("moderation was not forwarded: %+v", upstreamRequest.Moderation)
 	}
 	parts, ok := upstreamRequest.Input.([]any)
 	if !ok || len(parts) != 1 || parts[0].(map[string]any)["type"] != "input_file" {

@@ -128,6 +128,7 @@ func (d DeepSeek) ValidateResponseParameters(request openai.ResponseRequest) err
 	}
 	return rejectParameters("deepseek",
 		parameterCheck{"context_management", len(request.ContextManagement) > 0},
+		parameterCheck{"moderation", request.Moderation != nil},
 		parameterCheck{"metadata", request.Metadata != nil}, parameterCheck{"include", request.Include != nil},
 		parameterCheck{"store", request.Store != nil}, parameterCheck{"truncation", request.Truncation != nil},
 		parameterCheck{"safety_identifier", request.SafetyIdentifier != ""}, parameterCheck{"prompt_cache_key", request.PromptCacheKey != ""},

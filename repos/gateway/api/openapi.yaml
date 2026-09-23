@@ -9403,6 +9403,12 @@ components:
             oneOf:
               - $ref: '#/components/schemas/TextContentPart'
               - $ref: '#/components/schemas/InputImageContentPart'
+    ResponseModerationRule:
+      type: object
+      additionalProperties: false
+      required: [mode]
+      properties:
+        mode: {type: string, enum: [score, block]}
     ResponseRequest:
       description: Supply at most one non-null output limit, max_output_tokens or max_tokens.
       type: object
@@ -9426,6 +9432,19 @@ components:
             properties:
               type: {type: string, const: compaction}
               compact_threshold: {type: integer, minimum: 1, description: Provider token threshold at which server-side compaction may run.}
+        moderation:
+          type: object
+          description: Provider-side input and output moderation. Requests bypass gateway response caches and shadow execution.
+          additionalProperties: false
+          required: [model]
+          properties:
+            model: {type: string, minLength: 1, maxLength: 256}
+            policy:
+              type: object
+              additionalProperties: false
+              properties:
+                input: {$ref: '#/components/schemas/ResponseModerationRule'}
+                output: {$ref: '#/components/schemas/ResponseModerationRule'}
         reasoning:
           type: object
           additionalProperties: false

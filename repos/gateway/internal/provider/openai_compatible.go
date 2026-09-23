@@ -83,6 +83,7 @@ func (r openAICompatibleChatRequest) MarshalJSON() ([]byte, error) {
 type openAICompatibleResponseRequest struct {
 	Metadata             map[string]string             `json:"metadata,omitempty"`
 	ContextManagement    []openai.ResponseContextEntry `json:"context_management,omitempty"`
+	Moderation           *openai.ResponseModeration    `json:"moderation,omitempty"`
 	TopLogprobs          *int                          `json:"top_logprobs,omitempty"`
 	Truncation           *string                       `json:"truncation,omitempty"`
 	Reasoning            *openai.ResponseReasoning     `json:"reasoning,omitempty"`
@@ -844,7 +845,7 @@ func (p OpenAICompatible) Responses(ctx context.Context, request openai.Response
 		return openai.ResponseResponse{}, err
 	}
 	body, err := json.Marshal(openAICompatibleResponseRequest{
-		Include: request.Include, Store: request.Store, Reasoning: request.Reasoning, Truncation: request.Truncation, TopLogprobs: request.TopLogprobs, Metadata: request.Metadata, ContextManagement: request.ContextManagement,
+		Include: request.Include, Store: request.Store, Reasoning: request.Reasoning, Truncation: request.Truncation, TopLogprobs: request.TopLogprobs, Metadata: request.Metadata, ContextManagement: request.ContextManagement, Moderation: request.Moderation,
 		Model: request.Model, Input: request.Input, Instructions: request.Instructions,
 		Tools: request.Tools, ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls,
 		Text: request.Text, PreviousResponse: request.PreviousResponse, User: request.User, SafetyIdentifier: request.SafetyIdentifier, PromptCacheKey: request.PromptCacheKey, PromptCacheOptions: request.PromptCacheOptions, PromptCacheRetention: request.PromptCacheRetention, ServiceTier: request.ServiceTier, Background: request.Background, Stream: false, StreamOptions: request.StreamOptions,
@@ -887,7 +888,7 @@ func (p OpenAICompatible) StreamResponses(ctx context.Context, request openai.Re
 	}
 
 	body, err := json.Marshal(openAICompatibleResponseRequest{
-		Include: request.Include, Store: request.Store, Reasoning: request.Reasoning, Truncation: request.Truncation, TopLogprobs: request.TopLogprobs, Metadata: request.Metadata, ContextManagement: request.ContextManagement,
+		Include: request.Include, Store: request.Store, Reasoning: request.Reasoning, Truncation: request.Truncation, TopLogprobs: request.TopLogprobs, Metadata: request.Metadata, ContextManagement: request.ContextManagement, Moderation: request.Moderation,
 		Model: request.Model, Input: request.Input, Instructions: request.Instructions,
 		Tools: request.Tools, ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls,
 		Text: request.Text, PreviousResponse: request.PreviousResponse, User: request.User, SafetyIdentifier: request.SafetyIdentifier, PromptCacheKey: request.PromptCacheKey, PromptCacheOptions: request.PromptCacheOptions, PromptCacheRetention: request.PromptCacheRetention, ServiceTier: request.ServiceTier, Stream: true, StreamOptions: request.StreamOptions,

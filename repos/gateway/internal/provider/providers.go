@@ -1203,6 +1203,9 @@ func managedResponseOptionProbes() []managedResponseOptionProbe {
 			threshold := 1000
 			request.ContextManagement = []openai.ResponseContextEntry{{Type: "compaction", CompactThreshold: &threshold}}
 		}},
+		{name: "moderation", apply: func(request *openai.ResponseRequest) {
+			request.Moderation = &openai.ResponseModeration{Model: "omni-moderation-latest", Policy: &openai.ResponseModerationPolicy{Input: &openai.ResponseModerationRule{Mode: "block"}}}
+		}},
 		{name: "top_logprobs", apply: func(request *openai.ResponseRequest) { value := 1; request.TopLogprobs = &value }},
 		{name: "truncation", apply: func(request *openai.ResponseRequest) { value := "auto"; request.Truncation = &value }},
 		{name: "store", apply: func(request *openai.ResponseRequest) { value := true; request.Store = &value }},
