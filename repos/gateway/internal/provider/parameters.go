@@ -420,7 +420,7 @@ func supportedCompatibleServiceTier(providerName, value string) bool {
 	}
 	switch providerName {
 	case "openai":
-		return value == "auto" || value == "default" || value == "flex" || value == "priority"
+		return value == "auto" || value == "default" || value == "flex" || value == "priority" || value == "fast" || value == "ultrafast"
 	case "xai":
 		return value == "default" || value == "priority"
 	case "cerebras":

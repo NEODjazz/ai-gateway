@@ -51,22 +51,35 @@ func TestRejectGenerationOptionsCoversEveryPublicField(t *testing.T) {
 
 func TestManagedOpenAIServiceTierIsValidatedAndForwarded(t *testing.T) {
 	requests := 0
+	expectedTiers := []string{"priority", "priority", "fast", "fast", "ultrafast", "ultrafast"}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requests++
 		var body map[string]any
-		if json.NewDecoder(r.Body).Decode(&body) != nil || body["service_tier"] != "priority" {
+		if json.NewDecoder(r.Body).Decode(&body) != nil || requests >= len(expectedTiers) || body["service_tier"] != expectedTiers[requests] {
 			t.Fatalf("service tier was not forwarded: %+v", body)
 		}
-		_, _ = w.Write([]byte(`{"id":"chat","model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+		requests++
+		switch r.URL.Path {
+		case "/v1/chat/completions":
+			_, _ = w.Write([]byte(`{"id":"chat","model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+		case "/v1/responses":
+			_, _ = w.Write([]byte(`{"id":"resp_1","object":"response","model":"m","status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`))
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
 	}))
 	defer server.Close()
 	client := providerFor(config.ProviderEndpointConfig{Type: "openai", BaseURL: server.URL})
-	request := openai.ChatCompletionRequest{Model: "m", Messages: []openai.Message{{Role: "user", Content: "test"}}, ChatGenerationOptions: openai.ChatGenerationOptions{ServiceTier: "priority"}}
-	if _, err := client.ChatCompletions(t.Context(), request); err != nil {
-		t.Fatal(err)
+	for _, tier := range []string{"priority", "fast", "ultrafast"} {
+		request := openai.ChatCompletionRequest{Model: "m", Messages: []openai.Message{{Role: "user", Content: "test"}}, ChatGenerationOptions: openai.ChatGenerationOptions{ServiceTier: tier}}
+		if _, err := client.ChatCompletions(t.Context(), request); err != nil {
+			t.Fatalf("chat service_tier=%s: %v", tier, err)
+		}
+		if _, err := client.Responses(t.Context(), openai.ResponseRequest{Model: "m", Input: "test", ServiceTier: tier}); err != nil {
+			t.Fatalf("responses service_tier=%s: %v", tier, err)
+		}
 	}
-	request.ServiceTier = "scale"
-	if err := validateChatAdapter(client, request); err == nil || requests != 1 {
+	request := openai.ChatCompletionRequest{Model: "m", Messages: []openai.Message{{Role: "user", Content: "test"}}, ChatGenerationOptions: openai.ChatGenerationOptions{ServiceTier: "scale"}}
+	if err := validateChatAdapter(client, request); err == nil || requests != 6 {
 		t.Fatalf("unsupported tier reached provider: err=%v requests=%d", err, requests)
 	}
 }
