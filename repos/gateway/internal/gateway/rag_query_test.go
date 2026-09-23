@@ -64,7 +64,7 @@ func (p *ragQueryProvider) ChatCompletions(_ context.Context, req modules.Reques
 	p.chatRequest = req
 	return openai.ChatCompletionResponse{
 		ID: "chatcmpl-rag", Object: "chat.completion", Model: req.Request.Model,
-		Choices: []openai.Choice{{Index: 0, Message: openai.Message{Role: "assistant", Content: "answer"}, FinishReason: "stop"}},
+		Choices: []openai.Choice{{Index: 0, Message: openai.Message{Role: "assistant", Content: "answer [1]"}, FinishReason: "stop"}},
 		Usage:   openai.Usage{PromptTokens: 12, CompletionTokens: 1, TotalTokens: 13},
 	}, nil
 }
@@ -164,6 +164,14 @@ func TestRAGQueryRunsOwnerScopedRetrievalRerankAndChatWithDistinctExecutions(t *
 	if response.Code != http.StatusOK || auth.calls != 2 || !strings.Contains(response.Body.String(), `"id":"chatcmpl-rag"`) {
 		t.Fatalf("status=%d auth=%d body=%s", response.Code, auth.calls, response.Body.String())
 	}
+	var completion openai.ChatCompletionResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &completion); err != nil || len(completion.Choices) != 1 || len(completion.Choices[0].Message.Annotations) != 1 {
+		t.Fatalf("completion=%+v err=%v", completion, err)
+	}
+	citation := completion.Choices[0].Message.Annotations[0].SourceCitation
+	if citation == nil || citation.Source != "file_beta" || citation.Title != "beta.txt" || citation.StartIndex != 7 || citation.EndIndex != 10 || citation.DocumentIndex == nil || *citation.DocumentIndex != 0 || citation.LocationType != "document_chunk" {
+		t.Fatalf("citation=%+v", citation)
+	}
 	if runtime.embeddingRequest.EmbeddingRequest == nil || runtime.rerankRequest.RerankRequest == nil || runtime.chatRequest.Request.Model != "chat-model" {
 		t.Fatalf("missing stage requests: embedding=%+v rerank=%+v chat=%+v", runtime.embeddingRequest, runtime.rerankRequest, runtime.chatRequest)
 	}
@@ -224,5 +232,19 @@ func TestDecodeRAGQueryPreservesChatParameters(t *testing.T) {
 	if !ok || response.Code != http.StatusOK || chat.ReasoningEffort != "high" || chat.ServiceTier != "priority" || retrieval.VectorStoreID != "vs_owned" {
 		payload, _ := json.Marshal(chat)
 		t.Fatalf("ok=%t status=%d chat=%s retrieval=%+v body=%s", ok, response.Code, payload, retrieval, response.Body.String())
+	}
+}
+
+func TestAnnotateRAGResponseUsesRuneOffsetsAndKnownSources(t *testing.T) {
+	response := openai.ChatCompletionResponse{Choices: []openai.Choice{{Message: openai.Message{Role: "assistant", Content: "Ответ [2], см. [1](https://example.com), `[1]`, ```\n[1]\n``` и [9]."}}}}
+	results := []vectorSearchResult{{FileID: "file_one", Filename: "one.txt", chunkIndex: 3}, {FileID: "file_two", Filename: "two.txt", chunkIndex: 7}}
+	annotated := annotateRAGResponse(response, results)
+	annotations := annotated.Choices[0].Message.Annotations
+	if len(annotations) != 1 {
+		t.Fatalf("annotations=%+v", annotations)
+	}
+	citation := annotations[0].SourceCitation
+	if citation == nil || citation.Source != "file_two" || citation.StartIndex != 6 || citation.EndIndex != 9 || citation.LocationStart != 7 || citation.LocationEnd != 8 || citation.DocumentIndex == nil || *citation.DocumentIndex != 1 {
+		t.Fatalf("citation=%+v", citation)
 	}
 }
