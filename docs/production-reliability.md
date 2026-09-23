@@ -2319,3 +2319,17 @@ Gateway Helm revision 594 completed successfully. Pod
 `ai-gateway-gateway-885b4468d-7dp5q` became Ready with zero restarts. Direct
 service liveness and readiness returned 204, and the live DeepSeek Responses
 profile included `none`, `minimal`, `low`, `medium`, `high`, `xhigh` and `max`.
+
+## DeepSeek Responses input item types
+
+Source `6389de3` rejects Responses input item types that the native DeepSeek
+API silently ignores. The validator accepts message, function and custom tool
+call/output, reasoning and provider-restored web search history items. Invalid
+types fail before provider execution. Accepted and rejected item regressions
+passed with the full race suite, vet and build.
+
+Rancher Desktop built `ai-gateway-gateway:deepseek-input-6389de39` with image
+ID `sha256:1b41dec02b9b5c79cfcd8f78a83e3d4531096cab3577691e08e60397f1504090`.
+Gateway Helm revision 595 completed successfully. Pod
+`ai-gateway-gateway-86c8bbc88b-nt8wk` became Ready with zero restarts, and
+direct service liveness and readiness both returned 204.
