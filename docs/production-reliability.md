@@ -2062,3 +2062,7 @@ override grants fail closed before provider execution. Tool configuration partic
 in TPM and budget reserve, countTokens preserves it, and response caches are bypassed.
 The gateway transports action calls and safety acknowledgements; execution remains
 client-side.
+
+## Native Gemini MCP execution
+
+Remote MCP execution is registry-backed and fail closed. Requests carry only server IDs; the gateway resolves URLs and bearer credentials after authentication, requires an explicit per-server provider-execution opt-in and connector grant, and accepts Streamable HTTP only. Resolved requests bypass response caches and retain provider token accounting through native count and inference paths.

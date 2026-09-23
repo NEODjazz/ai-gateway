@@ -95,6 +95,30 @@ func TestGenerateRequestMapsGoogleSearchTool(t *testing.T) {
 	}
 }
 
+func TestGenerateRequestMapsMCPRegistryIDs(t *testing.T) {
+	var native generateRequest
+	if err := decodeMessagesValue(json.RawMessage(`{"contents":[{"parts":[{"text":"forecast"}]}],"tools":[{"mcpServers":[{"name":"weather"},{"name":"finance.prod"}]}]}`), &native); err != nil {
+		t.Fatal(err)
+	}
+	chat, err := native.chat("model", false)
+	if err != nil || len(chat.GeminiMCPServerIDs) != 2 || chat.GeminiMCPServerIDs[0] != "weather" || chat.NativeInputTokens == 0 {
+		t.Fatalf("chat=%+v err=%v", chat, err)
+	}
+	for _, raw := range []string{
+		`{"contents":[{"parts":[{"text":"x"}]}],"tools":[{"mcpServers":[]}]}`,
+		`{"contents":[{"parts":[{"text":"x"}]}],"tools":[{"mcpServers":[{"name":"weather"},{"name":"weather"}]}]}`,
+		`{"contents":[{"parts":[{"text":"x"}]}],"tools":[{"mcpServers":[{"name":"bad/id"}]}]}`,
+		`{"contents":[{"parts":[{"text":"x"}]}],"tools":[{"mcpServers":[{"name":"weather"}],"googleSearch":{}}]}`,
+	} {
+		var invalid generateRequest
+		if err := decodeMessagesValue(json.RawMessage(raw), &invalid); err == nil {
+			if _, err := invalid.chat("model", false); err == nil {
+				t.Fatalf("invalid MCP selection accepted: %s", raw)
+			}
+		}
+	}
+}
+
 func TestGenerateRequestMapsGoogleSearchTimeRange(t *testing.T) {
 	var native generateRequest
 	if err := decodeMessagesValue(json.RawMessage(`{"contents":[{"parts":[{"text":"news"}]}],"tools":[{"googleSearch":{"timeRangeFilter":{"startTime":"2026-01-01T02:00:00+02:00","endTime":"2026-02-01T00:00:00Z"}}}]}`), &native); err != nil {

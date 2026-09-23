@@ -1285,6 +1285,12 @@ policy. Tool configuration enters token reserve and native token counting, while
 and semantic response caches are bypassed. Function-call arguments, including provider
 safety decisions, remain in the native GenerateContent continuation contract.
 
+### Native Gemini MCP servers
+
+Native GenerateContent requests may select up to eight configured MCP servers with `tools[].mcpServers[].name`. The name is a gateway registry ID; client-supplied URLs and headers are rejected. Resolution happens after authentication, and every server must be enabled, use Streamable HTTP, explicitly allow native provider execution, and pass the effective connector ACL.
+
+The registry opt-in controls whether the configured HTTPS URL and encrypted bearer credential may be sent to the selected model provider. These requests require the `gemini_mcp` deployment capability, bypass exact and semantic response caches, and preserve the resolved server configuration for native token counting. Provider-reported prompt and tool-input tokens enter normal billing; the provider API does not expose a separate MCP-call counter, so the gateway does not synthesize one.
+
 ### Native GenerateContent token counting
 
 POST `/v1beta/models/{model}:countTokens` accepts either `contents` or

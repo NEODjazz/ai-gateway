@@ -486,6 +486,19 @@ func TestGeminiComputerUseDisablesResponseCaches(t *testing.T) {
 	}
 }
 
+func TestGeminiMCPDisablesResponseCaches(t *testing.T) {
+	request := modules.RequestContext{CredentialID: "key", Request: openai.ChatCompletionRequest{Model: "test", Messages: []openai.Message{{Role: "user", Content: "forecast"}}, GeminiMCPServerIDs: []string{"weather"}}}
+	if providerCacheKey("chat", request) != "" {
+		t.Fatal("exact cache allowed MCP")
+	}
+	if _, _, ok := semanticRequest(request, Endpoint{Name: "test"}); ok {
+		t.Fatal("semantic cache allowed MCP")
+	}
+	if got := strings.Join(requiredChatCapabilities(request.Request, false), ","); got != "chat,gemini_mcp" {
+		t.Fatalf("MCP routing requirements=%s", got)
+	}
+}
+
 func TestGeminiCodeExecutionDisablesResponseCaches(t *testing.T) {
 	request := modules.RequestContext{CredentialID: "key", Request: openai.ChatCompletionRequest{Model: "test", Messages: []openai.Message{{Role: "user", Content: "calculate"}}, GeminiCodeExecution: true}}
 	if providerCacheKey("chat", request) != "" {

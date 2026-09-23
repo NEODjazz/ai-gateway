@@ -70,6 +70,7 @@ func (Gemini) SupportsURLContext() bool        { return true }
 func (Gemini) SupportsSearchTimeRange() bool   { return true }
 func (Gemini) SupportsGeminiFileSearch() bool  { return true }
 func (Gemini) SupportsGeminiComputerUse() bool { return true }
+func (Gemini) SupportsGeminiMCP() bool         { return true }
 func (Gemini) SupportsGoogleMaps() bool        { return true }
 func (Gemini) SupportsAudioInput() bool        { return true }
 func (Gemini) SupportsFileInput() bool         { return true }
@@ -128,6 +129,7 @@ type geminiTool struct {
 	URLContext    *struct{}                       `json:"urlContext,omitempty"`
 	FileSearch    *openai.GeminiFileSearchConfig  `json:"fileSearch,omitempty"`
 	ComputerUse   *openai.GeminiComputerUseConfig `json:"computerUse,omitempty"`
+	MCPServers    []openai.GeminiMCPServer        `json:"mcpServers,omitempty"`
 }
 type geminiGeneration struct {
 	MaxOutputTokens    *int                            `json:"maxOutputTokens,omitempty"`
@@ -278,6 +280,21 @@ func geminiChatRequest(request openai.ChatCompletionRequest) (geminiRequest, err
 	}
 	if request.GeminiComputerUse != nil && !openai.ValidGeminiComputerUseConfig(request.GeminiComputerUse) {
 		return result, geminiInvalid("computer_use")
+	}
+	if len(request.GeminiMCPServerIDs) > 0 && (len(request.GeminiMCPServers) != len(request.GeminiMCPServerIDs) || !openai.ValidGeminiMCPServerIDs(request.GeminiMCPServerIDs)) {
+		return result, geminiInvalid("mcp_servers")
+	}
+	for index, server := range request.GeminiMCPServers {
+		transport := server.StreamableHTTPTransport
+		parsed, err := url.Parse(transport.URL)
+		if index >= len(request.GeminiMCPServerIDs) || server.Name != request.GeminiMCPServerIDs[index] || err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || transport.Timeout != "30s" || transport.SSEReadTimeout != "60s" || !transport.TerminateOnClose || len(transport.Headers) > 1 {
+			return result, geminiInvalid("mcp_servers")
+		}
+		for name, value := range transport.Headers {
+			if name != "Authorization" || !strings.HasPrefix(value, "Bearer ") || len(value) <= len("Bearer ") || len(value) > 32775 {
+				return result, geminiInvalid("mcp_servers")
+			}
+		}
 	}
 	if err := openai.ValidateChatGeminiPartMediaResolutions(request); err != nil {
 		return result, geminiInvalid("messages.content.media_resolution")
@@ -592,6 +609,14 @@ func geminiChatRequest(request openai.ChatCompletionRequest) (geminiRequest, err
 		config.ExcludedPredefinedFunctions = append([]string(nil), request.GeminiComputerUse.ExcludedPredefinedFunctions...)
 		config.DisabledSafetyPolicies = append([]string(nil), request.GeminiComputerUse.DisabledSafetyPolicies...)
 		result.Tools = append(result.Tools, geminiTool{ComputerUse: &config})
+	}
+	if len(request.GeminiMCPServers) > 0 {
+		servers := make([]openai.GeminiMCPServer, len(request.GeminiMCPServers))
+		for index := range request.GeminiMCPServers {
+			servers[index] = request.GeminiMCPServers[index]
+			servers[index].StreamableHTTPTransport.Headers = cloneStringMap(request.GeminiMCPServers[index].StreamableHTTPTransport.Headers)
+		}
+		result.Tools = append(result.Tools, geminiTool{MCPServers: servers})
 	}
 	if request.ToolChoice != nil {
 		if len(request.Tools) == 0 {
@@ -1146,6 +1171,17 @@ func validGeminiGroundingURL(value string, httpsOnly bool) bool {
 	parsed, err := url.Parse(value)
 	validScheme := parsed.Scheme == "https" || !httpsOnly && parsed.Scheme == "http"
 	return err == nil && validScheme && parsed.Host != "" && parsed.User == nil && len(value) <= 8192
+}
+
+func cloneStringMap(values map[string]string) map[string]string {
+	if len(values) == 0 {
+		return nil
+	}
+	result := make(map[string]string, len(values))
+	for key, value := range values {
+		result[key] = value
+	}
+	return result
 }
 
 func validateGeminiReasoning(blocks []openai.ReasoningBlock) error {

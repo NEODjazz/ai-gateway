@@ -395,6 +395,11 @@ func (h Handler) serveChatAdapted(w http.ResponseWriter, r *http.Request, reques
 		return
 	}
 	request = reqCtx.Request
+	if err := h.resolveGeminiMCPServers(&reqCtx); err != nil {
+		writeGeminiMCPError(w, err)
+		return
+	}
+	request = reqCtx.Request
 	if err := openai.ValidateLegacyFunctionRequest(request); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
@@ -412,6 +417,7 @@ func (h Handler) serveChatAdapted(w http.ResponseWriter, r *http.Request, reques
 	}
 	toolIdentifiers = append(toolIdentifiers, openai.GeminiFileSearchToolIdentifiers(request.GeminiFileSearch)...)
 	toolIdentifiers = append(toolIdentifiers, openai.GeminiComputerUseToolIdentifiers(request.GeminiComputerUse)...)
+	toolIdentifiers = append(toolIdentifiers, request.GeminiMCPConnectorIDs...)
 	if request.AnthropicCodeExecution {
 		toolIdentifiers = append(toolIdentifiers, "code_execution")
 	}

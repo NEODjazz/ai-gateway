@@ -120,6 +120,11 @@ func (h Handler) countContextTokens(w http.ResponseWriter, r *http.Request, requ
 		return provider.TokenCountResult{}, false
 	}
 	request = req.Request
+	if err := h.resolveGeminiMCPServers(&req); err != nil {
+		writeGeminiMCPError(w, err)
+		return provider.TokenCountResult{}, false
+	}
+	request = req.Request
 	tools, valid := chatToolIdentifiers(request.Tools, nil)
 	tools = append(tools, skillExecutionIdentifiers(request.AnthropicSkills)...)
 	if request.GeminiCodeExecution {
@@ -133,6 +138,7 @@ func (h Handler) countContextTokens(w http.ResponseWriter, r *http.Request, requ
 	}
 	tools = append(tools, openai.GeminiFileSearchToolIdentifiers(request.GeminiFileSearch)...)
 	tools = append(tools, openai.GeminiComputerUseToolIdentifiers(request.GeminiComputerUse)...)
+	tools = append(tools, request.GeminiMCPConnectorIDs...)
 	if request.AnthropicCodeExecution {
 		tools = append(tools, "code_execution")
 	}

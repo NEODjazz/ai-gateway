@@ -43,6 +43,12 @@ type ChatCompletionRequest struct {
 	GeminiFileSearch *GeminiFileSearchConfig `json:"-"`
 	// GeminiComputerUse contains validated client-executed computer controls.
 	GeminiComputerUse *GeminiComputerUseConfig `json:"-"`
+	// GeminiMCPServerIDs are authenticated gateway registry references.
+	GeminiMCPServerIDs []string `json:"-"`
+	// GeminiMCPServers are resolved only after connector authorization.
+	GeminiMCPServers []GeminiMCPServer `json:"-"`
+	// GeminiMCPConnectorIDs are canonical authorized registry identities.
+	GeminiMCPConnectorIDs []string `json:"-"`
 	// AnthropicSkills contains validated native Messages skill references.
 	AnthropicSkills      []AnthropicSkillReference `json:"-"`
 	AnthropicContainerID string                    `json:"-"`

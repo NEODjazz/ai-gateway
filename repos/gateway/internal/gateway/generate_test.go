@@ -322,6 +322,36 @@ func TestGenerateContentComputerUseEnforcesSafetyACL(t *testing.T) {
 	}
 }
 
+func TestGenerateContentMCPRequiresRegistryOptInAndConnectorGrant(t *testing.T) {
+	const connector = "mcp:weather@https://mcp.example.test/v1"
+	registry := NewMCPRegistry()
+	server := MCPServer{Label: "Weather", ServerURL: "https://mcp.example.test/v1", Transport: "streamable-http", Tools: []string{connector}, Enabled: true, AllowProviderExecution: true}
+	if _, err := registry.PutServer("weather", server, "server-secret"); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"contents":[{"parts":[{"text":"forecast"}]}],"tools":[{"mcpServers":[{"name":"weather"}]}]}`
+	upstream := &fallbackChatProvider{}
+	denied := Routes(NewHandler(modules.NewPipeline([]modules.Module{messagesAuth{accessPolicyModule{models: []string{"*"}, tools: []string{"safe"}}}}), upstream).WithMCPRegistry(registry))
+	response := generateCall(denied, "/v1beta/models/m:generateContent", body, "gateway-test-key")
+	if response.Code != http.StatusForbidden || upstream.calls != 0 || !strings.Contains(response.Body.String(), connector) {
+		t.Fatalf("connector ACL bypassed: status=%d calls=%d body=%s", response.Code, upstream.calls, response.Body.String())
+	}
+	allowed := Routes(NewHandler(modules.NewPipeline([]modules.Module{messagesAuth{accessPolicyModule{models: []string{"*"}, tools: []string{connector}}}}), upstream).WithMCPRegistry(registry))
+	response = generateCall(allowed, "/v1beta/models/m:generateContent", body, "gateway-test-key")
+	transport := upstream.request.Request.GeminiMCPServers[0].StreamableHTTPTransport
+	if response.Code == http.StatusForbidden || upstream.calls != 1 || transport.Headers["Authorization"] != "Bearer server-secret" || transport.Timeout != "30s" {
+		t.Fatalf("authorized MCP rejected: status=%d calls=%d request=%+v body=%s", response.Code, upstream.calls, upstream.request.Request, response.Body.String())
+	}
+	server.AllowProviderExecution = false
+	if _, err := registry.PutServer("weather", server); err != nil {
+		t.Fatal(err)
+	}
+	response = generateCall(allowed, "/v1beta/models/m:generateContent", body, "gateway-test-key")
+	if response.Code != http.StatusBadRequest || upstream.calls != 1 {
+		t.Fatalf("opt-in bypassed: status=%d calls=%d body=%s", response.Code, upstream.calls, response.Body.String())
+	}
+}
+
 func TestGenerateContentGeminiCodeExecutionStreamAndACL(t *testing.T) {
 	denied := &fallbackChatProvider{}
 	deniedHandler := Routes(NewHandler(modules.NewPipeline([]modules.Module{messagesAuth{accessPolicyModule{models: []string{"*"}, tools: []string{"safe"}}}}), denied))

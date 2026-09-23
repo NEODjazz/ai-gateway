@@ -42,6 +42,9 @@ type TokenCountRequest struct {
 	GeminiMediaResolution      string
 	GeminiFileSearch           *openai.GeminiFileSearchConfig
 	GeminiComputerUse          *openai.GeminiComputerUseConfig
+	GeminiMCPServerIDs         []string
+	GeminiMCPServers           []openai.GeminiMCPServer
+	GeminiMCPConnectorIDs      []string
 }
 type TokenCountResult struct {
 	InputTokens         int

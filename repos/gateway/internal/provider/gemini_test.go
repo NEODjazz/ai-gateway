@@ -201,6 +201,25 @@ func TestGeminiForwardsComputerUse(t *testing.T) {
 	}
 }
 
+func TestGeminiForwardsValidatedMCPServers(t *testing.T) {
+	transport := openai.GeminiStreamableHTTPTransport{URL: "https://mcp.example.test/v1", Headers: map[string]string{"Authorization": "Bearer secret"}, Timeout: "30s", SSEReadTimeout: "60s", TerminateOnClose: true}
+	request := openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "forecast"}}, GeminiMCPServerIDs: []string{"weather"}, GeminiMCPServers: []openai.GeminiMCPServer{{Name: "weather", StreamableHTTPTransport: transport}}}
+	native, err := geminiChatRequest(request)
+	if err != nil || len(native.Tools) != 1 || len(native.Tools[0].MCPServers) != 1 || native.Tools[0].MCPServers[0].StreamableHTTPTransport.URL != transport.URL {
+		t.Fatalf("native=%+v err=%v", native, err)
+	}
+	native.Tools[0].MCPServers[0].StreamableHTTPTransport.Headers["Authorization"] = "changed"
+	if request.GeminiMCPServers[0].StreamableHTTPTransport.Headers["Authorization"] != "Bearer secret" {
+		t.Fatal("provider request mutated resolved credential")
+	}
+	invalid := request
+	invalid.GeminiMCPServers = append([]openai.GeminiMCPServer(nil), request.GeminiMCPServers...)
+	invalid.GeminiMCPServers[0].StreamableHTTPTransport.URL = "http://mcp.example.test/v1"
+	if _, err := geminiChatRequest(invalid); err == nil {
+		t.Fatal("unsafe MCP transport accepted")
+	}
+}
+
 func TestGeminiRejectsInvalidFileSearchGrounding(t *testing.T) {
 	for _, raw := range []string{
 		`{"groundingChunks":[{"retrievedContext":{"fileSearchStore":"wrong"}}]}`,

@@ -232,7 +232,7 @@ func semanticRequest(req modules.RequestContext, endpoint Endpoint) (string, str
 	if request.GeminiCachedContent != "" {
 		return "", "", false
 	}
-	if request.WebSearchOptions != nil || request.WebFetchOptions != nil || request.GeminiCodeExecution || request.GeminiURLContext || request.GeminiGoogleMaps || request.GeminiFileSearch != nil || request.GeminiComputerUse != nil || request.AnthropicCodeExecution || request.AnthropicToolSearch != "" || len(request.AnthropicClientTools) > 0 || len(request.AnthropicClientToolsets) > 0 || request.AnthropicThinking != nil || request.AnthropicContainerID != "" || len(request.AnthropicSkills) > 0 {
+	if request.WebSearchOptions != nil || request.WebFetchOptions != nil || request.GeminiCodeExecution || request.GeminiURLContext || request.GeminiGoogleMaps || request.GeminiFileSearch != nil || request.GeminiComputerUse != nil || len(request.GeminiMCPServerIDs) > 0 || request.AnthropicCodeExecution || request.AnthropicToolSearch != "" || len(request.AnthropicClientTools) > 0 || len(request.AnthropicClientToolsets) > 0 || request.AnthropicThinking != nil || request.AnthropicContainerID != "" || len(request.AnthropicSkills) > 0 {
 		return "", "", false
 	}
 	if request.AnthropicInferenceGeo != "" {

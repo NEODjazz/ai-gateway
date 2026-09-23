@@ -164,6 +164,30 @@ func TestTokenCountPreservesGeminiComputerUse(t *testing.T) {
 	}
 }
 
+func TestTokenCountPreservesGeminiMCPServers(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Request struct {
+				Tools []geminiTool `json:"tools"`
+			} `json:"generateContentRequest"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if len(body.Request.Tools) != 1 || len(body.Request.Tools[0].MCPServers) != 1 || body.Request.Tools[0].MCPServers[0].Name != "weather" {
+			t.Errorf("MCP server lost: %+v", body.Request.Tools)
+		}
+		_, _ = w.Write([]byte(`{"totalTokens":72}`))
+	}))
+	defer server.Close()
+	router := New(Config{Endpoints: []config.ProviderEndpointConfig{{Name: "gemini", Type: "gemini", BaseURL: server.URL, Models: []string{"model"}, Capabilities: []string{"chat", "gemini_mcp"}}}}).(*Router)
+	transport := openai.GeminiStreamableHTTPTransport{URL: "https://mcp.example.test/v1", Timeout: "30s", SSEReadTimeout: "60s", TerminateOnClose: true}
+	result, err := router.CountTokens(t.Context(), modules.RequestContext{Request: openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "forecast"}}, GeminiMCPServerIDs: []string{"weather"}, GeminiMCPServers: []openai.GeminiMCPServer{{Name: "weather", StreamableHTTPTransport: transport}}}})
+	if err != nil || result.InputTokens != 72 {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+}
+
 type countPrePolicy struct{ stopAdmissionModule }
 
 func (*countPrePolicy) Name() string { return "dlp" }

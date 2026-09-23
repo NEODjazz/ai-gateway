@@ -28,6 +28,9 @@ type generateRequest struct {
 		URLContext    *struct{}                       `json:"urlContext,omitempty"`
 		FileSearch    *openai.GeminiFileSearchConfig  `json:"fileSearch,omitempty"`
 		ComputerUse   *openai.GeminiComputerUseConfig `json:"computerUse,omitempty"`
+		MCPServers    []struct {
+			Name string `json:"name"`
+		} `json:"mcpServers,omitempty"`
 	} `json:"tools,omitempty"`
 	ToolConfig *struct {
 		FunctionCalling *struct {
@@ -448,7 +451,7 @@ func (r generateRequest) chatWithContentRequirement(model string, stream, requir
 	}
 	for _, tool := range r.Tools {
 		members := 0
-		for _, present := range []bool{len(tool.Functions) > 0, tool.GoogleSearch != nil, tool.GoogleMaps != nil, tool.CodeExecution != nil, tool.URLContext != nil, tool.FileSearch != nil, tool.ComputerUse != nil} {
+		for _, present := range []bool{len(tool.Functions) > 0, tool.GoogleSearch != nil, tool.GoogleMaps != nil, tool.CodeExecution != nil, tool.URLContext != nil, tool.FileSearch != nil, tool.ComputerUse != nil, len(tool.MCPServers) > 0} {
 			if present {
 				members++
 			}
@@ -517,6 +520,18 @@ func (r generateRequest) chatWithContentRequirement(model string, stream, requir
 			config.ExcludedPredefinedFunctions = append([]string(nil), tool.ComputerUse.ExcludedPredefinedFunctions...)
 			config.DisabledSafetyPolicies = append([]string(nil), tool.ComputerUse.DisabledSafetyPolicies...)
 			result.GeminiComputerUse = &config
+			result.NativeInputTokens = openai.ReserveTokens(result.NativeInputTokens, openai.EstimateContextTokens(tool))
+			continue
+		}
+		if len(tool.MCPServers) > 0 {
+			ids := make([]string, len(tool.MCPServers))
+			for index := range tool.MCPServers {
+				ids[index] = tool.MCPServers[index].Name
+			}
+			if len(result.GeminiMCPServerIDs) > 0 || !openai.ValidGeminiMCPServerIDs(ids) {
+				return fail("mcpServers")
+			}
+			result.GeminiMCPServerIDs = ids
 			result.NativeInputTokens = openai.ReserveTokens(result.NativeInputTokens, openai.EstimateContextTokens(tool))
 			continue
 		}

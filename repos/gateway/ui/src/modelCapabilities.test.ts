@@ -18,6 +18,7 @@ describe("modelCapabilityOptions", () => {
       "gemini_search_time_range",
       "gemini_file_search",
       "gemini_computer_use",
+      "gemini_mcp",
       "url_context",
       "google_maps",
       "background_responses",
