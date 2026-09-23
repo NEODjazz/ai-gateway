@@ -97,6 +97,50 @@ func TestResponsesRejectsUnsupportedOutputContentTypeBeforeDelivery(t *testing.T
 	}
 }
 
+func TestResponsesRejectsConflictingOutputContentFieldsBeforeDelivery(t *testing.T) {
+	invalid := []string{
+		`{"type":"message","content":[{"type":"output_text","text":"answer","refusal":"no"}]}`,
+		`{"type":"message","content":[{"type":"refusal","text":"answer","refusal":"no"}]}`,
+		`{"type":"message","content":[{"type":"refusal","refusal":"no","annotations":[null]}]}`,
+		`{"type":"message","content":[{"type":"refusal","refusal":"no","logprobs":[{"token":"n","logprob":-1}]}]}`,
+		`{"type":"reasoning","summary":[{"type":"summary_text","text":"summary","refusal":"no"}]}`,
+		`{"type":"reasoning","summary":[{"type":"summary_text","text":"summary","annotations":[null]}]}`,
+		`{"type":"reasoning","summary":[{"type":"summary_text","text":"summary","logprobs":[{"token":"s","logprob":-1}]}]}`,
+	}
+	for _, output := range invalid {
+		document := `{"id":"r","object":"response","model":"m","status":"completed","output":[` + output + `]}`
+		if _, err := decodeResponseJSON(strings.NewReader(document)); err == nil {
+			t.Fatalf("conflicting JSON output content accepted: %s", output)
+		}
+		callbacks := 0
+		wire := "data: {\"type\":\"response.completed\",\"response\":" + document + "}\n\n"
+		if _, err := streamResponseData(strings.NewReader(wire), "m", func(string, string) error { callbacks++; return nil }); err == nil || callbacks != 0 {
+			t.Fatalf("conflicting SSE output content delivered: err=%v callbacks=%d output=%s", err, callbacks, output)
+		}
+	}
+
+	valid := `{"id":"r","output":[{"type":"message","content":[{"type":"output_text","text":"ok","annotations":[null],"logprobs":[{"token":"o","logprob":-1}]},{"type":"refusal","refusal":"no"}]},{"type":"reasoning","summary":[{"type":"summary_text","text":"summary"}]}]}`
+	if _, err := decodeResponseJSON(strings.NewReader(valid)); err != nil {
+		t.Fatalf("valid output content rejected: %v", err)
+	}
+}
+
+func TestResponseContentPartRejectsConflictingFieldsBeforeDelivery(t *testing.T) {
+	parts := []string{
+		`{"type":"output_text","text":"answer","refusal":"no"}`,
+		`{"type":"refusal","text":"answer","refusal":"no"}`,
+		`{"type":"refusal","refusal":"no","annotations":[null]}`,
+		`{"type":"refusal","refusal":"no","logprobs":[{"token":"n","logprob":-1}]}`,
+	}
+	for _, part := range parts {
+		callbacks := 0
+		wire := `data: {"type":"response.content_part.done","part":` + part + "}\n\n" + responseTestTerminal
+		if _, err := streamResponseData(strings.NewReader(wire), "m", func(string, string) error { callbacks++; return nil }); err == nil || callbacks != 0 {
+			t.Fatalf("conflicting content part delivered: err=%v callbacks=%d part=%s", err, callbacks, part)
+		}
+	}
+}
+
 func TestResponsesValidateFunctionAndCustomToolCalls(t *testing.T) {
 	valid := []string{
 		`{"type":"function_call","call_id":"call_1","name":"lookup","arguments":"{\"city\":\"Paris\"}"}`,

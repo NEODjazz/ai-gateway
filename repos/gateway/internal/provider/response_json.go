@@ -639,6 +639,20 @@ func validResponseOutputItemStatus(itemType, status string) bool {
 }
 
 func validateResponseOutputContent(part openai.ResponseOutputContent) error {
+	switch part.Type {
+	case "output_text":
+		if part.Refusal != "" {
+			return errors.New("provider returned refusal data in response output text")
+		}
+	case "refusal":
+		if part.Text != "" || len(part.Annotations) != 0 || len(part.Logprobs) != 0 {
+			return errors.New("provider returned text data in response refusal")
+		}
+	case "summary_text":
+		if part.Refusal != "" || len(part.Annotations) != 0 || len(part.Logprobs) != 0 {
+			return errors.New("provider returned unsupported response summary data")
+		}
+	}
 	if len(part.Annotations) > maxResponseStreamContentParts {
 		return errors.New("provider returned too many response output annotations")
 	}
