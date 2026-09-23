@@ -2198,3 +2198,19 @@ Gateway Helm revision 587 completed successfully. Pod
 `ai-gateway-gateway-6fc784dffc-f85d8` became Ready with zero restarts. Live
 liveness and readiness returned 204, OpenAPI 0.1.469 was served, and the live
 Cerebras capability profile reported `clear_thinking` only for `zai-glm-4.7`.
+
+## Chat reasoning policy coverage
+
+Source `9a84d79` includes unsigned Chat `reasoning_content` in input and output
+DLP projections, masks the field before provider execution and restores its
+request-local placeholders in successful responses. Signed reasoning blocks
+remain immutable so their signatures stay valid, while their readable thinking
+text remains covered by DLP. Regression tests cover input projection, output
+projection, masking, restoration and preservation of signed blocks. Gateway
+tests, vet, build and the full race suite passed.
+
+Rancher Desktop built `ai-gateway-gateway:reasoning-policy-9a84d799` with image
+ID `sha256:fe5cb57869a63f89fe97c3142c5003662e2720ef9e75dc98fe6832c6ca35f3ea`.
+Gateway Helm revision 588 completed successfully. Pod
+`ai-gateway-gateway-86995544c4-nlsb5` became Ready with zero restarts. Live
+liveness and readiness returned 204 and OpenAPI 0.1.470 was served.
