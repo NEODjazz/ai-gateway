@@ -2362,3 +2362,18 @@ ID `sha256:c3428edd560ffffdb8ac85f15fc60cac67f5007049996a2588b16dce926d2159`.
 Gateway Helm revision 597 completed successfully. Pod
 `ai-gateway-gateway-6878b7c47d-8rpqm` became Ready with zero restarts, and
 direct service liveness and readiness both returned 204.
+
+## DeepSeek Responses custom patch tool
+
+Source `dc84f63f` enables the `custom_tools` deployment capability for native
+DeepSeek Responses and forwards only the documented `apply_patch` custom tool.
+Other custom names and unsupported custom-tool fields fail before provider
+execution. Responses input validates the patch call name and call ID pairing.
+Wire, rejection and capability regressions passed with the full Go race suite,
+vet and build. No live provider credential was used for this contract check.
+
+Rancher Desktop built `ai-gateway-gateway:deepseek-patch-dc84f63f` with image
+ID `sha256:3283f77ca1fc8e85ce458bc6293038499715627f02216d145a762e74f5485e73`.
+Gateway Helm revision 598 completed successfully. Pod
+`ai-gateway-gateway-5845974d9-ljsfr` became Ready with zero restarts, and
+direct service liveness and readiness both returned 204.
