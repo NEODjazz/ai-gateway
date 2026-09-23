@@ -184,6 +184,9 @@ func (d DeepSeek) ValidateResponseParameters(request openai.ResponseRequest) err
 			}
 		}
 	}
+	if err := validateDeepSeekResponseSampling(request); err != nil {
+		return err
+	}
 	return rejectParameters("deepseek",
 		parameterCheck{"context_management", len(request.ContextManagement) > 0},
 		parameterCheck{"moderation", request.Moderation != nil},
@@ -197,6 +200,24 @@ func (d DeepSeek) ValidateResponseParameters(request openai.ResponseRequest) err
 		parameterCheck{"frequency_penalty", request.FrequencyPenalty != nil}, parameterCheck{"presence_penalty", request.PresencePenalty != nil},
 		parameterCheck{"max_tool_calls", request.MaxToolCalls != nil},
 	)
+}
+
+func validateDeepSeekResponseSampling(request openai.ResponseRequest) error {
+	invalid := func(parameter, message string) error {
+		return &Error{Class: FailureClientRequest, Provider: "deepseek", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: parameter, Err: errors.New(message)}
+	}
+	thinkingEnabled := request.Reasoning == nil || request.Reasoning.Effort == nil || *request.Reasoning.Effort != "none"
+	if thinkingEnabled {
+		if request.Temperature != nil {
+			return invalid("temperature", "temperature has no effect in DeepSeek Responses thinking mode")
+		}
+		if request.TopP != nil && *request.TopP < 0.95 {
+			return invalid("top_p", "top_p must be between 0.95 and 1 in DeepSeek Responses thinking mode")
+		}
+	} else if request.TopP != nil {
+		return invalid("top_p", "top_p has no effect when DeepSeek Responses thinking mode is disabled")
+	}
+	return nil
 }
 
 func validateDeepSeekResponseInput(input any, model string) error {

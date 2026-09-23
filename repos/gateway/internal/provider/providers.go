@@ -1182,7 +1182,7 @@ func managedProviderResponseParameterPolicy(client Client, supportsResponses boo
 	for _, probe := range managedResponseOptionProbes() {
 		request := baseline
 		probe.apply(&request)
-		if validateResponseAdapter(client, request) == nil {
+		if managedResponseOptionSupported(client, probe.name, request) {
 			policy.SupportedOptions = append(policy.SupportedOptions, probe.name)
 		}
 	}
@@ -1193,6 +1193,25 @@ func managedProviderResponseParameterPolicy(client Client, supportsResponses boo
 		policy.SupportedOptions = append(policy.SupportedOptions, "service_tier")
 	}
 	return policy
+}
+
+func managedResponseOptionSupported(client Client, name string, request openai.ResponseRequest) bool {
+	if validateResponseAdapter(client, request) == nil {
+		return true
+	}
+	var effort string
+	switch name {
+	case "temperature":
+		effort = "none"
+	case "top_p":
+		effort = "high"
+		value := 0.97
+		request.TopP = &value
+	default:
+		return false
+	}
+	request.Reasoning = &openai.ResponseReasoning{Effort: &effort}
+	return validateResponseAdapter(client, request) == nil
 }
 
 type managedResponseOptionProbe struct {

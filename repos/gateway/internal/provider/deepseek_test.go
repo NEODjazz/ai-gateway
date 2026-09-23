@@ -147,6 +147,40 @@ func TestDeepSeekResponsesReasoningEffortWire(t *testing.T) {
 	}
 }
 
+func TestDeepSeekResponsesSamplingMatchesThinkingMode(t *testing.T) {
+	client := NewDeepSeek("https://example.test", "key", false)
+	temperature, lowTopP, validTopP := 0.5, 0.5, 0.97
+	none, high := "none", "high"
+	for _, test := range []struct {
+		name    string
+		request openai.ResponseRequest
+		param   string
+	}{
+		{name: "default thinking ignores temperature", request: openai.ResponseRequest{Temperature: &temperature}, param: "temperature"},
+		{name: "explicit thinking ignores temperature", request: openai.ResponseRequest{Reasoning: &openai.ResponseReasoning{Effort: &high}, Temperature: &temperature}, param: "temperature"},
+		{name: "default thinking clamps top p", request: openai.ResponseRequest{TopP: &lowTopP}, param: "top_p"},
+		{name: "non thinking ignores top p", request: openai.ResponseRequest{Reasoning: &openai.ResponseReasoning{Effort: &none}, TopP: &validTopP}, param: "top_p"},
+		{name: "thinking accepts effective top p", request: openai.ResponseRequest{Reasoning: &openai.ResponseReasoning{Effort: &high}, TopP: &validTopP}},
+		{name: "non thinking accepts temperature", request: openai.ResponseRequest{Reasoning: &openai.ResponseReasoning{Effort: &none}, Temperature: &temperature}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			test.request.Model = "deepseek-flash"
+			test.request.Input = "hello"
+			err := client.ValidateResponseParameters(test.request)
+			if test.param == "" {
+				if err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+			var failure *Error
+			if !errors.As(err, &failure) || failure.Param != test.param {
+				t.Fatalf("param=%q err=%v", test.param, err)
+			}
+		})
+	}
+}
+
 func TestDeepSeekResponsesApplyPatchCustomToolWire(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
