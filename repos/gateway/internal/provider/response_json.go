@@ -69,6 +69,14 @@ func validateResponseControls(response openai.ResponseResponse) error {
 	if response.TopP != nil && (math.IsNaN(*response.TopP) || math.IsInf(*response.TopP, 0) || *response.TopP < 0 || *response.TopP > 1) {
 		return errors.New("provider returned invalid top_p")
 	}
+	if response.TopLogprobs != nil && (*response.TopLogprobs < 0 || *response.TopLogprobs > 20) {
+		return errors.New("provider returned invalid top_logprobs")
+	}
+	for _, penalty := range []*float64{response.FrequencyPenalty, response.PresencePenalty} {
+		if penalty != nil && (math.IsNaN(*penalty) || math.IsInf(*penalty, 0) || *penalty < -2 || *penalty > 2) {
+			return errors.New("provider returned invalid frequency or presence penalty")
+		}
+	}
 	if response.Truncation != nil && *response.Truncation != "auto" && *response.Truncation != "disabled" {
 		return errors.New("provider returned invalid truncation")
 	}

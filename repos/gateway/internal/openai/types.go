@@ -920,6 +920,9 @@ type ResponseResponse struct {
 	ParallelToolCalls   *bool                      `json:"parallel_tool_calls,omitempty"`
 	Temperature         *float64                   `json:"temperature,omitempty"`
 	TopP                *float64                   `json:"top_p,omitempty"`
+	TopLogprobs         *int                       `json:"top_logprobs,omitempty"`
+	FrequencyPenalty    *float64                   `json:"frequency_penalty,omitempty"`
+	PresencePenalty     *float64                   `json:"presence_penalty,omitempty"`
 	Truncation          *string                    `json:"truncation,omitempty"`
 	Citations           []string                   `json:"citations,omitempty"`
 	Conversation        *ResponseConversation      `json:"conversation,omitempty"`
