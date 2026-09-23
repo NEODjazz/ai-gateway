@@ -3439,13 +3439,14 @@ func requiredResponseCapabilities(request openai.ResponseRequest, stream bool) [
 	shellOutputs, _ := openai.InspectResponseShellCallOutputs(request.Input)
 	patchOutputs, _ := openai.InspectResponseApplyPatchCallOutputs(request.Input)
 	_, customHistory, _ := openai.InspectResponseCustomToolHistory(request.Input)
+	_, functionHistory, _ := openai.InspectResponseFunctionToolHistory(request.Input)
 	if request.Background {
 		required = append(required, "background_responses")
 	}
 	if stream {
 		required = append(required, "stream")
 	}
-	if len(request.Tools) > 0 || len(computerOutputs) > 0 || len(shellOutputs) > 0 || len(patchOutputs) > 0 || customHistory {
+	if len(request.Tools) > 0 || len(computerOutputs) > 0 || len(shellOutputs) > 0 || len(patchOutputs) > 0 || customHistory || functionHistory {
 		required = append(required, "tools")
 	}
 	computerRequired := len(computerOutputs) > 0

@@ -238,6 +238,45 @@ func TestResponsesUnattributedCustomOutputNeedsBroadGrantAndPreviousResponse(t *
 	}
 }
 
+func TestResponsesFunctionHistoryRequiresToolGrant(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		body   string
+		grants []string
+		status int
+	}{
+		{name: "allowed named history", body: `{"model":"test","input":[{"type":"function_call","call_id":"call_1","name":"safe_lookup","arguments":"{}"},{"type":"function_call_output","call_id":"call_1","output":"ok"}]}`, grants: []string{"safe_lookup"}, status: http.StatusOK},
+		{name: "denied named history", body: `{"model":"test","input":[{"type":"function_call","call_id":"call_1","name":"unsafe_lookup","arguments":"{}"}]}`, grants: []string{"safe_lookup"}, status: http.StatusForbidden},
+		{name: "unattributed output", body: `{"model":"test","input":[{"type":"function_call_output","call_id":"call_1","output":"ok"}]}`, grants: []string{"safe_lookup"}, status: http.StatusBadRequest},
+		{name: "stateful output with broad grant", body: `{"model":"test","previous_response_id":"resp_1","input":[{"type":"function_call_output","call_id":"call_1","output":"ok"}]}`, grants: []string{"*"}, status: http.StatusOK},
+		{name: "stateful output with scoped grant", body: `{"model":"test","previous_response_id":"resp_1","input":[{"type":"function_call_output","call_id":"call_1","output":"ok"}]}`, grants: []string{"safe_lookup"}, status: http.StatusForbidden},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			handler := NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}, tools: test.grants}}), &chatProvider{})
+			out := httptest.NewRecorder()
+			handler.Responses(out, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(test.body)))
+			if out.Code != test.status {
+				t.Fatalf("status=%d body=%s", out.Code, out.Body.String())
+			}
+		})
+	}
+}
+
+func TestResponsesVerifiedFunctionContinuationNamesAreInternal(t *testing.T) {
+	request := openai.ResponseRequest{
+		Model: "test", PreviousResponse: "resp_1", RunToolNames: []string{"safe_lookup"},
+		Input: []any{map[string]any{"type": "function_call_output", "call_id": "call_1", "output": "ok"}},
+	}
+	identifiers, valid := responseRequestToolIdentifiers(request)
+	if !valid || !reflect.DeepEqual(identifiers, []string{"safe_lookup"}) {
+		t.Fatalf("identifiers=%v valid=%t", identifiers, valid)
+	}
+	payload, err := json.Marshal(request)
+	if err != nil || strings.Contains(string(payload), "safe_lookup") {
+		t.Fatalf("internal tool name leaked into wire payload: %s err=%v", payload, err)
+	}
+}
+
 func TestResponsesImageGenerationACLUsesCanonicalToolName(t *testing.T) {
 	handler := NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}, tools: []string{"image_generation"}}}), &chatProvider{})
 	allowedResponse := httptest.NewRecorder()

@@ -729,7 +729,9 @@ func EmbeddingInputText(value any) string {
 
 type ResponseRequest struct {
 	// NativeInputTokens reserves provider-native context omitted from the public Responses wire shape.
-	NativeInputTokens    int                    `json:"-"`
+	NativeInputTokens int `json:"-"`
+	// RunToolNames attributes output-only function calls from a verified internal run snapshot.
+	RunToolNames         []string               `json:"-"`
 	Metadata             map[string]string      `json:"metadata,omitempty"`
 	ContextManagement    []ResponseContextEntry `json:"context_management,omitempty"`
 	Moderation           *ProviderModeration    `json:"moderation,omitempty"`

@@ -1925,6 +1925,11 @@ new tool definition is sent. Custom calls and outputs require a deployment with
 `custom_tools`. An output without an attributable call or declared custom tool
 needs `previous_response_id` and wildcard tool grants; otherwise it is rejected
 before execution. Scoped credentials can repeat the tool declaration.
+The same name authorization applies to `function_call` history, and function
+calls or outputs require the deployment's `tools` capability. Output-only
+function continuations follow the same previous-response and grant rule. Durable
+assistant runs attribute pending call IDs to function names from their verified
+run snapshot, so scoped grants remain valid without changing provider input.
 
 The output union also keeps branch-specific fields isolated. Only `message` items
 may contain `content` or an optional `assistant` role, and only `reasoning` items
