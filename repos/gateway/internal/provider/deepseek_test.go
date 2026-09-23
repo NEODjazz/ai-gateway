@@ -24,7 +24,7 @@ func TestDeepSeekChatMapsSupportedContract(t *testing.T) {
 		if body["model"] != "model" || body["max_tokens"] != float64(64) || body["max_completion_tokens"] != nil || body["user"] != nil || body["user_id"] != "tenant_1" || thinking["type"] != "disabled" {
 			t.Fatalf("request=%#v", body)
 		}
-		if body["logprobs"] != true || body["top_logprobs"] != float64(4) || len(body["stop"].([]any)) != 5 || len(body["tools"].([]any)) != 1 || body["response_format"] == nil {
+		if body["logprobs"] != true || body["top_logprobs"] != float64(4) || len(body["stop"].([]any)) != 5 || len(body["tools"].([]any)) != 1 || body["response_format"] == nil || body["reasoning_effort"] != nil {
 			t.Fatalf("request=%#v", body)
 		}
 		_, _ = fmt.Fprint(w, `{"id":"chat","object":"chat.completion","model":"model","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":2,"total_tokens":12,"prompt_cache_hit_tokens":7}}`)
@@ -40,6 +40,51 @@ func TestDeepSeekChatMapsSupportedContract(t *testing.T) {
 	})
 	if err != nil || response.Usage.PromptTokensDetails == nil || response.Usage.PromptTokensDetails.CachedTokens != 7 || openai.ContentText(response.Choices[0].Message.Content) != "ok" {
 		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
+func TestDeepSeekChatMapsThinkingControls(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		thinking, _ := body["thinking"].(map[string]any)
+		if thinking["type"] != "enabled" || body["reasoning_effort"] != "high" || body["top_p"] != 0.97 {
+			t.Fatalf("request=%#v", body)
+		}
+		_, _ = fmt.Fprint(w, `{"id":"chat","object":"chat.completion","model":"deepseek-flash","choices":[{"index":0,"message":{"role":"assistant","reasoning_content":"plan","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}`)
+	}))
+	defer server.Close()
+	topP := 0.97
+	response, err := NewDeepSeek(server.URL, "key", false).ChatCompletions(t.Context(), openai.ChatCompletionRequest{
+		Model: "deepseek-flash", Messages: []openai.Message{{Role: "user", Content: "hello"}}, TopP: &topP,
+		ChatGenerationOptions: openai.ChatGenerationOptions{Thinking: &openai.ChatThinkingOptions{Type: "enabled"}, ReasoningEffort: "high"},
+	})
+	if err != nil || response.Choices[0].Message.ReasoningContent != "plan" {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
+func TestDeepSeekRejectsInvalidThinkingCombinationsBeforeHTTP(t *testing.T) {
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
+	defer server.Close()
+	temperature, lowTopP := 0.5, 0.5
+	requests := []openai.ChatCompletionRequest{
+		{ChatGenerationOptions: openai.ChatGenerationOptions{Thinking: &openai.ChatThinkingOptions{Type: "disabled"}, ReasoningEffort: "high"}},
+		{ChatGenerationOptions: openai.ChatGenerationOptions{Thinking: &openai.ChatThinkingOptions{Type: "enabled"}, ReasoningEffort: "none"}},
+		{ChatGenerationOptions: openai.ChatGenerationOptions{Thinking: &openai.ChatThinkingOptions{Type: "enabled"}}, Temperature: &temperature},
+		{ChatGenerationOptions: openai.ChatGenerationOptions{ReasoningEffort: "high"}, TopP: &lowTopP},
+		{ChatGenerationOptions: openai.ChatGenerationOptions{Thinking: &openai.ChatThinkingOptions{Type: "enabled"}}, ToolChoice: "required"},
+		{ChatGenerationOptions: openai.ChatGenerationOptions{Thinking: &openai.ChatThinkingOptions{Type: "enabled"}}, ToolChoice: map[string]any{"type": "function", "function": map[string]any{"name": "lookup"}}},
+	}
+	for _, request := range requests {
+		request.Model = "deepseek-flash"
+		request.Messages = []openai.Message{{Role: "user", Content: "hello"}}
+		if _, err := NewDeepSeek(server.URL, "key", false).ChatCompletions(t.Context(), request); err == nil || called {
+			t.Fatalf("request=%+v err=%v called=%v", request, err, called)
+		}
 	}
 }
 

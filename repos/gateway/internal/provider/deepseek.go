@@ -64,7 +64,7 @@ func (d DeepSeek) ValidateChatParameters(request openai.ChatCompletionRequest) e
 	if err := rejectParameters("deepseek",
 		parameterCheck{"metadata", request.Metadata != nil}, parameterCheck{"store", request.Store != nil},
 		parameterCheck{"modalities", request.Modalities != nil}, parameterCheck{"audio", request.Audio != nil},
-		parameterCheck{"reasoning_effort", request.ReasoningEffort != ""}, parameterCheck{"safe_prompt", request.SafePrompt != nil},
+		parameterCheck{"safe_prompt", request.SafePrompt != nil},
 		parameterCheck{"n", request.N != nil && *request.N != 1}, parameterCheck{"safety_identifier", request.SafetyIdentifier != ""},
 		parameterCheck{"prompt_cache_key", request.PromptCacheKey != ""}, parameterCheck{"prompt_cache_options", request.PromptCacheOptions != nil},
 		parameterCheck{"prompt_cache_retention", request.PromptCacheRetention != ""}, parameterCheck{"prompt_mode", request.PromptMode != ""},
@@ -78,7 +78,47 @@ func (d DeepSeek) ValidateChatParameters(request openai.ChatCompletionRequest) e
 	); err != nil {
 		return err
 	}
+	if err := validateDeepSeekThinking(request); err != nil {
+		return err
+	}
 	return d.compatible.ValidateChatParameters(request)
+}
+
+func validateDeepSeekThinking(request openai.ChatCompletionRequest) error {
+	invalid := func(parameter, message string) error {
+		return &Error{Class: FailureClientRequest, Provider: "deepseek", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: parameter, Err: errors.New(message)}
+	}
+	switch request.ReasoningEffort {
+	case "", "none", "minimal", "low", "medium", "high", "xhigh", "max":
+	default:
+		return invalid("reasoning_effort", "reasoning_effort is not supported by DeepSeek")
+	}
+	thinkingEnabled := request.ReasoningEffort != "" && request.ReasoningEffort != "none"
+	if request.Thinking != nil {
+		thinkingEnabled = request.Thinking.Type == "enabled"
+		if !thinkingEnabled && request.ReasoningEffort != "" && request.ReasoningEffort != "none" {
+			return invalid("reasoning_effort", "enabled reasoning_effort conflicts with thinking.type=disabled")
+		}
+		if thinkingEnabled && request.ReasoningEffort == "none" {
+			return invalid("reasoning_effort", "reasoning_effort=none conflicts with thinking.type=enabled")
+		}
+	}
+	if !thinkingEnabled {
+		return nil
+	}
+	if request.Temperature != nil {
+		return invalid("temperature", "temperature is not supported in DeepSeek thinking mode")
+	}
+	if request.TopP != nil && (*request.TopP < 0.95 || *request.TopP > 1) {
+		return invalid("top_p", "top_p must be between 0.95 and 1 in DeepSeek thinking mode")
+	}
+	if request.ToolChoice != nil {
+		choice, ok := request.ToolChoice.(string)
+		if !ok || choice != "auto" && choice != "none" {
+			return invalid("tool_choice", "required and named tool choices are not supported in DeepSeek thinking mode")
+		}
+	}
+	return nil
 }
 
 func (d DeepSeek) ChatCompletions(ctx context.Context, request openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {

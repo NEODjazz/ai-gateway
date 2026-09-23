@@ -20,6 +20,7 @@ type ChatGenerationOptions struct {
 	Moderation           *ProviderModeration   `json:"moderation,omitempty"`
 	ClearThinking        *bool                 `json:"clear_thinking,omitempty"`
 	CitationOptions      string                `json:"citation_options,omitempty"`
+	Thinking             *ChatThinkingOptions  `json:"thinking,omitempty"`
 	IncludeReasoning     *bool                 `json:"include_reasoning,omitempty"`
 	ReasoningFormat      string                `json:"reasoning_format,omitempty"`
 	ReasoningEffort      string                `json:"reasoning_effort,omitempty"`
@@ -45,6 +46,10 @@ type ChatGenerationOptions struct {
 	TopA                 *float64              `json:"top_a,omitempty"`
 	RepetitionPenalty    *float64              `json:"repetition_penalty,omitempty"`
 	LogitBias            map[string]int        `json:"logit_bias,omitempty"`
+}
+
+type ChatThinkingOptions struct {
+	Type string `json:"type"`
 }
 
 type ChatWebSearchOptions struct {
@@ -160,6 +165,9 @@ func (o ChatGenerationOptions) Validate() string {
 	}
 	if o.CitationOptions != "" && o.CitationOptions != "enabled" && o.CitationOptions != "disabled" {
 		return "citation_options must be enabled or disabled"
+	}
+	if o.Thinking != nil && o.Thinking.Type != "enabled" && o.Thinking.Type != "disabled" {
+		return "thinking.type must be enabled or disabled"
 	}
 	switch o.ReasoningFormat {
 	case "", "hidden", "raw", "parsed":

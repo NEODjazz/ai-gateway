@@ -127,6 +127,22 @@ func TestOpenAPIGroqCitationOptionsAndCapabilityPolicy(t *testing.T) {
 	}
 }
 
+func TestOpenAPIDeepSeekThinkingAndCapabilityPolicy(t *testing.T) {
+	document := loadDocument(t)
+	chat := document.Components.Schemas["ChatCompletionRequest"].Value
+	if chat == nil || chat.Properties["thinking"] == nil {
+		t.Fatal("ChatCompletionRequest is missing thinking")
+	}
+	thinking := chat.Properties["thinking"].Value
+	if thinking == nil || thinking.Properties["type"] == nil || len(thinking.Properties["type"].Value.Enum) != 2 {
+		t.Fatalf("thinking schema=%+v", thinking)
+	}
+	policy := document.Components.Schemas["ProviderChatParameterPolicy"].Value
+	if policy == nil || policy.Properties["thinking"] == nil {
+		t.Fatal("ProviderChatParameterPolicy is missing thinking")
+	}
+}
+
 func TestOpenAPITopKBelongsToMessagesRequest(t *testing.T) {
 	document := loadDocument(t)
 	messages := document.Components.Schemas["MessagesRequest"].Value

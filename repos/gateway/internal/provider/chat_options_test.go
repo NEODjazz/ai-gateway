@@ -306,7 +306,7 @@ func TestCompatibleChatRejectsInvalidUsageBeforeDelivery(t *testing.T) {
 }
 
 func TestGenerationControlsAreRejectedByNativeAdapters(t *testing.T) {
-	for _, body := range []string{`{"metadata":{"trace":"one"}}`, `{"store":false}`, `{"modalities":["text"]}`, `{"reasoning_effort":"high"}`, `{"n":2}`, `{"safety_identifier":"hashed-user"}`, `{"prompt_cache_key":"tenant-thread"}`, `{"prompt_cache_options":{"mode":"explicit"}}`, `{"prompt_cache_retention":"24h"}`, `{"prediction":{"type":"content","content":"expected"}}`, `{"service_tier":"priority"}`, `{"user":"legacy-user"}`, `{"verbosity":"low"}`, `{"web_search_options":{}}`, `{"logprobs":false}`, `{"top_logprobs":0}`, `{"frequency_penalty":0}`, `{"presence_penalty":0}`, `{"min_p":0}`, `{"top_k":0}`, `{"top_a":0}`, `{"repetition_penalty":1}`, `{"logit_bias":{"1":0}}`} {
+	for _, body := range []string{`{"metadata":{"trace":"one"}}`, `{"store":false}`, `{"modalities":["text"]}`, `{"thinking":{"type":"enabled"}}`, `{"reasoning_effort":"high"}`, `{"n":2}`, `{"safety_identifier":"hashed-user"}`, `{"prompt_cache_key":"tenant-thread"}`, `{"prompt_cache_options":{"mode":"explicit"}}`, `{"prompt_cache_retention":"24h"}`, `{"prediction":{"type":"content","content":"expected"}}`, `{"service_tier":"priority"}`, `{"user":"legacy-user"}`, `{"verbosity":"low"}`, `{"web_search_options":{}}`, `{"logprobs":false}`, `{"top_logprobs":0}`, `{"frequency_penalty":0}`, `{"presence_penalty":0}`, `{"min_p":0}`, `{"top_k":0}`, `{"top_a":0}`, `{"repetition_penalty":1}`, `{"logit_bias":{"1":0}}`} {
 		var request openai.ChatCompletionRequest
 		if err := json.Unmarshal([]byte(body), &request); err != nil {
 			t.Fatal(err)

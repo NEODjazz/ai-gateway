@@ -73,6 +73,9 @@ func TestCacheIsolationIncludesNativeChatState(t *testing.T) {
 		{"native token reserve", func(request *openai.ChatCompletionRequest) { request.NativeInputTokens = 1 }},
 		{"clear thinking", func(request *openai.ChatCompletionRequest) { value := true; request.ClearThinking = &value }},
 		{"citation options", func(request *openai.ChatCompletionRequest) { request.CitationOptions = "disabled" }},
+		{"thinking", func(request *openai.ChatCompletionRequest) {
+			request.Thinking = &openai.ChatThinkingOptions{Type: "enabled"}
+		}},
 		{"include reasoning", func(request *openai.ChatCompletionRequest) { value := true; request.IncludeReasoning = &value }},
 		{"reasoning format", func(request *openai.ChatCompletionRequest) { request.ReasoningFormat = "parsed" }},
 		{"service tier", func(request *openai.ChatCompletionRequest) { request.BedrockServiceTier = "priority" }},

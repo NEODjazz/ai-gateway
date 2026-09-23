@@ -41,7 +41,7 @@ type openAICompatibleChatRequest struct {
 	Seed                *int64                         `json:"seed,omitempty"`
 	RandomSeed          *int64                         `json:"random_seed,omitempty"`
 	UserID              string                         `json:"user_id,omitempty"`
-	Thinking            *deepSeekThinking              `json:"thinking,omitempty"`
+	NativeThinking      *deepSeekThinking              `json:"thinking,omitempty"`
 }
 
 type deepSeekThinking struct {
@@ -228,7 +228,13 @@ func (p OpenAICompatible) mapChatParameters(request *openAICompatibleChatRequest
 		}
 		request.UserID = request.User
 		request.User = ""
-		request.Thinking = &deepSeekThinking{Type: "disabled"}
+		thinkingType := "disabled"
+		if request.Thinking != nil {
+			thinkingType = request.Thinking.Type
+		} else if request.ReasoningEffort != "" && request.ReasoningEffort != "none" {
+			thinkingType = "enabled"
+		}
+		request.NativeThinking = &deepSeekThinking{Type: thinkingType}
 	case "nvidia-nim":
 		if request.MaxCompletionTokens != nil {
 			request.MaxTokens = request.MaxCompletionTokens
