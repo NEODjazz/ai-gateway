@@ -2513,3 +2513,19 @@ Rancher Desktop built `ai-gateway-gateway:xai-tools-a86cefc4` with image ID
 Gateway Helm revision 607 completed successfully. Pod
 `ai-gateway-gateway-5b6b5d476d-nmzvh` became Ready with zero restarts, and
 direct service liveness and readiness both returned 204.
+
+## xAI model-scoped reasoning effort
+
+Source `6578bff4` validates reasoning effort against the selected xAI model for
+Chat and Responses. Grok 4.5 accepts low, medium and high; Grok 4.6 and 4.7
+also accept xhigh. The multi-agent model exposes these values only through
+Responses. The provider-wide capability profile no longer advertises reasoning
+effort for every model; exact model overrides describe the validated values.
+Regression tests, the full Go test and race suites, vet and build passed; no
+live provider credential was used.
+
+Rancher Desktop built `ai-gateway-gateway:xai-reasoning-6578bff4` with image ID
+`sha256:81bb1daffd64110db28eae3bc55646597d56bc8b45664bf3297aefa81b9e0a7b`.
+Gateway Helm revision 608 completed successfully. Pod
+`ai-gateway-gateway-58b469c4cc-zg6qn` became Ready with zero restarts, and
+direct service liveness and readiness both returned 204.
