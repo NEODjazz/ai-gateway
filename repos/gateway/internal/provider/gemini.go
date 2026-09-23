@@ -63,14 +63,15 @@ func (g Gemini) authorize(request *http.Request) error {
 	}
 }
 
-func (Gemini) SupportsVision() bool        { return true }
-func (Gemini) SupportsWebSearch() bool     { return true }
-func (Gemini) SupportsCodeExecution() bool { return true }
-func (Gemini) SupportsURLContext() bool    { return true }
-func (Gemini) SupportsGoogleMaps() bool    { return true }
-func (Gemini) SupportsAudioInput() bool    { return true }
-func (Gemini) SupportsFileInput() bool     { return true }
-func (Gemini) SupportsVideoInput() bool    { return true }
+func (Gemini) SupportsVision() bool          { return true }
+func (Gemini) SupportsWebSearch() bool       { return true }
+func (Gemini) SupportsCodeExecution() bool   { return true }
+func (Gemini) SupportsURLContext() bool      { return true }
+func (Gemini) SupportsGoogleMaps() bool      { return true }
+func (Gemini) SupportsAudioInput() bool      { return true }
+func (Gemini) SupportsFileInput() bool       { return true }
+func (Gemini) SupportsVideoInput() bool      { return true }
+func (Gemini) SupportsMediaResolution() bool { return true }
 
 func (Gemini) SupportsResponses() bool { return false }
 
@@ -132,6 +133,7 @@ type geminiGeneration struct {
 	ImageConfig        *geminiImageConfig              `json:"imageConfig,omitempty"`
 	AudioTranscription *geminiAudioTranscriptionConfig `json:"audioTranscriptionConfig,omitempty"`
 	AudioTimestamp     *bool                           `json:"audioTimestamp,omitempty"`
+	MediaResolution    string                          `json:"mediaResolution,omitempty"`
 	ResponseModalities []string                        `json:"responseModalities,omitempty"`
 	Seed               *int64                          `json:"seed,omitempty"`
 	Stop               []string                        `json:"stopSequences,omitempty"`
@@ -369,7 +371,17 @@ func geminiChatRequest(request openai.ChatCompletionRequest) (geminiRequest, err
 		FrequencyPenalty: request.FrequencyPenalty, PresencePenalty: request.PresencePenalty,
 		ResponseLogprobs: request.Logprobs, Logprobs: request.TopLogprobs, CandidateCount: request.N,
 		ThinkingConfig: thinkingConfig, Seed: request.Seed, Stop: stop,
-		AudioTimestamp: request.GeminiAudioTimestamp, ResponseModalities: responseModalities,
+		AudioTimestamp: request.GeminiAudioTimestamp, MediaResolution: request.GeminiMediaResolution, ResponseModalities: responseModalities,
+	}
+	if request.GeminiMediaResolution != "" {
+		switch request.GeminiMediaResolution {
+		case "MEDIA_RESOLUTION_UNSPECIFIED", "MEDIA_RESOLUTION_LOW", "MEDIA_RESOLUTION_MEDIUM", "MEDIA_RESOLUTION_HIGH":
+		default:
+			return result, geminiInvalid("media_resolution")
+		}
+		if !openai.HasChatMediaInput(request) {
+			return result, geminiInvalid("media_resolution")
+		}
 	}
 	result.ServiceTier = serviceTier
 	result.Store = request.Store

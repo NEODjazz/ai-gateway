@@ -37,6 +37,8 @@ type ChatCompletionRequest struct {
 	// GeminiAudioTimestamp enables Vertex audio timestamp understanding for
 	// requests that contain validated audio input.
 	GeminiAudioTimestamp *bool `json:"-"`
+	// GeminiMediaResolution controls the native input-media token resolution.
+	GeminiMediaResolution string `json:"-"`
 	// AnthropicSkills contains validated native Messages skill references.
 	AnthropicSkills      []AnthropicSkillReference `json:"-"`
 	AnthropicContainerID string                    `json:"-"`

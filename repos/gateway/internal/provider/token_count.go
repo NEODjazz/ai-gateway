@@ -39,6 +39,7 @@ type TokenCountRequest struct {
 	AnthropicInferenceGeo      string
 	AnthropicContextManagement json.RawMessage
 	GeminiCachedContent        string
+	GeminiMediaResolution      string
 }
 type TokenCountResult struct {
 	InputTokens         int

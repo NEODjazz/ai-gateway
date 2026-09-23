@@ -46,6 +46,7 @@ type generateRequest struct {
 		ResponseLogprobs *bool          `json:"responseLogprobs,omitempty"`
 		Logprobs         *int           `json:"logprobs,omitempty"`
 		AudioTimestamp   *bool          `json:"audioTimestamp,omitempty"`
+		MediaResolution  string         `json:"mediaResolution,omitempty"`
 		Modalities       []string       `json:"responseModalities,omitempty"`
 		MIMEType         string         `json:"responseMimeType,omitempty"`
 		JSONSchema       map[string]any `json:"responseJsonSchema,omitempty"`
@@ -97,7 +98,7 @@ func (r generateRequest) cachedContentChat(model string) (openai.ChatCompletionR
 }
 
 func (r generateRequest) chatWithContentRequirement(model string, stream, requireContents bool) (openai.ChatCompletionRequest, error) {
-	result := openai.ChatCompletionRequest{Model: model, Stream: stream, MaxCompletionTokens: r.Generation.MaxOutputTokens, Temperature: r.Generation.Temperature, TopP: r.Generation.TopP, Seed: r.Generation.Seed, GeminiCachedContent: r.CachedContent, GeminiAudioTimestamp: r.Generation.AudioTimestamp}
+	result := openai.ChatCompletionRequest{Model: model, Stream: stream, MaxCompletionTokens: r.Generation.MaxOutputTokens, Temperature: r.Generation.Temperature, TopP: r.Generation.TopP, Seed: r.Generation.Seed, GeminiCachedContent: r.CachedContent, GeminiAudioTimestamp: r.Generation.AudioTimestamp, GeminiMediaResolution: r.Generation.MediaResolution}
 	if stream {
 		result.StreamOptions = &openai.ChatStreamOptions{IncludeUsage: true}
 	}
@@ -516,6 +517,16 @@ func (r generateRequest) chatWithContentRequirement(model string, stream, requir
 	}
 	if result.GeminiAudioTimestamp != nil && !openai.HasChatAudioInput(result) {
 		return fail("generationConfig.audioTimestamp")
+	}
+	if result.GeminiMediaResolution != "" {
+		switch result.GeminiMediaResolution {
+		case "MEDIA_RESOLUTION_UNSPECIFIED", "MEDIA_RESOLUTION_LOW", "MEDIA_RESOLUTION_MEDIUM", "MEDIA_RESOLUTION_HIGH":
+		default:
+			return fail("generationConfig.mediaResolution")
+		}
+		if !openai.HasChatMediaInput(result) {
+			return fail("generationConfig.mediaResolution")
+		}
 	}
 	return result, nil
 }

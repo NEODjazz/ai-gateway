@@ -512,6 +512,27 @@ func TestVertexAudioTimestampRequiresAudioCapabilities(t *testing.T) {
 	}
 }
 
+func TestGeminiMediaResolutionRequiresMediaCapabilities(t *testing.T) {
+	request := modules.RequestContext{CredentialID: "key", Request: openai.ChatCompletionRequest{
+		Model: "test",
+		Messages: []openai.Message{{Role: "user", Content: []any{
+			map[string]any{"type": "image_url", "image_url": map[string]any{"url": "data:image/png;base64,iVBORw0KGgo="}},
+		}}},
+		GeminiMediaResolution: "MEDIA_RESOLUTION_HIGH",
+	}}
+	changed := request
+	changed.Request.GeminiMediaResolution = "MEDIA_RESOLUTION_LOW"
+	if providerCacheKey("chat", request) == providerCacheKey("chat", changed) {
+		t.Fatal("exact cache ignored media resolution")
+	}
+	if _, _, ok := semanticRequest(request, Endpoint{Name: "test"}); ok {
+		t.Fatal("semantic cache allowed media-resolution request")
+	}
+	if got := strings.Join(requiredChatCapabilities(request.Request, false), ","); got != "chat,vision,gemini_media_resolution" {
+		t.Fatalf("media resolution routing requirements=%s", got)
+	}
+}
+
 func TestChatWebFetchDisablesResponseCaches(t *testing.T) {
 	request := modules.RequestContext{CredentialID: "key", Request: openai.ChatCompletionRequest{Model: "test", Messages: []openai.Message{{Role: "user", Content: "read https://example.com"}}, ChatGenerationOptions: openai.ChatGenerationOptions{WebFetchOptions: &openai.ChatWebFetchOptions{AllowedDomains: []string{"example.com"}, MaxContentTokens: 1000}}}}
 	if providerCacheKey("chat", request) != "" {

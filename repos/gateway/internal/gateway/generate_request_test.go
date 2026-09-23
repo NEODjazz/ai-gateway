@@ -231,6 +231,29 @@ func TestGenerateRequestMapsVertexAudioTimestamp(t *testing.T) {
 	}
 }
 
+func TestGenerateRequestMapsMediaResolution(t *testing.T) {
+	var native generateRequest
+	if err := decodeMessagesValue(json.RawMessage(`{"contents":[{"role":"user","parts":[{"inlineData":{"mimeType":"image/png","data":"iVBORw0KGgo="}}]}],"generationConfig":{"mediaResolution":"MEDIA_RESOLUTION_HIGH"}}`), &native); err != nil {
+		t.Fatal(err)
+	}
+	chat, err := native.chat("model", false)
+	if err != nil || chat.GeminiMediaResolution != "MEDIA_RESOLUTION_HIGH" {
+		t.Fatalf("chat=%+v err=%v", chat, err)
+	}
+	for _, raw := range []string{
+		`{"contents":[{"role":"user","parts":[{"text":"hello"}]}],"generationConfig":{"mediaResolution":"MEDIA_RESOLUTION_HIGH"}}`,
+		`{"contents":[{"role":"user","parts":[{"inlineData":{"mimeType":"image/png","data":"iVBORw0KGgo="}}]}],"generationConfig":{"mediaResolution":"MEDIA_RESOLUTION_ULTRA_HIGH"}}`,
+	} {
+		var invalid generateRequest
+		if err := decodeMessagesValue(json.RawMessage(raw), &invalid); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := invalid.chat("model", false); err == nil {
+			t.Fatalf("invalid media resolution accepted: %s", raw)
+		}
+	}
+}
+
 func TestGenerateRequestMapsAdditionalInlineAudioFormats(t *testing.T) {
 	tests := []struct {
 		mediaType, wantMediaType string

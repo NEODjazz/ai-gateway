@@ -137,6 +137,11 @@ func HasChatAudioInput(request ChatCompletionRequest) bool {
 	return err == nil && len(attachments) > 0
 }
 
+// HasChatMediaInput reports validated image, audio, video, or PDF input.
+func HasChatMediaInput(request ChatCompletionRequest) bool {
+	return HasChatImages(request) || HasChatAudioInput(request) || HasChatVideoInput(request) || HasChatFileInput(request)
+}
+
 func HasResponseAudio(request ResponseRequest) bool {
 	attachments, err := ResponseAudioAttachments(request.Input)
 	return err == nil && len(attachments) > 0

@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -45,6 +46,41 @@ func TestTokenCountRejectsUnsupportedAdapterBeforePolicy(t *testing.T) {
 	assertUnsupportedParameter(t, err, "count_tokens")
 	if spy.calls != 0 {
 		t.Fatal("unsupported adapter ran policy modules")
+	}
+}
+
+func TestTokenCountPreservesGeminiMediaResolution(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1beta/models/model:countTokens" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		var body struct {
+			Request struct {
+				Generation geminiGeneration `json:"generationConfig"`
+			} `json:"generateContentRequest"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body.Request.Generation.MediaResolution != "MEDIA_RESOLUTION_HIGH" {
+			t.Errorf("media resolution=%q", body.Request.Generation.MediaResolution)
+		}
+		_, _ = w.Write([]byte(`{"totalTokens":1120}`))
+	}))
+	defer server.Close()
+	router := New(Config{Endpoints: []config.ProviderEndpointConfig{{
+		Name: "gemini", Type: "gemini", BaseURL: server.URL, Models: []string{"model"},
+		Capabilities: []string{"chat", "vision", "gemini_media_resolution"}, AVEnabled: true,
+	}}}).(*Router)
+	result, err := router.CountTokens(t.Context(), modules.RequestContext{Request: openai.ChatCompletionRequest{
+		Model: "model",
+		Messages: []openai.Message{{Role: "user", Content: []any{
+			map[string]any{"type": "image_url", "image_url": map[string]any{"url": "data:image/png;base64,iVBORw0KGgo="}},
+		}}},
+		GeminiMediaResolution: "MEDIA_RESOLUTION_HIGH",
+	}})
+	if err != nil || result.InputTokens != 1120 {
+		t.Fatalf("result=%+v err=%v", result, err)
 	}
 }
 

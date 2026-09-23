@@ -178,6 +178,7 @@ func chatCacheKeyValue(request openai.ChatCompletionRequest) any {
 		BedrockAdditionalModelRequestFields      json.RawMessage               `json:"bedrock_additional_model_request_fields,omitempty"`
 		BedrockAdditionalModelResponseFieldPaths []string                      `json:"bedrock_additional_model_response_field_paths,omitempty"`
 		AnthropicCacheControl                    *openai.PromptCacheBreakpoint `json:"anthropic_cache_control,omitempty"`
+		GeminiMediaResolution                    string                        `json:"gemini_media_resolution,omitempty"`
 	}{
 		Request:                                  request,
 		NativeContent:                            nativeContent,
@@ -190,6 +191,7 @@ func chatCacheKeyValue(request openai.ChatCompletionRequest) any {
 		BedrockAdditionalModelRequestFields:      append(json.RawMessage(nil), request.BedrockAdditionalModelRequestFields...),
 		BedrockAdditionalModelResponseFieldPaths: append([]string(nil), request.BedrockAdditionalModelResponseFieldPaths...),
 		AnthropicCacheControl:                    request.AnthropicCacheControl,
+		GeminiMediaResolution:                    request.GeminiMediaResolution,
 	}
 }
 
