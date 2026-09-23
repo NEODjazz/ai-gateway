@@ -2234,3 +2234,22 @@ Gateway Helm revision 589 completed successfully. Pod
 liveness and readiness returned 204, OpenAPI 0.1.471 was served, and the live
 Groq capability profile reported `include_reasoning` plus the three validated
 formats while every other provider profile omitted both controls.
+
+## Model-scoped Groq reasoning policy
+
+Source `4638192` replaces the provider-wide Groq reasoning claims with exact
+model policies. `openai/gpt-oss-20b` and `openai/gpt-oss-120b` accept
+`include_reasoning` plus `low`, `medium` and `high` effort. The exact
+`qwen/qwen3.8-27b` model accepts `none`, `default`, `low`, `medium` and `high`
+effort plus `hidden`, `raw` and `parsed` formats. Raw format is rejected with
+tools or a JSON response format, and all reasoning controls are rejected for
+unlisted models before provider execution. Capability, protocol, OpenAPI,
+adapter and full race regressions passed together with vet and build.
+
+Rancher Desktop built `ai-gateway-gateway:groq-model-policy-46381923` with
+image ID `sha256:00bf3e94a1e4b991a120f19f13163350d42cb51660b136a61f292f5e775e019e`.
+Gateway Helm revision 590 completed successfully. Pod
+`ai-gateway-gateway-5dfdbc5448-vl7cv` became Ready with zero restarts. Live
+liveness and readiness returned 204, OpenAPI 0.1.472 was served, the Groq
+provider-wide reasoning arrays were empty, and all three exact model policies
+matched the runtime validator.
