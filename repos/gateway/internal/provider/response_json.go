@@ -447,6 +447,13 @@ func validateResponseOutputItemsAllowSparse(items []openai.ResponseOutputItem, a
 		if len(item.Content) > maxResponseStreamContentParts || len(item.Summary) > maxResponseStreamContentParts {
 			return errors.New("provider returned too many response output content parts")
 		}
+		for _, parts := range [][]openai.ResponseOutputContent{item.Content, item.Summary} {
+			for _, part := range parts {
+				if part.Type == "" && !allowSparse {
+					return errors.New("provider returned response output content without type")
+				}
+			}
+		}
 		switch item.Type {
 		case "computer_call":
 			if err := validateResponseComputerCall(item); err != nil {

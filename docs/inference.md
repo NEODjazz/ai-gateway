@@ -1634,6 +1634,11 @@ Reasoning, tools, text, tool choice, prompt-cache data, moderation, diagnostics,
 context management, error details, incomplete details and prompt references
 cannot retain fields that a later provider snapshot omitted.
 
+Real provider `content` and reasoning `summary` parts must carry their required
+non-empty `type`. Empty internal slots created while assembling sparse SSE
+content indices remain permitted until an actual part occupies the slot; an
+explicit JSON or terminal snapshot cannot use those placeholders.
+
 ### Native Responses refusal assembly
 
 Native SSE accumulation resolves the event name from JSON `type` when the SSE

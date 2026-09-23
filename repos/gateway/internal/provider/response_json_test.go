@@ -53,6 +53,25 @@ func TestResponsesRejectsMissingOutputTypeAndOversizedPartsBeforeDelivery(t *tes
 	}
 }
 
+func TestResponsesRejectsMissingOutputContentTypeBeforeDelivery(t *testing.T) {
+	for name, output := range map[string]string{
+		"message content":   `{"type":"message","content":[{}]}`,
+		"reasoning summary": `{"type":"reasoning","summary":[{}]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			document := `{"id":"r","object":"response","model":"m","status":"completed","output":[` + output + `]}`
+			if _, err := decodeResponseJSON(strings.NewReader(document)); err == nil {
+				t.Fatalf("invalid JSON output content accepted: %s", output)
+			}
+			callbacks := 0
+			wire := "data: {\"type\":\"response.completed\",\"response\":" + document + "}\n\n"
+			if _, err := streamResponseData(strings.NewReader(wire), "m", func(string, string) error { callbacks++; return nil }); err == nil || callbacks != 0 {
+				t.Fatalf("invalid SSE output content delivered: err=%v callbacks=%d", err, callbacks)
+			}
+		})
+	}
+}
+
 func TestResponsesRejectsInvalidJSONDocuments(t *testing.T) {
 	for _, body := range []string{"null", `{"id":"r"} {"id":"second"}`, `{"id":"r"} trailing`, `{"id":`} {
 		t.Run(body, func(t *testing.T) {
