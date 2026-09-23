@@ -2177,3 +2177,24 @@ Rancher Desktop built `ai-gateway-gateway:reported-tiers-f9c1be4f` with image ID
 Gateway Helm revision 586 completed successfully. Pod
 `ai-gateway-gateway-5c76bf8b65-7sjrj` became Ready with zero restarts. Live
 liveness and readiness returned 204 and OpenAPI 0.1.467 was served.
+
+## Runtime model-policy schema and Cerebras thinking history
+
+Source `35d033a` removes the stale closed enum from the OpenAPI model-specific
+Chat policy schema. Runtime adapters can now publish exact upstream model IDs
+without producing an admin response that violates the gateway's own schema.
+The schema keeps a non-empty model constraint and its regression test.
+
+Source `d38eaba` adds the native Cerebras `clear_thinking` request control for
+the exact upstream model `zai-glm-4.7`. Explicit `false` is preserved on the
+wire, other Cerebras models and adapters reject the field before provider
+execution, and the value participates in exact and semantic cache identity.
+The runtime capability profile advertises the option only in that model's
+override. Provider and API tests, vet, build and the full race suite passed.
+
+Rancher Desktop built `ai-gateway-gateway:cerebras-clear-d38eaba8` with image
+ID `sha256:912a358ecd541c8aed912cca1d58b4b263bec0796c8bc3e9dbf2179ce4400622`.
+Gateway Helm revision 587 completed successfully. Pod
+`ai-gateway-gateway-6fc784dffc-f85d8` became Ready with zero restarts. Live
+liveness and readiness returned 204, OpenAPI 0.1.469 was served, and the live
+Cerebras capability profile reported `clear_thinking` only for `zai-glm-4.7`.
