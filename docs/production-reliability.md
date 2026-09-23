@@ -2545,3 +2545,19 @@ Rancher Desktop built `ai-gateway-gateway:xai-logprobs-40e57e84` with image ID
 Gateway Helm revision 609 completed successfully. Pod
 `ai-gateway-gateway-5c465f7cfc-dk84k` became Ready with zero restarts, and
 direct service liveness and readiness both returned 204.
+
+## xAI reasoning-model Chat control validation
+
+Source `34d38a28` rejects `stop`, `frequency_penalty` and `presence_penalty`
+for known Grok 4.5, 4.6 and 4.7 reasoning-model Chat requests before provider
+execution. The model-specific capability profile lists the two penalty options
+as unsupported. Unknown model IDs retain the existing pass-through policy.
+Regression tests, the full Go test and race suites, vet and build passed; no
+live provider credential was used.
+
+Rancher Desktop built `ai-gateway-gateway:xai-reasoning-controls-34d38a28`
+with image ID
+`sha256:8368e515419284a7af2c4d8c735a2460cfd3146f19e704b6eddbfa9377279b1e`.
+Gateway Helm revision 610 completed successfully. Pod
+`ai-gateway-gateway-fd494d897-qt4xj` became Ready with zero restarts, and
+direct service liveness and readiness both returned 204.
