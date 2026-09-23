@@ -597,6 +597,15 @@ func responseOutputItemOwnsCallID(itemType string) bool {
 }
 
 func validateResponseStreamOutputIdentity(items []openai.ResponseOutputItem, outputIndex int, candidate openai.ResponseOutputItem) error {
+	if outputIndex < len(items) {
+		current := items[outputIndex]
+		if candidate.ID != "" && current.ID != "" && candidate.ID != current.ID {
+			return errors.New("provider changed response output item ID during stream")
+		}
+		if candidate.CallID != "" && current.CallID != "" && candidate.CallID != current.CallID {
+			return errors.New("provider changed response tool call ID during stream")
+		}
+	}
 	for index, item := range items {
 		if index == outputIndex {
 			continue

@@ -331,6 +331,22 @@ func TestResponsesRejectDuplicateStreamingOutputIdentities(t *testing.T) {
 	}
 }
 
+func TestResponsesRejectChangedStreamingOutputIdentities(t *testing.T) {
+	for name, wire := range map[string]string{
+		"item ID": `data: {"type":"response.output_text.delta","output_index":0,"item_id":"first","delta":"A"}` + "\n\n" +
+			`data: {"type":"response.output_text.delta","output_index":0,"item_id":"second","delta":"B"}` + "\n\n",
+		"call ID": `data: {"type":"response.output_item.added","output_index":0,"item":{"id":"tool","type":"function_call","call_id":"first","name":"lookup","arguments":""}}` + "\n\n" +
+			`data: {"type":"response.output_item.done","output_index":0,"item":{"id":"tool","type":"function_call","call_id":"second","name":"lookup","arguments":"{}"}}` + "\n\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			callbacks := 0
+			if _, err := streamResponseData(strings.NewReader(wire+responseTestTerminal), "m", func(string, string) error { callbacks++; return nil }); err == nil || callbacks != 1 {
+				t.Fatalf("changed streaming identity delivered: err=%v callbacks=%d", err, callbacks)
+			}
+		})
+	}
+}
+
 func TestResponsesRejectsInvalidJSONDocuments(t *testing.T) {
 	for _, body := range []string{"null", `{"id":"r"} {"id":"second"}`, `{"id":"r"} trailing`, `{"id":`} {
 		t.Run(body, func(t *testing.T) {
