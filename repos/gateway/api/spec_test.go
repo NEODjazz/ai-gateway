@@ -95,6 +95,18 @@ func TestOpenAPIProviderProfilesExposeModelSpecificChatPolicy(t *testing.T) {
 	}
 }
 
+func TestOpenAPIProviderProfilesExposeModelSpecificResponsePolicy(t *testing.T) {
+	document := loadDocument(t)
+	profile := document.Components.Schemas["ProviderCapabilityProfile"].Value
+	if profile == nil || profile.Properties["response_model_parameters"] == nil {
+		t.Fatal("ProviderCapabilityProfile is missing response_model_parameters")
+	}
+	policy := document.Components.Schemas["ProviderResponseModelParameterPolicy"].Value
+	if policy == nil || policy.Properties["model"] == nil || policy.Properties["supported_options"] == nil || policy.Properties["reasoning_effort"] == nil {
+		t.Fatal("ProviderResponseModelParameterPolicy is incomplete")
+	}
+}
+
 func TestOpenAPIGroqReasoningControlsAndCapabilityPolicy(t *testing.T) {
 	document := loadDocument(t)
 	chat := document.Components.Schemas["ChatCompletionRequest"].Value

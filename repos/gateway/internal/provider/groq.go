@@ -33,7 +33,7 @@ func (Groq) ManagedChatModelProbes() []string {
 	return []string{"openai/gpt-oss-20b", "openai/gpt-oss-120b", "qwen/qwen3.8-27b"}
 }
 
-func (Groq) ManagedResponseParameterProbeModel() string { return "openai/gpt-oss-20b" }
+func (g Groq) ManagedResponseModelProbes() []string { return g.ManagedChatModelProbes() }
 
 func (g Groq) ValidateChatParameters(request openai.ChatCompletionRequest) error {
 	if err := rejectChatModeration("groq", request); err != nil {

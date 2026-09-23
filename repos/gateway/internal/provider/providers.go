@@ -51,6 +51,7 @@ type ProviderCapabilityProfile struct {
 	FineTuningCreateParameters   ProviderFineTuningCreateParameterPolicy   `json:"fine_tuning_create_parameters"`
 	ContainerCreateParameters    ProviderContainerCreateParameterPolicy    `json:"container_create_parameters"`
 	ChatModelParameters          []ProviderChatModelParameterPolicy        `json:"chat_model_parameters"`
+	ResponseModelParameters      []ProviderResponseModelParameterPolicy    `json:"response_model_parameters"`
 }
 
 type ProviderChatParameterPolicy struct {
@@ -74,6 +75,12 @@ type ProviderResponseParameterPolicy struct {
 	SupportedOptions []string `json:"supported_options"`
 	ReasoningEffort  []string `json:"reasoning_effort"`
 	ServiceTier      []string `json:"service_tier"`
+}
+
+type ProviderResponseModelParameterPolicy struct {
+	Model            string   `json:"model"`
+	SupportedOptions []string `json:"supported_options"`
+	ReasoningEffort  []string `json:"reasoning_effort"`
 }
 
 type ProviderInteractionParameterPolicy struct {
@@ -444,6 +451,7 @@ func ManagedProviderCapabilityProfiles() []ProviderCapabilityProfile {
 			FineTuningCreateParameters:   managedProviderFineTuningCreateParameterPolicy(client, slicesContain(operations, "fine_tuning")),
 			ContainerCreateParameters:    managedProviderContainerCreateParameterPolicy(client, operations),
 			ChatModelParameters:          managedProviderChatModelParameterPolicies(client, slicesContain(operations, "chat")),
+			ResponseModelParameters:      managedProviderResponseModelParameterPolicies(client, slicesContain(operations, "responses")),
 		})
 	}
 	return profiles
@@ -1160,14 +1168,35 @@ func managedProviderRerankParameterPolicy(client Client, supported bool) Provide
 }
 
 func managedProviderResponseParameterPolicy(client Client, supportsResponses bool) ProviderResponseParameterPolicy {
+	return managedProviderResponseParameterPolicyForModel(client, supportsResponses, "model")
+}
+
+func managedProviderResponseModelParameterPolicies(client Client, supported bool) []ProviderResponseModelParameterPolicy {
+	result := []ProviderResponseModelParameterPolicy{}
+	prober, ok := client.(interface{ ManagedResponseModelProbes() []string })
+	if !supported || !ok {
+		return result
+	}
+	base := managedProviderResponseParameterPolicy(client, true)
+	for _, model := range prober.ManagedResponseModelProbes() {
+		policy := managedProviderResponseParameterPolicyForModel(client, true, model)
+		options := make([]string, 0, len(policy.SupportedOptions))
+		for _, option := range policy.SupportedOptions {
+			if !slicesContain(base.SupportedOptions, option) {
+				options = append(options, option)
+			}
+		}
+		result = append(result, ProviderResponseModelParameterPolicy{Model: model, SupportedOptions: options, ReasoningEffort: policy.ReasoningEffort})
+	}
+	return result
+}
+
+func managedProviderResponseParameterPolicyForModel(client Client, supportsResponses bool, model string) ProviderResponseParameterPolicy {
 	policy := ProviderResponseParameterPolicy{SupportedOptions: []string{}, ReasoningEffort: []string{}, ServiceTier: []string{}}
 	if !supportsResponses {
 		return policy
 	}
-	baseline := openai.ResponseRequest{Model: "model", Input: "test"}
-	if prober, ok := client.(interface{ ManagedResponseParameterProbeModel() string }); ok {
-		baseline.Model = prober.ManagedResponseParameterProbeModel()
-	}
+	baseline := openai.ResponseRequest{Model: model, Input: "test"}
 	for _, value := range []string{"none", "minimal", "low", "medium", "high", "xhigh", "max", "default"} {
 		request, effort := baseline, value
 		request.Reasoning = &openai.ResponseReasoning{Effort: &effort}

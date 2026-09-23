@@ -214,6 +214,27 @@ func TestGroqCapabilityProfilePublishesExactReasoningPolicies(t *testing.T) {
 	}
 }
 
+func TestGroqCapabilityProfilePublishesResponsesReasoningByModel(t *testing.T) {
+	for _, profile := range ManagedProviderCapabilityProfiles() {
+		if profile.Type != "groq" {
+			continue
+		}
+		if len(profile.ResponseParameters.ReasoningEffort) != 0 || slicesContain(profile.ResponseParameters.SupportedOptions, "reasoning") {
+			t.Fatalf("provider-wide Responses policy=%+v", profile.ResponseParameters)
+		}
+		want := []ProviderResponseModelParameterPolicy{
+			{Model: "openai/gpt-oss-20b", SupportedOptions: []string{"reasoning"}, ReasoningEffort: []string{"low", "medium", "high"}},
+			{Model: "openai/gpt-oss-120b", SupportedOptions: []string{"reasoning"}, ReasoningEffort: []string{"low", "medium", "high"}},
+			{Model: "qwen/qwen3.8-27b", SupportedOptions: []string{"reasoning"}, ReasoningEffort: []string{"none", "low", "medium", "high", "default"}},
+		}
+		if fmt.Sprint(profile.ResponseModelParameters) != fmt.Sprint(want) {
+			t.Fatalf("Responses model policies=%+v want=%+v", profile.ResponseModelParameters, want)
+		}
+		return
+	}
+	t.Fatal("Groq profile is missing")
+}
+
 func TestGroqReasoningControlsAreAdapterIsolated(t *testing.T) {
 	include := false
 	for name, validate := range map[string]func(openai.ChatCompletionRequest) error{

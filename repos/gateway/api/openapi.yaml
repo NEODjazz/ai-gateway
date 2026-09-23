@@ -11303,7 +11303,7 @@ components:
     ProviderCapabilityProfile:
       type: object
       additionalProperties: false
-      required: [type, operations, capabilities, auth_types, chat_parameters, response_parameters, interaction_parameters, embedding_parameters, rerank_parameters, completion_parameters, moderation_parameters, search_parameters, image_generation_parameters, image_edit_parameters, image_variation_parameters, audio_transcription_parameters, audio_translation_parameters, audio_speech_parameters, ocr_parameters, video_create_parameters, video_extend_parameters, fine_tuning_create_parameters, container_create_parameters, chat_model_parameters]
+      required: [type, operations, capabilities, auth_types, chat_parameters, response_parameters, interaction_parameters, embedding_parameters, rerank_parameters, completion_parameters, moderation_parameters, search_parameters, image_generation_parameters, image_edit_parameters, image_variation_parameters, audio_transcription_parameters, audio_translation_parameters, audio_speech_parameters, ocr_parameters, video_create_parameters, video_extend_parameters, fine_tuning_create_parameters, container_create_parameters, chat_model_parameters, response_model_parameters]
       properties:
         type: {type: string, enum: [demo, ollama, openai, openai-compatible, openrouter, azure-openai, anthropic, gemini, vertex-gemini, cohere, mistral, voyage, bedrock, groq, deepseek, cerebras, nvidia-nim, together, xai, opensandbox]}
         operations:
@@ -11363,6 +11363,10 @@ components:
           type: array
           description: Exact upstream-model overrides relative to chat_parameters. An empty array means the adapter has no published model-specific override.
           items: {$ref: '#/components/schemas/ProviderChatModelParameterPolicy'}
+        response_model_parameters:
+          type: array
+          description: Exact upstream-model overrides relative to response_parameters. An empty array means the adapter has no published model-specific override.
+          items: {$ref: '#/components/schemas/ProviderResponseModelParameterPolicy'}
     ProviderChatParameterPolicy:
       type: object
       additionalProperties: false
@@ -11437,6 +11441,23 @@ components:
           type: array
           uniqueItems: true
           items: {type: string, enum: [auto, default, on_demand, flex, performance, scale, priority, fast, ultrafast, standard_only]}
+    ProviderResponseModelParameterPolicy:
+      type: object
+      additionalProperties: false
+      required: [model, supported_options, reasoning_effort]
+      description: Options accepted for this exact upstream Responses model. Listed values take precedence over provider-wide reasoning_effort values.
+      properties:
+        model:
+          type: string
+          minLength: 1
+        supported_options:
+          type: array
+          uniqueItems: true
+          items: {type: string, enum: [reasoning]}
+        reasoning_effort:
+          type: array
+          uniqueItems: true
+          items: {type: string, enum: [none, minimal, low, medium, high, xhigh, max, default]}
     ProviderInteractionParameterPolicy:
       type: object
       additionalProperties: false
