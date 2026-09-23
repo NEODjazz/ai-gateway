@@ -474,11 +474,11 @@ func TestResponseReasoningValidation(t *testing.T) {
 
 func TestServiceTierValues(t *testing.T) {
 	for _, value := range []string{"", "auto", "default", "on_demand", "flex", "performance", "scale", "priority", "fast", "ultrafast"} {
-		if !validServiceTier(value) {
+		if !ValidServiceTier(value) {
 			t.Fatalf("documented service tier rejected: %q", value)
 		}
 	}
-	if validServiceTier("unknown") {
+	if ValidServiceTier("unknown") {
 		t.Fatal("unknown service tier accepted")
 	}
 }

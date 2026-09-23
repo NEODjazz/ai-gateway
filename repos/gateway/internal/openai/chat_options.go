@@ -154,7 +154,7 @@ func (o ChatGenerationOptions) Validate() string {
 	if message := validateChatPrediction(o.Prediction); message != "" {
 		return message
 	}
-	if !validServiceTier(o.ServiceTier) {
+	if !ValidServiceTier(o.ServiceTier) {
 		return "unsupported service_tier value"
 	}
 	if !validVerbosity(o.Verbosity) {
@@ -381,7 +381,7 @@ func responseTextVerbosity(text any) (string, bool, bool) {
 	return verbosity, true, validVerbosity(verbosity)
 }
 
-func validServiceTier(value string) bool {
+func ValidServiceTier(value string) bool {
 	switch value {
 	case "", "auto", "default", "on_demand", "flex", "performance", "scale", "priority", "fast", "ultrafast", "standard_only":
 		return true

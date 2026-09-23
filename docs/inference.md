@@ -1788,6 +1788,15 @@ templates because their server-side expanded content is unavailable to the
 gateway's TPM and budget-reserve calculation. Enabling execution requires a
 provider count/preflight contract or a configured conservative reserve.
 
+### Responses assigned service tier
+
+The provider-assigned `service_tier` echoed in compatible JSON and terminal SSE
+responses is validated with the same shared tier matrix used at request
+admission. Unknown values fail before client delivery and successful billing
+post-processing, preventing an unrecognized execution class from being reported
+as a valid settled result. Omission remains valid when a provider does not report
+an assigned tier.
+
 ### Responses prompt-cache prewarming
 
 Responses accepts `prompt_cache_options.prewarm=true` on compatible adapters to

@@ -69,6 +69,36 @@ func TestResponsesValidateEnvelopeIdentityAndLifecycle(t *testing.T) {
 	}
 }
 
+func TestResponsesPreserveAndValidateAssignedServiceTier(t *testing.T) {
+	for _, tier := range []string{"auto", "default", "on_demand", "flex", "performance", "scale", "priority", "fast", "ultrafast", "standard_only"} {
+		for _, stream := range []bool{false, true} {
+			t.Run(fmt.Sprintf("tier=%s/stream=%v", tier, stream), func(t *testing.T) {
+				document := `{"id":"resp_1","object":"response","model":"m","status":"completed","service_tier":"` + tier + `"}`
+				var response openai.ResponseResponse
+				var err error
+				if stream {
+					response, err = streamResponseData(strings.NewReader("data: {\"type\":\"response.completed\",\"response\":"+document+"}\n\n"), "m", func(string, string) error { return nil })
+				} else {
+					response, err = decodeResponseJSON(strings.NewReader(document))
+				}
+				if err != nil || response.ServiceTier != tier {
+					t.Fatalf("response=%+v err=%v", response, err)
+				}
+			})
+		}
+	}
+
+	document := `{"id":"resp_1","object":"response","model":"m","status":"completed","service_tier":"unknown"}`
+	if _, err := decodeResponseJSON(strings.NewReader(document)); err == nil {
+		t.Fatal("unknown assigned service tier accepted")
+	}
+	callbacks := 0
+	wire := "data: {\"type\":\"response.completed\",\"response\":" + document + "}\n\n"
+	if _, err := streamResponseData(strings.NewReader(wire), "m", func(string, string) error { callbacks++; return nil }); err == nil || callbacks != 0 {
+		t.Fatalf("unknown assigned service tier delivered: err=%v callbacks=%d", err, callbacks)
+	}
+}
+
 func TestResponsesPreserveAndValidateMisalignmentError(t *testing.T) {
 	valid := `{"code":"misalignment_policy_violation","message":"request blocked","misalignment":{"detailed_explanation":"unsafe transfer","error_type":"potentially_unintended_data_transfer","steer":{"message":"continue without private data"}}}`
 	for _, stream := range []bool{false, true} {

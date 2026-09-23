@@ -180,6 +180,9 @@ func validateResponseControls(response openai.ResponseResponse) error {
 	if response.PromptCacheRetention != "" && response.PromptCacheRetention != "in_memory" && response.PromptCacheRetention != "24h" {
 		return errors.New("provider returned invalid prompt_cache_retention")
 	}
+	if !openai.ValidServiceTier(response.ServiceTier) {
+		return errors.New("provider returned invalid response service_tier")
+	}
 	if message := openai.ValidateResponseInstructions(response.Instructions); message != "" {
 		return errors.New("provider returned invalid instructions: " + message)
 	}
