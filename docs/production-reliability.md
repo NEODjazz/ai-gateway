@@ -2304,3 +2304,18 @@ ID `sha256:233c37636eb938cfc9bac36a9cc19463b82c9c461ebbabcfa2c84339d6af072c`.
 Gateway Helm revision 593 completed successfully. Pod
 `ai-gateway-gateway-744fffc8d9-qq9js` became Ready with zero restarts, and
 direct service liveness and readiness checks both returned 204.
+
+## DeepSeek Responses thinking levels
+
+Source `5af98a6` accepts native Responses `reasoning.effort=none` to disable
+thinking and `minimal` as a provider-compatible low-effort value. Both values
+are forwarded unchanged. The runtime capability profile is derived from the
+same validator. Wire and capability regressions passed with the full race
+suite, vet and build.
+
+Rancher Desktop built `ai-gateway-gateway:deepseek-responses-5af98a6e` with
+image ID `sha256:35bc13b0dd2128f244bf70c60b0e37445ff5b36b1648167dcc7ed8387e93e058`.
+Gateway Helm revision 594 completed successfully. Pod
+`ai-gateway-gateway-885b4468d-7dp5q` became Ready with zero restarts. Direct
+service liveness and readiness returned 204, and the live DeepSeek Responses
+profile included `none`, `minimal`, `low`, `medium`, `high`, `xhigh` and `max`.
