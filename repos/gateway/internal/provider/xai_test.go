@@ -172,6 +172,8 @@ func TestXAIReasoningEffortIsModelScoped(t *testing.T) {
 	}{
 		{model: "grok-4.5", effort: "low", chat: true, responses: true},
 		{model: "grok-4.5", effort: "xhigh"},
+		{model: "grok-build-latest", effort: "high", chat: true, responses: true},
+		{model: "grok-build-latest", effort: "xhigh"},
 		{model: "grok-4.6", effort: "xhigh", chat: true, responses: true},
 		{model: "grok-4.7-latest", effort: "xhigh", chat: true, responses: true},
 		{model: "grok-4.7", effort: "none"},
@@ -207,6 +209,7 @@ func TestXAIRejectsSilentlyIgnoredLogprobs(t *testing.T) {
 		{model: "grok-4.20-0309-reasoning", param: "top_logprobs", opts: openai.ChatGenerationOptions{Logprobs: &logprobs, TopLogprobs: &topLogprobs}},
 		{model: "grok-4.3", param: "logprobs", opts: openai.ChatGenerationOptions{Logprobs: &logprobs}},
 		{model: "grok-4.5", param: "logprobs", opts: openai.ChatGenerationOptions{Logprobs: &logprobs}},
+		{model: "grok-build-latest", param: "logprobs", opts: openai.ChatGenerationOptions{Logprobs: &logprobs}},
 		{model: "grok-4.6-latest", param: "logprobs", opts: openai.ChatGenerationOptions{Logprobs: &logprobs}},
 		{model: "grok-4.7", param: "logprobs", opts: openai.ChatGenerationOptions{Logprobs: &logprobs}},
 	} {
@@ -232,6 +235,7 @@ func TestXAIReasoningModelsRejectUnsupportedSamplingControls(t *testing.T) {
 		request openai.ChatCompletionRequest
 	}{
 		{model: "grok-4.5", param: "stop", request: openai.ChatCompletionRequest{Stop: "END"}},
+		{model: "grok-build-latest", param: "stop", request: openai.ChatCompletionRequest{Stop: "END"}},
 		{model: "grok-4.6-latest", param: "frequency_penalty", request: openai.ChatCompletionRequest{ChatGenerationOptions: openai.ChatGenerationOptions{FrequencyPenalty: &penalty}}},
 		{model: "grok-4.7", param: "presence_penalty", request: openai.ChatCompletionRequest{ChatGenerationOptions: openai.ChatGenerationOptions{PresencePenalty: &penalty}}},
 	} {
@@ -262,6 +266,7 @@ func TestXAICapabilityProfilePublishesReasoningByModel(t *testing.T) {
 			{Model: "grok-4.20", SupportedOptions: []string{}, UnsupportedOptions: []string{"logprobs", "top_logprobs"}, ReasoningEffort: []string{}, ReasoningFormat: []string{}},
 			{Model: "grok-4.3", SupportedOptions: []string{}, UnsupportedOptions: []string{"logprobs", "top_logprobs"}, ReasoningEffort: []string{}, ReasoningFormat: []string{}},
 			{Model: "grok-4.5", SupportedOptions: []string{"reasoning_effort"}, UnsupportedOptions: []string{"logprobs", "top_logprobs", "frequency_penalty", "presence_penalty"}, ReasoningEffort: []string{"low", "medium", "high"}, ReasoningFormat: []string{}},
+			{Model: "grok-build-latest", SupportedOptions: []string{"reasoning_effort"}, UnsupportedOptions: []string{"logprobs", "top_logprobs", "frequency_penalty", "presence_penalty"}, ReasoningEffort: []string{"low", "medium", "high"}, ReasoningFormat: []string{}},
 			{Model: "grok-4.6", SupportedOptions: []string{"reasoning_effort"}, UnsupportedOptions: []string{"logprobs", "top_logprobs", "frequency_penalty", "presence_penalty"}, ReasoningEffort: []string{"low", "medium", "high", "xhigh"}, ReasoningFormat: []string{}},
 			{Model: "grok-4.7", SupportedOptions: []string{"reasoning_effort"}, UnsupportedOptions: []string{"logprobs", "top_logprobs", "frequency_penalty", "presence_penalty"}, ReasoningEffort: []string{"low", "medium", "high", "xhigh"}, ReasoningFormat: []string{}},
 		}
@@ -270,6 +275,7 @@ func TestXAICapabilityProfilePublishesReasoningByModel(t *testing.T) {
 		}
 		wantResponses := []ProviderResponseModelParameterPolicy{
 			{Model: "grok-4.5", SupportedOptions: []string{"reasoning"}, ReasoningEffort: []string{"low", "medium", "high"}},
+			{Model: "grok-build-latest", SupportedOptions: []string{"reasoning"}, ReasoningEffort: []string{"low", "medium", "high"}},
 			{Model: "grok-4.6", SupportedOptions: []string{"reasoning"}, ReasoningEffort: []string{"low", "medium", "high", "xhigh"}},
 			{Model: "grok-4.7", SupportedOptions: []string{"reasoning"}, ReasoningEffort: []string{"low", "medium", "high", "xhigh"}},
 			{Model: "grok-4.20-multi-agent", SupportedOptions: []string{"reasoning"}, ReasoningEffort: []string{"low", "medium", "high", "xhigh"}},

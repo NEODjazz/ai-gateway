@@ -796,7 +796,7 @@ func validXAIServiceTier(value string) bool {
 func xaiSupportsReasoningEffort(model, effort string, responses bool) bool {
 	base := effort == "low" || effort == "medium" || effort == "high"
 	switch {
-	case model == "grok-4.5" || strings.HasPrefix(model, "grok-4.5-"):
+	case xaiGrok45Model(model):
 		return base
 	case model == "grok-4.6" || strings.HasPrefix(model, "grok-4.6-"), model == "grok-4.7" || strings.HasPrefix(model, "grok-4.7-"):
 		return base || effort == "xhigh"
@@ -807,8 +807,15 @@ func xaiSupportsReasoningEffort(model, effort string, responses bool) bool {
 	}
 }
 
+func xaiGrok45Model(model string) bool {
+	return model == "grok-4.5" || strings.HasPrefix(model, "grok-4.5-") || model == "grok-build-latest"
+}
+
 func xaiReasoningChatModel(model string) bool {
-	for _, family := range []string{"grok-4.5", "grok-4.6", "grok-4.7"} {
+	if xaiGrok45Model(model) {
+		return true
+	}
+	for _, family := range []string{"grok-4.6", "grok-4.7"} {
 		if model == family || strings.HasPrefix(model, family+"-") {
 			return true
 		}
@@ -817,6 +824,9 @@ func xaiReasoningChatModel(model string) bool {
 }
 
 func xaiIgnoresLogprobs(model string) bool {
+	if model == "grok-build-latest" {
+		return true
+	}
 	for _, family := range []string{"grok-4.20", "grok-4.3", "grok-4.5", "grok-4.6", "grok-4.7"} {
 		if model == family || strings.HasPrefix(model, family+"-") {
 			return true
@@ -826,11 +836,11 @@ func xaiIgnoresLogprobs(model string) bool {
 }
 
 func (XAI) ManagedChatModelProbes() []string {
-	return []string{"grok-4.20", "grok-4.3", "grok-4.5", "grok-4.6", "grok-4.7"}
+	return []string{"grok-4.20", "grok-4.3", "grok-4.5", "grok-build-latest", "grok-4.6", "grok-4.7"}
 }
 
 func (x XAI) ManagedResponseModelProbes() []string {
-	return []string{"grok-4.5", "grok-4.6", "grok-4.7", "grok-4.20-multi-agent"}
+	return []string{"grok-4.5", "grok-build-latest", "grok-4.6", "grok-4.7", "grok-4.20-multi-agent"}
 }
 
 func xaiParameterError(param, message string) error {

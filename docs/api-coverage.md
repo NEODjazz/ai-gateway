@@ -81,6 +81,8 @@ for the known Grok 4.20-and-newer model families, and rejects `stop`,
 `frequency_penalty` and `presence_penalty` for known reasoning models before
 provider execution. The latter two appear in the model-specific
 unsupported-option list.
+The published `grok-build-latest` alias follows the same validated Chat and
+Responses parameter policy as Grok 4.5 and has its own exact profile entry.
 
 ## Completed increments
 
