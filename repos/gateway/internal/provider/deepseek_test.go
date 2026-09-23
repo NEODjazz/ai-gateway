@@ -2,6 +2,7 @@ package provider
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -142,6 +143,41 @@ func TestDeepSeekResponsesReasoningEffortWire(t *testing.T) {
 				t.Fatalf("response=%+v err=%v", response, err)
 			}
 		})
+	}
+}
+
+func TestDeepSeekResponsesRejectsIgnoredInputItemTypes(t *testing.T) {
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
+	defer server.Close()
+	client := NewDeepSeek(server.URL, "key", false)
+	for _, input := range []any{
+		[]any{map[string]any{"type": "file_search_call", "id": "search_1"}},
+		[]any{map[string]any{"type": "unrecognized", "content": "ignored"}},
+		[]any{map[string]any{"content": "missing role"}},
+	} {
+		_, err := client.Responses(t.Context(), openai.ResponseRequest{Model: "deepseek-flash", Input: input})
+		var failure *Error
+		if !errors.As(err, &failure) || failure.Param != "input" || failure.UpstreamCode != "unsupported_parameter" || called {
+			t.Fatalf("input=%v err=%v called=%v", input, err, called)
+		}
+	}
+}
+
+func TestDeepSeekResponsesAcceptsDocumentedInputItemTypes(t *testing.T) {
+	for _, item := range []map[string]any{
+		{"role": "user", "content": "hello"},
+		{"type": "message", "role": "user", "content": "hello"},
+		{"type": "function_call", "call_id": "call_1", "name": "lookup", "arguments": "{}"},
+		{"type": "function_call_output", "call_id": "call_1", "output": "ok"},
+		{"type": "custom_tool_call", "call_id": "call_1", "name": "apply_patch", "input": "patch"},
+		{"type": "custom_tool_call_output", "call_id": "call_1", "output": "ok"},
+		{"type": "reasoning", "content": []any{map[string]any{"type": "reasoning_text", "text": "plan"}}},
+		{"type": "web_search_call", "id": "search_1"},
+	} {
+		if err := validateDeepSeekResponseInput([]any{item}); err != nil {
+			t.Fatalf("item=%v err=%v", item, err)
+		}
 	}
 }
 

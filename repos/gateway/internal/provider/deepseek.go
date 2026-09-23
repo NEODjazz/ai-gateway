@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -148,6 +149,9 @@ func (d DeepSeek) ValidateResponseParameters(request openai.ResponseRequest) err
 	if message := request.Validate(); message != "" {
 		return &Error{Class: FailureClientRequest, Provider: "deepseek", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New(message)}
 	}
+	if err := validateDeepSeekResponseInput(request.Input); err != nil {
+		return err
+	}
 	_, verbositySupplied := openai.ResponseTextVerbosity(request.Text)
 	if err := validateDeepSeekUser(request.User); err != nil {
 		return err
@@ -185,6 +189,42 @@ func (d DeepSeek) ValidateResponseParameters(request openai.ResponseRequest) err
 		parameterCheck{"frequency_penalty", request.FrequencyPenalty != nil}, parameterCheck{"presence_penalty", request.PresencePenalty != nil},
 		parameterCheck{"max_tool_calls", request.MaxToolCalls != nil},
 	)
+}
+
+func validateDeepSeekResponseInput(input any) error {
+	if input == nil {
+		return nil
+	}
+	if _, ok := input.(string); ok {
+		return nil
+	}
+	invalid := func(message string) error {
+		return &Error{Class: FailureClientRequest, Provider: "deepseek", StatusCode: http.StatusBadRequest, UpstreamCode: "unsupported_parameter", Param: "input", Err: errors.New(message)}
+	}
+	payload, err := json.Marshal(input)
+	if err != nil {
+		return invalid("input must be a string or supported item array")
+	}
+	var items []map[string]json.RawMessage
+	if json.Unmarshal(payload, &items) != nil || len(items) == 0 {
+		return invalid("input must be a string or supported item array")
+	}
+	for _, item := range items {
+		var itemType string
+		if len(item) == 0 || item["type"] != nil && json.Unmarshal(item["type"], &itemType) != nil {
+			return invalid("input item has an invalid type")
+		}
+		switch itemType {
+		case "":
+			if item["role"] == nil {
+				return invalid("input item without type must be a message")
+			}
+		case "message", "function_call", "function_call_output", "custom_tool_call", "custom_tool_call_output", "reasoning", "web_search_call":
+		default:
+			return invalid("input item type is not supported by DeepSeek")
+		}
+	}
+	return nil
 }
 
 func (d DeepSeek) Responses(ctx context.Context, request openai.ResponseRequest) (openai.ResponseResponse, error) {
