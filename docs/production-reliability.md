@@ -2392,3 +2392,17 @@ image ID `sha256:c5521be3dd9cfe8d4f87ceed667fa1fd5e43599a26b4536a0270181c90b4e0c
 Gateway Helm revision 599 completed successfully. Pod
 `ai-gateway-gateway-65f498b759-5fdgq` became Ready with zero restarts, and
 direct service liveness and readiness both returned 204.
+
+## DeepSeek Responses message image placement
+
+Source `22bdaac5` validates message roles and permits image parts only in
+`user`/`developer` messages or tool outputs on supported Flash models.
+Unsupported roles and `system`/`assistant` image parts fail before provider
+execution. Role and placement regressions passed with the full Go race suite,
+vet and build.
+
+Rancher Desktop built `ai-gateway-gateway:deepseek-images-22bdaac5` with image
+ID `sha256:f67ae7f1b63c82fbf39a8bd92a0a73c112bd9d5c48786f3ef0dd90a3dfd74a6f`.
+Gateway Helm revision 600 completed successfully. Pod
+`ai-gateway-gateway-66f9594b69-zkpfb` became Ready with zero restarts, and
+direct service liveness and readiness both returned 204.
