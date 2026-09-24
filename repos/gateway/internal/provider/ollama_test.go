@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -245,6 +246,53 @@ func TestOllamaChatCompletions(t *testing.T) {
 	}
 	if response.Usage.TotalTokens != 6 {
 		t.Fatalf("unexpected total tokens: %d", response.Usage.TotalTokens)
+	}
+}
+
+func TestOllamaRejectsInvalidChatUsage(t *testing.T) {
+	for _, test := range []struct {
+		name, usage string
+	}{
+		{name: "negative prompt", usage: `"prompt_eval_count":-1,"eval_count":1`},
+		{name: "negative completion", usage: `"prompt_eval_count":1,"eval_count":-1`},
+		{name: "overflow", usage: fmt.Sprintf(`"prompt_eval_count":%d,"eval_count":1`, math.MaxInt)},
+	} {
+		for _, stream := range []bool{false, true} {
+			name := test.name + "/json"
+			if stream {
+				name = test.name + "/stream"
+			}
+			t.Run(name, func(t *testing.T) {
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					_, _ = fmt.Fprintf(w, `{"model":"test-model","message":{"role":"assistant","content":"ok"},"done":true,%s}`+"\n", test.usage)
+				}))
+				defer server.Close()
+
+				provider := NewOllama(server.URL, stream)
+				request := openai.ChatCompletionRequest{Model: "test-model", Stream: stream}
+				var err error
+				if stream {
+					_, err = provider.StreamChatCompletions(t.Context(), request, func(payload string) error {
+						if strings.Contains(payload, `"finish_reason":"stop"`) {
+							t.Error("invalid usage produced a successful terminal event")
+						}
+						return nil
+					})
+				} else {
+					_, err = provider.ChatCompletions(t.Context(), request)
+				}
+				if err == nil || !strings.Contains(err.Error(), "invalid Ollama chat usage") {
+					t.Fatalf("expected invalid usage error, got %v", err)
+				}
+			})
+		}
+	}
+}
+
+func TestOllamaChatUsageMaxBoundary(t *testing.T) {
+	usage, err := ollamaChatUsage(math.MaxInt, 0)
+	if err != nil || usage.TotalTokens != math.MaxInt {
+		t.Fatalf("unexpected boundary usage: %+v, %v", usage, err)
 	}
 }
 

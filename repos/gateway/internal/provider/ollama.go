@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"strings"
@@ -231,6 +232,10 @@ func (p Ollama) ChatCompletions(ctx context.Context, request openai.ChatCompleti
 	if request.Logprobs != nil && *request.Logprobs && len(ollamaResp.Logprobs) == 0 && openai.ContentText(message.Content) != "" {
 		return openai.ChatCompletionResponse{}, errors.New("Ollama chat response omitted requested logprobs")
 	}
+	usage, err := ollamaChatUsage(ollamaResp.PromptEvalCount, ollamaResp.EvalCount)
+	if err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
 	var choiceLogprobs *openai.ChoiceLogprobs
 	if len(ollamaResp.Logprobs) > 0 {
 		choiceLogprobs = &logprobs
@@ -248,11 +253,7 @@ func (p Ollama) ChatCompletions(ctx context.Context, request openai.ChatCompleti
 				Logprobs:     choiceLogprobs,
 			},
 		},
-		Usage: openai.Usage{
-			PromptTokens:     ollamaResp.PromptEvalCount,
-			CompletionTokens: ollamaResp.EvalCount,
-			TotalTokens:      ollamaResp.PromptEvalCount + ollamaResp.EvalCount,
-		},
+		Usage: usage,
 	}, nil
 }
 
@@ -431,16 +432,16 @@ func (p Ollama) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 			}
 		}
 		if chunk.Done {
+			usage, err := ollamaChatUsage(chunk.PromptEvalCount, chunk.EvalCount)
+			if err != nil {
+				return openai.ChatCompletionResponse{}, err
+			}
 			finishReason := chunk.DoneReason
 			if finishReason == "" {
 				finishReason = "stop"
 			}
 			response.Choices[0].FinishReason = finishReason
-			response.Usage = openai.Usage{
-				PromptTokens:     chunk.PromptEvalCount,
-				CompletionTokens: chunk.EvalCount,
-				TotalTokens:      chunk.PromptEvalCount + chunk.EvalCount,
-			}
+			response.Usage = usage
 			if err := write(openAIChatCompletionChunkPayload(response.ID, response.Model, 0, "", "", &finishReason)); err != nil {
 				return openai.ChatCompletionResponse{}, err
 			}
@@ -450,6 +451,16 @@ func (p Ollama) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 		response.Choices[0].FinishReason = "stop"
 	}
 	return response, nil
+}
+
+func ollamaChatUsage(promptTokens, completionTokens int) (openai.Usage, error) {
+	if promptTokens < 0 || completionTokens < 0 || promptTokens > math.MaxInt-completionTokens {
+		return openai.Usage{}, errors.New("invalid Ollama chat usage")
+	}
+	return openai.Usage{
+		PromptTokens: promptTokens, CompletionTokens: completionTokens,
+		TotalTokens: promptTokens + completionTokens,
+	}, nil
 }
 
 func ollamaThink(reasoningEffort string) any {
