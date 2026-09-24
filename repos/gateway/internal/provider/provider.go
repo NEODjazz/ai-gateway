@@ -845,7 +845,10 @@ func (r Router) ChatCompletions(ctx context.Context, req modules.RequestContext)
 			if replaySafe && !chatResponseHasNativeContent(response) {
 				cachePayload, _ = json.Marshal(response)
 			}
-			mergeChatUsage(&response, attemptCtx.Usage)
+			if err := mergeChatUsage(&response, attemptCtx.Usage); err != nil {
+				r.modules.RunFailure(ctx, &attemptCtx, err)
+				return openai.ChatCompletionResponse{}, &Error{Class: FailurePostProcessing, Provider: endpoint.Name, Err: err}
+			}
 			attemptCtx.Response = &response
 			modules.DeanonymizeResponse(&attemptCtx, &response)
 			if err := r.modules.RunPostResponse(ctx, &attemptCtx); err != nil {
@@ -1041,7 +1044,10 @@ func (r Router) StreamChatCompletions(ctx context.Context, req modules.RequestCo
 		}
 		r.health.success(ctx, endpoint)
 
-		mergeChatUsage(&response, attemptCtx.Usage)
+		if err := mergeChatUsage(&response, attemptCtx.Usage); err != nil {
+			r.modules.RunFailure(ctx, &attemptCtx, err)
+			return openai.ChatCompletionResponse{}, true, &Error{Class: FailurePostProcessing, Provider: endpoint.Name, Err: err}
+		}
 		attemptCtx.Response = &response
 		if err := r.modules.RunPostResponse(ctx, &attemptCtx); err != nil {
 			return openai.ChatCompletionResponse{}, true, &Error{Class: FailurePostProcessing, Provider: endpoint.Name, Err: err}
@@ -1297,7 +1303,10 @@ func (r Router) Embeddings(ctx context.Context, req modules.RequestContext) (ope
 		setAttemptMetadata(&attemptCtx, started, err)
 		setAttemptCounters(&attemptCtx, totalRetries, fallbackCount)
 		if err == nil {
-			mergeEmbeddingUsage(&response, attemptCtx.Usage)
+			if err := mergeEmbeddingUsage(&response, attemptCtx.Usage); err != nil {
+				r.modules.RunFailure(ctx, &attemptCtx, err)
+				return openai.EmbeddingResponse{}, &Error{Class: FailurePostProcessing, Provider: endpoint.Name, Err: err}
+			}
 			attemptCtx.EmbeddingResponse = &response
 			if err := r.modules.RunPostResponse(ctx, &attemptCtx); err != nil {
 				return openai.EmbeddingResponse{}, &Error{Class: FailurePostProcessing, Provider: endpoint.Name, Err: err}
@@ -3027,12 +3036,17 @@ func setAttemptMetadata(req *modules.RequestContext, started time.Time, err erro
 	req.Metadata["provider.failure_class"] = string(failureClass(err))
 }
 
-func mergeChatUsage(response *openai.ChatCompletionResponse, usage *openai.Usage) {
+func mergeChatUsage(response *openai.ChatCompletionResponse, usage *openai.Usage) error {
 	if usage == nil || response.Usage.PromptTokens != 0 {
-		return
+		return nil
 	}
-	response.Usage.PromptTokens = usage.PromptTokens
-	response.Usage.TotalTokens += usage.PromptTokens
+	prompt := usage.PromptTokens
+	if prompt < 0 || response.Usage.TotalTokens < 0 || prompt > int(^uint(0)>>1)-response.Usage.TotalTokens {
+		return errors.New("invalid estimated Chat token usage")
+	}
+	response.Usage.PromptTokens = prompt
+	response.Usage.TotalTokens += prompt
+	return nil
 }
 
 func mergeResponseUsage(response *openai.ResponseResponse, usage *openai.Usage) error {
@@ -3052,12 +3066,17 @@ func mergeResponseUsage(response *openai.ResponseResponse, usage *openai.Usage) 
 	return nil
 }
 
-func mergeEmbeddingUsage(response *openai.EmbeddingResponse, usage *openai.Usage) {
+func mergeEmbeddingUsage(response *openai.EmbeddingResponse, usage *openai.Usage) error {
 	if usage == nil || response.UsageReported || response.Usage.PromptTokens != 0 {
-		return
+		return nil
 	}
-	response.Usage.PromptTokens = usage.PromptTokens
-	response.Usage.TotalTokens += usage.PromptTokens
+	prompt := usage.PromptTokens
+	if prompt < 0 || response.Usage.TotalTokens < 0 || prompt > int(^uint(0)>>1)-response.Usage.TotalTokens {
+		return errors.New("invalid estimated embedding token usage")
+	}
+	response.Usage.PromptTokens = prompt
+	response.Usage.TotalTokens += prompt
+	return nil
 }
 
 func (r Router) candidates(ctx context.Context, request openai.ChatCompletionRequest, capabilities ...string) []Endpoint {
