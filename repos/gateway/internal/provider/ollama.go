@@ -240,7 +240,10 @@ func (p Ollama) ChatCompletions(ctx context.Context, request openai.ChatCompleti
 		return openai.ChatCompletionResponse{}, err
 	}
 
-	finishReason := ollamaFinishReason(ollamaResp.DoneReason, len(message.ToolCalls) > 0)
+	finishReason, err := ollamaFinishReason(ollamaResp.DoneReason, len(message.ToolCalls) > 0)
+	if err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
 	logprobs, logprobText, err := ollamaChoiceLogprobs(ollamaResp.Logprobs)
 	if err != nil || len(ollamaResp.Logprobs) > 0 && logprobText != openai.ContentText(message.Content) {
 		return openai.ChatCompletionResponse{}, errors.New("invalid Ollama chat logprobs")
@@ -389,6 +392,9 @@ func (p Ollama) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 			if usageErr != nil {
 				return openai.ChatCompletionResponse{}, usageErr
 			}
+			if _, reasonErr := ollamaFinishReason(chunk.DoneReason, false); reasonErr != nil {
+				return openai.ChatCompletionResponse{}, reasonErr
+			}
 		}
 		if chunk.Model != "" {
 			if upstreamModel != "" && chunk.Model != upstreamModel {
@@ -474,7 +480,10 @@ func (p Ollama) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 			}
 		}
 		if chunk.Done {
-			finishReason := ollamaFinishReason(chunk.DoneReason, len(response.Choices[0].Message.ToolCalls) > 0)
+			finishReason, reasonErr := ollamaFinishReason(chunk.DoneReason, len(response.Choices[0].Message.ToolCalls) > 0)
+			if reasonErr != nil {
+				return openai.ChatCompletionResponse{}, reasonErr
+			}
 			response.Choices[0].FinishReason = finishReason
 			response.Usage = terminalUsage
 			role := ""
@@ -504,14 +513,17 @@ func ollamaChatUsage(promptTokens, cachedTokens, completionTokens *int) (openai.
 	return usage, nil
 }
 
-func ollamaFinishReason(reason string, hasToolCalls bool) string {
+func ollamaFinishReason(reason string, hasToolCalls bool) (string, error) {
+	if reason != "" && reason != "stop" && reason != "length" {
+		return "", errors.New("invalid Ollama chat finish reason")
+	}
 	if hasToolCalls && (reason == "" || reason == "stop") {
-		return "tool_calls"
+		return "tool_calls", nil
 	}
 	if reason == "" {
-		return "stop"
+		return "stop", nil
 	}
-	return reason
+	return reason, nil
 }
 
 func decodeOllamaChatResponse(reader io.Reader, response *ollamaChatResponse) error {

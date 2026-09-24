@@ -100,6 +100,9 @@ uninspected metadata produces no automatic capability selection; the operator
 must choose a capability before applying the plan. The connection probe only
 checks the model list, so unavailable detail metadata does not mark the provider
 offline.
+Native Ollama Chat accepts only the known terminal reasons `stop`, `length` and
+the empty default; an unknown reason fails the JSON or SSE request before a
+terminal stream chunk is forwarded.
 
 For Chat model parameter overrides, `supported_options` adds model-specific
 controls to the provider policy and `unsupported_options` removes controls the

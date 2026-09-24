@@ -24,9 +24,57 @@ func TestOllamaMapsMaxCompletionTokensToNumPredict(t *testing.T) {
 	}
 }
 
-func TestOllamaToolCallsPreserveLengthFinishReason(t *testing.T) {
-	if got := ollamaFinishReason("length", true); got != "length" {
-		t.Fatalf("truncated tool call finish reason = %q, want length", got)
+func TestOllamaFinishReasonMapping(t *testing.T) {
+	for _, test := range []struct {
+		reason       string
+		hasToolCalls bool
+		want         string
+	}{
+		{reason: "", want: "stop"},
+		{reason: "", hasToolCalls: true, want: "tool_calls"},
+		{reason: "stop", hasToolCalls: true, want: "tool_calls"},
+		{reason: "length", hasToolCalls: true, want: "length"},
+	} {
+		if got, err := ollamaFinishReason(test.reason, test.hasToolCalls); err != nil || got != test.want {
+			t.Fatalf("reason=%q tools=%t mapped to %q, want %q; err=%v", test.reason, test.hasToolCalls, got, test.want, err)
+		}
+	}
+}
+
+func TestOllamaFinishReasonRejectsUnknownValues(t *testing.T) {
+	for _, reason := range []string{"eos", "error", "content_filter"} {
+		if got, err := ollamaFinishReason(reason, false); err == nil || got != "" {
+			t.Fatalf("reason=%q mapped to %q with err=%v", reason, got, err)
+		}
+	}
+}
+
+func TestOllamaChatRejectsUnknownUpstreamFinishReason(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprint("stream=", stream), func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(`{"model":"m","message":{"role":"assistant","content":"bad"},"done":true,"done_reason":"eos","prompt_eval_count":2,"eval_count":1}`))
+			}))
+			t.Cleanup(server.Close)
+			client := NewOllama(server.URL, true)
+			request := openai.ChatCompletionRequest{Model: "m", Messages: []openai.Message{{Role: "user", Content: "hello"}}}
+			var err error
+			if stream {
+				var chunks []string
+				_, err = client.StreamChatCompletions(t.Context(), request, func(chunk string) error {
+					chunks = append(chunks, chunk)
+					return nil
+				})
+				if len(chunks) != 0 {
+					t.Fatalf("invalid terminal chunk was forwarded: %v", chunks)
+				}
+			} else {
+				_, err = client.ChatCompletions(t.Context(), request)
+			}
+			if err == nil || !strings.Contains(err.Error(), "finish reason") {
+				t.Fatalf("unknown upstream finish reason accepted: %v", err)
+			}
+		})
 	}
 }
 
