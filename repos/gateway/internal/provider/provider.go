@@ -3282,7 +3282,9 @@ func (r Router) rememberResponseAffinity(ctx context.Context, req modules.Reques
 	if key == "" {
 		return
 	}
-	err := r.affinity.set(ctx, key, endpoint)
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	err := r.affinity.set(writeCtx, key, endpoint)
 	if r.observer != nil {
 		result := "ok"
 		if err != nil {

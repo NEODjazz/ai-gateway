@@ -22,6 +22,24 @@ func (s *affinityFailureStore) get(context.Context, string) (string, bool, error
 }
 func (s *affinityFailureStore) set(context.Context, string, string) error { s.writes++; return s.err }
 
+type affinityCanceledContextStore struct {
+	key, endpoint string
+	bounded       bool
+}
+
+func (*affinityCanceledContextStore) get(context.Context, string) (string, bool, error) {
+	return "", false, nil
+}
+
+func (s *affinityCanceledContextStore) set(ctx context.Context, key, endpoint string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	_, s.bounded = ctx.Deadline()
+	s.key, s.endpoint = key, endpoint
+	return nil
+}
+
 type affinityObserver struct{ operations map[string]int }
 
 func (*affinityObserver) ObserveProvider(string, string, string, string, time.Duration) {}
@@ -117,5 +135,18 @@ func TestAffinityWritesCountOnlyActualStoreCalls(t *testing.T) {
 	router.rememberResponseAffinity(ctx, req, "resp", "a")
 	if store.writes != 1 || len(observer.operations) != 1 || observer.operations["affinity_set/ok"] != 1 {
 		t.Fatalf("writes=%d metrics=%v", store.writes, observer.operations)
+	}
+}
+
+func TestAffinityWriteSurvivesCanceledClientContext(t *testing.T) {
+	observer := &affinityObserver{operations: map[string]int{}}
+	store := &affinityCanceledContextStore{}
+	router := Router{affinity: store, observer: observer}
+	req := modules.RequestContext{CredentialID: "credential", UserID: "user"}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	router.rememberResponseAffinity(ctx, req, "response", "deployment")
+	if store.key != affinityKey(req, "response") || store.endpoint != "deployment" || !store.bounded || observer.operations["affinity_set/ok"] != 1 {
+		t.Fatalf("canceled client lost affinity: key=%q endpoint=%q bounded=%t metrics=%v", store.key, store.endpoint, store.bounded, observer.operations)
 	}
 }

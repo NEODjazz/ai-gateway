@@ -1529,6 +1529,9 @@ failure. Successful lookups still re-evaluate endpoint/model capabilities; a
 missing or expired binding retains existing cache-miss behavior. First requests
 without previous_response_id do not need a lookup. Failure to persist a new binding
 retains the existing logged best-effort behavior and is a separate durability gap.
+The write uses a five-second bounded context independent of client cancellation,
+so a completed provider response can still record its deployment after the
+client disconnects.
 Regression tests cover JSON and streaming lookup failures, no provider execution,
 no provider-module execution, and preservation of the existing pinned non-streaming
 fallback tests.
