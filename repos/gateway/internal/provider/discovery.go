@@ -76,6 +76,9 @@ func (r *Router) DiscoverProviderModels(ctx context.Context, providerID, credent
 	if managed.Type == "anthropic" {
 		return discoverAnthropicModels(ctx, managed.BaseURL, secret)
 	}
+	if managed.Type == "cohere" {
+		return discoverCohereModels(ctx, managed, secret)
+	}
 	if managed.Type == "xai" {
 		return discoverXAIModels(ctx, managed.BaseURL, secret)
 	}
