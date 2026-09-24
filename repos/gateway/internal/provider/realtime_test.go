@@ -10,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"ai-gateway-gateway/internal/config"
 	"ai-gateway-gateway/internal/modules"
@@ -258,9 +259,11 @@ func TestRealtimeRouterRequiresCapabilityPinsAdmissionAndAppliesAlias(t *testing
 	t.Cleanup(skipped.Close)
 	var selectedCalls atomic.Int32
 	var aliasApplied atomic.Bool
+	selectedReady := make(chan struct{}, 1)
 	selected := httptest.NewServer(websocket.Handler(func(connection *websocket.Conn) {
 		selectedCalls.Add(1)
 		aliasApplied.Store(connection.Request().URL.Query().Get("model") == "upstream-model")
+		selectedReady <- struct{}{}
 		var event string
 		_ = websocket.Message.Receive(connection, &event)
 	}))
@@ -278,6 +281,11 @@ func TestRealtimeRouterRequiresCapabilityPinsAdmissionAndAppliesAlias(t *testing
 	first, attempt, err := runtime.OpenRealtime(t.Context(), identity, "public-model")
 	if err != nil {
 		t.Fatal(err)
+	}
+	select {
+	case <-selectedReady:
+	case <-time.After(5 * time.Second):
+		t.Fatal("selected realtime handler did not start")
 	}
 	if skippedCalls.Load() != 0 || selectedCalls.Load() != 1 || !aliasApplied.Load() {
 		t.Fatalf("routing skipped=%d selected=%d alias=%v", skippedCalls.Load(), selectedCalls.Load(), aliasApplied.Load())
