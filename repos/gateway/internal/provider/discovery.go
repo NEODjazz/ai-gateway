@@ -310,7 +310,7 @@ func parseDiscoveredModels(providerType string, payload []byte) ([]DiscoveredMod
 		}
 	} else if providerType == "cohere" {
 		var body struct {
-			Models []struct {
+			Models *[]struct {
 				Name       string   `json:"name"`
 				Deprecated bool     `json:"is_deprecated"`
 				Endpoints  []string `json:"endpoints"`
@@ -319,7 +319,10 @@ func parseDiscoveredModels(providerType string, payload []byte) ([]DiscoveredMod
 		if err := json.Unmarshal(payload, &body); err != nil {
 			return nil, err
 		}
-		for _, item := range body.Models {
+		if body.Models == nil {
+			return nil, errors.New("Cohere discovery response omitted models")
+		}
+		for _, item := range *body.Models {
 			if item.Deprecated || (!containsString(item.Endpoints, "chat") && !containsString(item.Endpoints, "rerank") && !containsString(item.Endpoints, "embed")) {
 				continue
 			}
@@ -342,14 +345,17 @@ func parseDiscoveredModels(providerType string, payload []byte) ([]DiscoveredMod
 		}
 	} else {
 		var body struct {
-			Data []struct {
+			Data *[]struct {
 				ID string `json:"id"`
 			} `json:"data"`
 		}
 		if err := json.Unmarshal(payload, &body); err != nil {
 			return nil, err
 		}
-		for _, item := range body.Data {
+		if body.Data == nil {
+			return nil, errors.New("provider discovery response omitted data")
+		}
+		for _, item := range *body.Data {
 			ids = append(ids, item.ID)
 		}
 	}
