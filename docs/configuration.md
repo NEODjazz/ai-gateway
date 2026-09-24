@@ -146,6 +146,9 @@ identity. Для endpoint с suffix `.openai.azure.cn` или
 `https://cognitiveservices.azure.cn/`. Выбор sovereign cloud выполняется только
 по полному host suffix; другие и похожие внешние домены остаются на public-cloud
 defaults.
+Foundry resource и project endpoints с host suffix `.services.ai.azure.com`
+используют Entra scope `https://ai.azure.com/.default`; project URL
+`/api/projects/{project}` автоматически дополняется `/openai/v1`.
 `AZURE_CLIENT_ID` также выбирает
 user-assigned managed identity. Разрешены только loopback и link-local identity
 endpoints; redirects и некорректные/просроченные ответы отклоняются. Временный

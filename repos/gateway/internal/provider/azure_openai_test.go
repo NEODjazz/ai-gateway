@@ -118,6 +118,23 @@ func TestAzureOpenAIResourceRootUsesV1AndAPIKey(t *testing.T) {
 	}
 }
 
+func TestAzureFoundryProjectUsesV1AndEntraBearer(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/projects/project-a/openai/v1/chat/completions" || r.URL.RawQuery != "" {
+			t.Fatalf("unexpected URL: %s", r.URL.String())
+		}
+		if r.Header.Get("Authorization") != "Bearer project-token" || r.Header.Get("api-key") != "" {
+			t.Fatalf("unexpected auth headers: %v", r.Header)
+		}
+		_ = json.NewEncoder(w).Encode(openai.ChatCompletionResponse{ID: "chat-foundry", Model: "deployment"})
+	}))
+	t.Cleanup(server.Close)
+	client := NewAzureOpenAI(server.URL+"/api/projects/project-a", "project-token", false, "", "entra")
+	if _, err := client.ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "deployment", Messages: []openai.Message{{Role: "user", Content: "hello"}}}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestAzureOpenAIVersionedDeploymentUsesEntraBearer(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/openai/deployments/deployment-a/embeddings" || r.URL.Query().Get("api-version") != "2025-04-01-preview" {

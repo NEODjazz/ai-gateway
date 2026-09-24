@@ -22,6 +22,7 @@ const (
 	azureAuthorityURL        = "https://login.microsoftonline.com"
 	azureOpenAIResource      = "https://cognitiveservices.azure.com/"
 	azureOpenAIScope         = azureOpenAIResource + ".default"
+	azureFoundryResource     = "https://ai.azure.com/"
 	azureGovernmentAuthority = "https://login.microsoftonline.us"
 	azureGovernmentResource  = "https://cognitiveservices.azure.us/"
 	azureChinaAuthority      = "https://login.chinacloudapi.cn"
@@ -67,6 +68,9 @@ func azureIdentityEndpoints(providerBaseURL ...string) (string, string) {
 	if len(providerBaseURL) > 0 {
 		if parsed, err := url.Parse(providerBaseURL[0]); err == nil {
 			host := strings.ToLower(parsed.Hostname())
+			if strings.HasSuffix(host, ".services.ai.azure.com") {
+				return azureAuthorityURL, azureFoundryResource
+			}
 			if strings.HasSuffix(host, ".openai.azure.us") || strings.HasSuffix(host, ".cognitiveservices.azure.us") {
 				return azureGovernmentAuthority, azureGovernmentResource
 			}

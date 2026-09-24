@@ -65,17 +65,45 @@ func TestAzureIdentityEndpointsSelectSupportedCloud(t *testing.T) {
 		resource  string
 	}{
 		{baseURL: "https://resource.openai.azure.com", authority: azureAuthorityURL, resource: azureOpenAIResource},
+		{baseURL: "https://resource.services.ai.azure.com/openai/v1", authority: azureAuthorityURL, resource: azureFoundryResource},
+		{baseURL: "https://resource.services.ai.azure.com/api/projects/project-a/openai/v1", authority: azureAuthorityURL, resource: azureFoundryResource},
 		{baseURL: "https://resource.openai.azure.us/openai/v1", authority: azureGovernmentAuthority, resource: azureGovernmentResource},
 		{baseURL: "https://resource.cognitiveservices.azure.us", authority: azureGovernmentAuthority, resource: azureGovernmentResource},
 		{baseURL: "https://resource.openai.azure.cn/openai/v1", authority: azureChinaAuthority, resource: azureChinaResource},
 		{baseURL: "https://resource.cognitiveservices.azure.cn", authority: azureChinaAuthority, resource: azureChinaResource},
 		{baseURL: "https://resource.openai.azure.cn.example.test", authority: azureAuthorityURL, resource: azureOpenAIResource},
+		{baseURL: "https://resource.services.ai.azure.com.example.test", authority: azureAuthorityURL, resource: azureOpenAIResource},
 		{baseURL: "https://custom.example.test", authority: azureAuthorityURL, resource: azureOpenAIResource},
 	} {
 		authority, resource := azureIdentityEndpoints(test.baseURL)
 		if authority != test.authority || resource != test.resource {
 			t.Fatalf("base_url=%q authority=%q resource=%q", test.baseURL, authority, resource)
 		}
+	}
+}
+
+func TestAzureFoundryFederationUsesProjectScope(t *testing.T) {
+	tokenFile := filepath.Join(t.TempDir(), "federated-token")
+	if err := os.WriteFile(tokenFile, []byte("projected.jwt"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Error(err)
+		}
+		if got := r.Form.Get("scope"); got != azureFoundryResource+".default" {
+			t.Errorf("scope=%q", got)
+		}
+		_, _ = fmt.Fprint(w, `{"access_token":"foundry-token","expires_in":3600,"token_type":"Bearer"}`)
+	}))
+	t.Cleanup(server.Close)
+	source := newAzureTokenSource("", "https://resource.services.ai.azure.com/api/projects/project-a/openai/v1")
+	source.authorityBaseURL = server.URL
+	source.getenv = awsTestEnvironment(map[string]string{
+		"AZURE_TENANT_ID": "tenant-id", "AZURE_CLIENT_ID": "client-id", "AZURE_FEDERATED_TOKEN_FILE": tokenFile,
+	})
+	if token, err := source.Token(t.Context()); err != nil || token != "foundry-token" {
+		t.Fatalf("token=%q err=%v", token, err)
 	}
 }
 
