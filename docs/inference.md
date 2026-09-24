@@ -2490,6 +2490,8 @@ Provider type `azure-openai` добавляет `/openai/v1` к resource-root UR
 `prompt_tokens`, `completion_tokens` и согласованный `total_tokens`.
 Отсутствие полного provider usage завершает попытку ошибкой вместо успешного
 учета только оценочного prompt; явно переданные нули допускаются.
+В SSE chunk с неполным или несогласованным usage отклоняется до передачи
+клиенту; промежуточные chunks с `usage: null` остаются допустимыми.
 Завершённые Azure Responses JSON/SSE также требуют явных `input_tokens`,
 `output_tokens` и согласованного `total_tokens`; терминальное SSE-событие с
 неполным usage не отправляется клиенту. Фоновые ответы со статусом `queued`

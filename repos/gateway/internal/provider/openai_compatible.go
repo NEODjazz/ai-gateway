@@ -720,6 +720,27 @@ func validateExactChatUsage(response openai.ChatCompletionResponse) error {
 	return nil
 }
 
+func validateExactChatUsageChunk(payload string) error {
+	var chunk struct {
+		Usage json.RawMessage `json:"usage"`
+	}
+	if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
+		return err
+	}
+	if len(chunk.Usage) == 0 || bytes.Equal(bytes.TrimSpace(chunk.Usage), []byte("null")) {
+		return nil
+	}
+	var usage openai.Usage
+	if err := json.Unmarshal(chunk.Usage, &usage); err != nil {
+		return err
+	}
+	reported, err := completeChatUsageFields([]byte(payload))
+	if err != nil {
+		return err
+	}
+	return validateExactChatUsage(openai.ChatCompletionResponse{Usage: usage, UsageReported: reported})
+}
+
 func validateRequestedChatChoices(request openai.ChatCompletionRequest, response openai.ChatCompletionResponse) error {
 	if request.N == nil {
 		return nil
@@ -836,7 +857,19 @@ func (p OpenAICompatible) streamChatCompletions(ctx context.Context, request ope
 	}
 	defer resp.Body.Close()
 
-	response, err := streamChatCompletionDataWithNormalizer(resp.Body, request.Model, write, normalizeStream)
+	forward := write
+	if p.exactChatUsage {
+		forward = func(payload string) error {
+			if err := validateExactChatUsageChunk(payload); err != nil {
+				return err
+			}
+			if write != nil {
+				return write(payload)
+			}
+			return nil
+		}
+	}
+	response, err := streamChatCompletionDataWithNormalizer(resp.Body, request.Model, forward, normalizeStream)
 	if err == nil {
 		err = validateChatCompletionEnvelope(response)
 	}

@@ -196,7 +196,7 @@ func TestAzureChatRequiresExactUsage(t *testing.T) {
 					}
 					if stream {
 						w.Header().Set("Content-Type", "text/event-stream")
-						_, _ = fmt.Fprint(w, `data: {"id":"chat-1","model":"deployment","choices":[{"index":0,"delta":{"content":"hello"},"finish_reason":"stop"}]}`+"\n\n")
+						_, _ = fmt.Fprint(w, `data: {"id":"chat-1","model":"deployment","choices":[{"index":0,"delta":{"content":"hello"},"finish_reason":"stop"}],"usage":null}`+"\n\n")
 						_, _ = fmt.Fprint(w, `data: {"id":"chat-1","model":"deployment","choices":[]`+tc.usage+`}`+"\n\n")
 						_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
 					} else {
@@ -208,8 +208,14 @@ func TestAzureChatRequiresExactUsage(t *testing.T) {
 				request := openai.ChatCompletionRequest{Model: "deployment", Messages: []openai.Message{{Role: "user", Content: "hello"}}, Stream: stream}
 				var response openai.ChatCompletionResponse
 				var err error
+				deliveredUsage := false
 				if stream {
-					response, err = client.StreamChatCompletions(t.Context(), request, nil)
+					response, err = client.StreamChatCompletions(t.Context(), request, func(payload string) error {
+						if strings.Contains(payload, `"usage":{`) {
+							deliveredUsage = true
+						}
+						return nil
+					})
 				} else {
 					response, err = client.ChatCompletions(t.Context(), request)
 				}
@@ -217,8 +223,13 @@ func TestAzureChatRequiresExactUsage(t *testing.T) {
 					if err == nil || !strings.Contains(err.Error(), "usage") {
 						t.Fatalf("invalid Azure usage accepted: response=%+v err=%v", response, err)
 					}
+					if deliveredUsage {
+						t.Fatal("invalid Azure usage chunk was forwarded")
+					}
 				} else if err != nil || !response.UsageReported {
 					t.Fatalf("reported Azure usage rejected: response=%+v err=%v", response, err)
+				} else if stream && !deliveredUsage {
+					t.Fatal("valid Azure usage chunk was not forwarded")
 				}
 			})
 		}
@@ -238,6 +249,31 @@ func TestAzureFoundryEntraChatRequiresExactUsage(t *testing.T) {
 	_, err := client.ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "deployment", Messages: []openai.Message{{Role: "user", Content: "hello"}}})
 	if err == nil || !strings.Contains(err.Error(), "usage") {
 		t.Fatalf("Foundry Entra Chat accepted missing usage: %v", err)
+	}
+}
+
+func TestAzureFoundryEntraChatWithholdsInvalidStreamUsage(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/projects/project-a/openai/v1/chat/completions" ||
+			r.Header.Get("Authorization") != "Bearer project-token" || r.Header.Get("api-key") != "" {
+			t.Errorf("unexpected Foundry Chat request: path=%s headers=%v", r.URL.Path, r.Header)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, `data: {"id":"chat-1","model":"deployment","choices":[{"index":0,"delta":{"content":"hello"},"finish_reason":"stop"}]}`+"\n\n")
+		_, _ = fmt.Fprint(w, `data: {"id":"chat-1","model":"deployment","choices":[],"usage":{"prompt_tokens":3,"total_tokens":3}}`+"\n\n")
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	t.Cleanup(server.Close)
+	client := NewAzureOpenAI(server.URL+"/api/projects/project-a", "project-token", true, "", "entra")
+	var forwarded []string
+	_, err := client.StreamChatCompletions(t.Context(), openai.ChatCompletionRequest{
+		Model: "deployment", Messages: []openai.Message{{Role: "user", Content: "hello"}}, Stream: true,
+	}, func(payload string) error {
+		forwarded = append(forwarded, payload)
+		return nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "usage") || len(forwarded) != 1 || strings.Contains(forwarded[0], `"usage":`) {
+		t.Fatalf("invalid Foundry Chat usage was forwarded: err=%v forwarded=%v", err, forwarded)
 	}
 }
 
