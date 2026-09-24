@@ -31,8 +31,10 @@ func TestAzureOpenAIRealtimeUsesNativeURLAndAuthentication(t *testing.T) {
 		wantPath, wantQuery, wantAPIKey, wantBearer      string
 	}{
 		{name: "GA API key", basePath: "/openai/deployments/legacy", credential: "resource-key", authType: "api_key", wantPath: "/openai/v1/realtime", wantQuery: "model=deployment-a", wantAPIKey: "resource-key"},
+		{name: "v1 preview API key", basePath: "/openai/v1", credential: "resource-key", apiVersion: "preview", authType: "api_key", wantPath: "/openai/v1/realtime", wantQuery: "model=deployment-a", wantAPIKey: "resource-key"},
 		{name: "preview Entra", basePath: "/openai/deployments/legacy", credential: "entra-token", apiVersion: "2025-04-01-preview", authType: "entra", wantPath: "/openai/realtime", wantQuery: "api-version=2025-04-01-preview&deployment=deployment-a", wantBearer: "Bearer entra-token"},
 		{name: "prefixed GA API key", basePath: "/tenant-a/openai/v1", credential: "resource-key", authType: "api_key", wantPath: "/tenant-a/openai/v1/realtime", wantQuery: "model=deployment-a", wantAPIKey: "resource-key"},
+		{name: "prefixed v1 preview Entra", basePath: "/tenant-a/openai/v1", credential: "entra-token", apiVersion: "preview", authType: "entra", wantPath: "/tenant-a/openai/v1/realtime", wantQuery: "model=deployment-a", wantBearer: "Bearer entra-token"},
 		{name: "prefixed preview Entra", basePath: "/tenant-a/openai/deployments/legacy", credential: "entra-token", apiVersion: "2025-04-01-preview", authType: "entra", wantPath: "/tenant-a/openai/realtime", wantQuery: "api-version=2025-04-01-preview&deployment=deployment-a", wantBearer: "Bearer entra-token"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -80,6 +82,7 @@ func TestManagedAzureRealtimeRoutesWithAuthenticationAndQuota(t *testing.T) {
 		name, authType, apiVersion, wantPath, wantQuery string
 	}{
 		{name: "GA API key", authType: "api_key", wantPath: "/openai/v1/realtime", wantQuery: "model=upstream-model"},
+		{name: "v1 preview API key", authType: "api_key", apiVersion: "preview", wantPath: "/openai/v1/realtime", wantQuery: "model=upstream-model"},
 		{name: "preview Entra", authType: "entra", apiVersion: "2025-04-01-preview", wantPath: "/openai/realtime", wantQuery: "api-version=2025-04-01-preview&deployment=upstream-model"},
 	} {
 		t.Run(test.name, func(t *testing.T) {

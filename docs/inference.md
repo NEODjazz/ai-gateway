@@ -775,8 +775,9 @@ Provider audio deltas проверяются как strict base64 до пере�
 `response.done.usage` заменяет резерв при billing commit и сохраняет cached,
 text и audio token details. WebSocket event ограничен 20 MiB плюс 64 KiB JSON
 overhead, pending responses — 16, conversation items — 1024, а сессия — 30 минут.
-Azure deployment с пустым `api_version` подключается к native GA
-`/openai/v1/realtime?model=...`; versioned deployment использует preview
+Azure deployment с пустым `api_version` или значением `preview` подключается к
+v1 `/openai/v1/realtime?model=...`; deployment с датированной версией использует
+legacy preview
 `/openai/realtime?api-version=...&deployment=...`. Handshake передаёт только
 настроенный `api-key` либо Entra bearer token, включая ambient managed identity.
 Отсутствующий API key закрывает запрос до WebSocket dial.

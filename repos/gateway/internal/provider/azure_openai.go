@@ -136,7 +136,7 @@ func azureRealtimeEndpoint(baseURL, apiVersion, model string) (*url.URL, error) 
 	endpoint.RawQuery = ""
 	endpoint.Fragment = ""
 	query := make(url.Values)
-	if apiVersion == "" {
+	if apiVersion == "" || apiVersion == "preview" {
 		endpoint.Path = pathPrefix + "/openai/v1/realtime"
 		query.Set("model", model)
 	} else {
