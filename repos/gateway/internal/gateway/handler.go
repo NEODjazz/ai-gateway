@@ -978,6 +978,10 @@ func (h Handler) CompactResponse(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", message)
 		return
 	}
+	if kind, err := responseAttachmentError(request.Input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_"+kind, err.Error())
+		return
+	}
 	responseRequest := openai.ResponseRequest{Provider: request.Provider, Model: request.Model, Input: request.Input, Instructions: request.Instructions}
 	reqCtx := modules.RequestContext{
 		APIKey: bearerToken(r.Header.Get("Authorization")), RequestID: executionID(w), SessionID: sessionID(r),
@@ -1006,7 +1010,17 @@ func (h Handler) CompactResponse(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "module_failed", "module produced an invalid response compaction request: "+message)
 		return
 	}
-	if !h.prepareAccessGroups(w, &reqCtx) || !h.authorizeAccess(w, r.Context(), reqCtx, request.Model, estimateResponseCompactTokens(request)) {
+	if kind, err := responseAttachmentError(request.Input); err != nil {
+		writeError(w, http.StatusBadGateway, "module_failed", "module produced invalid "+kind+" input: "+err.Error())
+		return
+	}
+	if !h.prepareAccessGroups(w, &reqCtx) {
+		return
+	}
+	toolIdentifiers, validTools := responseRequestToolIdentifiers(*reqCtx.ResponseRequest)
+	if !h.authorizeTools(w, reqCtx, toolIdentifiers, validTools) ||
+		!h.authorizeResponseToolResources(w, r.Context(), &reqCtx, reqCtx.ResponseRequest) ||
+		!h.authorizeAccess(w, r.Context(), reqCtx, request.Model, estimateResponseCompactTokens(request)) {
 		return
 	}
 	if !h.prepareModelFallbacks(w, r.Context(), &reqCtx, request.Model) {
@@ -1042,6 +1056,13 @@ func validateResponseCompactRequest(request openai.ResponseCompactRequest) strin
 		return "input is required"
 	default:
 		return "input must be a string or a non-empty array"
+	}
+	responseRequest := openai.ResponseRequest{Provider: request.Provider, Model: request.Model, Input: request.Input, Instructions: request.Instructions}
+	if message := responseRequest.ValidateEnvelope(); message != "" {
+		return message
+	}
+	if message := responseRequest.Validate(); message != "" {
+		return message
 	}
 	return ""
 }

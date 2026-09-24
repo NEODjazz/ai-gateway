@@ -669,6 +669,34 @@ func TestCompactResponseRejectsUnsupportedFieldsAndEmptyInput(t *testing.T) {
 	}
 }
 
+func TestCompactResponseValidatesInputAndToolHistory(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		body   string
+		status int
+		code   string
+	}{
+		{name: "non-object input", body: `{"model":"m","input":[null]}`, status: http.StatusBadRequest, code: "invalid_request"},
+		{name: "invalid image", body: `{"model":"m","input":[{"role":"user","content":[{"type":"input_image","image_url":"data:image/png;base64,not-base64"}]}]}`, status: http.StatusBadRequest, code: "invalid_image"},
+		{name: "denied tool history", body: `{"model":"m","input":[{"type":"function_call","call_id":"call_1","name":"unsafe_lookup","arguments":"{}"}]}`, status: http.StatusForbidden, code: "tool_not_allowed"},
+		{name: "unattributed tool output", body: `{"model":"m","input":[{"type":"function_call_output","call_id":"call_1","output":"ok"}]}`, status: http.StatusBadRequest, code: "invalid_request"},
+		{name: "allowed tool history", body: `{"model":"m","input":[{"type":"function_call","call_id":"call_1","name":"safe_lookup","arguments":"{}"}]}`, status: http.StatusOK},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			llm := &chatProvider{}
+			handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}, tools: []string{"safe_lookup"}}}), llm))
+			out := httptest.NewRecorder()
+			handler.ServeHTTP(out, httptest.NewRequest(http.MethodPost, "/v1/responses/compact", strings.NewReader(test.body)))
+			if out.Code != test.status || test.code != "" && !strings.Contains(out.Body.String(), `"code":"`+test.code+`"`) {
+				t.Fatalf("status=%d body=%s", out.Code, out.Body.String())
+			}
+			if test.status != http.StatusOK && llm.request.ResponseRequest != nil {
+				t.Fatal("invalid compaction input reached the provider")
+			}
+		})
+	}
+}
+
 func TestRerankUsesAuthenticatedProviderPipeline(t *testing.T) {
 	llm := &chatProvider{}
 	handler := NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}}}), llm)
