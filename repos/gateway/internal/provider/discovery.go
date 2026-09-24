@@ -272,9 +272,9 @@ func azureOpenAIDiscoveryURL(managed ManagedProvider) (string, error) {
 			return "", parseErr
 		}
 		path = strings.TrimRight(normalized.Path, "/")
-		if (managed.APIVersion == "" || managed.APIVersion == "preview") && strings.HasSuffix(path, "/openai") {
-			path += "/v1"
-		}
+	}
+	if (managed.APIVersion == "" || managed.APIVersion == "preview") && strings.HasSuffix(path, "/openai") {
+		path += "/v1"
 	}
 	base.Path = path + "/models"
 	query := url.Values{}

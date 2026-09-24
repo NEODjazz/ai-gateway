@@ -1092,15 +1092,20 @@ func TestAzureOpenAIBasePathSharesGAModelAndInferenceRoutes(t *testing.T) {
 
 func TestAzureOpenAIBasePathDiscoveryKeepsVersionedRoute(t *testing.T) {
 	for _, test := range []struct {
+		name       string
+		basePath   string
 		apiVersion string
 		wantPath   string
 	}{
-		{apiVersion: "", wantPath: "/tenant/openai/v1/models"},
-		{apiVersion: "preview", wantPath: "/tenant/openai/v1/models"},
-		{apiVersion: "2024-10-21", wantPath: "/tenant/openai/models"},
+		{name: "GA root", basePath: "/tenant/openai", wantPath: "/tenant/openai/v1/models"},
+		{name: "v1 preview root", basePath: "/tenant/openai", apiVersion: "preview", wantPath: "/tenant/openai/v1/models"},
+		{name: "versioned root", basePath: "/tenant/openai", apiVersion: "2024-10-21", wantPath: "/tenant/openai/models"},
+		{name: "GA deployment", basePath: "/tenant/openai/deployments/legacy", wantPath: "/tenant/openai/v1/models"},
+		{name: "v1 preview deployment", basePath: "/tenant/openai/deployments/legacy", apiVersion: "preview", wantPath: "/tenant/openai/v1/models"},
+		{name: "versioned deployment", basePath: "/tenant/openai/deployments/legacy", apiVersion: "2024-10-21", wantPath: "/tenant/openai/models"},
 	} {
-		t.Run(test.apiVersion, func(t *testing.T) {
-			endpoint, err := azureOpenAIDiscoveryURL(ManagedProvider{BaseURL: "https://proxy.example.test/tenant/openai", APIVersion: test.apiVersion})
+		t.Run(test.name, func(t *testing.T) {
+			endpoint, err := azureOpenAIDiscoveryURL(ManagedProvider{BaseURL: "https://proxy.example.test" + test.basePath, APIVersion: test.apiVersion})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1109,6 +1114,29 @@ func TestAzureOpenAIBasePathDiscoveryKeepsVersionedRoute(t *testing.T) {
 				t.Fatalf("discovery endpoint=%q err=%v", endpoint, err)
 			}
 		})
+	}
+}
+
+func TestAzureDeploymentBaseDiscoveryUsesV1AndCredential(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/tenant/openai/v1/models" || r.URL.RawQuery != "" || r.Header.Get("api-key") != "resource-key" || r.Header.Get("Authorization") != "" {
+			t.Errorf("unexpected discovery request: %s headers=%v", r.URL, r.Header)
+			http.Error(w, "invalid discovery route", http.StatusBadRequest)
+			return
+		}
+		_, _ = w.Write([]byte(`{"data":[{"id":"deployment-a"}]}`))
+	}))
+	t.Cleanup(server.Close)
+	router := New(Config{CredentialEncryptionKey: []byte("azure-deployment-discovery-key")}).(*Router)
+	if _, err := router.CreateProvider(ManagedProvider{ID: "azure", Type: "azure-openai", BaseURL: server.URL + "/tenant/openai/deployments/legacy", AuthType: "api_key", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := router.CreateCredential(CredentialInput{ID: "azure-key", ProviderID: "azure", Secret: "resource-key"}); err != nil {
+		t.Fatal(err)
+	}
+	models, err := router.DiscoverProviderModels(t.Context(), "azure", "azure-key")
+	if err != nil || len(models) != 1 || models[0].ID != "deployment-a" {
+		t.Fatalf("models=%+v err=%v", models, err)
 	}
 }
 
