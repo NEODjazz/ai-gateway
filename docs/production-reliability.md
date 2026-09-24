@@ -2612,3 +2612,22 @@ image ID `sha256:00cb1f635100fa203166c8e4c95b9b80f7bb161268e2fca4bb590dc48546a3e
 Gateway Helm revision 613 completed successfully. Pod
 `ai-gateway-gateway-695cf6d97d-b82fv` became Ready with zero restarts, and
 direct service liveness and readiness both returned 204.
+
+## Responses tool description and Foundry project endpoint
+
+Source `53ea7a2e` removes the separate 4096-character description cap for
+Responses function and custom tools. The inference request-body limit remains
+in force. Validation regressions, the full Go test and race suites, vet and
+build passed.
+
+Source `deb8db21` routes Foundry project URLs through their `/openai/v1` path
+and selects the `https://ai.azure.com/.default` Entra scope for official
+`.services.ai.azure.com` hosts. Local HTTP regressions verify project routing,
+bearer authentication and the workload-federation token request. The full Go
+test and race suites, vet and build passed. No external Foundry credential was
+used for live inference.
+
+Rancher Desktop built `ai-gateway-gateway:foundry-deb8db21` with image ID
+`sha256:4df2677c57ed6edf4dc25627e37dcf15068db5dff11aa90ca4ff8162db23f688`.
+Gateway Helm revision 615 completed successfully with one available replica;
+the local ingress returned HTTP 204 for both `/healthz` and `/readyz`.
