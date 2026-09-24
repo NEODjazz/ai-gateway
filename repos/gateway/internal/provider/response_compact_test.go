@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -137,5 +140,57 @@ func TestCompactedResponseDecoderEnforcesBodyLimitAndFinalItem(t *testing.T) {
 	invalid := `{"id":"cmp_1","object":"response.compaction","output":[{"type":"message"}],"usage":{"total_tokens":1}}`
 	if _, err := decodeCompactedResponse(strings.NewReader(invalid)); err == nil {
 		t.Fatal("compacted response without final compaction item was accepted")
+	}
+}
+
+func TestCompactedResponseRequiresExactUsage(t *testing.T) {
+	for _, tc := range []struct {
+		name, usage string
+		wantError   bool
+	}{
+		{"missing", "", true},
+		{"null", `,"usage":null`, true},
+		{"input missing", `,"usage":{"output_tokens":2,"total_tokens":2}`, true},
+		{"output missing", `,"usage":{"input_tokens":3,"total_tokens":3}`, true},
+		{"total missing", `,"usage":{"input_tokens":3,"output_tokens":2}`, true},
+		{"inconsistent", `,"usage":{"input_tokens":3,"output_tokens":2,"total_tokens":6}`, true},
+		{"zero", `,"usage":{"input_tokens":0,"output_tokens":0,"total_tokens":0}`, false},
+		{"reported", `,"usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := `{"id":"cmp_1","object":"response.compaction","output":[{"type":"compaction","encrypted_content":"opaque"}]` + tc.usage + `}`
+			response, err := decodeCompactedResponse(strings.NewReader(body))
+			if tc.wantError && err == nil {
+				t.Fatalf("invalid usage accepted: %+v", response)
+			}
+			if !tc.wantError && (err != nil || response.Usage.TotalTokens != response.Usage.InputTokens+response.Usage.OutputTokens) {
+				t.Fatalf("valid usage rejected: response=%+v err=%v", response, err)
+			}
+		})
+	}
+}
+
+func TestAzureCompactResponseRequiresExactUsage(t *testing.T) {
+	for _, tc := range []struct {
+		name, basePath, authType, wantPath string
+	}{
+		{name: "resource API key", authType: "api_key", wantPath: "/openai/v1/responses/compact"},
+		{name: "Foundry Entra", basePath: "/api/projects/project-a", authType: "entra", wantPath: "/api/projects/project-a/openai/v1/responses/compact"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != tc.wantPath || tc.authType == "api_key" && r.Header.Get("api-key") != "credential" ||
+					tc.authType == "entra" && r.Header.Get("Authorization") != "Bearer credential" {
+					t.Errorf("unexpected Azure compact request: path=%s headers=%v", r.URL.Path, r.Header)
+				}
+				_, _ = fmt.Fprint(w, `{"id":"cmp_1","object":"response.compaction","output":[{"type":"compaction","encrypted_content":"opaque"}],"usage":{"input_tokens":3,"total_tokens":3}}`)
+			}))
+			t.Cleanup(server.Close)
+			client := NewAzureOpenAI(server.URL+tc.basePath, "credential", false, "", tc.authType)
+			_, err := client.CompactResponse(t.Context(), openai.ResponseCompactRequest{Model: "deployment", Input: "hello"})
+			if err == nil || !strings.Contains(err.Error(), "usage") {
+				t.Fatalf("incomplete Azure compact usage was accepted: %v", err)
+			}
+		})
 	}
 }

@@ -1812,6 +1812,11 @@ context, these requests bypass gateway response caches and are not
 copied to shadow deployments. Provider-reported terminal usage remains the
 authoritative billing settlement.
 
+`POST /v1/responses/compact` принимает только ответ upstream с явными
+`input_tokens`, `output_tokens` и согласованным `total_tokens`. Отсутствующий
+или противоречивый usage завершает вызов ошибкой до успешного billing settlement;
+явный ноль допустим.
+
 ### Responses provider moderation
 
 Responses accepts an optional provider-side `moderation` object with a required
