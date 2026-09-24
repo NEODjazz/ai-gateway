@@ -7,7 +7,7 @@ import (
 
 const maxResponseStreamBytes = 32 << 20
 
-var errResponseStreamTooLarge = errors.New("upstream Responses stream exceeds 32 MiB")
+var errResponseStreamTooLarge = errors.New("upstream stream exceeds 32 MiB")
 
 // responseStreamReader bounds all wire bytes, including comments and unfinished
 // frames. One extra byte distinguishes an exact-size body from an oversized one.

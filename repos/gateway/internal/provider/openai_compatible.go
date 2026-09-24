@@ -1081,7 +1081,7 @@ func streamChatCompletionDataWithNormalizer(body io.Reader, fallbackModel string
 		},
 	}
 	var idSeen, modelSeen, createdSeen, metadataSeen, serviceTierSeen, fingerprintSeen bool
-	err := scanSSEData(body, func(payload string) error {
+	err := scanSSEData(&responseStreamReader{source: body, remaining: maxResponseStreamBytes}, func(payload string) error {
 		if payload == "[DONE]" {
 			return io.EOF
 		}

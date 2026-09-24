@@ -1109,6 +1109,23 @@ func TestChatStreamPreservesReportedUsage(t *testing.T) {
 	}
 }
 
+func TestChatStreamRejectsOversizedUpstreamBody(t *testing.T) {
+	body := strings.Repeat(": keepalive\n", maxResponseStreamBytes/12+1)
+	for _, streaming := range []bool{false, true} {
+		t.Run(fmt.Sprintf("streaming=%t", streaming), func(t *testing.T) {
+			writes := 0
+			var write ChatCompletionStreamWriter
+			if streaming {
+				write = func(string) error { writes++; return nil }
+			}
+			_, err := streamChatCompletionData(strings.NewReader(body), "model", write)
+			if !errors.Is(err, errResponseStreamTooLarge) || writes != 0 {
+				t.Fatalf("oversized Chat stream accepted: err=%v writes=%d", err, writes)
+			}
+		})
+	}
+}
+
 func TestChatStreamRejectsInvalidIndicesBeforeWriting(t *testing.T) {
 	for _, index := range []int{-1, 128, math.MaxInt} {
 		for _, tool := range []bool{false, true} {
