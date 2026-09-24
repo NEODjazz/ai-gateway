@@ -68,6 +68,9 @@ control-plane snapshot и никогда не возвращаются read API.
 Для локального `ollama` credential не требуется. Удалённый Ollama endpoint
 получает настроенный `api_key` или managed credential в `Authorization: Bearer`
 для chat, streaming, embeddings и completions. Redirects не выполняются.
+`base_url` принимает корень сервера, `/api` или `/v1`; адаптер приводит
+последние два варианта к общему корню, поскольку native и совместимые операции
+используют разные пути. Discovery применяет ту же нормализацию.
 
 ### Managed control plane
 

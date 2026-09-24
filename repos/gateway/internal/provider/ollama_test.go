@@ -22,6 +22,21 @@ func TestOllamaMapsMaxCompletionTokensToNumPredict(t *testing.T) {
 	}
 }
 
+func TestNormalizeOllamaBaseURL(t *testing.T) {
+	for _, test := range []struct{ input, want string }{
+		{input: "https://ollama.com", want: "https://ollama.com"},
+		{input: "https://ollama.com/api/", want: "https://ollama.com"},
+		{input: "https://ollama.com/v1", want: "https://ollama.com"},
+		{input: "https://proxy.example.test/ollama/api", want: "https://proxy.example.test/ollama"},
+		{input: "https://proxy.example.test/ollama/v1", want: "https://proxy.example.test/ollama"},
+		{input: "https://api", want: "https://api"},
+	} {
+		if got := normalizeOllamaBaseURL(test.input); got != test.want {
+			t.Errorf("base URL %q normalized to %q, want %q", test.input, got, test.want)
+		}
+	}
+}
+
 func TestOllamaManagedCredentialAuthenticatesInference(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer cloud-token" {
@@ -52,7 +67,7 @@ func TestOllamaManagedCredentialAuthenticatesInference(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 	router := New(Config{CredentialEncryptionKey: []byte("ollama-cloud-test-key")}).(*Router)
-	endpoint, err := router.endpointForManagedDeploymentWithSecret(ModelDeployment{ID: "ollama-deployment", ProviderID: "ollama", Models: []string{"test-model"}, Capabilities: []string{"chat", "stream", "embeddings", "completions"}}, ManagedProvider{ID: "ollama", Type: "ollama", BaseURL: server.URL, Enabled: true}, "cloud-token")
+	endpoint, err := router.endpointForManagedDeploymentWithSecret(ModelDeployment{ID: "ollama-deployment", ProviderID: "ollama", Models: []string{"test-model"}, Capabilities: []string{"chat", "stream", "embeddings", "completions"}}, ManagedProvider{ID: "ollama", Type: "ollama", BaseURL: server.URL + "/api", Enabled: true}, "cloud-token")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,6 +86,29 @@ func TestOllamaManagedCredentialAuthenticatesInference(t *testing.T) {
 	}
 	if _, err := client.Completions(t.Context(), openai.CompletionRequest{Model: "test-model", Prompt: "hello"}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestOllamaDiscoveryNormalizesAPIBaseURL(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/tags" || r.Header.Get("Authorization") != "Bearer cloud-token" {
+			t.Errorf("unexpected Ollama discovery request: %s headers=%v", r.URL.String(), r.Header)
+			http.Error(w, "invalid request", http.StatusBadRequest)
+			return
+		}
+		_, _ = w.Write([]byte(`{"models":[{"name":"test-model"}]}`))
+	}))
+	t.Cleanup(server.Close)
+	router := New(Config{CredentialEncryptionKey: []byte("ollama-discovery-test-key")}).(*Router)
+	if _, err := router.CreateProvider(ManagedProvider{ID: "ollama", Type: "ollama", BaseURL: server.URL + "/api", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := router.CreateCredential(CredentialInput{ID: "ollama-token", ProviderID: "ollama", Secret: "cloud-token"}); err != nil {
+		t.Fatal(err)
+	}
+	models, err := router.DiscoverProviderModels(t.Context(), "ollama", "ollama-token")
+	if err != nil || len(models) != 1 || models[0].ID != "test-model" {
+		t.Fatalf("models=%+v err=%v", models, err)
 	}
 }
 

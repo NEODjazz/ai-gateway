@@ -225,7 +225,11 @@ func discoveryURL(managed ManagedProvider) (string, error) {
 	if managed.Type == "azure-openai" {
 		return azureOpenAIDiscoveryURL(managed)
 	}
-	base, err := url.Parse(managed.BaseURL)
+	baseURL := managed.BaseURL
+	if managed.Type == "ollama" {
+		baseURL = normalizeOllamaBaseURL(baseURL)
+	}
+	base, err := url.Parse(baseURL)
 	if err != nil {
 		return "", err
 	}

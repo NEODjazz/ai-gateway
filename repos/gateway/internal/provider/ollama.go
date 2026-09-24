@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -131,10 +132,28 @@ func newOllamaWithToken(baseURL, token string, upstreamStream bool) Ollama {
 		client.Transport = ollamaBearerTransport{base: client.Transport, token: token}
 	}
 	return Ollama{
-		baseURL:        strings.TrimRight(baseURL, "/"),
+		baseURL:        normalizeOllamaBaseURL(baseURL),
 		upstreamStream: upstreamStream,
 		client:         client,
 	}
+}
+
+func normalizeOllamaBaseURL(value string) string {
+	value = strings.TrimRight(strings.TrimSpace(value), "/")
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return value
+	}
+	path := strings.TrimRight(parsed.Path, "/")
+	if strings.HasSuffix(path, "/api") {
+		parsed.Path = strings.TrimSuffix(path, "/api")
+	} else if strings.HasSuffix(path, "/v1") {
+		parsed.Path = strings.TrimSuffix(path, "/v1")
+	} else {
+		return value
+	}
+	parsed.RawPath = ""
+	return strings.TrimRight(parsed.String(), "/")
 }
 
 func (Ollama) SupportsVision() bool { return true }
