@@ -501,6 +501,9 @@ For native Ollama Chat, `reasoning_effort=default` leaves `think` unset so the
 selected model uses its own default. The managed capability profile lists this
 value alongside the explicit supported levels. The compatibility aliases
 `minimal` and `xhigh` map to native `think=low` and `think=max` respectively.
+Native Chat preserves `prompt_eval_cached_count` as cached input-token detail
+while `prompt_eval_count` remains the full input-token total for quota and
+billing. Negative cached counts or counts above the input total fail closed.
 
 For Azure Foundry project URLs under `/api/projects/{project}`, managed identity
 uses the Foundry audience even when the endpoint has a custom hostname. Known

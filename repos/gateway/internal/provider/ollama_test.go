@@ -307,6 +307,8 @@ func TestOllamaRejectsInvalidChatUsage(t *testing.T) {
 		{name: "negative prompt", usage: `"prompt_eval_count":-1,"eval_count":1`},
 		{name: "negative completion", usage: `"prompt_eval_count":1,"eval_count":-1`},
 		{name: "overflow", usage: fmt.Sprintf(`"prompt_eval_count":%d,"eval_count":1`, math.MaxInt)},
+		{name: "negative cached", usage: `"prompt_eval_count":2,"prompt_eval_cached_count":-1,"eval_count":1`},
+		{name: "cached exceeds prompt", usage: `"prompt_eval_count":2,"prompt_eval_cached_count":3,"eval_count":1`},
 	} {
 		for _, stream := range []bool{false, true} {
 			name := test.name + "/json"
@@ -344,14 +346,41 @@ func TestOllamaRejectsInvalidChatUsage(t *testing.T) {
 	}
 }
 
+func TestOllamaChatPreservesCachedPromptUsage(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		name := "json"
+		if stream {
+			name = "stream"
+		}
+		t.Run(name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = fmt.Fprintln(w, `{"model":"test-model","message":{"role":"assistant","content":"ok"},"done":true,"prompt_eval_count":10,"prompt_eval_cached_count":7,"eval_count":3}`)
+			}))
+			t.Cleanup(server.Close)
+			provider := NewOllama(server.URL, stream)
+			request := openai.ChatCompletionRequest{Model: "test-model", Stream: stream}
+			var response openai.ChatCompletionResponse
+			var err error
+			if stream {
+				response, err = provider.StreamChatCompletions(t.Context(), request, func(string) error { return nil })
+			} else {
+				response, err = provider.ChatCompletions(t.Context(), request)
+			}
+			if err != nil || response.Usage.PromptTokens != 10 || response.Usage.CompletionTokens != 3 || response.Usage.TotalTokens != 13 || response.Usage.PromptTokensDetails == nil || response.Usage.PromptTokensDetails.CachedTokens != 7 {
+				t.Fatalf("response usage=%+v err=%v", response.Usage, err)
+			}
+		})
+	}
+}
+
 func TestOllamaChatUsageMaxBoundary(t *testing.T) {
 	promptTokens, completionTokens := math.MaxInt, 0
-	usage, err := ollamaChatUsage(&promptTokens, &completionTokens)
+	usage, err := ollamaChatUsage(&promptTokens, nil, &completionTokens)
 	if err != nil || usage.TotalTokens != math.MaxInt {
 		t.Fatalf("unexpected boundary usage: %+v, %v", usage, err)
 	}
 	promptTokens = 0
-	usage, err = ollamaChatUsage(&promptTokens, &completionTokens)
+	usage, err = ollamaChatUsage(&promptTokens, nil, &completionTokens)
 	if err != nil || usage.TotalTokens != 0 {
 		t.Fatalf("valid zero usage rejected: %+v, %v", usage, err)
 	}

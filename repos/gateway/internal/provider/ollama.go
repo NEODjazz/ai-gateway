@@ -88,17 +88,18 @@ type ollamaRequestFunctionCall struct {
 }
 
 type ollamaChatResponse struct {
-	Model              string                `json:"model"`
-	Message            ollamaResponseMessage `json:"message"`
-	Done               bool                  `json:"done"`
-	PromptEvalCount    *int                  `json:"prompt_eval_count,omitempty"`
-	EvalCount          *int                  `json:"eval_count,omitempty"`
-	DoneReason         string                `json:"done_reason"`
-	TotalDuration      int64                 `json:"total_duration"`
-	LoadDuration       int64                 `json:"load_duration"`
-	PromptEvalDuration int64                 `json:"prompt_eval_duration"`
-	EvalDuration       int64                 `json:"eval_duration"`
-	Logprobs           []ollamaLogprob       `json:"logprobs"`
+	Model                 string                `json:"model"`
+	Message               ollamaResponseMessage `json:"message"`
+	Done                  bool                  `json:"done"`
+	PromptEvalCount       *int                  `json:"prompt_eval_count,omitempty"`
+	PromptEvalCachedCount *int                  `json:"prompt_eval_cached_count,omitempty"`
+	EvalCount             *int                  `json:"eval_count,omitempty"`
+	DoneReason            string                `json:"done_reason"`
+	TotalDuration         int64                 `json:"total_duration"`
+	LoadDuration          int64                 `json:"load_duration"`
+	PromptEvalDuration    int64                 `json:"prompt_eval_duration"`
+	EvalDuration          int64                 `json:"eval_duration"`
+	Logprobs              []ollamaLogprob       `json:"logprobs"`
 }
 
 type ollamaTokenLogprob struct {
@@ -233,7 +234,7 @@ func (p Ollama) ChatCompletions(ctx context.Context, request openai.ChatCompleti
 	if request.Logprobs != nil && *request.Logprobs && len(ollamaResp.Logprobs) == 0 && openai.ContentText(message.Content) != "" {
 		return openai.ChatCompletionResponse{}, errors.New("Ollama chat response omitted requested logprobs")
 	}
-	usage, err := ollamaChatUsage(ollamaResp.PromptEvalCount, ollamaResp.EvalCount)
+	usage, err := ollamaChatUsage(ollamaResp.PromptEvalCount, ollamaResp.PromptEvalCachedCount, ollamaResp.EvalCount)
 	if err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
@@ -433,7 +434,7 @@ func (p Ollama) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 			}
 		}
 		if chunk.Done {
-			usage, err := ollamaChatUsage(chunk.PromptEvalCount, chunk.EvalCount)
+			usage, err := ollamaChatUsage(chunk.PromptEvalCount, chunk.PromptEvalCachedCount, chunk.EvalCount)
 			if err != nil {
 				return openai.ChatCompletionResponse{}, err
 			}
@@ -449,14 +450,18 @@ func (p Ollama) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 	return openai.ChatCompletionResponse{}, errors.New("Ollama chat stream ended without a terminal chunk")
 }
 
-func ollamaChatUsage(promptTokens, completionTokens *int) (openai.Usage, error) {
-	if promptTokens == nil || completionTokens == nil || *promptTokens < 0 || *completionTokens < 0 || *promptTokens > math.MaxInt-*completionTokens {
+func ollamaChatUsage(promptTokens, cachedTokens, completionTokens *int) (openai.Usage, error) {
+	if promptTokens == nil || completionTokens == nil || *promptTokens < 0 || *completionTokens < 0 || *promptTokens > math.MaxInt-*completionTokens || cachedTokens != nil && (*cachedTokens < 0 || *cachedTokens > *promptTokens) {
 		return openai.Usage{}, errors.New("invalid Ollama chat usage")
 	}
-	return openai.Usage{
+	usage := openai.Usage{
 		PromptTokens: *promptTokens, CompletionTokens: *completionTokens,
 		TotalTokens: *promptTokens + *completionTokens,
-	}, nil
+	}
+	if cachedTokens != nil {
+		usage.PromptTokensDetails = &openai.PromptTokenDetails{CachedTokens: *cachedTokens}
+	}
+	return usage, nil
 }
 
 func ollamaFinishReason(reason string, hasToolCalls bool) string {
