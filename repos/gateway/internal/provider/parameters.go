@@ -182,6 +182,9 @@ func (Ollama) ValidateResponseParameters(request openai.ResponseRequest) error {
 }
 
 func (Ollama) ValidateChatParameters(request openai.ChatCompletionRequest) error {
+	if _, err := openai.ChatImageAttachments(request.Messages); err != nil {
+		return &Error{Class: FailureClientRequest, Provider: "ollama", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_image", Param: "messages", Err: err}
+	}
 	if err := rejectChatModeration("ollama", request); err != nil {
 		return err
 	}

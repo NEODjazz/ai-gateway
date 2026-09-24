@@ -920,12 +920,47 @@ func TestOllamaRejectsInvalidNativeSamplingOptions(t *testing.T) {
 }
 
 func TestOllamaConvertsVisionContentToNativeImages(t *testing.T) {
-	messages := ollamaMessages([]openai.Message{{Role: "user", Content: []any{
+	messages, err := ollamaMessages([]openai.Message{{Role: "user", Content: []any{
 		map[string]any{"type": "text", "text": "describe"},
 		map[string]any{"type": "image_url", "image_url": map[string]any{"url": "data:image/png;base64,iVBORw0KGgo="}},
 	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(messages) != 1 || messages[0].Content != "describe" || len(messages[0].Images) != 1 || messages[0].Images[0] != "iVBORw0KGgo=" {
 		t.Fatalf("unexpected native Ollama vision message: %+v", messages)
+	}
+}
+
+func TestOllamaRejectsInvalidVisionBeforeUpstream(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		http.Error(w, "unexpected upstream call", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	request := openai.ChatCompletionRequest{Model: "llava", Messages: []openai.Message{{Role: "user", Content: []any{
+		map[string]any{"type": "text", "text": "describe"},
+		map[string]any{"type": "image_url", "image_url": map[string]any{"url": "data:image/png;base64,invalid!"}},
+	}}}}
+	provider := NewOllama(server.URL, true)
+	for _, test := range []struct {
+		name string
+		run  func() error
+	}{
+		{"json", func() error { _, err := provider.ChatCompletions(context.Background(), request); return err }},
+		{"stream", func() error { _, err := provider.StreamChatCompletions(context.Background(), request, nil); return err }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var failure *Error
+			if err := test.run(); !errors.As(err, &failure) || failure.Class != FailureClientRequest || !errors.Is(err, openai.ErrInvalidImage) {
+				t.Fatalf("invalid image was not rejected as a client error: %v", err)
+			}
+		})
+	}
+	if got := calls.Load(); got != 0 {
+		t.Fatalf("invalid image reached upstream %d times", got)
 	}
 }
 

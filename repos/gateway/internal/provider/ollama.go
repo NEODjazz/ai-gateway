@@ -185,9 +185,13 @@ func (p Ollama) ChatCompletions(ctx context.Context, request openai.ChatCompleti
 	if err := p.ValidateChatParameters(request); err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
+	messages, err := ollamaMessages(request.Messages)
+	if err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
 	body, err := json.Marshal(ollamaChatRequest{
 		Model:    request.Model,
-		Messages: ollamaMessages(request.Messages),
+		Messages: messages,
 		Tools:    request.Tools,
 		Format:   ollamaResponseFormat(request.ResponseFormat),
 		Options:  ollamaRequestOptions(request),
@@ -314,10 +318,14 @@ func (p Ollama) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 	if !p.upstreamStream {
 		return openai.ChatCompletionResponse{}, ErrStreamingUnsupported
 	}
+	messages, err := ollamaMessages(request.Messages)
+	if err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
 
 	body, err := json.Marshal(ollamaChatRequest{
 		Model:    request.Model,
-		Messages: ollamaMessages(request.Messages),
+		Messages: messages,
 		Tools:    request.Tools,
 		Format:   ollamaResponseFormat(request.ResponseFormat),
 		Options:  ollamaRequestOptions(request),
@@ -562,7 +570,7 @@ func ollamaOpenAITokenLogprob(item ollamaTokenLogprob) (openai.TokenLogprob, err
 	return openai.TokenLogprob{Token: item.Token, Logprob: item.Logprob, Bytes: bytes, TopLogprobs: []openai.TopLogprob{}}, nil
 }
 
-func ollamaMessages(messages []openai.Message) []ollamaRequestMessage {
+func ollamaMessages(messages []openai.Message) ([]ollamaRequestMessage, error) {
 	converted := make([]ollamaRequestMessage, len(messages))
 	for index, message := range messages {
 		converted[index] = ollamaRequestMessage{
@@ -571,13 +579,13 @@ func ollamaMessages(messages []openai.Message) []ollamaRequestMessage {
 		}
 		attachments, err := openai.ChatImageAttachments([]openai.Message{message})
 		if err != nil {
-			continue
+			return nil, err
 		}
 		for _, attachment := range attachments {
 			converted[index].Images = append(converted[index].Images, attachment.Data)
 		}
 	}
-	return converted
+	return converted, nil
 }
 
 func (message ollamaResponseMessage) openAI() openai.Message {
