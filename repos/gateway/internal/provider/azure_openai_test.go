@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"ai-gateway-gateway/internal/config"
 	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/openai"
 	"golang.org/x/net/websocket"
@@ -275,6 +276,63 @@ func TestManagedAzureVersionedRootUsesDeploymentRoute(t *testing.T) {
 				t.Fatalf("Azure routed response=%+v err=%v", response, err)
 			}
 		})
+	}
+}
+
+func TestConfiguredAzureVersionedRootUsesDeploymentRoute(t *testing.T) {
+	for _, test := range []struct {
+		name, authType, basePath, wantPath, model string
+		models                                    []string
+		aliases                                   map[string]string
+	}{
+		{name: "API key", authType: "api_key", wantPath: "/openai/deployments/upstream-deployment/chat/completions", model: "public-model", models: []string{"public-model"}, aliases: map[string]string{"public-model": "upstream-deployment"}},
+		{name: "Entra with reverse proxy", authType: "entra", basePath: "/tenant-a/openai/v1", wantPath: "/tenant-a/openai/deployments/upstream-deployment/chat/completions", model: "public-model", models: []string{"public-model"}, aliases: map[string]string{"public-model": "upstream-deployment"}},
+		{name: "shared deployment aliases", authType: "api_key", wantPath: "/openai/deployments/upstream-deployment/chat/completions", model: "public-two", models: []string{"public-one", "public-two"}, aliases: map[string]string{"public-one": "upstream-deployment", "public-two": "upstream-deployment"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != test.wantPath || r.URL.Query().Get("api-version") != "2024-10-21" {
+					t.Errorf("unexpected Azure URL: %s", r.URL.String())
+					http.NotFound(w, r)
+					return
+				}
+				if test.authType == "entra" && (r.Header.Get("Authorization") != "Bearer configured-secret" || r.Header.Get("api-key") != "") ||
+					test.authType == "api_key" && (r.Header.Get("api-key") != "configured-secret" || r.Header.Get("Authorization") != "") {
+					t.Errorf("unexpected Azure authentication headers: %v", r.Header)
+				}
+				var request openai.ChatCompletionRequest
+				if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request.Model != "upstream-deployment" {
+					t.Errorf("unexpected upstream model: %q err=%v", request.Model, err)
+				}
+				_ = json.NewEncoder(w).Encode(openai.ChatCompletionResponse{
+					ID: "chat-azure", Model: "upstream-deployment", Choices: []openai.Choice{{Index: 0, Message: openai.Message{Role: "assistant", Content: "hello"}, FinishReason: "stop"}},
+					Usage: openai.Usage{PromptTokens: 2, CompletionTokens: 1, TotalTokens: 3},
+				})
+			}))
+			t.Cleanup(server.Close)
+			router, err := NewWithError(Config{Endpoints: []config.ProviderEndpointConfig{{
+				Name: "azure-static", Type: "azure-openai", BaseURL: server.URL + test.basePath,
+				APIKey: "configured-secret", APIVersion: "2024-10-21", AuthType: test.authType,
+				Models: test.models, ModelAliases: test.aliases, Capabilities: []string{"chat"},
+			}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			response, err := router.ChatCompletions(t.Context(), modules.RequestContext{Request: openai.ChatCompletionRequest{Provider: "azure-static", Model: test.model, Messages: []openai.Message{{Role: "user", Content: "hello"}}}})
+			if err != nil || response.Usage.TotalTokens != 3 {
+				t.Fatalf("configured Azure response=%+v err=%v", response, err)
+			}
+		})
+	}
+}
+
+func TestConfiguredAzureVersionedRootRejectsAmbiguousModels(t *testing.T) {
+	_, err := NewWithError(Config{Endpoints: []config.ProviderEndpointConfig{{
+		Name: "azure-static", Type: "azure-openai", BaseURL: "https://resource.openai.azure.com", APIVersion: "2024-10-21",
+		Models: []string{"public-one", "public-two"}, Capabilities: []string{"chat"},
+	}}})
+	if !errors.Is(err, ErrInvalidDeployment) {
+		t.Fatalf("ambiguous versioned Azure route was accepted: %v", err)
 	}
 }
 

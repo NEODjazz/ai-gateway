@@ -503,6 +503,32 @@ func NewWithError(cfg Config) (Provider, error) {
 	initialDeployments := make(map[string]ModelDeployment)
 	initialProviders := make(map[string]ManagedProvider)
 	for _, endpoint := range cfg.Endpoints {
+		providerBaseURL := endpoint.BaseURL
+		upstreamModel := ""
+		if len(endpoint.Models) == 1 {
+			upstreamModel = endpoint.Models[0]
+		}
+		if endpoint.Type == "azure-openai" {
+			if len(endpoint.Models) > 0 {
+				for index, model := range endpoint.Models {
+					mapped := endpoint.ModelAliases[model]
+					if mapped == "" {
+						mapped = model
+					}
+					if index == 0 {
+						upstreamModel = mapped
+					} else if upstreamModel != mapped {
+						upstreamModel = ""
+						break
+					}
+				}
+			}
+			baseURL, err := azureManagedDeploymentBaseURL(providerBaseURL, endpoint.APIVersion, ModelDeployment{Models: endpoint.Models, UpstreamModel: upstreamModel})
+			if err != nil {
+				return nil, fmt.Errorf("provider %q has invalid Azure deployment route: %w", endpoint.Name, err)
+			}
+			endpoint.BaseURL = baseURL
+		}
 		provider := providerFor(endpoint)
 		if provider == nil {
 			continue
@@ -566,10 +592,6 @@ func NewWithError(cfg Config) (Provider, error) {
 		if deploymentWeight == 0 {
 			deploymentWeight = 1
 		}
-		upstreamModel := ""
-		if len(endpoint.Models) == 1 {
-			upstreamModel = endpoint.Models[0]
-		}
 		authType := ""
 		region := ""
 		if endpoint.Type == "azure-openai" || endpoint.Type == "gemini" {
@@ -585,7 +607,7 @@ func NewWithError(cfg Config) (Provider, error) {
 				region = strings.ToLower(strings.TrimSpace(endpoint.Region))
 			}
 		}
-		initialProviders[endpoint.Name] = ManagedProvider{ID: endpoint.Name, Type: endpoint.Type, BaseURL: strings.TrimRight(endpoint.BaseURL, "/"), APIVersion: strings.TrimSpace(endpoint.APIVersion), AuthType: authType, Region: region, Enabled: enabled}
+		initialProviders[endpoint.Name] = ManagedProvider{ID: endpoint.Name, Type: endpoint.Type, BaseURL: strings.TrimRight(providerBaseURL, "/"), APIVersion: strings.TrimSpace(endpoint.APIVersion), AuthType: authType, Region: region, Enabled: enabled}
 		initialDeployments[endpoint.Name] = ModelDeployment{ID: endpoint.Name, ProviderID: endpoint.Name, ProviderType: endpoint.Type, UpstreamModel: upstreamModel, Models: append([]string(nil), endpoint.Models...), Capabilities: append([]string(nil), endpoint.Capabilities...), Priority: endpoint.Priority, Weight: deploymentWeight, GuardrailPolicy: endpoint.GuardrailPolicy, MaxRetries: endpoint.MaxRetries, CooldownAfterFailures: endpoint.CooldownAfterFailures, CooldownSeconds: endpoint.CooldownSeconds, MaxParallelRequests: endpoint.MaxParallelRequests, QueueCapacity: endpoint.QueueCapacity, QueueTimeoutMS: endpoint.QueueTimeoutMS, RateLimitRPM: endpoint.RateLimitRPM, RateLimitTPM: endpoint.RateLimitTPM, Enabled: enabled}
 	}
 
