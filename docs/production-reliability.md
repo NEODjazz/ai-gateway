@@ -2663,3 +2663,17 @@ Rancher Desktop built `ai-gateway-gateway:ollama-auth-8b298edc` with image ID
 `sha256:54b5b92d446dc6a6f5252b0c5b01adeca7e022719c8222cdddce75ca3d969b20`.
 Gateway Helm revision 617 completed successfully with one available replica;
 the local ingress returned HTTP 204 for `/healthz` and `/readyz`.
+
+## Ollama Base URL normalization
+
+Source `c0ae8abb` accepts Ollama server roots and the documented `/api` and
+`/v1` base URLs without duplicating either prefix. Native Chat, streaming and
+Embeddings use `/api`; compatible Completions uses `/v1`; managed discovery uses
+`/api/tags`. Local HTTP regressions cover authenticated inference and discovery
+with an `/api` base, plus URL normalization boundaries. The full Go test and
+race suites, vet and build passed. No external Ollama Cloud credential was used.
+
+Rancher Desktop built `ai-gateway-gateway:ollama-url-c0ae8abb` with image ID
+`sha256:04c807fbe03c42bc085a6f6511862f1b896695cd242b0bf99cee37d579f955b0`.
+Gateway Helm revision 618 completed successfully with one available replica;
+the local ingress returned HTTP 204 for `/healthz` and `/readyz`.
