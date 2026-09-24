@@ -7,6 +7,9 @@ TPM and remote billing reserve use the same context estimator. For chat, it incl
 Native Ollama Chat rejects negative or overflowing provider-reported token counts
 in JSON and terminal SSE responses before usage settlement. An invalid stream
 does not emit a successful completion event.
+Native Ollama Chat JSON and stream bodies are bounded to 32 MiB. Ollama Responses
+JSON uses the shared bounded decoder and validates response usage and structure
+before returning the result.
 
 Native Messages and GenerateContent requests retain their API family in billing
 reserve, commit and failure events. The gateway sets this classification before

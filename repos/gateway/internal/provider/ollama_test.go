@@ -296,6 +296,34 @@ func TestOllamaChatUsageMaxBoundary(t *testing.T) {
 	}
 }
 
+func TestOllamaChatResponseReadLimit(t *testing.T) {
+	var response ollamaChatResponse
+	err := decodeOllamaChatResponse(strings.NewReader(strings.Repeat(" ", maxChatCompletionResponseBytes+1)), &response)
+	if err == nil || !strings.Contains(err.Error(), "exceeds limit") {
+		t.Fatalf("oversized Ollama chat response accepted: %v", err)
+	}
+	err = decodeOllamaChatResponse(strings.NewReader(`{"model":"test"}{"model":"second"}`), &response)
+	if err == nil {
+		t.Fatal("multiple Ollama chat response objects accepted")
+	}
+}
+
+func TestOllamaChatStreamReadLimit(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(strings.Repeat(" ", maxResponseStreamBytes+1)))
+	}))
+	defer server.Close()
+
+	forwarded := 0
+	_, err := NewOllama(server.URL, true).StreamChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "test-model", Stream: true}, func(string) error {
+		forwarded++
+		return nil
+	})
+	if !errors.Is(err, errResponseStreamTooLarge) || forwarded != 0 {
+		t.Fatalf("oversized Ollama chat stream accepted: err=%v forwarded=%d", err, forwarded)
+	}
+}
+
 func TestOllamaNativeReasoningRoundTrip(t *testing.T) {
 	var upstream ollamaChatRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -758,6 +786,18 @@ func TestOllamaResponses(t *testing.T) {
 	}
 	if response.Usage.TotalTokens != 4 {
 		t.Fatalf("unexpected total tokens: %d", response.Usage.TotalTokens)
+	}
+}
+
+func TestOllamaResponsesRejectInvalidUsage(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"id":"resp-test","object":"response","status":"completed","model":"test-model","output":[],"usage":{"input_tokens":-1,"output_tokens":1,"total_tokens":0}}`))
+	}))
+	defer server.Close()
+
+	_, err := NewOllama(server.URL, false).Responses(t.Context(), openai.ResponseRequest{Model: "test-model", Input: "ping"})
+	if err == nil || !strings.Contains(err.Error(), "usage") {
+		t.Fatalf("invalid Ollama Responses usage accepted: %v", err)
 	}
 }
 

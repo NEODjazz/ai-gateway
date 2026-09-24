@@ -212,7 +212,7 @@ func (p Ollama) ChatCompletions(ctx context.Context, request openai.ChatCompleti
 	}
 
 	var ollamaResp ollamaChatResponse
-	if err := json.NewDecoder(resp.Body).Decode(&ollamaResp); err != nil {
+	if err := decodeOllamaChatResponse(resp.Body, &ollamaResp); err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
 	message := ollamaResp.Message.openAI()
@@ -353,7 +353,7 @@ func (p Ollama) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 		},
 	}
 
-	decoder := json.NewDecoder(resp.Body)
+	decoder := json.NewDecoder(&responseStreamReader{source: resp.Body, remaining: maxResponseStreamBytes})
 	sentRole := false
 	for {
 		var chunk ollamaChatResponse
@@ -461,6 +461,17 @@ func ollamaChatUsage(promptTokens, completionTokens int) (openai.Usage, error) {
 		PromptTokens: promptTokens, CompletionTokens: completionTokens,
 		TotalTokens: promptTokens + completionTokens,
 	}, nil
+}
+
+func decodeOllamaChatResponse(reader io.Reader, response *ollamaChatResponse) error {
+	payload, err := io.ReadAll(io.LimitReader(reader, maxChatCompletionResponseBytes+1))
+	if err != nil {
+		return err
+	}
+	if len(payload) > maxChatCompletionResponseBytes {
+		return errors.New("Ollama chat response exceeds limit")
+	}
+	return json.Unmarshal(payload, response)
 }
 
 func ollamaThink(reasoningEffort string) any {
@@ -639,12 +650,7 @@ func (p Ollama) Responses(ctx context.Context, request openai.ResponseRequest) (
 		return openai.ResponseResponse{}, responseStatusError("ollama", resp)
 	}
 
-	var response openai.ResponseResponse
-	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
-		return openai.ResponseResponse{}, err
-	}
-	response.OutputText = responseText(response)
-	return response, nil
+	return decodeResponseJSON(resp.Body)
 }
 
 func (p Ollama) StreamResponses(ctx context.Context, request openai.ResponseRequest, write ResponseStreamWriter) (openai.ResponseResponse, error) {
