@@ -146,6 +146,9 @@ func azureIdentityEndpoints(providerBaseURL ...string) (string, string) {
 
 func (s *azureTokenSource) Token(ctx context.Context) (string, error) {
 	if s.explicit != "" {
+		if len(s.explicit) > 16<<10 || strings.ContainsAny(s.explicit, " \t\r\n\x00") {
+			return "", errors.New("invalid explicit Azure Entra token")
+		}
 		return s.explicit, nil
 	}
 	for {

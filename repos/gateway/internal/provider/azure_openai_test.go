@@ -179,6 +179,33 @@ func TestAzureOpenAIHTTPFailsClosedWithoutAPIKey(t *testing.T) {
 	}
 }
 
+func TestAzureOpenAIHTTPRejectsInvalidEntraTokenBeforeUpstream(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+	for _, tc := range []struct{ name, token string }{
+		{name: "blank", token: " "},
+		{name: "surrounding spaces", token: " token "},
+		{name: "internal space", token: "token value"},
+		{name: "newline", token: "token\nvalue"},
+		{name: "oversized", token: strings.Repeat("t", 16<<10+1)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := NewAzureOpenAI(server.URL, tc.token, false, "", "entra")
+			_, err := client.ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "deployment", Messages: []openai.Message{{Role: "user", Content: "hello"}}})
+			if err == nil {
+				t.Fatal("invalid Entra token was accepted")
+			}
+		})
+	}
+	if got := calls.Load(); got != 0 {
+		t.Fatalf("invalid Entra token reached upstream %d times", got)
+	}
+}
+
 func TestAzureChatRequiresExactUsage(t *testing.T) {
 	for _, tc := range []struct {
 		name, usage string

@@ -18,6 +18,11 @@ fails before billing settlement.
 Anthropic Chat also rejects reported web-search, web-fetch or code-execution
 usage when the corresponding server tool was not enabled in the request.
 
+An explicitly configured Azure Entra bearer token is rejected before HTTP
+inference when it is blank, contains whitespace or NUL, or exceeds 16 KiB.
+This applies to managed Azure OpenAI and Foundry inference as well as direct
+adapter use; an absent explicit token still selects workload identity.
+
 ## Token accounting and request identity
 
 TPM and remote billing reserve use the same context estimator. For chat, it includes messages, tool calls, tool schemas, tool choice and response format. For Responses, it includes input, instructions, tools, tool choice and text format. The estimate uses serialized context bytes (approximately four bytes per token); image input uses a fixed 4096-token estimate instead of charging for base64 length. This is a reservation estimate, not a provider tokenizer or a guarantee of exact multimodal usage. Provider-reported usage settles the final charge when available; fallback usage remains marked estimated.
