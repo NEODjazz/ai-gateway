@@ -1649,12 +1649,16 @@ func openAIChatAnnotationChunkPayload(id, model string, annotation openai.ChatAn
 	return string(payload)
 }
 
-func openAIChatToolCallChunkPayload(id, model string, toolIndex int, call openai.ToolCall) string {
+func openAIChatToolCallChunkPayload(id, model string, toolIndex int, call openai.ToolCall, role ...string) string {
 	index := toolIndex
 	call.Index = &index
+	delta := map[string]any{"tool_calls": []openai.ToolCall{call}}
+	if len(role) > 0 && role[0] != "" {
+		delta["role"] = role[0]
+	}
 	payload, err := json.Marshal(map[string]any{
 		"id": id, "object": "chat.completion.chunk", "created": time.Now().UTC().Unix(), "model": model,
-		"choices": []map[string]any{{"index": 0, "delta": map[string]any{"tool_calls": []openai.ToolCall{call}}, "finish_reason": nil}},
+		"choices": []map[string]any{{"index": 0, "delta": delta, "finish_reason": nil}},
 	})
 	if err != nil {
 		return "{}"

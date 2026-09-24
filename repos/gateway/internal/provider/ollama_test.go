@@ -962,6 +962,7 @@ func TestOllamaStreamsNativeToolCalls(t *testing.T) {
 		t.Fatalf("streaming reasoning disable was not forwarded: %#v", upstream.Think)
 	}
 	if len(payloads) != 2 || !strings.Contains(payloads[0], `"type":"function"`) ||
+		!strings.Contains(payloads[0], `"role":"assistant"`) ||
 		!strings.Contains(payloads[0], `"id":"`+response.Choices[0].Message.ToolCalls[0].ID+`"`) ||
 		!strings.Contains(payloads[1], `"finish_reason":"tool_calls"`) ||
 		!strings.Contains(payloads[0], `"arguments":"{\"city\":\"Moscow\"}"`) {

@@ -58,6 +58,8 @@ not presented as a successful response.
 Native Ollama Chat accepts only assistant or omitted roles in provider output;
 an omitted role becomes assistant, while another role fails before that chunk
 is forwarded to the client.
+Tool-only native Chat streams include the `assistant` role in their first tool
+call chunk, so clients can reconstruct the message without a text delta.
 
 Native Messages and GenerateContent requests retain their API family in billing
 reserve, commit and failure events. The gateway sets this classification before

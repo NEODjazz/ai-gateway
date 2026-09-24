@@ -451,7 +451,12 @@ func (p Ollama) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 		for _, call := range message.ToolCalls {
 			toolIndex := len(response.Choices[0].Message.ToolCalls)
 			response.Choices[0].Message.ToolCalls = append(response.Choices[0].Message.ToolCalls, call)
-			if err := write(openAIChatToolCallChunkPayload(response.ID, response.Model, toolIndex, call)); err != nil {
+			role := ""
+			if !sentRole {
+				role = "assistant"
+				sentRole = true
+			}
+			if err := write(openAIChatToolCallChunkPayload(response.ID, response.Model, toolIndex, call, role)); err != nil {
 				return openai.ChatCompletionResponse{}, err
 			}
 		}
