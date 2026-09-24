@@ -235,6 +235,9 @@ func (p Ollama) ChatCompletions(ctx context.Context, request openai.ChatCompleti
 		return openai.ChatCompletionResponse{}, fmt.Errorf("invalid Ollama chat reasoning content: %w", err)
 	}
 	normalizeOllamaToolCalls(&message)
+	if err := validateOllamaResponseToolCalls(message.ToolCalls, request.Tools, nil); err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
 
 	finishReason := ollamaFinishReason(ollamaResp.DoneReason, len(message.ToolCalls) > 0)
 	logprobs, logprobText, err := ollamaChoiceLogprobs(ollamaResp.Logprobs)
@@ -395,6 +398,9 @@ func (p Ollama) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 			response.Choices[0].Message.Role = message.Role
 		}
 		normalizeOllamaToolCalls(&message)
+		if err := validateOllamaResponseToolCalls(message.ToolCalls, request.Tools, response.Choices[0].Message.ToolCalls); err != nil {
+			return openai.ChatCompletionResponse{}, err
+		}
 		reasoningContent := message.ReasoningContent
 		if reasoningContent != "" {
 			current := response.Choices[0].Message.ReasoningContent
@@ -639,6 +645,34 @@ func normalizeOllamaToolCalls(message *openai.Message) {
 			message.ToolCalls[index].Type = "function"
 		}
 	}
+}
+
+func validateOllamaResponseToolCalls(calls []openai.ToolCall, tools []openai.Tool, previous []openai.ToolCall) error {
+	if len(calls)+len(previous) > maxChatStreamToolCalls {
+		return errors.New("invalid Ollama tool call count")
+	}
+	seen := make(map[string]bool, len(calls)+len(previous))
+	for _, call := range previous {
+		seen[call.ID] = true
+	}
+	for _, call := range calls {
+		declared := false
+		for _, tool := range tools {
+			if tool.Type == "function" && tool.Function.Name == call.Function.Name {
+				declared = true
+				break
+			}
+		}
+		if !declared || call.ID == "" || seen[call.ID] || call.Type != "function" || call.Index != nil || call.ExtraContent != nil || len(call.Function.Arguments) > openai.MaxChatFunctionArgumentsChars {
+			return errors.New("invalid Ollama tool call")
+		}
+		var arguments map[string]any
+		if json.Unmarshal([]byte(call.Function.Arguments), &arguments) != nil || arguments == nil {
+			return errors.New("invalid Ollama tool call")
+		}
+		seen[call.ID] = true
+	}
+	return nil
 }
 
 func ollamaRequestOptions(request openai.ChatCompletionRequest) ollamaOptions {

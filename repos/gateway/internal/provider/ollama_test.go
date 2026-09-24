@@ -891,6 +891,7 @@ func TestOllamaNormalizesToolArgumentsAndForwardsOptions(t *testing.T) {
 	seed := int64(42)
 	response, err := NewOllama(server.URL, false).ChatCompletions(context.Background(), openai.ChatCompletionRequest{
 		Model: "llama3.2:latest",
+		Tools: []openai.Tool{{Type: "function", Function: openai.FunctionDefinition{Name: "weather.get"}}},
 		Messages: []openai.Message{{
 			Role: "assistant", ToolCalls: []openai.ToolCall{{
 				ID: "previous", Type: "function",
@@ -944,6 +945,7 @@ func TestOllamaStreamsNativeToolCalls(t *testing.T) {
 	minP := 0.1
 	response, err := NewOllama(server.URL, true).StreamChatCompletions(context.Background(), openai.ChatCompletionRequest{
 		Model: "llama3.2:latest", Stream: true, Messages: []openai.Message{{Role: "user", Content: "weather"}},
+		Tools:                 []openai.Tool{{Type: "function", Function: openai.FunctionDefinition{Name: "weather.get"}}},
 		ChatGenerationOptions: openai.ChatGenerationOptions{TopK: &topK, MinP: &minP, ReasoningEffort: "none"},
 	}, func(payload string) error {
 		payloads = append(payloads, payload)
