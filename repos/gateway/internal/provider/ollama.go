@@ -760,7 +760,7 @@ func (p Ollama) Responses(ctx context.Context, request openai.ResponseRequest) (
 	if err != nil {
 		return openai.ResponseResponse{}, err
 	}
-	if err := validateOllamaResponseUsage(response); err != nil {
+	if err := validateExactResponseUsage(response, "Ollama"); err != nil {
 		return openai.ResponseResponse{}, err
 	}
 	return response, nil
@@ -808,7 +808,7 @@ func (p Ollama) StreamResponses(ctx context.Context, request openai.ResponseRequ
 
 	response, err := streamResponseData(resp.Body, request.Model, func(event, payload string) error {
 		if event == "response.completed" || event == "response.incomplete" {
-			if err := validateOllamaTerminalUsage(payload); err != nil {
+			if err := validateExactResponseTerminalUsage(payload, "Ollama"); err != nil {
 				return err
 			}
 		}
@@ -820,44 +820,10 @@ func (p Ollama) StreamResponses(ctx context.Context, request openai.ResponseRequ
 	if err != nil {
 		return openai.ResponseResponse{}, err
 	}
-	if err := validateOllamaResponseUsage(response); err != nil {
+	if err := validateExactResponseUsage(response, "Ollama"); err != nil {
 		return openai.ResponseResponse{}, err
 	}
 	return response, nil
-}
-
-func validateOllamaResponseUsage(response openai.ResponseResponse) error {
-	if response.Status != "completed" && response.Status != "incomplete" {
-		return nil
-	}
-	if !response.InputTokensReported || !response.OutputTokensReported || !response.TotalTokensReported ||
-		response.Usage.TotalTokens != response.Usage.InputTokens+response.Usage.OutputTokens {
-		return errors.New("Ollama Responses requires exact input, output and total token usage")
-	}
-	return nil
-}
-
-func validateOllamaTerminalUsage(payload string) error {
-	var event struct {
-		Response struct {
-			Usage *struct {
-				InputTokens  *int `json:"input_tokens"`
-				OutputTokens *int `json:"output_tokens"`
-				TotalTokens  *int `json:"total_tokens"`
-			} `json:"usage"`
-		} `json:"response"`
-	}
-	if err := json.Unmarshal([]byte(payload), &event); err != nil {
-		return err
-	}
-	if event.Response.Usage == nil || event.Response.Usage.InputTokens == nil ||
-		event.Response.Usage.OutputTokens == nil || event.Response.Usage.TotalTokens == nil {
-		return errors.New("Ollama Responses terminal event requires exact token usage")
-	}
-	if *event.Response.Usage.TotalTokens != *event.Response.Usage.InputTokens+*event.Response.Usage.OutputTokens {
-		return errors.New("Ollama Responses terminal event has inconsistent token usage")
-	}
-	return nil
 }
 
 func responseText(response openai.ResponseResponse) string {

@@ -3,6 +3,7 @@ package provider
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	"ai-gateway-gateway/internal/openai"
 )
@@ -29,6 +30,40 @@ func validateResponseUsage(usage openai.ResponseUsage) error {
 		if details.CachedTokens < 0 || details.CacheWriteTokens < 0 || details.CacheCreationTokens < 0 || details.AudioTokens < 0 || details.ImageTokens < 0 || details.ReasoningTokens < 0 || details.TextTokens < 0 {
 			return errors.New("invalid negative Responses input token details")
 		}
+	}
+	return nil
+}
+
+func validateExactResponseUsage(response openai.ResponseResponse, providerName string) error {
+	if response.Status != "" && response.Status != "completed" && response.Status != "incomplete" {
+		return nil
+	}
+	if !response.InputTokensReported || !response.OutputTokensReported || !response.TotalTokensReported ||
+		response.Usage.TotalTokens != response.Usage.InputTokens+response.Usage.OutputTokens {
+		return fmt.Errorf("%s Responses requires exact input, output and total token usage", providerName)
+	}
+	return nil
+}
+
+func validateExactResponseTerminalUsage(payload, providerName string) error {
+	var event struct {
+		Response struct {
+			Usage *struct {
+				InputTokens  *int `json:"input_tokens"`
+				OutputTokens *int `json:"output_tokens"`
+				TotalTokens  *int `json:"total_tokens"`
+			} `json:"usage"`
+		} `json:"response"`
+	}
+	if err := json.Unmarshal([]byte(payload), &event); err != nil {
+		return err
+	}
+	if event.Response.Usage == nil || event.Response.Usage.InputTokens == nil ||
+		event.Response.Usage.OutputTokens == nil || event.Response.Usage.TotalTokens == nil {
+		return fmt.Errorf("%s Responses terminal event requires exact token usage", providerName)
+	}
+	if *event.Response.Usage.TotalTokens != *event.Response.Usage.InputTokens+*event.Response.Usage.OutputTokens {
+		return fmt.Errorf("%s Responses terminal event has inconsistent token usage", providerName)
 	}
 	return nil
 }

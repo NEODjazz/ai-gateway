@@ -179,6 +179,7 @@ type OpenAICompatible struct {
 	apiKey                string
 	errorProvider         string
 	exactChatUsage        bool
+	exactResponseUsage    bool
 	upstreamStream        bool
 	rerankPath            string
 	completionStreamUsage bool
@@ -926,7 +927,16 @@ func (p OpenAICompatible) Responses(ctx context.Context, request openai.Response
 		return openai.ResponseResponse{}, responseStatusError(p.providerName(), resp)
 	}
 
-	return decodeResponseJSON(resp.Body)
+	response, err := decodeResponseJSON(resp.Body)
+	if err != nil {
+		return openai.ResponseResponse{}, err
+	}
+	if p.exactResponseUsage {
+		if err := validateExactResponseUsage(response, "Azure"); err != nil {
+			return openai.ResponseResponse{}, err
+		}
+	}
+	return response, nil
 }
 
 func (p OpenAICompatible) StreamResponses(ctx context.Context, request openai.ResponseRequest, write ResponseStreamWriter) (openai.ResponseResponse, error) {
@@ -969,7 +979,30 @@ func (p OpenAICompatible) StreamResponses(ctx context.Context, request openai.Re
 		return openai.ResponseResponse{}, responseStatusError(p.providerName(), resp)
 	}
 
-	return streamResponseData(resp.Body, request.Model, write)
+	forward := write
+	if p.exactResponseUsage {
+		forward = func(event, payload string) error {
+			if event == "response.completed" || event == "response.incomplete" {
+				if err := validateExactResponseTerminalUsage(payload, "Azure"); err != nil {
+					return err
+				}
+			}
+			if write != nil {
+				return write(event, payload)
+			}
+			return nil
+		}
+	}
+	response, err := streamResponseData(resp.Body, request.Model, forward)
+	if err != nil {
+		return openai.ResponseResponse{}, err
+	}
+	if p.exactResponseUsage {
+		if err := validateExactResponseUsage(response, "Azure"); err != nil {
+			return openai.ResponseResponse{}, err
+		}
+	}
+	return response, nil
 }
 
 func providerURL(baseURL string, path string) string {

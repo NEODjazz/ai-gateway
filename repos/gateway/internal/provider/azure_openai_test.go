@@ -241,6 +241,89 @@ func TestAzureFoundryEntraChatRequiresExactUsage(t *testing.T) {
 	}
 }
 
+func TestAzureResponsesRequireExactUsage(t *testing.T) {
+	for _, tc := range []struct {
+		name, status, usage string
+		wantError           bool
+	}{
+		{"missing", "completed", "", true},
+		{"missing status and usage", "", "", true},
+		{"input missing", "completed", `,"usage":{"output_tokens":2,"total_tokens":2}`, true},
+		{"output missing", "completed", `,"usage":{"input_tokens":3,"total_tokens":3}`, true},
+		{"total missing", "completed", `,"usage":{"input_tokens":3,"output_tokens":2}`, true},
+		{"inconsistent", "completed", `,"usage":{"input_tokens":3,"output_tokens":2,"total_tokens":6}`, true},
+		{"reported zero", "completed", `,"usage":{"input_tokens":0,"output_tokens":0,"total_tokens":0}`, false},
+		{"reported counts", "completed", `,"usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}`, false},
+		{"queued background", "queued", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Header.Get("api-key") != "test-key" {
+					t.Errorf("missing Azure API key")
+				}
+				_, _ = fmt.Fprint(w, `{"id":"resp-test","object":"response","model":"deployment","status":"`+tc.status+`","output":[]`+tc.usage+`}`)
+			}))
+			t.Cleanup(server.Close)
+			client := NewAzureOpenAI(server.URL, "test-key", false, "", "api_key")
+			request := openai.ResponseRequest{Model: "deployment", Input: "hello"}
+			if tc.status == "queued" {
+				store := true
+				request.Background = true
+				request.Store = &store
+			}
+			response, err := client.Responses(t.Context(), request)
+			if tc.wantError {
+				if err == nil || !strings.Contains(err.Error(), "usage") {
+					t.Fatalf("invalid Azure Responses usage accepted: response=%+v err=%v", response, err)
+				}
+			} else if err != nil {
+				t.Fatalf("valid Azure Responses rejected: %v", err)
+			}
+		})
+	}
+}
+
+func TestAzureFoundryStreamResponsesRequireTerminalUsage(t *testing.T) {
+	for _, tc := range []struct {
+		name, usage string
+		wantError   bool
+	}{
+		{"missing", "", true},
+		{"output missing", `,"usage":{"input_tokens":3,"total_tokens":3}`, true},
+		{"inconsistent", `,"usage":{"input_tokens":3,"output_tokens":2,"total_tokens":6}`, true},
+		{"reported zero", `,"usage":{"input_tokens":0,"output_tokens":0,"total_tokens":0}`, false},
+		{"reported counts", `,"usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/api/projects/project-a/openai/v1/responses" || r.Header.Get("Authorization") != "Bearer project-token" || r.Header.Get("api-key") != "" {
+					t.Errorf("unexpected Foundry request: path=%s headers=%v", r.URL.Path, r.Header)
+				}
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = fmt.Fprint(w, `data: {"type":"response.output_text.delta","delta":"hello"}`+"\n\n")
+				_, _ = fmt.Fprint(w, `data: {"type":"response.completed","response":{"id":"resp-test","object":"response","model":"deployment","status":"completed","output":[]`+tc.usage+`}}`+"\n\n")
+			}))
+			t.Cleanup(server.Close)
+			client := NewAzureOpenAI(server.URL+"/api/projects/project-a", "project-token", true, "", "entra")
+			var events []string
+			response, err := client.StreamResponses(t.Context(), openai.ResponseRequest{Model: "deployment", Input: "hello"}, func(event, _ string) error {
+				events = append(events, event)
+				return nil
+			})
+			if tc.wantError {
+				if err == nil || !strings.Contains(err.Error(), "usage") {
+					t.Fatalf("invalid Foundry terminal usage accepted: response=%+v err=%v", response, err)
+				}
+				if len(events) != 1 || events[0] != "response.output_text.delta" {
+					t.Fatalf("invalid terminal success forwarded: %v", events)
+				}
+			} else if err != nil || len(events) != 2 {
+				t.Fatalf("valid Foundry stream rejected: events=%v err=%v", events, err)
+			}
+		})
+	}
+}
+
 func TestAzureDiscoveryFailsClosedWithoutAPIKey(t *testing.T) {
 	for _, path := range []string{"", "/api/projects/project-a"} {
 		t.Run(path, func(t *testing.T) {

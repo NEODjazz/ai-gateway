@@ -2486,6 +2486,10 @@ Provider type `azure-openai` добавляет `/openai/v1` к resource-root UR
 `prompt_tokens`, `completion_tokens` и согласованный `total_tokens`.
 Отсутствие полного provider usage завершает попытку ошибкой вместо успешного
 учета только оценочного prompt; явно переданные нули допускаются.
+Завершённые Azure Responses JSON/SSE также требуют явных `input_tokens`,
+`output_tokens` и согласованного `total_tokens`; терминальное SSE-событие с
+неполным usage не отправляется клиенту. Фоновые ответы со статусом `queued`
+могут возвращаться до появления финального usage.
 
 Для Foundry project endpoint `/api/projects/{project}` inference использует
 `/openai/v1`, а discovery читает project deployments через
