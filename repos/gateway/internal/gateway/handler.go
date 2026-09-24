@@ -989,12 +989,32 @@ func (h Handler) CompactResponse(w http.ResponseWriter, r *http.Request) {
 		Request:         openai.ChatCompletionRequest{Provider: request.Provider, Model: request.Model, Messages: responseMessages(responseRequest)},
 		Metadata:        map[string]string{"gateway.api_type": "responses_compact"},
 	}
-	if err := h.pipeline.Run(r.Context(), &reqCtx); err != nil {
-		if errors.Is(err, modules.ErrUnauthorized) {
+	var pipelineErr error
+	computerOutputs, _ := openai.InspectResponseComputerCallOutputs(request.Input)
+	if responseComputerOutputsHaveFiles(computerOutputs) {
+		pipelineErr = h.pipeline.RunAuthentication(r.Context(), &reqCtx)
+		if pipelineErr == nil {
+			reqCtx.APIKey = ""
+			if err := h.resolveResponseComputerScreenshots(r.Context(), reqCtx, reqCtx.ResponseRequest); err != nil {
+				if errors.Is(err, errResponseComputerFileStorageUnavailable) {
+					writeError(w, http.StatusServiceUnavailable, "file_storage_unavailable", err.Error())
+				} else {
+					writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+				}
+				return
+			}
+			reqCtx.Request.Messages = responseMessages(*reqCtx.ResponseRequest)
+			pipelineErr = h.pipeline.RunAfterAuthentication(r.Context(), &reqCtx)
+		}
+	} else {
+		pipelineErr = h.pipeline.Run(r.Context(), &reqCtx)
+	}
+	if pipelineErr != nil {
+		if errors.Is(pipelineErr, modules.ErrUnauthorized) {
 			writeError(w, http.StatusUnauthorized, "unauthorized", "invalid api key")
 			return
 		}
-		writeError(w, http.StatusBadGateway, "module_failed", err.Error())
+		writeError(w, http.StatusBadGateway, "module_failed", pipelineErr.Error())
 		return
 	}
 	reqCtx.APIKey = ""
