@@ -2482,6 +2482,10 @@ Provider type `azure-openai` добавляет `/openai/v1` к resource-root UR
 отклоняется до HTTP inference и model discovery для Azure OpenAI и Foundry.
 В режиме `auth_type=entra` отсутствие статического токена по-прежнему включает
 настроенную workload identity.
+Успешный Azure Chat JSON и поток SSE должны содержать полный usage с
+`prompt_tokens`, `completion_tokens` и согласованный `total_tokens`.
+Отсутствие полного provider usage завершает попытку ошибкой вместо успешного
+учета только оценочного prompt; явно переданные нули допускаются.
 
 Для Foundry project endpoint `/api/projects/{project}` inference использует
 `/openai/v1`, а discovery читает project deployments через

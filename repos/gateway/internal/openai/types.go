@@ -458,6 +458,7 @@ type JSONSchemaFormat struct {
 }
 
 type ChatCompletionResponse struct {
+	UsageReported bool `json:"-"`
 	// NativeContainer preserves a validated provider container descriptor for
 	// protocol adapters that expose managed execution state.
 	NativeContainer         json.RawMessage   `json:"-"`

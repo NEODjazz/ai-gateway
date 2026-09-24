@@ -178,6 +178,7 @@ type OpenAICompatible struct {
 	baseURL               string
 	apiKey                string
 	errorProvider         string
+	exactChatUsage        bool
 	upstreamStream        bool
 	rerankPath            string
 	completionStreamUsage bool
@@ -588,6 +589,9 @@ func (p OpenAICompatible) chatCompletions(ctx context.Context, request openai.Ch
 		if err == nil {
 			err = validateCompletionUsage(response.Usage)
 		}
+		if err == nil && p.exactChatUsage {
+			err = validateExactChatUsage(response)
+		}
 		if err == nil {
 			err = validateRequestedChatChoices(request, response)
 		}
@@ -609,6 +613,11 @@ func (p OpenAICompatible) chatCompletions(ctx context.Context, request openai.Ch
 	}
 	if err := validateCompletionUsage(response.Usage); err != nil {
 		return openai.ChatCompletionResponse{}, err
+	}
+	if p.exactChatUsage {
+		if err := validateExactChatUsage(response); err != nil {
+			return openai.ChatCompletionResponse{}, err
+		}
 	}
 	if err := validateRequestedChatChoices(request, response); err != nil {
 		return openai.ChatCompletionResponse{}, err
@@ -662,7 +671,36 @@ func decodeChatCompletionResponse(reader io.Reader, target *openai.ChatCompletio
 	if len(payload) > maxChatCompletionResponseBytes {
 		return errors.New("chat completion response exceeds limit")
 	}
-	return json.Unmarshal(payload, target)
+	if err := json.Unmarshal(payload, target); err != nil {
+		return err
+	}
+	reported, err := completeChatUsageFields(payload)
+	if err != nil {
+		return err
+	}
+	target.UsageReported = reported
+	return nil
+}
+
+func completeChatUsageFields(payload []byte) (bool, error) {
+	var wire struct {
+		Usage *struct {
+			PromptTokens     *int `json:"prompt_tokens"`
+			CompletionTokens *int `json:"completion_tokens"`
+			TotalTokens      *int `json:"total_tokens"`
+		} `json:"usage"`
+	}
+	if err := json.Unmarshal(payload, &wire); err != nil {
+		return false, err
+	}
+	return wire.Usage != nil && wire.Usage.PromptTokens != nil && wire.Usage.CompletionTokens != nil && wire.Usage.TotalTokens != nil, nil
+}
+
+func validateExactChatUsage(response openai.ChatCompletionResponse) error {
+	if !response.UsageReported || response.Usage.TotalTokens != response.Usage.PromptTokens+response.Usage.CompletionTokens {
+		return errors.New("Azure Chat requires exact prompt, completion and total token usage")
+	}
+	return nil
 }
 
 func validateRequestedChatChoices(request openai.ChatCompletionRequest, response openai.ChatCompletionResponse) error {
@@ -790,6 +828,9 @@ func (p OpenAICompatible) streamChatCompletions(ctx context.Context, request ope
 	}
 	if err == nil {
 		err = validateRequestedLegacyFunctionCalls(request, response)
+	}
+	if err == nil && p.exactChatUsage {
+		err = validateExactChatUsage(response)
 	}
 	return response, err
 }
@@ -1082,6 +1123,11 @@ func streamChatCompletionDataWithNormalizer(body io.Reader, fallbackModel string
 				return err
 			}
 			response.Usage = *chunk.Usage
+			reported, err := completeChatUsageFields([]byte(payload))
+			if err != nil {
+				return err
+			}
+			response.UsageReported = reported
 		}
 		for _, choice := range chunk.Choices {
 			if choice.Index < 0 || choice.Index >= maxChatStreamChoices {

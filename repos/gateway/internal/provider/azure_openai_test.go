@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -172,6 +173,71 @@ func TestAzureOpenAIHTTPFailsClosedWithoutAPIKey(t *testing.T) {
 	}
 	if calls.Load() != 0 {
 		t.Fatalf("unauthenticated requests reached upstream: %d", calls.Load())
+	}
+}
+
+func TestAzureChatRequiresExactUsage(t *testing.T) {
+	for _, tc := range []struct {
+		name, usage string
+		wantError   bool
+	}{
+		{"missing", "", true},
+		{"completion missing", `,"usage":{"prompt_tokens":3,"total_tokens":3}`, true},
+		{"total missing", `,"usage":{"prompt_tokens":3,"completion_tokens":2}`, true},
+		{"inconsistent", `,"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":6}`, true},
+		{"reported zero", `,"usage":{"prompt_tokens":0,"completion_tokens":0,"total_tokens":0}`, false},
+		{"reported counts", `,"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}`, false},
+	} {
+		for _, stream := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/stream=%t", tc.name, stream), func(t *testing.T) {
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.Header.Get("api-key") != "test-key" {
+						t.Errorf("missing Azure API key")
+					}
+					if stream {
+						w.Header().Set("Content-Type", "text/event-stream")
+						_, _ = fmt.Fprint(w, `data: {"id":"chat-1","model":"deployment","choices":[{"index":0,"delta":{"content":"hello"},"finish_reason":"stop"}]}`+"\n\n")
+						_, _ = fmt.Fprint(w, `data: {"id":"chat-1","model":"deployment","choices":[]`+tc.usage+`}`+"\n\n")
+						_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+					} else {
+						_, _ = fmt.Fprint(w, `{"id":"chat-1","model":"deployment","choices":[{"index":0,"message":{"role":"assistant","content":"hello"},"finish_reason":"stop"}]`+tc.usage+`}`)
+					}
+				}))
+				t.Cleanup(server.Close)
+				client := NewAzureOpenAI(server.URL, "test-key", stream, "", "api_key")
+				request := openai.ChatCompletionRequest{Model: "deployment", Messages: []openai.Message{{Role: "user", Content: "hello"}}, Stream: stream}
+				var response openai.ChatCompletionResponse
+				var err error
+				if stream {
+					response, err = client.StreamChatCompletions(t.Context(), request, nil)
+				} else {
+					response, err = client.ChatCompletions(t.Context(), request)
+				}
+				if tc.wantError {
+					if err == nil || !strings.Contains(err.Error(), "usage") {
+						t.Fatalf("invalid Azure usage accepted: response=%+v err=%v", response, err)
+					}
+				} else if err != nil || !response.UsageReported {
+					t.Fatalf("reported Azure usage rejected: response=%+v err=%v", response, err)
+				}
+			})
+		}
+	}
+}
+
+func TestAzureFoundryEntraChatRequiresExactUsage(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/projects/project-a/openai/v1/chat/completions" ||
+			r.Header.Get("Authorization") != "Bearer project-token" || r.Header.Get("api-key") != "" {
+			t.Errorf("unexpected Foundry request: path=%s headers=%v", r.URL.Path, r.Header)
+		}
+		_, _ = fmt.Fprint(w, `{"id":"chat-1","model":"deployment","choices":[]}`)
+	}))
+	t.Cleanup(server.Close)
+	client := NewAzureOpenAI(server.URL+"/api/projects/project-a", "project-token", false, "", "entra")
+	_, err := client.ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "deployment", Messages: []openai.Message{{Role: "user", Content: "hello"}}})
+	if err == nil || !strings.Contains(err.Error(), "usage") {
+		t.Fatalf("Foundry Entra Chat accepted missing usage: %v", err)
 	}
 }
 
