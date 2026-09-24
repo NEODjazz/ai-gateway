@@ -37,8 +37,10 @@ func (t azureOpenAITransport) RoundTrip(request *http.Request) (*http.Response, 
 	}
 	cloned.Header.Del("Authorization")
 	cloned.Header.Del("api-key")
+	var token string
 	if t.authType == "entra" {
-		token, err := t.tokenSource.Token(request.Context())
+		var err error
+		token, err = t.tokenSource.Token(request.Context())
 		if err != nil {
 			return nil, err
 		}
@@ -52,7 +54,11 @@ func (t azureOpenAITransport) RoundTrip(request *http.Request) (*http.Response, 
 	if base == nil {
 		base = http.DefaultTransport
 	}
-	return base.RoundTrip(cloned)
+	response, err := base.RoundTrip(cloned)
+	if err == nil && response.StatusCode == http.StatusUnauthorized && t.authType == "entra" {
+		t.tokenSource.invalidate(token)
+	}
+	return response, err
 }
 
 func NewAzureOpenAI(baseURL, credential string, upstreamStream bool, apiVersion, authType string, azureCloud ...string) OpenAICompatible {

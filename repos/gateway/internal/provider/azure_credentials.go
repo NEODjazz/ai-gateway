@@ -205,6 +205,19 @@ func (s *azureTokenSource) Token(ctx context.Context) (string, error) {
 	}
 }
 
+func (s *azureTokenSource) invalidate(token string) {
+	if s.explicit != "" || token == "" {
+		return
+	}
+	s.mu.Lock()
+	if s.token == token {
+		s.token = ""
+		s.refreshAt = time.Time{}
+		s.expiresAt = time.Time{}
+	}
+	s.mu.Unlock()
+}
+
 func azureTokenRefreshAt(now, expiration time.Time) time.Time {
 	advance := expiration.Sub(now) / 2
 	if advance > 5*time.Minute {

@@ -466,6 +466,70 @@ func TestAzureTokenSourceUsesCachedTokenUntilExpiration(t *testing.T) {
 	}
 }
 
+func TestAzureEntraUnauthorizedResponseRefreshesNextRequest(t *testing.T) {
+	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	var tokenRequests atomic.Int32
+	identity := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprintf(w, `{"access_token":"token-%d","expires_on":%d,"token_type":"Bearer"}`, tokenRequests.Add(1), now.Add(time.Hour).Unix())
+	}))
+	t.Cleanup(identity.Close)
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") == "Bearer token-1" {
+			http.Error(w, "expired", http.StatusUnauthorized)
+			return
+		}
+		if r.Header.Get("Authorization") != "Bearer token-2" {
+			t.Error("request used an unexpected Entra token")
+			http.Error(w, "invalid token", http.StatusUnauthorized)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(backend.Close)
+	source := newAzureTokenSource("")
+	source.now = func() time.Time { return now }
+	source.getenv = awsTestEnvironment(nil)
+	source.imdsURL = identity.URL
+	client := &http.Client{Transport: azureOpenAITransport{base: http.DefaultTransport, tokenSource: source, authType: "entra"}}
+	for _, want := range []int{http.StatusUnauthorized, http.StatusNoContent} {
+		request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, backend.URL, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response, err := client.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if response.StatusCode != want {
+			t.Errorf("status=%d, want %d", response.StatusCode, want)
+		}
+		if err := response.Body.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if tokenRequests.Load() != 2 {
+		t.Fatalf("token requests=%d, want 2", tokenRequests.Load())
+	}
+}
+
+func TestAzureTokenSourceRejectedOldTokenKeepsNewToken(t *testing.T) {
+	source := newAzureTokenSource("")
+	source.token = "new-token"
+	source.refreshAt = time.Now().Add(time.Hour)
+	source.invalidate("old-token")
+	if token, err := source.Token(t.Context()); err != nil || token != "new-token" {
+		t.Fatalf("new token was invalidated: token=%q err=%v", token, err)
+	}
+}
+
+func TestAzureTokenSourceDoesNotRotateExplicitToken(t *testing.T) {
+	source := newAzureTokenSource("operator-token")
+	source.invalidate("operator-token")
+	if token, err := source.Token(t.Context()); err != nil || token != "operator-token" {
+		t.Fatalf("explicit token changed: token=%q err=%v", token, err)
+	}
+}
+
 func TestAzureTokenSourceDoesNotReturnTokenExpiredDuringRefresh(t *testing.T) {
 	base := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	var clock atomic.Int64
