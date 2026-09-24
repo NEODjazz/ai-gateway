@@ -345,6 +345,8 @@ func TestOllamaRejectsUnsupportedResponsesControlsBeforeUpstream(t *testing.T) {
 	topLogprobs := 1
 	context := "auto"
 	mode := "standard"
+	summary := "auto"
+	generateSummary := "auto"
 	for _, test := range []struct {
 		name    string
 		request openai.ResponseRequest
@@ -360,6 +362,8 @@ func TestOllamaRejectsUnsupportedResponsesControlsBeforeUpstream(t *testing.T) {
 		{name: "parallel_tool_calls", request: openai.ResponseRequest{ParallelToolCalls: &falseValue}},
 		{name: "reasoning.context", request: openai.ResponseRequest{Reasoning: &openai.ResponseReasoning{Context: &context}}},
 		{name: "reasoning.mode", request: openai.ResponseRequest{Reasoning: &openai.ResponseReasoning{Mode: &mode}}},
+		{name: "reasoning.summary", request: openai.ResponseRequest{Reasoning: &openai.ResponseReasoning{Summary: &summary}}},
+		{name: "reasoning.generate_summary", request: openai.ResponseRequest{Reasoning: &openai.ResponseReasoning{GenerateSummary: &generateSummary}}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			request := test.request

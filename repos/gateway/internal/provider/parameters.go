@@ -139,10 +139,12 @@ func (Anthropic) ValidateResponseParameters(request openai.ResponseRequest) erro
 
 func (Ollama) ValidateResponseParameters(request openai.ResponseRequest) error {
 	_, verbositySupplied := openai.ResponseTextVerbosity(request.Text)
-	contextSupplied, modeSupplied := false, false
+	contextSupplied, modeSupplied, summarySupplied, generateSummarySupplied := false, false, false, false
 	if request.Reasoning != nil {
 		contextSupplied = request.Reasoning.Context != nil
 		modeSupplied = request.Reasoning.Mode != nil
+		summarySupplied = request.Reasoning.Summary != nil
+		generateSummarySupplied = request.Reasoning.GenerateSummary != nil
 	}
 	return rejectParameters("ollama",
 		parameterCheck{"background", request.Background},
@@ -159,6 +161,8 @@ func (Ollama) ValidateResponseParameters(request openai.ResponseRequest) error {
 		parameterCheck{"parallel_tool_calls", request.ParallelToolCalls != nil},
 		parameterCheck{"reasoning.context", contextSupplied},
 		parameterCheck{"reasoning.mode", modeSupplied},
+		parameterCheck{"reasoning.summary", summarySupplied},
+		parameterCheck{"reasoning.generate_summary", generateSummarySupplied},
 		parameterCheck{"user", request.User != ""},
 		parameterCheck{"safety_identifier", request.SafetyIdentifier != ""},
 		parameterCheck{"prompt_cache_key", request.PromptCacheKey != ""},

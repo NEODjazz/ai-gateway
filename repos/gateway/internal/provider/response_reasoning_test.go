@@ -18,8 +18,8 @@ func TestResponsesReasoningForwarding(t *testing.T) {
 				requestBody := `{"model":"m","input":"hello","reasoning":{"effort":"high","summary":"auto","generate_summary":"auto","context":"auto","mode":"standard"}}`
 				wantReasoning := map[string]any{"effort": "high", "summary": "auto", "generate_summary": "auto", "context": "auto", "mode": "standard"}
 				if adapter == "ollama" {
-					requestBody = `{"model":"m","input":"hello","reasoning":{"effort":"high","summary":"auto","generate_summary":"auto"}}`
-					wantReasoning = map[string]any{"effort": "high", "summary": "auto", "generate_summary": "auto"}
+					requestBody = `{"model":"m","input":"hello","reasoning":{"effort":"high"}}`
+					wantReasoning = map[string]any{"effort": "high"}
 				}
 				called := false
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

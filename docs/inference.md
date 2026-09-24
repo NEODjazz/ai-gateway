@@ -604,7 +604,7 @@ adapter используют те же проверки, включая streamin
 | --- | --- |
 | Anthropic chat | `seed`; `stop` неверного типа или более четырёх последовательностей |
 | Anthropic Responses | `previous_response_id`, `safety_identifier` |
-| Ollama Responses | `previous_response_id`, provider-side `conversation`, `store=true`, `truncation`, `include`, `metadata`, `top_logprobs`, `tool_choice`, `parallel_tool_calls`, `reasoning.context`, `reasoning.mode`, `safety_identifier` |
+| Ollama Responses | `previous_response_id`, provider-side `conversation`, `store=true`, `truncation`, `include`, `metadata`, `top_logprobs`, `tool_choice`, `parallel_tool_calls`, `reasoning.context`, `reasoning.mode`, `reasoning.summary`, `reasoning.generate_summary`, `safety_identifier` |
 | Ollama native chat | `tool_choice`, `parallel_tool_calls` |
 | Ollama embeddings | token-ID input; `user`; `encoding_format`, отличный от `float` |
 | Gemini embeddings | token-ID input; `user`; `encoding_format`, отличный от `float` |
@@ -2121,8 +2121,8 @@ test verifies grouping and block order for text before, between and after result
 
 The optional `reasoning` object accepts `effort`, `summary`, `generate_summary`,
 `context` and `mode` string fields. OpenAI-compatible Responses adapters forward
-all supplied fields; Ollama forwards `effort`, `summary` and `generate_summary`
-but rejects `context` and `mode` in JSON and streaming requests. Upstream/model
+all supplied fields; Ollama forwards `effort` but rejects `summary`,
+`generate_summary`, `context` and `mode` in JSON and streaming requests. Upstream/model
 support determines valid values; the gateway does not translate them into a
 different provider's thinking controls. Anthropic and Demo return
 `unsupported_parameter` for a supplied object. Omission preserves prior defaults.
