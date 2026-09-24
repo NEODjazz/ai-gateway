@@ -88,6 +88,21 @@ func TestAzureIdentityEndpointsSelectSupportedCloud(t *testing.T) {
 	}
 }
 
+func TestAzureIdentityEndpointsExplicitCloudForProxy(t *testing.T) {
+	for _, test := range []struct {
+		baseURL, cloud, authority, resource string
+	}{
+		{baseURL: "https://proxy.example.test/api/projects/project-a/openai/v1", cloud: "usgov", authority: azureGovernmentAuthority, resource: azureGovernmentFoundryResource},
+		{baseURL: "https://proxy.example.test/openai/v1", cloud: "china", authority: azureChinaAuthority, resource: azureChinaResource},
+		{baseURL: "https://proxy.example.test/api/projects/project-a/openai/v1", cloud: "public", authority: azureAuthorityURL, resource: azureFoundryResource},
+	} {
+		source := newAzureTokenSourceWithCloud("", test.baseURL, test.cloud)
+		if source.authorityBaseURL != test.authority || source.resource != test.resource || source.scope != test.resource+".default" {
+			t.Fatalf("base=%q cloud=%q authority=%q resource=%q scope=%q", test.baseURL, test.cloud, source.authorityBaseURL, source.resource, source.scope)
+		}
+	}
+}
+
 func TestAzureFoundryFederationUsesProjectScope(t *testing.T) {
 	tokenFile := filepath.Join(t.TempDir(), "federated-token")
 	if err := os.WriteFile(tokenFile, []byte("projected.jwt"), 0o600); err != nil {

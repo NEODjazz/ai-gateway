@@ -65,6 +65,35 @@ func newAzureTokenSource(explicit string, providerBaseURL ...string) *azureToken
 	return &azureTokenSource{explicit: explicit, client: client, getenv: os.Getenv, now: time.Now, imdsURL: azureIMDSTokenURL, authorityBaseURL: authority, resource: resource, scope: resource + ".default"}
 }
 
+func newAzureTokenSourceWithCloud(explicit, providerBaseURL, cloud string) *azureTokenSource {
+	source := newAzureTokenSource(explicit, providerBaseURL)
+	if cloud == "" {
+		return source
+	}
+	project := source.resource == azureFoundryResource || source.resource == azureGovernmentFoundryResource
+	switch cloud {
+	case "public":
+		source.authorityBaseURL = azureAuthorityURL
+		if project {
+			source.resource = azureFoundryResource
+		} else {
+			source.resource = azureOpenAIResource
+		}
+	case "usgov":
+		source.authorityBaseURL = azureGovernmentAuthority
+		if project {
+			source.resource = azureGovernmentFoundryResource
+		} else {
+			source.resource = azureGovernmentResource
+		}
+	case "china":
+		source.authorityBaseURL = azureChinaAuthority
+		source.resource = azureChinaResource
+	}
+	source.scope = source.resource + ".default"
+	return source
+}
+
 func azureIdentityEndpoints(providerBaseURL ...string) (string, string) {
 	if len(providerBaseURL) > 0 {
 		if parsed, err := url.Parse(providerBaseURL[0]); err == nil {

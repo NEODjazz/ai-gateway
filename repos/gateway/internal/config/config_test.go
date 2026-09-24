@@ -59,6 +59,9 @@ func TestValidateAzureOpenAIConfiguration(t *testing.T) {
 	if err := validateProviderAdmission([]ProviderEndpointConfig{{Name: "foundry", Type: "azure-openai", BaseURL: "https://resource.services.ai.azure.com/api/projects/project-a", AuthType: "entra"}}); err != nil {
 		t.Fatalf("valid Foundry project configuration rejected: %v", err)
 	}
+	if err := validateProviderAdmission([]ProviderEndpointConfig{{Name: "foundry-gov", Type: "azure-openai", BaseURL: "https://proxy.example.test/api/projects/project-a", AuthType: "entra", AzureCloud: "usgov"}}); err != nil {
+		t.Fatalf("valid sovereign Foundry proxy rejected: %v", err)
+	}
 	for _, endpoint := range []ProviderEndpointConfig{
 		{Name: "azure", Type: "azure-openai", APIVersion: "2025-13-01"},
 		{Name: "azure", Type: "azure-openai", AuthType: "basic"},
@@ -66,6 +69,10 @@ func TestValidateAzureOpenAIConfiguration(t *testing.T) {
 		{Name: "foundry", Type: "azure-openai", BaseURL: "https://resource.services.ai.azure.com/api/projects/project-a", APIVersion: "2025-04-01-preview", AuthType: "entra"},
 		{Name: "foundry", Type: "azure-openai", BaseURL: "https://resource.services.ai.azure.com/api/projects/project-a/openai/v1", APIVersion: "2025-04-01-preview", AuthType: "entra"},
 		{Name: "other", Type: "openai-compatible", APIVersion: "2025-04-01-preview"},
+		{Name: "azure", Type: "azure-openai", AuthType: "entra", AzureCloud: "unknown"},
+		{Name: "azure", Type: "azure-openai", AuthType: "api_key", AzureCloud: "usgov"},
+		{Name: "foundry", Type: "azure-openai", BaseURL: "https://proxy.example.test/api/projects/project-a", AuthType: "entra", AzureCloud: "china"},
+		{Name: "other", Type: "openai-compatible", AzureCloud: "usgov"},
 	} {
 		if err := validateProviderAdmission([]ProviderEndpointConfig{endpoint}); err == nil {
 			t.Fatalf("invalid Azure configuration accepted: %+v", endpoint)

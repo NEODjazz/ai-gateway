@@ -490,7 +490,7 @@ func (r *Router) endpointForManagedDeploymentWithSecret(deployment ModelDeployme
 	if managed.Type == "vertex-gemini" && deployment.CredentialID != "" {
 		return Endpoint{}, ErrInvalidDeployment
 	}
-	providerConfig := config.ProviderEndpointConfig{Type: managed.Type, BaseURL: managed.BaseURL, APIKey: secret, Stream: hasCapability(deployment.Capabilities, "stream"), APIVersion: managed.APIVersion, AuthType: managed.AuthType, Region: managed.Region}
+	providerConfig := config.ProviderEndpointConfig{Type: managed.Type, BaseURL: managed.BaseURL, APIKey: secret, Stream: hasCapability(deployment.Capabilities, "stream"), APIVersion: managed.APIVersion, AuthType: managed.AuthType, AzureCloud: managed.AzureCloud, Region: managed.Region}
 	if managed.Type == "azure-openai" {
 		baseURL, err := azureManagedDeploymentBaseURL(managed.BaseURL, managed.APIVersion, deployment)
 		if err != nil {

@@ -607,7 +607,7 @@ func NewWithError(cfg Config) (Provider, error) {
 				region = strings.ToLower(strings.TrimSpace(endpoint.Region))
 			}
 		}
-		initialProviders[endpoint.Name] = ManagedProvider{ID: endpoint.Name, Type: endpoint.Type, BaseURL: strings.TrimRight(providerBaseURL, "/"), APIVersion: strings.TrimSpace(endpoint.APIVersion), AuthType: authType, Region: region, Enabled: enabled}
+		initialProviders[endpoint.Name] = ManagedProvider{ID: endpoint.Name, Type: endpoint.Type, BaseURL: strings.TrimRight(providerBaseURL, "/"), APIVersion: strings.TrimSpace(endpoint.APIVersion), AuthType: authType, AzureCloud: endpoint.AzureCloud, Region: region, Enabled: enabled}
 		initialDeployments[endpoint.Name] = ModelDeployment{ID: endpoint.Name, ProviderID: endpoint.Name, ProviderType: endpoint.Type, UpstreamModel: upstreamModel, Models: append([]string(nil), endpoint.Models...), Capabilities: append([]string(nil), endpoint.Capabilities...), Priority: endpoint.Priority, Weight: deploymentWeight, GuardrailPolicy: endpoint.GuardrailPolicy, MaxRetries: endpoint.MaxRetries, CooldownAfterFailures: endpoint.CooldownAfterFailures, CooldownSeconds: endpoint.CooldownSeconds, MaxParallelRequests: endpoint.MaxParallelRequests, QueueCapacity: endpoint.QueueCapacity, QueueTimeoutMS: endpoint.QueueTimeoutMS, RateLimitRPM: endpoint.RateLimitRPM, RateLimitTPM: endpoint.RateLimitTPM, Enabled: enabled}
 	}
 
@@ -3869,7 +3869,7 @@ func providerFor(endpoint config.ProviderEndpointConfig) Client {
 	case "openrouter":
 		return NewOpenRouter(endpoint.BaseURL, endpoint.APIKey, endpoint.Stream, endpoint.RerankPath)
 	case "azure-openai":
-		return NewAzureOpenAI(endpoint.BaseURL, endpoint.APIKey, endpoint.Stream, endpoint.APIVersion, endpoint.AuthType)
+		return NewAzureOpenAI(endpoint.BaseURL, endpoint.APIKey, endpoint.Stream, endpoint.APIVersion, endpoint.AuthType, endpoint.AzureCloud)
 	case "gemini":
 		return NewGeminiWithAuth(endpoint.BaseURL, endpoint.APIKey, endpoint.Stream, endpoint.AuthType)
 	case "vertex-gemini":

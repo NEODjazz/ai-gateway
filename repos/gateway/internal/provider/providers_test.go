@@ -70,6 +70,60 @@ func TestManagedGeminiWorkloadAuthentication(t *testing.T) {
 	}
 }
 
+func TestAzureCloudSelectionReachesManagedAndStartupInference(t *testing.T) {
+	baseURL := "https://proxy.example.test/api/projects/project-a"
+	router := New(Config{}).(*Router)
+	managed, err := router.CreateProvider(ManagedProvider{ID: "foundry-gov", Type: "azure-openai", BaseURL: baseURL, AuthType: "entra", AzureCloud: "usgov", Enabled: true})
+	if err != nil || managed.AzureCloud != "usgov" {
+		t.Fatalf("managed provider=%+v err=%v", managed, err)
+	}
+	deployment := ModelDeployment{ID: "foundry-model", ProviderID: managed.ID, Models: []string{"deployment"}, Capabilities: []string{"chat"}, Enabled: true}
+	endpoint, err := router.endpointForManagedDeploymentWithSecret(deployment, managed, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertAzureCloudTransport(t, endpoint.Provider, azureGovernmentAuthority, azureGovernmentFoundryResource)
+
+	startup := New(Config{Endpoints: []config.ProviderEndpointConfig{{Name: "foundry-gov", Type: "azure-openai", BaseURL: baseURL, AuthType: "entra", AzureCloud: "usgov", Models: []string{"deployment"}}}}).(*Router)
+	providers := startup.ListProviders(t.Context())
+	if len(providers) != 1 || providers[0].AzureCloud != "usgov" {
+		t.Fatalf("startup provider=%+v", providers)
+	}
+	for _, runtime := range startup.runtimeEndpoints() {
+		if runtime.Name == "foundry-gov" {
+			assertAzureCloudTransport(t, runtime.Provider, azureGovernmentAuthority, azureGovernmentFoundryResource)
+			return
+		}
+	}
+	t.Fatal("startup Azure endpoint missing")
+}
+
+func assertAzureCloudTransport(t *testing.T, client Client, authority, resource string) {
+	t.Helper()
+	azure, ok := client.(OpenAICompatible)
+	if !ok {
+		t.Fatalf("Azure client type=%T", client)
+	}
+	transport, ok := azure.client.Transport.(azureOpenAITransport)
+	if !ok || transport.tokenSource.authorityBaseURL != authority || transport.tokenSource.resource != resource {
+		t.Fatalf("Azure transport=%+v", azure.client.Transport)
+	}
+}
+
+func TestManagedAzureCloudRejectsInvalidSelections(t *testing.T) {
+	router := New(Config{}).(*Router)
+	for _, input := range []ManagedProvider{
+		{ID: "unknown", Type: "azure-openai", BaseURL: "https://proxy.example.test", AuthType: "entra", AzureCloud: "unknown", Enabled: true},
+		{ID: "api-key", Type: "azure-openai", BaseURL: "https://proxy.example.test", AuthType: "api_key", AzureCloud: "usgov", Enabled: true},
+		{ID: "china-project", Type: "azure-openai", BaseURL: "https://proxy.example.test/api/projects/project-a", AuthType: "entra", AzureCloud: "china", Enabled: true},
+		{ID: "other", Type: "openai-compatible", BaseURL: "https://proxy.example.test", AzureCloud: "usgov", Enabled: true},
+	} {
+		if _, err := router.CreateProvider(input); !errors.Is(err, ErrInvalidProvider) {
+			t.Fatalf("invalid cloud selection accepted: %+v err=%v", input, err)
+		}
+	}
+}
+
 func TestManagedVertexGeminiConfiguration(t *testing.T) {
 	router := New(Config{}).(*Router)
 	baseURL := "https://us-central1-aiplatform.googleapis.com/v1/projects/project-1/locations/us-central1/publishers/google"

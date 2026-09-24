@@ -504,7 +504,9 @@ value alongside the explicit supported levels. The compatibility aliases
 
 For Azure Foundry project URLs under `/api/projects/{project}`, managed identity
 uses the Foundry audience even when the endpoint has a custom hostname. Known
-Azure Government hostnames select the corresponding sovereign audience.
+Azure Government hostnames select the corresponding sovereign audience. When a
+sovereign endpoint uses a custom hostname, set `azure_cloud=usgov` or `china`
+with `auth_type=entra`; Foundry project URLs support `usgov` but not `china`.
 
 OpenAI-compatible adapter один раз повторяет запрос с
 `max_completion_tokens`, только когда upstream явно отверг legacy

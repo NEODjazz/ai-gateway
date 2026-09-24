@@ -2,11 +2,45 @@ package provider
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"time"
 )
+
+func TestAzureFoundryProjectDiscoveryUsesExplicitGovernmentIdentity(t *testing.T) {
+	for _, name := range []string{"AZURE_TENANT_ID", "AZURE_CLIENT_ID", "AZURE_FEDERATED_TOKEN_FILE"} {
+		t.Setenv(name, "")
+	}
+	identity := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("resource") != azureGovernmentFoundryResource || r.Header.Get("X-IDENTITY-HEADER") != "test-header" {
+			t.Errorf("government identity request: query=%v headers=%v", r.URL.Query(), r.Header)
+		}
+		_, _ = fmt.Fprintf(w, `{"access_token":"government-project-token","expires_on":%d,"token_type":"Bearer"}`, time.Now().Add(time.Hour).Unix())
+	}))
+	t.Cleanup(identity.Close)
+	t.Setenv("IDENTITY_ENDPOINT", identity.URL)
+	t.Setenv("IDENTITY_HEADER", "test-header")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/projects/project-a/deployments" || r.URL.Query().Get("api-version") != "v1" || r.Header.Get("Authorization") != "Bearer government-project-token" {
+			t.Errorf("government discovery request: %s headers=%v", r.URL.String(), r.Header)
+			http.Error(w, "invalid discovery request", http.StatusBadRequest)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"value": []any{map[string]any{"name": "model-a", "type": "ModelDeployment"}}})
+	}))
+	t.Cleanup(server.Close)
+	router := New(Config{}).(*Router)
+	if _, err := router.CreateProvider(ManagedProvider{ID: "foundry-gov", Type: "azure-openai", BaseURL: server.URL + "/api/projects/project-a", AuthType: "entra", AzureCloud: "usgov", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	models, err := router.DiscoverProviderModels(t.Context(), "foundry-gov", "")
+	if err != nil || len(models) != 1 || models[0].ID != "model-a" {
+		t.Fatalf("models=%+v err=%v", models, err)
+	}
+}
 
 func TestAzureFoundryProjectDiscoveryPaginatesDeployments(t *testing.T) {
 	var calls atomic.Int32

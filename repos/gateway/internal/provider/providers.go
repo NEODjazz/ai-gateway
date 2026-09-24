@@ -20,6 +20,7 @@ type ManagedProvider struct {
 	BaseURL      string `json:"base_url,omitempty"`
 	APIVersion   string `json:"api_version,omitempty"`
 	AuthType     string `json:"auth_type,omitempty"`
+	AzureCloud   string `json:"azure_cloud,omitempty"`
 	Region       string `json:"region,omitempty"`
 	RateLimitRPM int    `json:"rate_limit_rpm,omitempty"`
 	RateLimitTPM int    `json:"rate_limit_tpm,omitempty"`
@@ -313,6 +314,7 @@ func normalizeManagedProvider(input ManagedProvider) (ManagedProvider, error) {
 	input.BaseURL = strings.TrimRight(strings.TrimSpace(input.BaseURL), "/")
 	input.APIVersion = strings.TrimSpace(input.APIVersion)
 	input.AuthType = strings.ToLower(strings.TrimSpace(input.AuthType))
+	input.AzureCloud = strings.ToLower(strings.TrimSpace(input.AzureCloud))
 	input.Region = strings.ToLower(strings.TrimSpace(input.Region))
 	if input.ID == "" || len(input.ID) > 128 || !validProviderType(input.Type) || len(input.BaseURL) > 2048 || input.RateLimitRPM < 0 || input.RateLimitRPM > 10000000 || input.RateLimitTPM < 0 || input.RateLimitTPM > 1000000000 {
 		return ManagedProvider{}, ErrInvalidProvider
@@ -323,13 +325,19 @@ func normalizeManagedProvider(input ManagedProvider) (ManagedProvider, error) {
 			return ManagedProvider{}, ErrInvalidProvider
 		}
 	}
+	if input.Type != "azure-openai" && input.AzureCloud != "" {
+		return ManagedProvider{}, ErrInvalidProvider
+	}
 	if input.Type == "azure-openai" {
 		input.AuthType = normalizeAzureAuthType(input.AuthType)
 		parsed, _ := url.Parse(input.BaseURL)
-		if parsed.RawQuery != "" || parsed.Fragment != "" || !validAzureProviderVersion(input.APIVersion) || (input.AuthType != "api_key" && input.AuthType != "entra") {
+		if parsed.RawQuery != "" || parsed.Fragment != "" || !validAzureProviderVersion(input.APIVersion) || (input.AuthType != "api_key" && input.AuthType != "entra") || (input.AzureCloud != "" && (input.AuthType != "entra" || !validManagedAzureCloud(input.AzureCloud))) {
 			return ManagedProvider{}, ErrInvalidProvider
 		}
 		if _, project := azureFoundryProjectPath(parsed.Path); project && input.APIVersion != "" {
+			return ManagedProvider{}, ErrInvalidProvider
+		}
+		if _, project := azureFoundryProjectPath(parsed.Path); project && input.AzureCloud == "china" {
 			return ManagedProvider{}, ErrInvalidProvider
 		}
 		input.Region = ""
@@ -1473,6 +1481,10 @@ func validAzureProviderVersion(value string) bool {
 	}
 	_, err := time.Parse("2006-01-02", date)
 	return err == nil
+}
+
+func validManagedAzureCloud(value string) bool {
+	return value == "public" || value == "usgov" || value == "china"
 }
 
 func cloneProviders(current map[string]ManagedProvider) map[string]ManagedProvider {

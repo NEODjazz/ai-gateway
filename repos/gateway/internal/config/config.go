@@ -201,6 +201,7 @@ type ProviderEndpointConfig struct {
 	RerankPath            string            `json:"rerank_path,omitempty"`
 	APIVersion            string            `json:"api_version,omitempty"`
 	AuthType              string            `json:"auth_type,omitempty"`
+	AzureCloud            string            `json:"azure_cloud,omitempty"`
 	Region                string            `json:"region,omitempty"`
 }
 
@@ -451,6 +452,12 @@ func validateProviderAdmission(endpoints []ProviderEndpointConfig) error {
 			if authType != "" && authType != "api_key" && authType != "entra" {
 				result = errors.Join(result, fmt.Errorf("provider %q auth_type must be api_key or entra", name))
 			}
+			if endpoint.AzureCloud != "" && (authType != "entra" || !validAzureCloud(endpoint.AzureCloud)) {
+				result = errors.Join(result, fmt.Errorf("provider %q azure_cloud requires Entra authentication and a supported cloud", name))
+			}
+			if parsed, err := url.Parse(endpoint.BaseURL); err == nil && azureFoundryProjectPath(parsed.Path) && endpoint.AzureCloud == "china" {
+				result = errors.Join(result, fmt.Errorf("provider %q Foundry project does not support azure_cloud=china", name))
+			}
 		} else if endpoint.Type == "gemini" {
 			authType := strings.ToLower(strings.TrimSpace(endpoint.AuthType))
 			if authType != "" && authType != "api_key" && authType != "gcp_adc" {
@@ -492,6 +499,9 @@ func validateProviderAdmission(endpoints []ProviderEndpointConfig) error {
 			}
 		} else if endpoint.APIVersion != "" || endpoint.AuthType != "" || endpoint.Region != "" {
 			result = errors.Join(result, fmt.Errorf("provider %q api_version, auth_type or region is unsupported for this type", name))
+		}
+		if endpoint.Type != "azure-openai" && endpoint.AzureCloud != "" {
+			result = errors.Join(result, fmt.Errorf("provider %q azure_cloud is only supported for Azure OpenAI", name))
 		}
 		if endpoint.QueueCapacity > 0 && endpoint.QueueTimeoutMS <= 0 {
 			result = errors.Join(result, fmt.Errorf("provider %q queue requires queue_timeout_ms", name))
@@ -570,6 +580,10 @@ func validAzureAPIVersion(value string) bool {
 	}
 	_, err := time.Parse("2006-01-02", date)
 	return err == nil
+}
+
+func validAzureCloud(value string) bool {
+	return value == "public" || value == "usgov" || value == "china"
 }
 
 func loadGuardrailPolicies() map[string]GuardrailPolicyConfig {

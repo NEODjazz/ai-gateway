@@ -122,7 +122,9 @@ export function ProvidersPage() {
   async function saveProvider(value: Row) {
     const current = editing;
     const id = String(current?.id || value.id || "");
-    await client.request(current ? `/admin/v1/providers/${encodeURIComponent(id)}` : "/admin/v1/providers", { method: current ? "PUT" : "POST", body: value });
+    const body = { ...value };
+    if (!body.azure_cloud) delete body.azure_cloud;
+    await client.request(current ? `/admin/v1/providers/${encodeURIComponent(id)}` : "/admin/v1/providers", { method: current ? "PUT" : "POST", body });
     setEditing(undefined); await load();
   }
 

@@ -155,6 +155,11 @@ defaults.
 Foundry resource и project endpoints с host suffix `.services.ai.azure.com`
 используют Entra scope `https://ai.azure.com/.default`; project URL
 `/api/projects/{project}` автоматически дополняется `/openai/v1`.
+Для Azure endpoint за собственным hostname можно задать `azure_cloud=public`,
+`usgov` или `china` при `auth_type=entra`; без настройки cloud определяется по URL.
+Для Foundry project в Government выбираются authority `login.microsoftonline.us`
+и audience `https://ai.azure.us/`. `azure_cloud=china` для Foundry project
+отклоняется, поскольку этот контракт не поддерживается.
 Для project endpoint `api_version` должен быть пустым; неверная конфигурация
 отклоняется до provider execution.
 Для Azure OpenAI provider с датированной `api_version` можно указать

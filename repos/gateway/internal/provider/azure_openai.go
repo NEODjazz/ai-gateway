@@ -51,7 +51,7 @@ func (t azureOpenAITransport) RoundTrip(request *http.Request) (*http.Response, 
 	return base.RoundTrip(cloned)
 }
 
-func NewAzureOpenAI(baseURL, credential string, upstreamStream bool, apiVersion, authType string) OpenAICompatible {
+func NewAzureOpenAI(baseURL, credential string, upstreamStream bool, apiVersion, authType string, azureCloud ...string) OpenAICompatible {
 	baseURL = normalizeAzureOpenAIBaseURL(baseURL)
 	legacyPath := ""
 	if parsed, err := url.Parse(baseURL); err == nil && parsed.Path != "" && !strings.HasSuffix(strings.TrimRight(parsed.Path, "/"), "/v1") {
@@ -61,7 +61,12 @@ func NewAzureOpenAI(baseURL, credential string, upstreamStream bool, apiVersion,
 	client.errorProvider = "azure-openai"
 	transport := client.client.Transport
 	normalizedAuthType := normalizeAzureAuthType(authType)
-	tokenSource := newAzureTokenSource(credential, baseURL)
+	var tokenSource *azureTokenSource
+	if len(azureCloud) > 0 {
+		tokenSource = newAzureTokenSourceWithCloud(credential, baseURL, azureCloud[0])
+	} else {
+		tokenSource = newAzureTokenSource(credential, baseURL)
+	}
 	client.client.Transport = azureOpenAITransport{
 		base: transport, credential: credential, tokenSource: tokenSource, authType: normalizedAuthType, apiVersion: strings.TrimSpace(apiVersion), legacyPath: legacyPath,
 	}
