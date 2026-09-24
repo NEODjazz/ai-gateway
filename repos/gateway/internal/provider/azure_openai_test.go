@@ -3,12 +3,14 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
+	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/openai"
 	"golang.org/x/net/websocket"
 )
@@ -58,6 +60,81 @@ func TestAzureOpenAIRealtimeUsesNativeURLAndAuthentication(t *testing.T) {
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+func TestManagedAzureRealtimeRoutesWithAuthenticationAndQuota(t *testing.T) {
+	for _, test := range []struct {
+		name, authType, apiVersion, wantPath, wantQuery string
+	}{
+		{name: "GA API key", authType: "api_key", wantPath: "/openai/v1/realtime", wantQuery: "model=upstream-model"},
+		{name: "preview Entra", authType: "entra", apiVersion: "2025-04-01-preview", wantPath: "/openai/realtime", wantQuery: "api-version=2025-04-01-preview&deployment=upstream-model"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			upstreamCheck := make(chan error, 1)
+			server := httptest.NewServer(websocket.Handler(func(connection *websocket.Conn) {
+				request := connection.Request()
+				if request.URL.Path != test.wantPath || request.URL.RawQuery != test.wantQuery {
+					upstreamCheck <- fmt.Errorf("unexpected realtime URL: %s", request.URL.String())
+					return
+				}
+				if test.authType == "entra" && (request.Header.Get("Authorization") != "Bearer managed-secret" || request.Header.Get("api-key") != "") ||
+					test.authType == "api_key" && (request.Header.Get("api-key") != "managed-secret" || request.Header.Get("Authorization") != "") {
+					upstreamCheck <- fmt.Errorf("unexpected realtime authentication headers: %v", request.Header)
+					return
+				}
+				upstreamCheck <- nil
+			}))
+			t.Cleanup(server.Close)
+
+			router := New(Config{CredentialEncryptionKey: []byte("azure-realtime-test-key"), DeploymentQuotaStore: NewMemoryDeploymentQuotaStore()}).(*Router)
+			if _, err := router.CreateProvider(ManagedProvider{ID: "azure", Type: "azure-openai", BaseURL: server.URL, APIVersion: test.apiVersion, AuthType: test.authType, Enabled: true}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := router.CreateCredential(CredentialInput{ID: "azure-key", ProviderID: "azure", Secret: "managed-secret"}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := router.CreateModelDeployment(ModelDeployment{ID: "azure-realtime", ProviderID: "azure", CredentialID: "azure-key", Models: []string{"public-model"}, UpstreamModel: "upstream-model", Capabilities: []string{"realtime"}, RateLimitTPM: 4, Enabled: true}); err != nil {
+				t.Fatal(err)
+			}
+			connection, attempt, err := router.OpenRealtime(t.Context(), modules.RequestContext{RequestID: "execution"}, "public-model")
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = connection.Close() })
+			if err := <-upstreamCheck; err != nil {
+				t.Fatal(err)
+			}
+			if attempt.Request.Model != "upstream-model" || attempt.Metadata["provider.endpoint.name"] != "azure-realtime" {
+				t.Fatalf("unexpected routed attempt: %+v", attempt)
+			}
+			reserver, ok := connection.(RealtimeTokenReserver)
+			if !ok {
+				t.Fatal("managed Azure realtime connection has no token reservation")
+			}
+			if err := reserver.ReserveRealtimeTokens(t.Context(), 4); err != nil {
+				t.Fatal(err)
+			}
+			var quotaErr *DeploymentQuotaError
+			if err := reserver.ReserveRealtimeTokens(t.Context(), 1); !errors.As(err, &quotaErr) {
+				t.Fatalf("deployment TPM was not enforced: %v", err)
+			}
+		})
+	}
+}
+
+func TestAzureFoundryProjectDoesNotAdvertiseResourceRealtime(t *testing.T) {
+	router := New(Config{CredentialEncryptionKey: []byte("foundry-realtime-test-key")}).(*Router)
+	if _, err := router.CreateProvider(ManagedProvider{ID: "foundry", Type: "azure-openai", BaseURL: "https://resource.services.ai.azure.com/api/projects/project-a", AuthType: "entra", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := router.CreateModelDeployment(ModelDeployment{ID: "foundry-realtime", ProviderID: "foundry", Models: []string{"model"}, Capabilities: []string{"realtime"}, Enabled: true})
+	if !errors.Is(err, ErrUnsupportedProviderCapability) {
+		t.Fatalf("project Realtime capability accepted: %v", err)
+	}
+	client := NewAzureOpenAI("https://resource.services.ai.azure.com/api/projects/project-a", "token", false, "", "entra")
+	if _, err := client.OpenRealtime(t.Context(), "model"); err == nil {
+		t.Fatal("project URL was silently rewritten to resource Realtime URL")
 	}
 }
 

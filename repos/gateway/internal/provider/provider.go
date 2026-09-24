@@ -3655,7 +3655,7 @@ func (e Endpoint) supportsCapabilities(required ...string) bool {
 		}
 	}
 	if hasCapability(required, "realtime") {
-		if _, ok := e.Provider.(RealtimeClient); !ok || e.Type != "openai" && e.Type != "openai-compatible" {
+		if _, ok := e.Provider.(RealtimeClient); !ok || e.Type != "openai" && e.Type != "openai-compatible" && (e.Type != "azure-openai" || !azureRealtimeSupportedBaseURL(e.BaseURL)) {
 			return false
 		}
 	}

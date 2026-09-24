@@ -94,6 +94,9 @@ func azureRealtimeEndpoint(baseURL, apiVersion, model string) (*url.URL, error) 
 	if err != nil || endpoint.Host == "" || endpoint.User != nil || (endpoint.Scheme != "http" && endpoint.Scheme != "https") {
 		return nil, errors.New("invalid Azure realtime provider URL")
 	}
+	if _, project := azureFoundryProjectPath(endpoint.Path); project {
+		return nil, errors.New("Azure Foundry project URL does not expose the Azure OpenAI realtime endpoint")
+	}
 	if endpoint.Scheme == "https" {
 		endpoint.Scheme = "wss"
 	} else {
@@ -112,6 +115,15 @@ func azureRealtimeEndpoint(baseURL, apiVersion, model string) (*url.URL, error) 
 	}
 	endpoint.RawQuery = query.Encode()
 	return endpoint, nil
+}
+
+func azureRealtimeSupportedBaseURL(baseURL string) bool {
+	parsed, err := url.Parse(baseURL)
+	if err != nil {
+		return false
+	}
+	_, project := azureFoundryProjectPath(parsed.Path)
+	return !project
 }
 
 func normalizeAzureOpenAIBaseURL(value string) string {

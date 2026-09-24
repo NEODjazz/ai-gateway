@@ -79,6 +79,10 @@ projects use `https://ai.azure.com/.default`; Azure Government projects on
 `*.services.ai.azure.us` use `https://ai.azure.us/.default` with the government
 Entra authority. Azure OpenAI resource endpoints keep their resource-specific
 audiences.
+Managed Azure OpenAI resource deployments can advertise `realtime` and use the
+shared routing, admission and per-response quota lifecycle with API-key or Entra
+WebSocket authentication. Foundry project URLs do not expose the resource-level
+Realtime route and are rejected for this capability.
 
 For Chat model parameter overrides, `supported_options` adds model-specific
 controls to the provider policy and `unsupported_options` removes controls the

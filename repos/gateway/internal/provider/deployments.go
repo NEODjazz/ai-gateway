@@ -611,7 +611,7 @@ func supportsManagedAdapterCapability(endpoint Endpoint, capability string) bool
 		return ok && endpoint.Type == "opensandbox"
 	case "realtime":
 		_, ok := endpoint.Provider.(RealtimeClient)
-		return ok && (endpoint.Type == "openai" || endpoint.Type == "openai-compatible")
+		return ok && (endpoint.Type == "openai" || endpoint.Type == "openai-compatible" || endpoint.Type == "azure-openai" && azureRealtimeSupportedBaseURL(endpoint.BaseURL))
 	case "background_responses":
 		if endpoint.Type != "openai" && endpoint.Type != "openai-compatible" && endpoint.Type != "azure-openai" {
 			return false
