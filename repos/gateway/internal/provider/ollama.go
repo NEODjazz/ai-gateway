@@ -677,6 +677,16 @@ func normalizeOllamaResponseText(value any) (any, error) {
 	}
 }
 
+func ollamaResponseReasoning(reasoning *openai.ResponseReasoning) *openai.ResponseReasoning {
+	if reasoning == nil || reasoning.Effort == nil || *reasoning.Effort != "default" {
+		return reasoning
+	}
+	// Ollama uses its model default when effort is omitted.
+	copy := *reasoning
+	copy.Effort = nil
+	return &copy
+}
+
 func (p Ollama) Responses(ctx context.Context, request openai.ResponseRequest) (openai.ResponseResponse, error) {
 	if err := p.ValidateResponseParameters(request); err != nil {
 		return openai.ResponseResponse{}, err
@@ -686,7 +696,7 @@ func (p Ollama) Responses(ctx context.Context, request openai.ResponseRequest) (
 		return openai.ResponseResponse{}, err
 	}
 	body, err := json.Marshal(openAICompatibleResponseRequest{
-		Include: request.Include, Store: request.Store, Reasoning: request.Reasoning, Truncation: request.Truncation, TopLogprobs: request.TopLogprobs, Metadata: request.Metadata,
+		Include: request.Include, Store: request.Store, Reasoning: ollamaResponseReasoning(request.Reasoning), Truncation: request.Truncation, TopLogprobs: request.TopLogprobs, Metadata: request.Metadata,
 		Model: request.Model, Input: request.Input, Instructions: request.Instructions,
 		Tools: request.Tools, ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls,
 		Text: text, PreviousResponse: request.PreviousResponse, Stream: false,
@@ -729,7 +739,7 @@ func (p Ollama) StreamResponses(ctx context.Context, request openai.ResponseRequ
 	}
 
 	body, err := json.Marshal(openAICompatibleResponseRequest{
-		Include: request.Include, Store: request.Store, Reasoning: request.Reasoning, Truncation: request.Truncation, TopLogprobs: request.TopLogprobs, Metadata: request.Metadata,
+		Include: request.Include, Store: request.Store, Reasoning: ollamaResponseReasoning(request.Reasoning), Truncation: request.Truncation, TopLogprobs: request.TopLogprobs, Metadata: request.Metadata,
 		Model: request.Model, Input: request.Input, Instructions: request.Instructions,
 		Tools: request.Tools, ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls,
 		Text: text, PreviousResponse: request.PreviousResponse, Stream: true,

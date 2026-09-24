@@ -2131,7 +2131,8 @@ The optional `reasoning` object accepts `effort`, `summary`, `generate_summary`,
 all supplied fields; Ollama forwards `effort` but rejects `summary`,
 `generate_summary`, `context` and `mode` in JSON and streaming requests. Upstream/model
 support determines valid values; the gateway does not translate them into a
-different provider's thinking controls. Anthropic and Demo return
+different provider's thinking controls. For Ollama, `effort=default` is sent as
+an omitted effort so the selected model keeps its own default. Anthropic and Demo return
 `unsupported_parameter` for a supplied object. Omission preserves prior defaults.
 
 This adds an optional typed request object and its OpenAPI schema. HTTP regression
