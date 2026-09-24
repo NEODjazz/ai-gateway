@@ -1496,6 +1496,9 @@ func streamAnthropicChat(body io.Reader, fallbackModel string, structured bool, 
 				response.Usage.InferenceGeo = streamEvent.Usage.InferenceGeo
 			}
 			if streamEvent.Usage.OutputTokens != 0 {
+				if response.Usage.PromptTokens > math.MaxInt-streamEvent.Usage.OutputTokens {
+					return errors.New("invalid Anthropic usage")
+				}
 				response.Usage.CompletionTokens = streamEvent.Usage.OutputTokens
 				response.Usage.TotalTokens = response.Usage.PromptTokens + response.Usage.CompletionTokens
 			}
@@ -1604,6 +1607,9 @@ func streamAnthropicResponses(body io.Reader, fallbackModel string, structured b
 		}
 		switch event {
 		case "message_start":
+			if err := validateAnthropicUsage(streamEvent.Message.Usage); err != nil {
+				return err
+			}
 			response.ID = streamEvent.Message.ID
 			response.Model = streamEvent.Message.Model
 			response.Usage.InputTokens = anthropicInputTokens(streamEvent.Message.Usage)
@@ -1651,7 +1657,13 @@ func streamAnthropicResponses(body io.Reader, fallbackModel string, structured b
 				}
 			}
 		case "message_delta":
+			if err := validateAnthropicUsage(streamEvent.Usage); err != nil {
+				return err
+			}
 			if streamEvent.Usage.OutputTokens != 0 {
+				if response.Usage.InputTokens > math.MaxInt-streamEvent.Usage.OutputTokens {
+					return errors.New("invalid Anthropic usage")
+				}
 				response.Usage.OutputTokens = streamEvent.Usage.OutputTokens
 				response.Usage.TotalTokens = response.Usage.InputTokens + response.Usage.OutputTokens
 			}

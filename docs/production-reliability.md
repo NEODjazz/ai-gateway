@@ -5,6 +5,11 @@ token totals that exceed the platform integer range before JSON conversion or
 the first streaming event. Regression tests cover each overflowing component,
 the valid maximum boundary and both Chat response paths.
 
+For Anthropic Chat and Responses SSE, the gateway also validates the combined
+usage across `message_start` and `message_delta`. Responses streaming validates
+the initial provider usage before forwarding `response.created`; overflowing
+final usage cannot produce a successful terminal response or billing settlement.
+
 ## Token accounting and request identity
 
 TPM and remote billing reserve use the same context estimator. For chat, it includes messages, tool calls, tool schemas, tool choice and response format. For Responses, it includes input, instructions, tools, tool choice and text format. The estimate uses serialized context bytes (approximately four bytes per token); image input uses a fixed 4096-token estimate instead of charging for base64 length. This is a reservation estimate, not a provider tokenizer or a guarantee of exact multimodal usage. Provider-reported usage settles the final charge when available; fallback usage remains marked estimated.
