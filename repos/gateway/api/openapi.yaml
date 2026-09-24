@@ -10086,6 +10086,7 @@ components:
           type: object
           nullable: true
           additionalProperties: false
+          required: [reason]
           properties:
             reason: {type: string, enum: [max_output_tokens, max_messages, content_filter, steered]}
         model: {type: string, minLength: 1, maxLength: 256}
