@@ -318,9 +318,6 @@ func validateResponseTools(tools []ResponseTool) string {
 			if !chatFunctionName.MatchString(tool.Name) {
 				return "function tool names must contain 1 to 64 letters, digits, underscores, or hyphens"
 			}
-			if utf8.RuneCountInString(tool.Description) > 4096 {
-				return "function tool descriptions must contain at most 4096 characters"
-			}
 			if responseToolHasHostedImageFields(tool) || tool.ServerLabel != "" || tool.ServerURL != "" || tool.ServerDescription != "" || len(tool.AllowedTools) > 0 || len(tool.AllowedCallers) > 0 || tool.RequireApproval != nil || len(tool.Headers) > 0 || len(tool.VectorStoreIDs) > 0 || tool.Container != nil || tool.Environment != nil || tool.Filters != nil || tool.MaxNumResults != nil || tool.RankingOptions != nil || tool.RewriteQuery != nil || tool.SearchContextSize != "" || tool.UserLocation != nil || tool.Format != nil {
 				return "function tools contain unsupported fields"
 			}
@@ -334,9 +331,6 @@ func validateResponseTools(tools []ResponseTool) string {
 		case "custom":
 			if !chatFunctionName.MatchString(tool.Name) {
 				return "custom tool names must contain 1 to 64 letters, digits, underscores, or hyphens"
-			}
-			if utf8.RuneCountInString(tool.Description) > 4096 {
-				return "custom tool descriptions must contain at most 4096 characters"
 			}
 			if responseToolHasHostedImageFields(tool) || tool.Parameters != nil || tool.Strict != nil || tool.ServerLabel != "" || tool.ServerURL != "" || tool.ServerDescription != "" || len(tool.AllowedTools) > 0 || len(tool.AllowedCallers) > 0 || tool.RequireApproval != nil || len(tool.Headers) > 0 || len(tool.VectorStoreIDs) > 0 || tool.Container != nil || tool.Environment != nil || tool.Filters != nil || tool.MaxNumResults != nil || tool.RankingOptions != nil || tool.RewriteQuery != nil || tool.SearchContextSize != "" || tool.UserLocation != nil {
 				return "custom tools contain unsupported fields"

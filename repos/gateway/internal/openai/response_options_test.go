@@ -372,7 +372,6 @@ func TestResponseToolDefinitionValidation(t *testing.T) {
 		{name: "missing function name", tools: []ResponseTool{{Type: "function"}}},
 		{name: "invalid function name", tools: []ResponseTool{{Type: "function", Name: "bad name"}}},
 		{name: "long function name", tools: []ResponseTool{{Type: "function", Name: strings.Repeat("a", 65)}}},
-		{name: "long function description", tools: []ResponseTool{{Type: "function", Name: "lookup", Description: strings.Repeat("d", 4097)}}},
 		{name: "non-object parameters", tools: []ResponseTool{{Type: "function", Name: "lookup", Parameters: []any{"invalid"}}}},
 		{name: "function with MCP field", tools: []ResponseTool{{Type: "function", Name: "lookup", ServerURL: "https://example.test"}}},
 		{name: "duplicate function name", tools: []ResponseTool{{Type: "function", Name: "lookup"}, {Type: "function", Name: "lookup"}}},
@@ -407,6 +406,20 @@ func TestResponseToolDefinitionValidation(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			if message := (ResponseRequest{Tools: test.tools}).Validate(); message == "" {
 				t.Fatalf("invalid tools accepted: %+v", test.tools)
+			}
+		})
+	}
+}
+
+func TestResponseToolDescriptionsCanExceed4096Characters(t *testing.T) {
+	for _, toolType := range []string{"function", "custom"} {
+		t.Run(toolType, func(t *testing.T) {
+			tools := []ResponseTool{{Type: toolType, Name: "lookup", Description: strings.Repeat("d", 8192)}}
+			if message := (ResponseRequest{Tools: tools}).Validate(); message != "" {
+				t.Fatalf("request rejected: %s", message)
+			}
+			if message := ValidateResponseConfiguration(tools, nil, nil, nil); message != "" {
+				t.Fatalf("provider response rejected: %s", message)
 			}
 		})
 	}
