@@ -1525,9 +1525,12 @@ opening SSE and do not retry the lookup through the JSON fallback path. The erro
 response does not expose the storage error text.
 
 This deliberately changes the previous behavior that routed despite a lookup
-failure. Successful lookups still re-evaluate endpoint/model capabilities; a
-missing or expired binding retains existing cache-miss behavior. First requests
-without previous_response_id do not need a lookup. Failure to persist a new binding
+failure. Successful lookups still re-evaluate endpoint/model capabilities. On a
+missing or expired affinity binding, an owner-scoped persistent response record
+pins continuation and comparison requests only when its model and deployment
+identity still match an available candidate. Without such a record, the existing
+cache-miss behavior applies. An ownership read failure also fails closed. First
+requests without previous_response_id do not need a lookup. Failure to persist a new binding
 retains the existing logged best-effort behavior and is a separate durability gap.
 The write uses a five-second bounded context independent of client cancellation,
 so a completed provider response can still record its deployment after the

@@ -3188,7 +3188,7 @@ func (r Router) responseCandidates(ctx context.Context, req modules.RequestConte
 	if request.PreviousResponse == "" && comparisonResponseID == "" {
 		return candidates, nil
 	}
-	if r.affinity == nil {
+	if r.affinity == nil && !r.ownership.configured() {
 		if comparisonResponseID != "" {
 			return nil, invalidResponseComparisonReference()
 		}
@@ -3209,18 +3209,48 @@ func (r Router) responseCandidates(ctx context.Context, req modules.RequestConte
 			}
 			continue
 		}
-		endpointName, found, err := r.affinity.get(ctx, key)
-		if r.observer != nil {
-			result := "miss"
-			if err != nil {
-				result = "error"
-			} else if found {
-				result = "hit"
+		endpointName, found := "", false
+		if r.affinity != nil {
+			var err error
+			endpointName, found, err = r.affinity.get(ctx, key)
+			if r.observer != nil {
+				result := "miss"
+				if err != nil {
+					result = "error"
+				} else if found {
+					result = "hit"
+				}
+				r.observer.ObserveCache("affinity_get", result)
 			}
-			r.observer.ObserveCache("affinity_get", result)
+			if err != nil {
+				return nil, fmt.Errorf("%w: %w", ErrResponseAffinityUnavailable, err)
+			}
 		}
-		if err != nil {
-			return nil, fmt.Errorf("%w: %w", ErrResponseAffinityUnavailable, err)
+		if !found && r.ownership.configured() {
+			binding, owned, err := r.ownership.get(ctx, req, reference.id)
+			if err != nil {
+				return nil, fmt.Errorf("%w: %w", ErrResponseAffinityUnavailable, err)
+			}
+			if owned {
+				available := binding.Resource == "" || binding.Resource == "response"
+				available = available && binding.Model == request.Model
+				if available {
+					available = false
+					for _, endpoint := range candidates {
+						if endpoint.Name == binding.Endpoint && responseDeploymentIdentity(endpoint) == binding.Deployment {
+							available = true
+							break
+						}
+					}
+				}
+				if !available {
+					if reference.required {
+						return nil, invalidResponseComparisonReference()
+					}
+					return nil, ErrResponseDeploymentChanged
+				}
+				endpointName, found = binding.Endpoint, true
+			}
 		}
 		if !found {
 			if reference.required {
