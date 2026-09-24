@@ -324,6 +324,54 @@ func TestAzureFoundryStreamResponsesRequireTerminalUsage(t *testing.T) {
 	}
 }
 
+func TestAzureEmbeddingsRequireExactUsage(t *testing.T) {
+	for _, tc := range []struct {
+		name, usage string
+		wantError   bool
+	}{
+		{"missing", "", true},
+		{"null", `,"usage":null`, true},
+		{"prompt missing", `,"usage":{"total_tokens":3}`, true},
+		{"total missing", `,"usage":{"prompt_tokens":3}`, true},
+		{"inconsistent", `,"usage":{"prompt_tokens":3,"total_tokens":4}`, true},
+		{"reported zero", `,"usage":{"prompt_tokens":0,"total_tokens":0}`, false},
+		{"reported count", `,"usage":{"prompt_tokens":3,"total_tokens":3}`, false},
+	} {
+		for _, foundry := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/foundry=%t", tc.name, foundry), func(t *testing.T) {
+				basePath := ""
+				authType, credential := "api_key", "resource-key"
+				wantPath := "/openai/v1/embeddings"
+				if foundry {
+					basePath = "/api/projects/project-a"
+					authType, credential = "entra", "project-token"
+					wantPath = "/api/projects/project-a/openai/v1/embeddings"
+				}
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.URL.Path != wantPath {
+						t.Errorf("unexpected Azure embeddings path: %s", r.URL.Path)
+					}
+					if foundry && (r.Header.Get("Authorization") != "Bearer project-token" || r.Header.Get("api-key") != "") ||
+						!foundry && (r.Header.Get("api-key") != "resource-key" || r.Header.Get("Authorization") != "") {
+						t.Errorf("unexpected Azure embeddings authentication")
+					}
+					_, _ = fmt.Fprint(w, `{"object":"list","model":"deployment","data":[{"object":"embedding","index":0,"embedding":[0.1,0.2]}]`+tc.usage+`}`)
+				}))
+				t.Cleanup(server.Close)
+				client := NewAzureOpenAI(server.URL+basePath, credential, false, "", authType)
+				response, err := client.Embeddings(t.Context(), openai.EmbeddingRequest{Model: "deployment", Input: "hello"})
+				if tc.wantError {
+					if err == nil || !strings.Contains(err.Error(), "usage") {
+						t.Fatalf("invalid Azure embeddings usage accepted: response=%+v err=%v", response, err)
+					}
+				} else if err != nil || !response.UsageReported {
+					t.Fatalf("valid Azure embeddings usage rejected: response=%+v err=%v", response, err)
+				}
+			})
+		}
+	}
+}
+
 func TestAzureDiscoveryFailsClosedWithoutAPIKey(t *testing.T) {
 	for _, path := range []string{"", "/api/projects/project-a"} {
 		t.Run(path, func(t *testing.T) {

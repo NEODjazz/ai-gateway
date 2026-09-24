@@ -2490,6 +2490,10 @@ Provider type `azure-openai` добавляет `/openai/v1` к resource-root UR
 `output_tokens` и согласованного `total_tokens`; терминальное SSE-событие с
 неполным usage не отправляется клиенту. Фоновые ответы со статусом `queued`
 могут возвращаться до появления финального usage.
+Azure embeddings требуют provider-reported `prompt_tokens` и `total_tokens` с
+одинаковым значением; отсутствие usage не заменяется оценкой для успешного
+billing. Это правило действует для resource и Foundry project endpoints при
+API-key и Entra authentication.
 
 Для Foundry project endpoint `/api/projects/{project}` inference использует
 `/openai/v1`, а discovery читает project deployments через

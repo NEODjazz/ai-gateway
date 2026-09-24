@@ -180,6 +180,7 @@ type OpenAICompatible struct {
 	errorProvider         string
 	exactChatUsage        bool
 	exactResponseUsage    bool
+	exactEmbeddingUsage   bool
 	upstreamStream        bool
 	rerankPath            string
 	completionStreamUsage bool
@@ -776,6 +777,9 @@ func (p OpenAICompatible) Embeddings(ctx context.Context, request openai.Embeddi
 	}
 	if err := validateEmbeddingVectors(request, response.Data); err != nil {
 		return openai.EmbeddingResponse{}, err
+	}
+	if p.exactEmbeddingUsage && (!response.UsageReported || response.Usage.TotalTokens != response.Usage.PromptTokens) {
+		return openai.EmbeddingResponse{}, errors.New("Azure embeddings requires exact prompt and total token usage")
 	}
 	return response, nil
 }
