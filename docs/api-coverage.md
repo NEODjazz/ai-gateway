@@ -91,7 +91,8 @@ continuation checks for API-key and Entra authentication.
 It exposes the deployment's upstream model name and publisher in onboarding.
 Azure discovery does not infer gateway operations from a deployment name or an
 unspecified provider capability object: the operator selects capabilities
-explicitly before applying the plan.
+explicitly before validating the onboarding plan. Ollama models without verified
+capabilities also require an explicit selection before validation.
 Azure onboarding also requires explicit input and output prices per million
 tokens for every selected model. A deliberate zero price is accepted, but an
 empty field cannot silently validate or publish a zero-cost catalog entry.

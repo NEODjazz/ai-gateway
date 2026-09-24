@@ -43,15 +43,16 @@ describe("ModelOnboardingPage", () => {
     await userEvent.type(screen.getByLabelText("Input cost deploy-a"), "0.2");
     expect(screen.getByRole("button", { name: "Review 1 model(s)" })).toBeDisabled();
     await userEvent.type(screen.getByLabelText("Output cost deploy-a"), "0");
+    expect(screen.getByRole("button", { name: "Review 1 model(s)" })).toBeDisabled();
+    await userEvent.click(screen.getByLabelText("Capabilities deploy-a"));
+    await userEvent.click(screen.getByRole("option", { name: /Embeddings/ }));
     expect(screen.getByRole("button", { name: "Review 1 model(s)" })).toBeEnabled();
     await userEvent.click(screen.getByRole("button", { name: "Review 1 model(s)" }));
     await screen.findByText("Review onboarding plan");
-    expect(plans[0].deployments[0].capabilities).toEqual([]);
+    expect(plans[0].deployments[0].capabilities).toEqual(["embeddings"]);
     expect(plans[0].catalog.models[0]).toMatchObject({ input_cost_per_1m: 0.2, output_cost_per_1m: 0, currency: "USD" });
     expect(screen.queryByLabelText("Input cost deploy-a")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Apply configuration" })).toBeDisabled();
-    await userEvent.click(screen.getByLabelText("Capabilities deploy-a"));
-    await userEvent.click(screen.getByRole("option", { name: /Embeddings/ }));
+    expect(screen.queryByLabelText("Capabilities deploy-a")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Apply configuration" })).toBeEnabled();
     await userEvent.click(screen.getByRole("button", { name: "Apply configuration" }));
     expect(await screen.findByText("Onboarding complete")).toBeInTheDocument();
@@ -83,15 +84,15 @@ describe("ModelOnboardingPage", () => {
     expect(await screen.findByText("embed")).toBeInTheDocument();
     await userEvent.click(screen.getAllByRole("checkbox")[0]);
     await userEvent.click(screen.getAllByRole("checkbox")[1]);
+    expect(screen.getByRole("button", { name: "Review 2 model(s)" })).toBeDisabled();
+    await userEvent.click(screen.getByLabelText("Capabilities unknown"));
+    await userEvent.click(screen.getByRole("option", { name: /Chat/ }));
     await userEvent.click(screen.getByRole("button", { name: "Review 2 model(s)" }));
     await screen.findByText("Review onboarding plan");
     expect(plans[0].deployments).toEqual(expect.arrayContaining([
       expect.objectContaining({ upstream_model: "embed", capabilities: ["embeddings"] }),
-      expect.objectContaining({ upstream_model: "unknown", capabilities: [] })
+      expect.objectContaining({ upstream_model: "unknown", capabilities: ["chat"] })
     ]));
-    expect(screen.getByRole("button", { name: "Apply configuration" })).toBeDisabled();
-    await userEvent.click(screen.getByLabelText("Capabilities unknown"));
-    await userEvent.click(screen.getByRole("option", { name: /Chat/ }));
     expect(screen.getByRole("button", { name: "Apply configuration" })).toBeEnabled();
   });
 
@@ -123,9 +124,9 @@ describe("ModelOnboardingPage", () => {
     await userEvent.click(screen.getByRole("button", { name: "Test & discover models" }));
     expect(await screen.findByText("gpt-a")).toBeInTheDocument();
     await userEvent.click(screen.getAllByRole("checkbox")[0]);
-    await userEvent.click(screen.getByRole("button", { name: "Review 1 model(s)" }));
     await userEvent.click(screen.getByLabelText("Capabilities gpt-a"));
     await userEvent.click(screen.getByRole("option", { name: /Tools/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Review 1 model(s)" }));
     await userEvent.type(screen.getByLabelText("Input cost gpt-a"), "0.2");
     await userEvent.type(screen.getByLabelText("Output cost gpt-a"), "2");
     await userEvent.click(screen.getByRole("button", { name: "Apply configuration" }));
@@ -139,7 +140,9 @@ describe("ModelOnboardingPage", () => {
       model_groups: [{ id: "gpt-a", deployment_ids: ["azure-gpt-a"] }]
     });
     expect(applyCall?.body.catalog.models[0]).toMatchObject({ provider: "azure", model: "gpt-a", capabilities: ["chat", "stream", "tools"], input_cost_per_1m: 0.2, output_cost_per_1m: 2, currency: "USD" });
-    expect(calls.filter((call) => call.path === "/admin/v1/model-onboarding/plan")).toHaveLength(2);
+    const planCalls = calls.filter((call) => call.path === "/admin/v1/model-onboarding/plan");
+    expect(planCalls).toHaveLength(2);
+    expect(planCalls[0].body.deployments[0].capabilities).toEqual(["chat", "stream", "tools"]);
     expect(calls.some((call) => call.method === "POST" && (call.path === "/admin/v1/model-deployments" || call.path === "/admin/v1/model-groups") || call.method === "PUT" && call.path === "/admin/v1/model-catalog")).toBe(false);
     await waitFor(() => expect(fetchMock.mock.calls.some(([path]) => String(path).endsWith("/discover-models"))).toBe(true));
   });
@@ -292,11 +295,11 @@ describe("ModelOnboardingPage", () => {
     await screen.findByRole("option", { name: "voyage — voyage" });
     await userEvent.click(screen.getByRole("button", { name: "Test & discover models" }));
     await userEvent.click((await screen.findAllByRole("checkbox"))[0]);
-    await userEvent.click(screen.getByRole("button", { name: "Review 1 model(s)" }));
-    await screen.findByText("Review onboarding plan");
     await userEvent.click(screen.getByLabelText("Capabilities voyage-4"));
     expect(screen.getByRole("option", { name: /Rerank/ })).toBeInTheDocument();
     expect(screen.queryByRole("option", { name: /Image generation/ })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Review 1 model(s)" }));
+    await screen.findByText("Review onboarding plan");
     const plan = calls.find((call) => call.path === "/admin/v1/model-onboarding/plan")?.body as { deployments?: Array<{ capabilities?: string[] }> };
     expect(plan.deployments?.[0].capabilities).toEqual(["embeddings"]);
   });
