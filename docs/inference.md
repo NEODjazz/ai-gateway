@@ -497,6 +497,10 @@ signature. Лимиты: 8 изображений, 8 MiB каждое, 16 MiB de
 | `xai` | Chat/stream, Responses and Embeddings with bearer authentication, merged text/embedding model discovery, structured output, vision, web search, response compaction and owned retrieve/input-items/delete lifecycle; priority tier, bounded reasoning/logprobs, Responses execution controls, lifecycle, isolation, prompt-cache diagnostics, moderation results, compaction settings and deanonymized instruction metadata, effective generation settings and strict echoed tool configuration with response preservation, float/base64 vectors, exact embedding token usage and validated server-side tool item counters |
 | `demo` | Локальный deterministic fallback для разработки |
 
+For native Ollama Chat, `reasoning_effort=default` leaves `think` unset so the
+selected model uses its own default. The managed capability profile lists this
+value alongside the explicit supported levels.
+
 OpenAI-compatible adapter один раз повторяет запрос с
 `max_completion_tokens`, только когда upstream явно отверг legacy
 `max_tokens`. Unsupported non-default `temperature` не переписывается

@@ -530,7 +530,7 @@ func TestManagedProviderCapabilityProfilesExposeValidatedChatParameters(t *testi
 		"bedrock":           {ReasoningEffort: []string{}, Logprobs: []string{}, ServiceTier: []string{"default", "flex", "priority"}},
 		"anthropic":         {ReasoningEffort: []string{"low", "medium", "high", "xhigh", "max"}, Logprobs: []string{}, ServiceTier: []string{"auto", "standard_only"}},
 		"gemini":            {ReasoningEffort: []string{"minimal", "low", "medium", "high"}, Logprobs: []string{"false", "true"}, ServiceTier: []string{"auto", "default", "flex", "priority", "standard_only"}},
-		"ollama":            {ReasoningEffort: []string{"none", "low", "medium", "high", "max"}, Logprobs: []string{"false", "true"}, ServiceTier: []string{}},
+		"ollama":            {ReasoningEffort: []string{"none", "low", "medium", "high", "max", "default"}, Logprobs: []string{"false", "true"}, ServiceTier: []string{}},
 		"cohere":            {ReasoningEffort: []string{}, Logprobs: []string{"false", "true"}, ServiceTier: []string{}},
 		"mistral":           {ReasoningEffort: []string{"none", "minimal", "low", "medium", "high", "xhigh"}, Logprobs: []string{}, ServiceTier: []string{}},
 		"deepseek":          {ReasoningEffort: []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"}, Thinking: []string{"enabled", "disabled"}, Logprobs: []string{"false", "true"}, ServiceTier: []string{}},

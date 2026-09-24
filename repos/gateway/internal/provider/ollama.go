@@ -486,6 +486,8 @@ func ollamaThink(reasoningEffort string) any {
 		return false
 	case "low", "medium", "high", "max":
 		return reasoningEffort
+	case "default":
+		return nil
 	default:
 		return nil
 	}
