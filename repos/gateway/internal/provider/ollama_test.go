@@ -920,10 +920,14 @@ func TestOllamaRejectsInvalidNativeSamplingOptions(t *testing.T) {
 }
 
 func TestOllamaConvertsVisionContentToNativeImages(t *testing.T) {
-	messages, err := ollamaMessages([]openai.Message{{Role: "user", Content: []any{
+	input := []openai.Message{{Role: "user", Content: []any{
 		map[string]any{"type": "text", "text": "describe"},
-		map[string]any{"type": "image_url", "image_url": map[string]any{"url": "data:image/png;base64,iVBORw0KGgo="}},
-	}}})
+		map[string]any{"type": "image_url", "image_url": map[string]any{"url": "data:image/png;base64,iVBORw0KGgo=", "detail": "auto"}},
+	}}}
+	if err := (Ollama{}).ValidateChatParameters(openai.ChatCompletionRequest{Messages: input}); err != nil {
+		t.Fatal(err)
+	}
+	messages, err := ollamaMessages(input)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -961,6 +965,47 @@ func TestOllamaRejectsInvalidVisionBeforeUpstream(t *testing.T) {
 	}
 	if got := calls.Load(); got != 0 {
 		t.Fatalf("invalid image reached upstream %d times", got)
+	}
+}
+
+func TestOllamaRejectsUnmappableChatMessageContent(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		http.Error(w, "unexpected upstream call", http.StatusInternalServerError)
+	}))
+	t.Cleanup(server.Close)
+	const imageURL = "data:image/png;base64,iVBORw0KGgo="
+	for _, test := range []struct {
+		name    string
+		message openai.Message
+		param   string
+	}{
+		{"unknown part", openai.Message{Role: "user", Content: []any{map[string]any{"type": "input_audio", "data": "audio"}}}, "messages.content"},
+		{"malformed text", openai.Message{Role: "user", Content: []any{map[string]any{"type": "text", "text": 7}}}, "messages.content"},
+		{"top-level object", openai.Message{Role: "user", Content: map[string]any{"type": "text", "text": "hello"}}, "messages.content"},
+		{"high image detail", openai.Message{Role: "user", Content: []any{map[string]any{"type": "image_url", "image_url": map[string]any{"url": imageURL, "detail": "high"}}}}, "messages.content.image_url.detail"},
+		{"unknown image field", openai.Message{Role: "user", Content: []any{map[string]any{"type": "image_url", "image_url": map[string]any{"url": imageURL, "crop": true}}}}, "messages.content.image_url"},
+		{"message name", openai.Message{Role: "user", Content: "hello", Name: "alice"}, "messages.name"},
+		{"message annotations", openai.Message{Role: "assistant", Content: "answer", Annotations: []openai.ChatAnnotation{{}}}, "messages.annotations"},
+		{"reasoning blocks", openai.Message{Role: "assistant", Content: "answer", Reasoning: []openai.ReasoningBlock{{}}}, "messages.reasoning"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request := openai.ChatCompletionRequest{Model: "test", Messages: []openai.Message{test.message}}
+			provider := NewOllama(server.URL, true)
+			for _, run := range []func() error{
+				func() error { _, err := provider.ChatCompletions(t.Context(), request); return err },
+				func() error { _, err := provider.StreamChatCompletions(t.Context(), request, nil); return err },
+			} {
+				var failure *Error
+				if err := run(); !errors.As(err, &failure) || failure.Class != FailureClientRequest || failure.Param != test.param {
+					t.Fatalf("unmappable message was not rejected as a client error for %s: %v", test.param, err)
+				}
+			}
+		})
+	}
+	if got := calls.Load(); got != 0 {
+		t.Fatalf("unmappable message reached upstream %d times", got)
 	}
 }
 

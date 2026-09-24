@@ -503,6 +503,9 @@ value alongside the explicit supported levels. The compatibility aliases
 `minimal` and `xhigh` map to native `think=low` and `think=max` respectively.
 Native Ollama Chat validates image attachments before upstream execution; malformed
 images fail as client errors instead of being omitted from the native message.
+Chat content accepts text and user image URL parts with automatic image detail;
+unsupported part types, explicit image detail levels, message names, annotations
+and reasoning blocks fail before provider execution instead of being dropped.
 Chat response formats are limited to text, JSON object, or a supplied JSON Schema;
 unmappable formats and `strict=false` fail before provider execution.
 Native Chat preserves `prompt_eval_cached_count` as cached input-token detail

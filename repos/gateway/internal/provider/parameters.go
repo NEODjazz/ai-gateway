@@ -212,6 +212,9 @@ func (Ollama) ValidateChatParameters(request openai.ChatCompletionRequest) error
 	if err := rejectChatMessageAudio("ollama", request.Messages); err != nil {
 		return err
 	}
+	if err := validateOllamaChatMessages(request.Messages); err != nil {
+		return err
+	}
 	options := request.ChatGenerationOptions
 	if options.TopK != nil && (*options.TopK < 0 || *options.TopK > 1_000_000) {
 		return &Error{Class: FailureClientRequest, Provider: "ollama", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_parameter", Param: "top_k", Err: fmt.Errorf("parameter top_k must be between 0 and 1000000")}
@@ -237,6 +240,60 @@ func (Ollama) ValidateChatParameters(request openai.ChatCompletionRequest) error
 		parameterCheck{"tool_choice", request.ToolChoice != nil},
 		parameterCheck{"parallel_tool_calls", request.ParallelToolCalls != nil},
 	)
+}
+
+func validateOllamaChatMessages(messages []openai.Message) error {
+	unsupported := func(param string) error {
+		return &Error{Class: FailureClientRequest, Provider: "ollama", StatusCode: http.StatusBadRequest, UpstreamCode: "unsupported_parameter", Param: param, Err: fmt.Errorf("parameter %s is not supported by Ollama Chat", param)}
+	}
+	for _, message := range messages {
+		if message.Name != "" {
+			return unsupported("messages.name")
+		}
+		if len(message.Annotations) > 0 {
+			return unsupported("messages.annotations")
+		}
+		if len(message.Reasoning) > 0 {
+			return unsupported("messages.reasoning")
+		}
+		switch content := message.Content.(type) {
+		case nil, string:
+		case []any:
+			for _, item := range content {
+				part, ok := item.(map[string]any)
+				if !ok {
+					return unsupported("messages.content")
+				}
+				switch part["type"] {
+				case "text":
+					if _, ok := part["text"].(string); !ok || len(part) != 2 {
+						return unsupported("messages.content")
+					}
+				case "image_url":
+					image, ok := part["image_url"].(map[string]any)
+					if message.Role != "user" || !ok || len(part) != 2 || len(image) < 1 || len(image) > 2 {
+						return unsupported("messages.content")
+					}
+					if _, ok := image["url"].(string); !ok {
+						return unsupported("messages.content")
+					}
+					for field := range image {
+						if field != "url" && field != "detail" {
+							return unsupported("messages.content.image_url")
+						}
+					}
+					if detail, present := image["detail"]; present && detail != "auto" {
+						return unsupported("messages.content.image_url.detail")
+					}
+				default:
+					return unsupported("messages.content")
+				}
+			}
+		default:
+			return unsupported("messages.content")
+		}
+	}
+	return nil
 }
 
 func validateOllamaChatResponseFormat(format *openai.ResponseFormat) error {
