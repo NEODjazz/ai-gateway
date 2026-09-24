@@ -203,6 +203,9 @@ func (Ollama) ValidateChatParameters(request openai.ChatCompletionRequest) error
 	if err := validateChatPromptCacheBreakpoints("ollama", request, false); err != nil {
 		return err
 	}
+	if err := validateOllamaChatTools(request.Tools); err != nil {
+		return err
+	}
 	if err := rejectToolCallMetadata("ollama", request.Messages); err != nil {
 		return err
 	}

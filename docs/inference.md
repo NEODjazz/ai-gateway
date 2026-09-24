@@ -506,6 +506,9 @@ images fail as client errors instead of being omitted from the native message.
 Chat content accepts text and user image URL parts with automatic image detail;
 unsupported part types, explicit image detail levels, message names, annotations
 and reasoning blocks fail before provider execution instead of being dropped.
+Function tools sent through native Ollama Chat accept only the schema fields its
+tool contract can preserve; unsupported keywords such as `additionalProperties`
+and `const`, and the function `strict` control, fail before upstream execution.
 Chat response formats are limited to text, JSON object, or a supplied JSON Schema;
 unmappable formats and `strict=false` fail before provider execution.
 Native Chat preserves `prompt_eval_cached_count` as cached input-token detail
