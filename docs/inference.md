@@ -614,6 +614,13 @@ adapter используют те же проверки, включая streamin
 | Anthropic, Ollama, Gemini и demo Chat | `verbosity` |
 | Anthropic, Ollama и demo Responses | `text.verbosity` |
 
+Для Ollama Responses `text.format.type=json_object` преобразуется в
+`json_schema` с корневым типом `object`, который native Responses endpoint
+действительно применяет. Дополнительные поля внутри `json_object` отклоняются
+до обращения к upstream; исходный объект запроса не меняется. `json_schema`
+требует объект `schema`; неизвестные типы формата и поля, которые native
+endpoint игнорирует (включая `strict`), возвращают явную ошибку.
+
 Остальные верхнеуровневые поля действующего OpenAI-compatible контракта
 передаются соответствующим upstream wire request. Это не подтверждает поддержку
 параметра каждой моделью: upstream может вернуть собственную ошибку.

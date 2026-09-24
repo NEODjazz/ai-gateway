@@ -146,7 +146,7 @@ func (Ollama) ValidateResponseParameters(request openai.ResponseRequest) error {
 		summarySupplied = request.Reasoning.Summary != nil
 		generateSummarySupplied = request.Reasoning.GenerateSummary != nil
 	}
-	return rejectParameters("ollama",
+	if err := rejectParameters("ollama",
 		parameterCheck{"background", request.Background},
 		parameterCheck{"context_management", len(request.ContextManagement) > 0},
 		parameterCheck{"moderation", request.Moderation != nil},
@@ -174,7 +174,11 @@ func (Ollama) ValidateResponseParameters(request openai.ResponseRequest) error {
 		parameterCheck{"frequency_penalty", request.FrequencyPenalty != nil},
 		parameterCheck{"presence_penalty", request.PresencePenalty != nil},
 		parameterCheck{"max_tool_calls", request.MaxToolCalls != nil},
-	)
+	); err != nil {
+		return err
+	}
+	_, err := normalizeOllamaResponseText(request.Text)
+	return err
 }
 
 func (Ollama) ValidateChatParameters(request openai.ChatCompletionRequest) error {

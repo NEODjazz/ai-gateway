@@ -627,15 +627,69 @@ func ollamaResponseFormat(format *openai.ResponseFormat) any {
 	return nil
 }
 
+func normalizeOllamaResponseText(value any) (any, error) {
+	if value == nil {
+		return nil, nil
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return value, nil
+	}
+	var text map[string]json.RawMessage
+	if json.Unmarshal(encoded, &text) != nil {
+		return value, nil
+	}
+	formatJSON, supplied := text["format"]
+	if !supplied || len(formatJSON) == 0 || string(formatJSON) == "null" {
+		return value, nil
+	}
+	var format map[string]json.RawMessage
+	if json.Unmarshal(formatJSON, &format) != nil || format == nil {
+		return value, nil
+	}
+	var formatType string
+	if json.Unmarshal(format["type"], &formatType) != nil {
+		return nil, &Error{Class: FailureClientRequest, Provider: "ollama", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "text.format.type", Err: errors.New("text format type is required")}
+	}
+	switch formatType {
+	case "text", "json_object":
+		if len(format) != 1 {
+			return nil, &Error{Class: FailureClientRequest, Provider: "ollama", StatusCode: http.StatusBadRequest, UpstreamCode: "unsupported_parameter", Param: "text.format", Err: errors.New("this text format does not accept additional controls")}
+		}
+		if formatType == "text" {
+			return value, nil
+		}
+		text["format"] = json.RawMessage(`{"type":"json_schema","name":"response","schema":{"type":"object"}}`)
+		return text, nil
+	case "json_schema":
+		var schema map[string]json.RawMessage
+		if json.Unmarshal(format["schema"], &schema) != nil || schema == nil {
+			return nil, &Error{Class: FailureClientRequest, Provider: "ollama", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "text.format.schema", Err: errors.New("json_schema requires an object schema")}
+		}
+		for field := range format {
+			if field != "type" && field != "name" && field != "schema" {
+				return nil, &Error{Class: FailureClientRequest, Provider: "ollama", StatusCode: http.StatusBadRequest, UpstreamCode: "unsupported_parameter", Param: "text.format." + field, Err: fmt.Errorf("text format field %s is not supported", field)}
+			}
+		}
+		return value, nil
+	default:
+		return nil, &Error{Class: FailureClientRequest, Provider: "ollama", StatusCode: http.StatusBadRequest, UpstreamCode: "unsupported_parameter", Param: "text.format.type", Err: fmt.Errorf("text format type %q is not supported", formatType)}
+	}
+}
+
 func (p Ollama) Responses(ctx context.Context, request openai.ResponseRequest) (openai.ResponseResponse, error) {
 	if err := p.ValidateResponseParameters(request); err != nil {
+		return openai.ResponseResponse{}, err
+	}
+	text, err := normalizeOllamaResponseText(request.Text)
+	if err != nil {
 		return openai.ResponseResponse{}, err
 	}
 	body, err := json.Marshal(openAICompatibleResponseRequest{
 		Include: request.Include, Store: request.Store, Reasoning: request.Reasoning, Truncation: request.Truncation, TopLogprobs: request.TopLogprobs, Metadata: request.Metadata,
 		Model: request.Model, Input: request.Input, Instructions: request.Instructions,
 		Tools: request.Tools, ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls,
-		Text: request.Text, PreviousResponse: request.PreviousResponse, Stream: false,
+		Text: text, PreviousResponse: request.PreviousResponse, Stream: false,
 		MaxOutputTokens: responseOutputTokenLimit(request),
 		Temperature:     request.Temperature, TopP: request.TopP,
 	})
@@ -669,12 +723,16 @@ func (p Ollama) StreamResponses(ctx context.Context, request openai.ResponseRequ
 	if !p.upstreamStream {
 		return openai.ResponseResponse{}, ErrStreamingUnsupported
 	}
+	text, err := normalizeOllamaResponseText(request.Text)
+	if err != nil {
+		return openai.ResponseResponse{}, err
+	}
 
 	body, err := json.Marshal(openAICompatibleResponseRequest{
 		Include: request.Include, Store: request.Store, Reasoning: request.Reasoning, Truncation: request.Truncation, TopLogprobs: request.TopLogprobs, Metadata: request.Metadata,
 		Model: request.Model, Input: request.Input, Instructions: request.Instructions,
 		Tools: request.Tools, ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls,
-		Text: request.Text, PreviousResponse: request.PreviousResponse, Stream: true,
+		Text: text, PreviousResponse: request.PreviousResponse, Stream: true,
 		MaxOutputTokens: responseOutputTokenLimit(request),
 		Temperature:     request.Temperature, TopP: request.TopP,
 	})
