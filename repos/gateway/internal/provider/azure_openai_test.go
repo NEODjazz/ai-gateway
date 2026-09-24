@@ -1218,6 +1218,9 @@ func TestManagedAzureOpenAIRejectsInvalidNativeSettings(t *testing.T) {
 		{ID: "azure", Type: "azure-openai", BaseURL: "https://example.test", APIVersion: "2025-13-01"},
 		{ID: "azure", Type: "azure-openai", BaseURL: "https://example.test", AuthType: "basic"},
 		{ID: "azure", Type: "azure-openai", BaseURL: "https://example.test?secret=value"},
+		{ID: "azure", Type: "azure-openai", BaseURL: "https://example.test?"},
+		{ID: "azure", Type: "azure-openai", BaseURL: "https://example.test#"},
+		{ID: "foundry", Type: "azure-openai", BaseURL: "https://resource.services.ai.azure.com/api/projects/project-a?", AuthType: "entra"},
 		{ID: "azure", Type: "azure-openai", BaseURL: "https://proxy.example.test/tenant/../openai/v1"},
 		{ID: "azure", Type: "azure-openai", BaseURL: "https://proxy.example.test/tenant%2fother/openai/v1"},
 		{ID: "azure", Type: "azure-openai", BaseURL: "https://example.test#fragment"},
@@ -1227,5 +1230,11 @@ func TestManagedAzureOpenAIRejectsInvalidNativeSettings(t *testing.T) {
 		if _, err := normalizeManagedProvider(input); err == nil {
 			t.Fatalf("invalid managed provider accepted: %+v", input)
 		}
+	}
+}
+
+func TestNormalizeAzureOpenAIBaseURLClearsEmptyQuery(t *testing.T) {
+	if got := normalizeAzureOpenAIBaseURL("https://resource.openai.azure.com?"); got != "https://resource.openai.azure.com/openai/v1" {
+		t.Fatalf("normalized URL retained empty query: %q", got)
 	}
 }

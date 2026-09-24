@@ -447,7 +447,7 @@ func validateProviderAdmission(endpoints []ProviderEndpointConfig) error {
 			}
 		}
 		if endpoint.Type == "azure-openai" {
-			if parsed, err := url.Parse(endpoint.BaseURL); err != nil || parsed.RawQuery != "" || parsed.Fragment != "" || !azureurl.ValidPath(parsed) {
+			if parsed, err := url.Parse(endpoint.BaseURL); err != nil || parsed.RawQuery != "" || parsed.ForceQuery || strings.Contains(endpoint.BaseURL, "#") || !azureurl.ValidPath(parsed) {
 				result = errors.Join(result, fmt.Errorf("provider %q base_url has invalid query, fragment, or path", name))
 			} else if azureFoundryProjectPath(parsed.Path) && endpoint.APIVersion != "" {
 				result = errors.Join(result, fmt.Errorf("provider %q Foundry project endpoint must not set api_version", name))

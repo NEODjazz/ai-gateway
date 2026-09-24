@@ -164,6 +164,7 @@ func normalizeAzureOpenAIBaseURL(value string) string {
 		return value
 	}
 	parsed.RawQuery = ""
+	parsed.ForceQuery = false
 	parsed.Fragment = ""
 	if strings.Trim(parsed.Path, "/") == "" {
 		parsed.Path = "/openai/v1"
