@@ -2648,3 +2648,18 @@ image ID `sha256:a1668295b40795a6823e17aac392524cbb4834fe1e224a1c951e43c59286364
 Gateway Helm revision 616 completed successfully with one available replica;
 the local ingress returned HTTP 204 for `/healthz` and `/readyz`. No external
 Foundry credential was used for live discovery.
+
+## Ollama bearer authentication
+
+Source `8b298edc` forwards the configured static or managed credential as an
+Ollama bearer token across native Chat JSON/SSE, Embeddings and compatible
+Completions. Local endpoints without a credential continue to send no
+Authorization header. Redirects remain disabled. Local HTTP regressions cover
+managed credential delivery, streaming, local unauthenticated calls and redirect
+rejection; the full Go test and race suites, vet and build passed. No external
+Ollama Cloud credential was used for live inference.
+
+Rancher Desktop built `ai-gateway-gateway:ollama-auth-8b298edc` with image ID
+`sha256:54b5b92d446dc6a6f5252b0c5b01adeca7e022719c8222cdddce75ca3d969b20`.
+Gateway Helm revision 617 completed successfully with one available replica;
+the local ingress returned HTTP 204 for `/healthz` and `/readyz`.
