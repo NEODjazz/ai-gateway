@@ -478,7 +478,7 @@ func TestOllamaStreamsNativeReasoning(t *testing.T) {
 }
 
 func TestOllamaReasoningEffortContract(t *testing.T) {
-	for _, level := range []string{"none", "low", "medium", "high", "max", "default"} {
+	for _, level := range []string{"none", "minimal", "low", "medium", "high", "xhigh", "max", "default"} {
 		t.Run(level, func(t *testing.T) {
 			request := openai.ChatCompletionRequest{ChatGenerationOptions: openai.ChatGenerationOptions{ReasoningEffort: level}}
 			if err := (Ollama{}).ValidateChatParameters(request); err != nil {
@@ -492,16 +492,53 @@ func TestOllamaReasoningEffortContract(t *testing.T) {
 				if ollamaThink(level) != nil {
 					t.Fatalf("default mapped to %#v", ollamaThink(level))
 				}
+			} else if level == "minimal" {
+				if ollamaThink(level) != "low" {
+					t.Fatalf("minimal mapped to %#v", ollamaThink(level))
+				}
+			} else if level == "xhigh" {
+				if ollamaThink(level) != "max" {
+					t.Fatalf("xhigh mapped to %#v", ollamaThink(level))
+				}
 			} else if ollamaThink(level) != level {
 				t.Fatalf("%s mapped to %#v", level, ollamaThink(level))
 			}
 		})
 	}
-	for _, level := range []string{"minimal", "xhigh"} {
-		var failure *Error
-		err := (Ollama{}).ValidateChatParameters(openai.ChatCompletionRequest{ChatGenerationOptions: openai.ChatGenerationOptions{ReasoningEffort: level}})
-		if !errors.As(err, &failure) || failure.Param != "reasoning_effort" || failure.UpstreamCode != "unsupported_parameter" {
-			t.Fatalf("unrepresentable level %s was not rejected: %v", level, err)
+}
+
+func TestOllamaReasoningEffortAliasesReachNativeChat(t *testing.T) {
+	for _, test := range []struct{ effort, wantThink string }{{"minimal", "low"}, {"xhigh", "max"}} {
+		for _, stream := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/stream=%t", test.effort, stream), func(t *testing.T) {
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					var body map[string]json.RawMessage
+					if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+						t.Error(err)
+						return
+					}
+					if string(body["think"]) != fmt.Sprintf("%q", test.wantThink) {
+						t.Errorf("native think=%s, want %q", body["think"], test.wantThink)
+					}
+					if stream {
+						_, _ = fmt.Fprintln(w, `{"model":"m","done":true,"done_reason":"stop","prompt_eval_count":1,"eval_count":0}`)
+					} else {
+						_, _ = fmt.Fprint(w, `{"model":"m","message":{"role":"assistant","content":"ok"},"done":true,"done_reason":"stop","prompt_eval_count":1,"eval_count":1}`)
+					}
+				}))
+				t.Cleanup(server.Close)
+				request := openai.ChatCompletionRequest{Model: "m", Messages: []openai.Message{{Role: "user", Content: "hello"}}, ChatGenerationOptions: openai.ChatGenerationOptions{ReasoningEffort: test.effort}}
+				client := NewOllama(server.URL, true)
+				var err error
+				if stream {
+					_, err = client.StreamChatCompletions(t.Context(), request, func(string) error { return nil })
+				} else {
+					_, err = client.ChatCompletions(t.Context(), request)
+				}
+				if err != nil || request.ReasoningEffort != test.effort {
+					t.Fatalf("err=%v original effort=%q", err, request.ReasoningEffort)
+				}
+			})
 		}
 	}
 }

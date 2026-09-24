@@ -499,7 +499,8 @@ signature. Лимиты: 8 изображений, 8 MiB каждое, 16 MiB de
 
 For native Ollama Chat, `reasoning_effort=default` leaves `think` unset so the
 selected model uses its own default. The managed capability profile lists this
-value alongside the explicit supported levels.
+value alongside the explicit supported levels. The compatibility aliases
+`minimal` and `xhigh` map to native `think=low` and `think=max` respectively.
 
 OpenAI-compatible adapter один раз повторяет запрос с
 `max_completion_tokens`, только когда upstream явно отверг legacy

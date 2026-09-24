@@ -221,7 +221,7 @@ func (Ollama) ValidateChatParameters(request openai.ChatCompletionRequest) error
 	options.Logprobs = nil
 	options.TopLogprobs = nil
 	switch options.ReasoningEffort {
-	case "none", "low", "medium", "high", "max", "default":
+	case "none", "minimal", "low", "medium", "high", "xhigh", "max", "default":
 		options.ReasoningEffort = ""
 	}
 	if err := rejectGenerationOptions("ollama", options); err != nil {
