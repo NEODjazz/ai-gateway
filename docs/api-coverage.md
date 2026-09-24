@@ -94,7 +94,7 @@ unspecified provider capability object: the operator selects capabilities
 explicitly before applying the plan.
 Azure onboarding also requires explicit input and output prices per million
 tokens for every selected model. A deliberate zero price is accepted, but an
-empty field cannot silently publish a zero-cost catalog entry.
+empty field cannot silently validate or publish a zero-cost catalog entry.
 For ambient Entra credentials, an upstream `401` invalidates only the token used
 by that request, so the next independent request refreshes it. The rejected
 inference request is not replayed; explicitly supplied bearer tokens remain

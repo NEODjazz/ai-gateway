@@ -10,7 +10,7 @@ function json(value: unknown, status = 200) {
 
 describe("ModelOnboardingPage", () => {
   it("requires explicit Azure capabilities and prices during Foundry onboarding", async () => {
-    const plans: Array<{ deployments: Array<{ capabilities: string[] }> }> = [];
+    const plans: Array<{ deployments: Array<{ capabilities: string[] }>; catalog: { models: Array<{ input_cost_per_1m: number; output_cost_per_1m: number; currency: string }> } }> = [];
     const applied: Array<{ catalog: { models: Array<{ input_cost_per_1m: number; output_cost_per_1m: number; currency: string }> } }> = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, options) => {
       const path = String(input);
@@ -22,7 +22,7 @@ describe("ModelOnboardingPage", () => {
       if (path.endsWith("/test")) return json({ status: "available", latency_ms: 1, model_count: 1 });
       if (path.endsWith("/discover-models")) return json({ data: [{ id: "deploy-a", model_name: "text-embedding-3-large", model_publisher: "Microsoft" }] });
       if (path === "/admin/v1/model-onboarding/plan") {
-        const body = JSON.parse(String(options?.body)) as { deployments: Array<{ capabilities: string[] }> };
+        const body = JSON.parse(String(options?.body)) as typeof plans[number];
         plans.push(body);
         return json({ revision: 1, catalog_version: "v1", deployments: body.deployments, model_groups: [], changes: [] });
       }
@@ -39,16 +39,19 @@ describe("ModelOnboardingPage", () => {
     await userEvent.click(screen.getByRole("button", { name: "Test & discover models" }));
     expect(await screen.findByText("deploy-a — text-embedding-3-large (Microsoft)")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("checkbox"));
+    expect(screen.getByRole("button", { name: "Review 1 model(s)" })).toBeDisabled();
+    await userEvent.type(screen.getByLabelText("Input cost deploy-a"), "0.2");
+    expect(screen.getByRole("button", { name: "Review 1 model(s)" })).toBeDisabled();
+    await userEvent.type(screen.getByLabelText("Output cost deploy-a"), "0");
+    expect(screen.getByRole("button", { name: "Review 1 model(s)" })).toBeEnabled();
     await userEvent.click(screen.getByRole("button", { name: "Review 1 model(s)" }));
     await screen.findByText("Review onboarding plan");
     expect(plans[0].deployments[0].capabilities).toEqual([]);
+    expect(plans[0].catalog.models[0]).toMatchObject({ input_cost_per_1m: 0.2, output_cost_per_1m: 0, currency: "USD" });
+    expect(screen.queryByLabelText("Input cost deploy-a")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Apply configuration" })).toBeDisabled();
     await userEvent.click(screen.getByLabelText("Capabilities deploy-a"));
     await userEvent.click(screen.getByRole("option", { name: /Embeddings/ }));
-    expect(screen.getByRole("button", { name: "Apply configuration" })).toBeDisabled();
-    await userEvent.type(screen.getByLabelText("Input cost deploy-a"), "0.2");
-    expect(screen.getByRole("button", { name: "Apply configuration" })).toBeDisabled();
-    await userEvent.type(screen.getByLabelText("Output cost deploy-a"), "0");
     expect(screen.getByRole("button", { name: "Apply configuration" })).toBeEnabled();
     await userEvent.click(screen.getByRole("button", { name: "Apply configuration" }));
     expect(await screen.findByText("Onboarding complete")).toBeInTheDocument();
