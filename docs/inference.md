@@ -38,6 +38,12 @@ Gateway реализует OpenAI-compatible endpoints:
 [OpenAPI](../repos/gateway/api/openapi.yaml). Все endpoints требуют Bearer
 credential и применяют тот же model/tool policy, что `/v1/models` и Playground.
 
+`/v1/responses/input_tokens` требует точного upstream token-count API.
+Azure OpenAI и Foundry project deployments возвращают `unsupported_operation`
+до upstream-вызова, поскольку их текущий Responses contract не публикует этот
+метод; gateway не выдаёт локальную оценку за точный подсчёт. Другие совместимые
+deployments продолжают использовать upstream endpoint.
+
 Files API доступен только при настроенном PostgreSQL control-plane store. Файлы
 изолированы по паре credential/user, ограничены `FILE_MAX_BYTES`, а суммарная
 квота `FILE_OWNER_QUOTA_BYTES` проверяется атомарно даже при конкурентных

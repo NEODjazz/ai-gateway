@@ -17,7 +17,14 @@ import (
 
 var ErrResponseInputTokenCountUnsupported = errors.New("response input token counting is not supported by the selected deployment")
 
+func (p OpenAICompatible) responseInputTokenCountingSupported() bool {
+	return p.providerName() != "azure-openai"
+}
+
 func (p OpenAICompatible) CountResponseInputTokens(ctx context.Context, request openai.ResponseInputTokenCountRequest) (openai.ResponseInputTokenCount, error) {
+	if !p.responseInputTokenCountingSupported() {
+		return openai.ResponseInputTokenCount{}, ErrResponseInputTokenCountUnsupported
+	}
 	if strings.TrimSpace(request.Model) == "" || request.Input == nil {
 		return openai.ResponseInputTokenCount{}, &Error{Class: FailureClientRequest, Provider: p.providerName(), StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New("model and input are required")}
 	}
@@ -107,9 +114,13 @@ func (r Router) CountResponseInputTokens(ctx context.Context, req modules.Reques
 	}
 	available := candidates[:0]
 	for _, endpoint := range candidates {
-		if _, ok := endpoint.Provider.(ResponseInputTokenCountClient); ok {
-			available = append(available, endpoint)
+		if _, ok := endpoint.Provider.(ResponseInputTokenCountClient); !ok {
+			continue
 		}
+		if support, ok := endpoint.Provider.(interface{ responseInputTokenCountingSupported() bool }); ok && !support.responseInputTokenCountingSupported() {
+			continue
+		}
+		available = append(available, endpoint)
 	}
 	if len(available) == 0 {
 		return openai.ResponseInputTokenCount{}, ErrResponseInputTokenCountUnsupported
