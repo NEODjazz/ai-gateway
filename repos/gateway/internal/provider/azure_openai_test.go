@@ -372,6 +372,92 @@ func TestAzureEmbeddingsRequireExactUsage(t *testing.T) {
 	}
 }
 
+func TestAzureCompletionsRequireExactUsage(t *testing.T) {
+	for _, tc := range []struct {
+		name, usage string
+		wantError   bool
+	}{
+		{"missing", "", true},
+		{"prompt missing", `,"usage":{"completion_tokens":2,"total_tokens":2}`, true},
+		{"completion missing", `,"usage":{"prompt_tokens":3,"total_tokens":3}`, true},
+		{"total missing", `,"usage":{"prompt_tokens":3,"completion_tokens":2}`, true},
+		{"inconsistent", `,"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":6}`, true},
+		{"reported zero", `,"usage":{"prompt_tokens":0,"completion_tokens":0,"total_tokens":0}`, false},
+		{"reported counts", `,"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}`, false},
+	} {
+		for _, stream := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/stream=%t", tc.name, stream), func(t *testing.T) {
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.URL.Path != "/openai/v1/completions" || r.Header.Get("api-key") != "test-key" {
+						t.Errorf("unexpected Azure Completions path or auth")
+					}
+					var body map[string]any
+					if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+						t.Error(err)
+					}
+					if stream {
+						options, _ := body["stream_options"].(map[string]any)
+						if options["include_usage"] != true {
+							t.Errorf("Azure Completions did not request stream usage: %v", body)
+						}
+						w.Header().Set("Content-Type", "text/event-stream")
+						_, _ = fmt.Fprint(w, `data: {"id":"cmpl-1","object":"text_completion","created":1,"model":"deployment","choices":[{"index":0,"text":"ok","finish_reason":"stop"}]}`+"\n\n")
+						_, _ = fmt.Fprint(w, `data: {"id":"cmpl-1","object":"text_completion","created":1,"model":"deployment","choices":[]`+tc.usage+`}`+"\n\n")
+						_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+					} else {
+						_, _ = fmt.Fprint(w, `{"id":"cmpl-1","object":"text_completion","created":1,"model":"deployment","choices":[{"index":0,"text":"ok","finish_reason":"stop"}]`+tc.usage+`}`)
+					}
+				}))
+				t.Cleanup(server.Close)
+				client := NewAzureOpenAI(server.URL, "test-key", stream, "", "api_key")
+				request := openai.CompletionRequest{Model: "deployment", Prompt: "hello", Stream: stream}
+				var response openai.CompletionResponse
+				var err error
+				if stream {
+					response, err = client.StreamCompletions(t.Context(), request, nil)
+				} else {
+					response, err = client.Completions(t.Context(), request)
+				}
+				if tc.wantError {
+					if err == nil || !strings.Contains(err.Error(), "usage") {
+						t.Fatalf("invalid Azure Completions usage accepted: response=%+v err=%v", response, err)
+					}
+				} else if err != nil || !response.UsageReported {
+					t.Fatalf("valid Azure Completions usage rejected: response=%+v err=%v", response, err)
+				}
+			})
+		}
+	}
+}
+
+func TestAzureVersionedEntraStreamCompletionsUsage(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/openai/deployments/deployment-a/completions" ||
+			r.URL.Query().Get("api-version") != "2025-04-01-preview" ||
+			r.Header.Get("Authorization") != "Bearer entra-token" || r.Header.Get("api-key") != "" {
+			t.Errorf("unexpected Azure versioned Completions request: %s headers=%v", r.URL, r.Header)
+		}
+		var body struct {
+			StreamOptions struct {
+				IncludeUsage bool `json:"include_usage"`
+			} `json:"stream_options"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || !body.StreamOptions.IncludeUsage {
+			t.Errorf("Azure versioned Completions did not request usage: %+v err=%v", body, err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, `data: {"id":"cmpl-1","object":"text_completion","created":1,"model":"deployment-a","choices":[{"index":0,"text":"ok","finish_reason":"stop"}]}`+"\n\n")
+		_, _ = fmt.Fprint(w, `data: {"id":"cmpl-1","object":"text_completion","created":1,"model":"deployment-a","choices":[],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}`+"\n\n")
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	t.Cleanup(server.Close)
+	client := NewAzureOpenAI(server.URL+"/openai/deployments/deployment-a", "entra-token", true, "2025-04-01-preview", "entra")
+	response, err := client.StreamCompletions(t.Context(), openai.CompletionRequest{Model: "deployment-a", Prompt: "hello", Stream: true}, nil)
+	if err != nil || !response.UsageReported || response.Usage.TotalTokens != 5 {
+		t.Fatalf("Azure versioned Entra usage lost: response=%+v err=%v", response, err)
+	}
+}
+
 func TestAzureDiscoveryFailsClosedWithoutAPIKey(t *testing.T) {
 	for _, path := range []string{"", "/api/projects/project-a"} {
 		t.Run(path, func(t *testing.T) {

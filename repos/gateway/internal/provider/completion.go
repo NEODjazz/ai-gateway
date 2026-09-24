@@ -30,6 +30,11 @@ func decodeCompletionResponse(reader io.Reader) (openai.CompletionResponse, erro
 	if response == nil {
 		return openai.CompletionResponse{}, errors.New("completion response must be an object")
 	}
+	reported, err := completeChatUsageFields(payload)
+	if err != nil {
+		return openai.CompletionResponse{}, err
+	}
+	response.UsageReported = reported
 	if err := validateCompletionResponse(*response); err != nil {
 		return openai.CompletionResponse{}, err
 	}

@@ -69,6 +69,8 @@ func NewAzureOpenAI(baseURL, credential string, upstreamStream bool, apiVersion,
 	client.exactChatUsage = true
 	client.exactResponseUsage = true
 	client.exactEmbeddingUsage = true
+	client.exactCompletionUsage = true
+	client.completionStreamUsage = true
 	transport := client.client.Transport
 	normalizedAuthType := normalizeAzureAuthType(authType)
 	cloud, audience := "", ""

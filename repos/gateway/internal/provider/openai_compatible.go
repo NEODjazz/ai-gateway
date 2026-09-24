@@ -181,6 +181,7 @@ type OpenAICompatible struct {
 	exactChatUsage        bool
 	exactResponseUsage    bool
 	exactEmbeddingUsage   bool
+	exactCompletionUsage  bool
 	upstreamStream        bool
 	rerankPath            string
 	completionStreamUsage bool
@@ -421,10 +422,19 @@ func (p OpenAICompatible) completion(ctx context.Context, request openai.Complet
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return openai.CompletionResponse{}, responseStatusError(p.providerName(), resp)
 	}
+	var response openai.CompletionResponse
 	if stream {
-		return streamCompletionData(resp.Body, request, write)
+		response, err = streamCompletionData(resp.Body, request, write)
+	} else {
+		response, err = decodeCompletionResponse(resp.Body)
 	}
-	return decodeCompletionResponse(resp.Body)
+	if err != nil {
+		return openai.CompletionResponse{}, err
+	}
+	if p.exactCompletionUsage && (!response.UsageReported || response.Usage.TotalTokens != response.Usage.PromptTokens+response.Usage.CompletionTokens) {
+		return openai.CompletionResponse{}, errors.New("Azure Completions requires exact prompt, completion and total token usage")
+	}
+	return response, nil
 }
 
 func streamCompletionData(body io.Reader, request openai.CompletionRequest, write CompletionStreamWriter) (openai.CompletionResponse, error) {
@@ -481,6 +491,11 @@ func streamCompletionData(body io.Reader, request openai.CompletionRequest, writ
 				return err
 			}
 			response.Usage = *chunk.Usage
+			reported, err := completeChatUsageFields([]byte(payload))
+			if err != nil {
+				return err
+			}
+			response.UsageReported = reported
 		}
 		for _, choice := range chunk.Choices {
 			if choice.Index < 0 || choice.Index >= 128 {
