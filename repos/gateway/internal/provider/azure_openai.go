@@ -54,8 +54,11 @@ func (t azureOpenAITransport) RoundTrip(request *http.Request) (*http.Response, 
 func NewAzureOpenAI(baseURL, credential string, upstreamStream bool, apiVersion, authType string, azureCloud ...string) OpenAICompatible {
 	baseURL = normalizeAzureOpenAIBaseURL(baseURL)
 	legacyPath := ""
-	if parsed, err := url.Parse(baseURL); err == nil && parsed.Path != "" && !strings.HasSuffix(strings.TrimRight(parsed.Path, "/"), "/v1") {
-		legacyPath = strings.TrimRight(parsed.Path, "/")
+	if parsed, err := url.Parse(baseURL); err == nil {
+		path := strings.TrimRight(parsed.Path, "/")
+		if path != "" && !strings.HasSuffix(path, "/v1") && (strings.Contains(path, "/openai/deployments/") || apiVersion != "" && apiVersion != "preview") {
+			legacyPath = path
+		}
 	}
 	client := NewOpenAICompatible(baseURL, "", upstreamStream)
 	client.errorProvider = "azure-openai"

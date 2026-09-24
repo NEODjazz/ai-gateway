@@ -613,6 +613,82 @@ func TestManagedAzureOpenAIDiscoveryUsesNativeVersionAndAuth(t *testing.T) {
 	}
 }
 
+func TestAzureOpenAIBasePathSharesGAModelAndInferenceRoutes(t *testing.T) {
+	var modelCalls, chatCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("api-key") != "resource-key" || r.Header.Get("Authorization") != "" || r.URL.RawQuery != "" {
+			t.Errorf("unexpected Azure headers or query: %s headers=%v", r.URL, r.Header)
+		}
+		switch r.URL.Path {
+		case "/openai/v1/models":
+			modelCalls.Add(1)
+			_, _ = w.Write([]byte(`{"data":[{"id":"deployment-a"}]}`))
+		case "/openai/v1/chat/completions":
+			chatCalls.Add(1)
+			_, _ = w.Write([]byte(`{"id":"chat-azure","object":"chat.completion","model":"deployment-a","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	router := New(Config{CredentialEncryptionKey: []byte("azure-ga-discovery-test-key")}).(*Router)
+	if _, err := router.CreateProvider(ManagedProvider{ID: "azure", Type: "azure-openai", BaseURL: server.URL + "/openai", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := router.CreateCredential(CredentialInput{ID: "azure-key", ProviderID: "azure", Secret: "resource-key"}); err != nil {
+		t.Fatal(err)
+	}
+	models, err := router.DiscoverProviderModels(t.Context(), "azure", "azure-key")
+	if err != nil || len(models) != 1 || models[0].ID != "deployment-a" {
+		t.Fatalf("models=%v err=%v", models, err)
+	}
+	client := NewAzureOpenAI(server.URL+"/openai", "resource-key", false, "", "api_key")
+	if _, err := client.ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "deployment-a", Messages: []openai.Message{{Role: "user", Content: "hello"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if modelCalls.Load() != 1 || chatCalls.Load() != 1 {
+		t.Fatalf("model calls=%d chat calls=%d", modelCalls.Load(), chatCalls.Load())
+	}
+}
+
+func TestAzureOpenAIBasePathDiscoveryKeepsVersionedRoute(t *testing.T) {
+	for _, test := range []struct {
+		apiVersion string
+		wantPath   string
+	}{
+		{apiVersion: "", wantPath: "/tenant/openai/v1/models"},
+		{apiVersion: "preview", wantPath: "/tenant/openai/v1/models"},
+		{apiVersion: "2024-10-21", wantPath: "/tenant/openai/models"},
+	} {
+		t.Run(test.apiVersion, func(t *testing.T) {
+			endpoint, err := azureOpenAIDiscoveryURL(ManagedProvider{BaseURL: "https://proxy.example.test/tenant/openai", APIVersion: test.apiVersion})
+			if err != nil {
+				t.Fatal(err)
+			}
+			parsed, err := url.Parse(endpoint)
+			if err != nil || parsed.Path != test.wantPath {
+				t.Fatalf("discovery endpoint=%q err=%v", endpoint, err)
+			}
+		})
+	}
+}
+
+func TestAzureOpenAIBasePathPreviewKeepsV1InferenceRoute(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/tenant/openai/v1/chat/completions" || r.URL.RawQuery != "api-version=preview" || r.Header.Get("api-key") != "resource-key" {
+			t.Errorf("unexpected preview request: %s headers=%v", r.URL, r.Header)
+			http.Error(w, "invalid route", http.StatusBadRequest)
+			return
+		}
+		_, _ = w.Write([]byte(`{"id":"chat-azure","object":"chat.completion","model":"deployment-a","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+	}))
+	t.Cleanup(server.Close)
+	client := NewAzureOpenAI(server.URL+"/tenant/openai", "resource-key", false, "preview", "api_key")
+	if _, err := client.ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "deployment-a", Messages: []openai.Message{{Role: "user", Content: "hello"}}}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestManagedAzureOpenAIRejectsInvalidNativeSettings(t *testing.T) {
 	for _, input := range []ManagedProvider{
 		{ID: "azure", Type: "azure-openai", BaseURL: "https://example.test", APIVersion: "2025-13-01"},

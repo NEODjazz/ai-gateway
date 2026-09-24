@@ -76,6 +76,9 @@ Discovery других провайдеров также отклоняет ус
 массива моделей (`models` для Cohere, `data` для совместимого каталога).
 Cohere discovery проходит все страницы `next_page_token` перед публикацией списка;
 повторный токен или ошибка последующей страницы отклоняют весь результат.
+Для Azure OpenAI `base_url` с окончанием `/openai` в GA/preview-режиме использует
+`/openai/v1` и для inference, и для discovery; versioned deployment URL сохраняет
+маршрут `/openai/deployments/{deployment}`.
 
 ### Managed control plane
 
