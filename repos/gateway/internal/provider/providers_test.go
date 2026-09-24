@@ -70,6 +70,22 @@ func TestManagedGeminiWorkloadAuthentication(t *testing.T) {
 	}
 }
 
+func TestManagedOllamaRejectsBaseURLQueryOrFragment(t *testing.T) {
+	for _, baseURL := range []string{
+		"https://ollama.example.test/tenant?token=secret",
+		"https://ollama.example.test/tenant#fragment",
+		"https://ollama.example.test/tenant?",
+	} {
+		_, err := normalizeManagedProvider(ManagedProvider{ID: "ollama", Type: "ollama", BaseURL: baseURL, Enabled: true})
+		if !errors.Is(err, ErrInvalidProvider) {
+			t.Errorf("Ollama base URL %q accepted: %v", baseURL, err)
+		}
+	}
+	if _, err := normalizeManagedProvider(ManagedProvider{ID: "ollama", Type: "ollama", BaseURL: "https://ollama.example.test/tenant/api", Enabled: true}); err != nil {
+		t.Fatalf("valid Ollama reverse-proxy URL rejected: %v", err)
+	}
+}
+
 func TestAzureAudienceSelectionReachesManagedAndStartupInference(t *testing.T) {
 	baseURL := "https://proxy.example.test/api/projects/project-a"
 	router := New(Config{}).(*Router)

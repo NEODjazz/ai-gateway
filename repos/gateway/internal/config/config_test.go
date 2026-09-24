@@ -51,6 +51,29 @@ func TestValidateProviderAdmissionRejectsUnsafeRerankPath(t *testing.T) {
 	}
 }
 
+func TestValidateOllamaBaseURL(t *testing.T) {
+	for _, baseURL := range []string{
+		"https://ollama.example.test/tenant?token=secret",
+		"https://ollama.example.test/tenant#fragment",
+		"https://ollama.example.test/tenant?",
+	} {
+		endpoint := ProviderEndpointConfig{Name: "ollama", Type: "ollama", BaseURL: baseURL}
+		if err := validateProviderAdmission([]ProviderEndpointConfig{endpoint}); err == nil {
+			t.Errorf("Ollama base URL %q accepted", baseURL)
+		}
+	}
+	for _, baseURL := range []string{
+		"https://ollama.example.test/tenant",
+		"https://ollama.example.test/tenant/api",
+		"https://ollama.example.test/tenant/v1",
+	} {
+		endpoint := ProviderEndpointConfig{Name: "ollama", Type: "ollama", BaseURL: baseURL}
+		if err := validateProviderAdmission([]ProviderEndpointConfig{endpoint}); err != nil {
+			t.Errorf("valid Ollama base URL %q rejected: %v", baseURL, err)
+		}
+	}
+}
+
 func TestValidateAzureOpenAIConfiguration(t *testing.T) {
 	valid := ProviderEndpointConfig{Name: "azure", Type: "azure-openai", APIVersion: "2025-04-01-preview", AuthType: "entra"}
 	if err := validateProviderAdmission([]ProviderEndpointConfig{valid}); err != nil {

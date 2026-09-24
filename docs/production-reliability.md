@@ -41,6 +41,9 @@ before forwarding content or tool calls from that terminal chunk.
 Native Ollama Chat JSON and stream bodies are bounded to 32 MiB. Ollama Responses
 JSON uses the shared bounded decoder and validates response usage and structure
 before returning the result.
+Ollama provider base URLs reject query strings and fragments at startup and in
+managed configuration. Reverse-proxy path prefixes, including URLs ending in
+`/api` or `/v1`, remain supported.
 Native Ollama Chat streams require the provider's `done: true` terminal chunk;
 an early EOF returns an error without emitting a successful finish event.
 The final native Chat JSON or stream chunk must include both provider token

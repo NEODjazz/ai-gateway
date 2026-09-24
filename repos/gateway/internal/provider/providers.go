@@ -328,6 +328,12 @@ func normalizeManagedProvider(input ManagedProvider) (ManagedProvider, error) {
 			return ManagedProvider{}, ErrInvalidProvider
 		}
 	}
+	if input.Type == "ollama" {
+		parsed, err := url.Parse(input.BaseURL)
+		if err != nil || parsed.RawQuery != "" || parsed.ForceQuery || strings.Contains(input.BaseURL, "#") {
+			return ManagedProvider{}, ErrInvalidProvider
+		}
+	}
 	if input.Type != "azure-openai" && (input.AzureCloud != "" || input.AzureAudience != "") {
 		return ManagedProvider{}, ErrInvalidProvider
 	}
