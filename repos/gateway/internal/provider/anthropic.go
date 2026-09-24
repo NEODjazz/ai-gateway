@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"strings"
@@ -1074,6 +1075,9 @@ func anthropicCompletionTokenDetails(usage anthropicUsage) *openai.CompletionTok
 
 func validateAnthropicUsage(usage anthropicUsage) error {
 	if usage.InputTokens < 0 || usage.OutputTokens < 0 || usage.CacheReadInputTokens < 0 || usage.CacheCreationInputTokens < 0 {
+		return errors.New("invalid Anthropic usage")
+	}
+	if usage.InputTokens > math.MaxInt-usage.CacheReadInputTokens || usage.InputTokens+usage.CacheReadInputTokens > math.MaxInt-usage.CacheCreationInputTokens || usage.InputTokens+usage.CacheReadInputTokens+usage.CacheCreationInputTokens > math.MaxInt-usage.OutputTokens {
 		return errors.New("invalid Anthropic usage")
 	}
 	if details := usage.OutputTokensDetails; details != nil && (details.ThinkingTokens < 0 || details.ThinkingTokens > usage.OutputTokens) {
