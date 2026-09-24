@@ -44,6 +44,9 @@ func main() {
 			log.Fatal(err)
 		}
 		defer providerControlStore.Close()
+		if err := providerControlStore.ResponseSessions().Ping(appCtx); err != nil {
+			log.Fatalf("response session schema is unavailable: %v", err)
+		}
 	}
 
 	gatewayPipeline := modules.NewPipelineWithObserver([]modules.Module{
@@ -143,7 +146,10 @@ func main() {
 					return err
 				}
 			}
-			return providerControlStore.Ping(ctx)
+			if err := providerControlStore.Ping(ctx); err != nil {
+				return err
+			}
+			return providerControlStore.ResponseSessions().Ping(ctx)
 		}
 	}
 	handler := gateway.NewHandlerWithMetrics(gatewayPipeline, llmProvider, rateLimits, readiness, metrics).WithResourceBillingPipeline(providerPipeline).WithModelRegistry(modelRegistry).WithComplianceModules(dlpModule, avModule).WithAnonymizerModule(anonymizerModule).WithGuardrailMonitor(guardrailMonitor).WithCacheDiagnostics(gateway.CacheRuntimeConfig{ExactTTLSeconds: cfg.Cache.TTLSeconds, ExactMaxBytes: cfg.Cache.MaxBytes, SemanticTTLSeconds: cfg.Cache.Semantic.TTLSeconds, SemanticMaxEntries: cfg.Cache.Semantic.MaxEntries, SemanticMaxBytes: cfg.Cache.Semantic.MaxBytes}).WithLoggingRegistry(loggingRegistry).WithAgentRegistry(agentRegistry).WithMCPRegistry(mcpRegistry).WithAccessRegistry(accessRegistry).WithAdminState(adminState)

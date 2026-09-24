@@ -7,6 +7,13 @@ import (
 	"time"
 )
 
+func TestResponseSessionsPingWithoutStore(t *testing.T) {
+	var sessions *ResponseSessions
+	if err := sessions.Ping(t.Context()); err == nil {
+		t.Fatal("nil response session store passed readiness check")
+	}
+}
+
 func TestPostgresResponseSessionsIntegration(t *testing.T) {
 	dsn := requiredPostgresTestDSN(t)
 	store, err := NewPostgresStore(t.Context(), dsn, nil)
@@ -14,6 +21,10 @@ func TestPostgresResponseSessionsIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(store.Close)
+	sessions := store.ResponseSessions()
+	if err := sessions.Ping(t.Context()); err == nil {
+		t.Fatal("missing response session schema passed readiness check")
+	}
 	if _, err := store.pool.Exec(t.Context(), `CREATE TABLE gateway_response_sessions (
 		key TEXT PRIMARY KEY CHECK (length(key) BETWEEN 1 AND 256),
 		value BYTEA NOT NULL CHECK (octet_length(value) BETWEEN 1 AND 4096),
@@ -21,7 +32,9 @@ func TestPostgresResponseSessionsIntegration(t *testing.T) {
 		CREATE INDEX gateway_response_sessions_expires_at_idx ON gateway_response_sessions (expires_at)`); err != nil {
 		t.Fatal(err)
 	}
-	sessions := store.ResponseSessions()
+	if err := sessions.Ping(t.Context()); err != nil {
+		t.Fatalf("response session schema is unavailable: %v", err)
+	}
 	if _, found, err := sessions.Get(t.Context(), "responses-affinity:missing"); err != nil || found {
 		t.Fatalf("missing record found=%v err=%v", found, err)
 	}
@@ -74,6 +87,12 @@ func TestPostgresResponseSessionsIntegration(t *testing.T) {
 	}
 	if value, found, err := sessions.Get(t.Context(), "responses-affinity:one"); err != nil || !found || string(value) != "new" {
 		t.Fatalf("replacement value=%q found=%v err=%v", value, found, err)
+	}
+	if _, err := store.pool.Exec(t.Context(), `DROP TABLE gateway_response_sessions`); err != nil {
+		t.Fatal(err)
+	}
+	if err := sessions.Ping(t.Context()); err == nil {
+		t.Fatal("removed response session schema passed readiness check")
 	}
 }
 

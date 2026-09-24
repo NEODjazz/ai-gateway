@@ -23,6 +23,14 @@ func (s *PostgresStore) ResponseSessions() *ResponseSessions {
 	return &ResponseSessions{pool: s.pool}
 }
 
+func (s *ResponseSessions) Ping(ctx context.Context) error {
+	if s == nil || s.pool == nil {
+		return errors.New("response session store is unavailable")
+	}
+	_, err := s.pool.Exec(ctx, `SELECT key,value,expires_at FROM gateway_response_sessions LIMIT 0`)
+	return err
+}
+
 func (s *ResponseSessions) Get(ctx context.Context, key string) ([]byte, bool, error) {
 	if err := s.validKey(key); err != nil {
 		return nil, false, err

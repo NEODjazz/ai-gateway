@@ -278,6 +278,8 @@ Responses `previous_response_id` закрепляется за создавши�
 tenant-scoped affinity store. При настроенном PostgreSQL affinity и ownership
 хранятся в общей для replicas таблице с TTL и не зависят от Redis. Без PostgreSQL
 используется Redis, а без обоих хранилищ — локальный memory fallback для affinity.
+При настроенном PostgreSQL startup и readiness проверяют наличие session-таблицы,
+чтобы миграция не оставила gateway готовым при невозможности сохранить binding.
 Provider-scoped response ID не отправляется
 другому endpoint при failover.
 
