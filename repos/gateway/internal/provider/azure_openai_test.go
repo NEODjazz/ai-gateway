@@ -437,7 +437,7 @@ func TestAzureCompletionsRequireExactUsage(t *testing.T) {
 							t.Errorf("Azure Completions did not request stream usage: %v", body)
 						}
 						w.Header().Set("Content-Type", "text/event-stream")
-						_, _ = fmt.Fprint(w, `data: {"id":"cmpl-1","object":"text_completion","created":1,"model":"deployment","choices":[{"index":0,"text":"ok","finish_reason":"stop"}]}`+"\n\n")
+						_, _ = fmt.Fprint(w, `data: {"id":"cmpl-1","object":"text_completion","created":1,"model":"deployment","choices":[{"index":0,"text":"ok","finish_reason":"stop"}],"usage":null}`+"\n\n")
 						_, _ = fmt.Fprint(w, `data: {"id":"cmpl-1","object":"text_completion","created":1,"model":"deployment","choices":[]`+tc.usage+`}`+"\n\n")
 						_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
 					} else {
@@ -449,8 +449,14 @@ func TestAzureCompletionsRequireExactUsage(t *testing.T) {
 				request := openai.CompletionRequest{Model: "deployment", Prompt: "hello", Stream: stream}
 				var response openai.CompletionResponse
 				var err error
+				deliveredUsage := false
 				if stream {
-					response, err = client.StreamCompletions(t.Context(), request, nil)
+					response, err = client.StreamCompletions(t.Context(), request, func(payload string) error {
+						if strings.Contains(payload, `"usage":{`) {
+							deliveredUsage = true
+						}
+						return nil
+					})
 				} else {
 					response, err = client.Completions(t.Context(), request)
 				}
@@ -458,8 +464,13 @@ func TestAzureCompletionsRequireExactUsage(t *testing.T) {
 					if err == nil || !strings.Contains(err.Error(), "usage") {
 						t.Fatalf("invalid Azure Completions usage accepted: response=%+v err=%v", response, err)
 					}
+					if deliveredUsage {
+						t.Fatal("invalid Azure Completions usage chunk was forwarded")
+					}
 				} else if err != nil || !response.UsageReported {
 					t.Fatalf("valid Azure Completions usage rejected: response=%+v err=%v", response, err)
+				} else if stream && !deliveredUsage {
+					t.Fatal("valid Azure Completions usage chunk was not forwarded")
 				}
 			})
 		}
@@ -491,6 +502,29 @@ func TestAzureVersionedEntraStreamCompletionsUsage(t *testing.T) {
 	response, err := client.StreamCompletions(t.Context(), openai.CompletionRequest{Model: "deployment-a", Prompt: "hello", Stream: true}, nil)
 	if err != nil || !response.UsageReported || response.Usage.TotalTokens != 5 {
 		t.Fatalf("Azure versioned Entra usage lost: response=%+v err=%v", response, err)
+	}
+}
+
+func TestAzureFoundryEntraStreamCompletionsWithholdsInvalidUsage(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/projects/project-a/openai/v1/completions" ||
+			r.Header.Get("Authorization") != "Bearer project-token" || r.Header.Get("api-key") != "" {
+			t.Errorf("unexpected Foundry Completions request: path=%s headers=%v", r.URL.Path, r.Header)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, `data: {"id":"cmpl-1","object":"text_completion","created":1,"model":"deployment","choices":[{"index":0,"text":"ok","finish_reason":"stop"}]}`+"\n\n")
+		_, _ = fmt.Fprint(w, `data: {"id":"cmpl-1","object":"text_completion","created":1,"model":"deployment","choices":[],"usage":{"prompt_tokens":3,"total_tokens":3}}`+"\n\n")
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	t.Cleanup(server.Close)
+	client := NewAzureOpenAI(server.URL+"/api/projects/project-a", "project-token", true, "", "entra")
+	var forwarded []string
+	_, err := client.StreamCompletions(t.Context(), openai.CompletionRequest{Model: "deployment", Prompt: "hello", Stream: true}, func(payload string) error {
+		forwarded = append(forwarded, payload)
+		return nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "usage") || len(forwarded) != 1 || strings.Contains(forwarded[0], `"usage":{`) {
+		t.Fatalf("invalid Foundry Completions usage was forwarded: err=%v forwarded=%v", err, forwarded)
 	}
 }
 

@@ -2503,7 +2503,9 @@ API-key и Entra authentication.
 Azure legacy Completions JSON/SSE требуют явных `prompt_tokens`,
 `completion_tokens` и согласованного `total_tokens`. Для SSE adapter запрашивает
 финальный usage chunk через `stream_options.include_usage`; поток без него не
-получает успешный billing settlement.
+получает успешный billing settlement. Azure и Ollama отклоняют неполный или
+несогласованный usage chunk до передачи клиенту; промежуточный `usage: null`
+допустим.
 
 Для Foundry project endpoint `/api/projects/{project}` inference использует
 `/openai/v1`, а discovery читает project deployments через

@@ -424,7 +424,19 @@ func (p OpenAICompatible) completion(ctx context.Context, request openai.Complet
 	}
 	var response openai.CompletionResponse
 	if stream {
-		response, err = streamCompletionData(resp.Body, request, write)
+		forward := write
+		if p.exactCompletionUsage {
+			forward = func(payload string) error {
+				if err := validateExactPromptCompletionUsageChunk(payload, p.providerName()+" Completions"); err != nil {
+					return err
+				}
+				if write != nil {
+					return write(payload)
+				}
+				return nil
+			}
+		}
+		response, err = streamCompletionData(resp.Body, request, forward)
 	} else {
 		response, err = decodeCompletionResponse(resp.Body)
 	}
@@ -720,7 +732,7 @@ func validateExactChatUsage(response openai.ChatCompletionResponse) error {
 	return nil
 }
 
-func validateExactChatUsageChunk(payload string) error {
+func validateExactPromptCompletionUsageChunk(payload, operation string) error {
 	var chunk struct {
 		Usage json.RawMessage `json:"usage"`
 	}
@@ -738,7 +750,10 @@ func validateExactChatUsageChunk(payload string) error {
 	if err != nil {
 		return err
 	}
-	return validateExactChatUsage(openai.ChatCompletionResponse{Usage: usage, UsageReported: reported})
+	if !reported || usage.TotalTokens != usage.PromptTokens+usage.CompletionTokens {
+		return fmt.Errorf("%s requires exact prompt, completion and total token usage", operation)
+	}
+	return nil
 }
 
 func validateRequestedChatChoices(request openai.ChatCompletionRequest, response openai.ChatCompletionResponse) error {
@@ -860,7 +875,7 @@ func (p OpenAICompatible) streamChatCompletions(ctx context.Context, request ope
 	forward := write
 	if p.exactChatUsage {
 		forward = func(payload string) error {
-			if err := validateExactChatUsageChunk(payload); err != nil {
+			if err := validateExactPromptCompletionUsageChunk(payload, "Azure Chat"); err != nil {
 				return err
 			}
 			if write != nil {

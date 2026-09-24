@@ -356,8 +356,14 @@ func TestOllamaCompletionsRequireExactUsage(t *testing.T) {
 				request := openai.CompletionRequest{Model: "model", Prompt: "hello", Stream: stream}
 				var response openai.CompletionResponse
 				var err error
+				deliveredUsage := false
 				if stream {
-					response, err = client.StreamCompletions(t.Context(), request, nil)
+					response, err = client.StreamCompletions(t.Context(), request, func(payload string) error {
+						if strings.Contains(payload, `"usage":{`) {
+							deliveredUsage = true
+						}
+						return nil
+					})
 				} else {
 					response, err = client.Completions(t.Context(), request)
 				}
@@ -365,8 +371,13 @@ func TestOllamaCompletionsRequireExactUsage(t *testing.T) {
 					if err == nil || !strings.Contains(err.Error(), "usage") {
 						t.Fatalf("invalid Ollama Completions usage accepted: response=%+v err=%v", response, err)
 					}
+					if deliveredUsage {
+						t.Fatal("invalid Ollama Completions usage chunk was forwarded")
+					}
 				} else if err != nil || !response.UsageReported {
 					t.Fatalf("valid Ollama Completions usage rejected: response=%+v err=%v", response, err)
+				} else if stream && !deliveredUsage {
+					t.Fatal("valid Ollama Completions usage chunk was not forwarded")
 				}
 			})
 		}
