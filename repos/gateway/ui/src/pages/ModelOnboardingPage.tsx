@@ -171,13 +171,18 @@ export function ModelOnboardingPage() {
     if (!catalog) throw new Error("Model catalog is unavailable");
     const nextModels = [...(catalog.models || [])];
     for (const candidate of selectedCandidates) {
-      const key = `${providerID}\u0000${candidate.publicModel}`;
+      const key = `${candidate.deploymentID}\u0000${candidate.publicModel}`;
       const index = nextModels.findIndex((entry) => `${String(entry.provider)}\u0000${String(entry.model)}` === key);
+      const inherited = index >= 0 ? nextModels[index] : [candidate.deploymentID, providerID, selectedProviderType, "*"]
+        .flatMap((provider) => [candidate.publicModel, candidate.upstream, "*"].map((model) => nextModels.find((entry) => entry.provider === provider && entry.model === model)))
+        .find((entry) => entry !== undefined);
       const entry: Row = {
-        provider: providerID, model: candidate.publicModel,
+        ...inherited,
+        provider: candidate.deploymentID, model: candidate.publicModel,
         capabilities: [...candidate.capabilities],
-        input_cost_per_1m: Number(candidate.inputCost || 0), output_cost_per_1m: Number(candidate.outputCost || 0),
-        currency: candidate.inputCost || candidate.outputCost ? candidate.currency.trim().toUpperCase() : ""
+        input_cost_per_1m: candidate.inputCost.trim() ? Number(candidate.inputCost) : inherited?.input_cost_per_1m ?? 0,
+        output_cost_per_1m: candidate.outputCost.trim() ? Number(candidate.outputCost) : inherited?.output_cost_per_1m ?? 0,
+        currency: candidate.inputCost.trim() || candidate.outputCost.trim() ? candidate.currency.trim().toUpperCase() : inherited?.currency ?? ""
       };
       if (index >= 0) nextModels[index] = entry; else nextModels.push(entry);
     }

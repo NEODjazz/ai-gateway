@@ -56,7 +56,49 @@ describe("ModelOnboardingPage", () => {
     expect(screen.getByRole("button", { name: "Apply configuration" })).toBeEnabled();
     await userEvent.click(screen.getByRole("button", { name: "Apply configuration" }));
     expect(await screen.findByText("Onboarding complete")).toBeInTheDocument();
-    expect(applied[0].catalog.models[0]).toMatchObject({ input_cost_per_1m: 0.2, output_cost_per_1m: 0, currency: "USD" });
+    expect(applied[0].catalog.models[0]).toMatchObject({ provider: "foundry-deploy-a", input_cost_per_1m: 0.2, output_cost_per_1m: 0, currency: "USD" });
+  });
+
+  it("keeps distinct deployment prices for one public model", async () => {
+    let planned: { catalog: { models: Array<{ provider: string; model: string; input_cost_per_1m: number; training_cost_per_1m?: number; max_input_tokens?: number }> }; model_groups: Array<{ id: string; deployment_ids: string[] }> } | undefined;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, options) => {
+      const path = String(input);
+      if (!options?.method && path === "/admin/v1/providers") return json({ data: [{ id: "foundry", type: "azure-openai", base_url: "https://example.services.ai.azure.com/api/projects/project-a", auth_type: "entra", enabled: true }] });
+      if (!options?.method && path === "/admin/v1/credentials") return json({ data: [] });
+      if (!options?.method && path === "/admin/v1/model-catalog") return json({ version: "v1", models: [{ provider: "foundry", model: "shared", capabilities: ["chat"], input_cost_per_1m: 9, output_cost_per_1m: 9, training_cost_per_1m: 3, max_input_tokens: 100, currency: "USD" }] });
+      if (!options?.method && path === "/admin/v1/model-groups") return json({ data: [] });
+      if (!options?.method && path === "/admin/v1/provider-capabilities") return json({ data: [{ type: "azure-openai", capabilities: ["chat"] }] });
+      if (path.endsWith("/test")) return json({ status: "available", latency_ms: 1, model_count: 2 });
+      if (path.endsWith("/discover-models")) return json({ data: [{ id: "dep-a" }, { id: "dep-b" }] });
+      if (path === "/admin/v1/model-onboarding/plan") {
+        planned = JSON.parse(String(options?.body));
+        return json({ revision: 1, catalog_version: "v1", deployments: [], model_groups: [], changes: [] });
+      }
+      return json({ error: { message: `Unexpected ${path}` } }, 500);
+    });
+    sessionStorage.setItem("ai-gateway.admin-token", "token");
+    render(<MemoryRouter><AuthProvider><ModelOnboardingPage /></AuthProvider></MemoryRouter>);
+    await screen.findByRole("option", { name: "foundry — azure-openai" });
+    await userEvent.click(screen.getByRole("button", { name: "Test & discover models" }));
+    await screen.findByText("dep-a");
+    for (const model of ["dep-a", "dep-b"]) {
+      await userEvent.click(screen.getAllByRole("checkbox")[model === "dep-a" ? 0 : 1]);
+      await userEvent.clear(screen.getByLabelText(`Public model ${model}`));
+      await userEvent.type(screen.getByLabelText(`Public model ${model}`), "shared");
+      await userEvent.click(screen.getByLabelText(`Capabilities ${model}`));
+      await userEvent.click(screen.getByRole("option", { name: /Chat/ }));
+      await userEvent.type(screen.getByLabelText(`Input cost ${model}`), model === "dep-a" ? "0.1" : "0.5");
+      await userEvent.type(screen.getByLabelText(`Output cost ${model}`), "1");
+    }
+    await userEvent.click(screen.getByRole("button", { name: "Review 2 model(s)" }));
+    await screen.findByText("Review onboarding plan");
+    expect(planned?.catalog.models).toEqual(expect.arrayContaining([
+      expect.objectContaining({ provider: "foundry", model: "shared", input_cost_per_1m: 9 }),
+      expect.objectContaining({ provider: "foundry-dep-a", model: "shared", input_cost_per_1m: 0.1, training_cost_per_1m: 3, max_input_tokens: 100 }),
+      expect.objectContaining({ provider: "foundry-dep-b", model: "shared", input_cost_per_1m: 0.5, training_cost_per_1m: 3, max_input_tokens: 100 })
+    ]));
+    expect(planned?.catalog.models).toHaveLength(3);
+    expect(planned?.model_groups).toEqual([{ id: "shared", deployment_ids: ["foundry-dep-a", "foundry-dep-b"], strategy: "weighted", enabled: true }]);
   });
 
   it("uses discovered Ollama capabilities and requires explicit selection when metadata is unavailable", async () => {
@@ -139,7 +181,7 @@ describe("ModelOnboardingPage", () => {
       deployments: [{ id: "azure-gpt-a", provider_id: "azure", credential_id: "azure-key", upstream_model: "gpt-a", models: ["gpt-a"], capabilities: ["chat", "stream", "tools"] }],
       model_groups: [{ id: "gpt-a", deployment_ids: ["azure-gpt-a"] }]
     });
-    expect(applyCall?.body.catalog.models[0]).toMatchObject({ provider: "azure", model: "gpt-a", capabilities: ["chat", "stream", "tools"], input_cost_per_1m: 0.2, output_cost_per_1m: 2, currency: "USD" });
+    expect(applyCall?.body.catalog.models[0]).toMatchObject({ provider: "azure-gpt-a", model: "gpt-a", capabilities: ["chat", "stream", "tools"], input_cost_per_1m: 0.2, output_cost_per_1m: 2, currency: "USD" });
     const planCalls = calls.filter((call) => call.path === "/admin/v1/model-onboarding/plan");
     expect(planCalls).toHaveLength(2);
     expect(planCalls[0].body.deployments[0].capabilities).toEqual(["chat", "stream", "tools"]);

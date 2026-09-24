@@ -40,6 +40,30 @@ func TestCatalogLookupSupportsManagedProviderIdentity(t *testing.T) {
 	}
 }
 
+func TestCatalogLookupKeepsDeploymentPricesDistinct(t *testing.T) {
+	catalog, err := Parse(`{"version":"v1","models":[
+		{"provider":"foundry","model":"shared","input_cost_per_1m":9,"currency":"USD"},
+		{"provider":"foundry-dep-a","model":"shared","input_cost_per_1m":0.1,"currency":"USD"},
+		{"provider":"foundry-dep-b","model":"shared","input_cost_per_1m":0.5,"currency":"USD"}
+	]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		deployment string
+		price      float64
+	}{
+		{deployment: "foundry-dep-a", price: 0.1},
+		{deployment: "foundry-dep-b", price: 0.5},
+		{deployment: "foundry-dep-c", price: 9},
+	} {
+		entry, found := catalog.FindForProviders([]string{test.deployment, "foundry", "azure-openai"}, "shared")
+		if !found || entry.InputCostPer1M != test.price {
+			t.Errorf("deployment %s: entry=%+v found=%v", test.deployment, entry, found)
+		}
+	}
+}
+
 func TestCatalogRejectsInvalidOrDuplicateEntries(t *testing.T) {
 	for _, raw := range []string{
 		`{"models":[{"provider":"p","model":"m"}]}`,

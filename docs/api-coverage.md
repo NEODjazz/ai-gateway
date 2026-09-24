@@ -96,6 +96,10 @@ capabilities also require an explicit selection before validation.
 Azure onboarding also requires explicit input and output prices per million
 tokens for every selected model. A deliberate zero price is accepted, but an
 empty field cannot silently validate or publish a zero-cost catalog entry.
+Onboarding writes prices under each deployment ID. Deployments that expose the
+same public model can therefore retain different rates without changing an
+existing provider-wide catalog price. New entries inherit other catalog limits
+and pricing dimensions from the effective existing entry.
 For ambient Entra credentials, an upstream `401` invalidates only the token used
 by that request, so the next independent request refreshes it. The rejected
 inference request is not replayed; explicitly supplied bearer tokens remain
