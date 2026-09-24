@@ -491,6 +491,13 @@ func (r *Router) endpointForManagedDeploymentWithSecret(deployment ModelDeployme
 		return Endpoint{}, ErrInvalidDeployment
 	}
 	providerConfig := config.ProviderEndpointConfig{Type: managed.Type, BaseURL: managed.BaseURL, APIKey: secret, Stream: hasCapability(deployment.Capabilities, "stream"), APIVersion: managed.APIVersion, AuthType: managed.AuthType, Region: managed.Region}
+	if managed.Type == "azure-openai" {
+		baseURL, err := azureManagedDeploymentBaseURL(managed.BaseURL, managed.APIVersion, deployment)
+		if err != nil {
+			return Endpoint{}, err
+		}
+		providerConfig.BaseURL = baseURL
+	}
 	client := providerFor(providerConfig)
 	if managed.Type == "bedrock" && managed.AuthType == "aws_sigv4" {
 		bedrock := NewBedrockWithAuth(providerConfig.BaseURL, providerConfig.APIKey, providerConfig.AuthType, providerConfig.Region)

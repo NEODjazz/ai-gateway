@@ -20,7 +20,13 @@ type azureOpenAITransport struct {
 func (t azureOpenAITransport) RoundTrip(request *http.Request) (*http.Response, error) {
 	cloned := request.Clone(request.Context())
 	if prefix := t.legacyPath + "/v1/"; t.legacyPath != "" && strings.HasPrefix(cloned.URL.Path, prefix) {
-		cloned.URL.Path = t.legacyPath + "/" + strings.TrimPrefix(cloned.URL.Path, prefix)
+		suffix := strings.TrimPrefix(cloned.URL.Path, prefix)
+		if deploymentIndex := strings.LastIndex(t.legacyPath, "/openai/deployments/"); deploymentIndex >= 0 && (suffix == "responses" || strings.HasPrefix(suffix, "responses/")) {
+			cloned.URL.Path = t.legacyPath[:deploymentIndex] + "/openai/" + suffix
+		} else {
+			cloned.URL.Path = t.legacyPath + "/" + suffix
+		}
+		cloned.URL.RawPath = ""
 	}
 	if t.apiVersion != "" {
 		query := cloned.URL.Query()
@@ -146,6 +152,52 @@ func normalizeAzureOpenAIBaseURL(value string) string {
 		parsed.Path = strings.TrimRight(parsed.Path, "/") + "/openai/v1"
 	}
 	return strings.TrimRight(parsed.String(), "/")
+}
+
+func azureManagedDeploymentBaseURL(baseURL, apiVersion string, deployment ModelDeployment) (string, error) {
+	if apiVersion == "" || apiVersion == "preview" {
+		return baseURL, nil
+	}
+	parsed, err := url.Parse(baseURL)
+	if err != nil {
+		return "", ErrInvalidDeployment
+	}
+	path := strings.TrimRight(parsed.Path, "/")
+	if strings.Contains(path, "/openai/deployments/") {
+		return baseURL, nil
+	}
+	if strings.HasSuffix(path, "/openai/v1") {
+		path = strings.TrimSuffix(path, "/openai/v1")
+	} else if strings.HasSuffix(path, "/openai") {
+		path = strings.TrimSuffix(path, "/openai")
+	} else if strings.Contains(path, "/openai/") || strings.HasSuffix(path, "/openai/deployments") {
+		return "", ErrInvalidDeployment
+	}
+	model := deployment.UpstreamModel
+	if model == "" {
+		if len(deployment.Models) != 1 {
+			return "", ErrInvalidDeployment
+		}
+		model = deployment.Models[0]
+	}
+	if !validAzureDeploymentPathSegment(model) {
+		return "", ErrInvalidDeployment
+	}
+	parsed.Path = path + "/openai/deployments/" + model
+	parsed.RawPath = ""
+	return parsed.String(), nil
+}
+
+func validAzureDeploymentPathSegment(value string) bool {
+	if value == "" || len(value) > 256 {
+		return false
+	}
+	for _, char := range value {
+		if (char < 'a' || char > 'z') && (char < 'A' || char > 'Z') && (char < '0' || char > '9') && char != '-' && char != '_' && char != '.' {
+			return false
+		}
+	}
+	return true
 }
 
 func azureFoundryProjectPath(path string) (string, bool) {

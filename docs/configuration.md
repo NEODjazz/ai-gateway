@@ -157,6 +157,14 @@ Foundry resource и project endpoints с host suffix `.services.ai.azure.com`
 `/api/projects/{project}` автоматически дополняется `/openai/v1`.
 Для project endpoint `api_version` должен быть пустым; неверная конфигурация
 отклоняется до provider execution.
+Для managed Azure OpenAI provider с датированной `api_version` можно указать
+resource-root URL. Каждый model deployment получает собственный путь
+`/openai/deployments/{upstream_model}`; если `upstream_model` не указан,
+используется единственное имя из `models`. Для нескольких имен без явного
+`upstream_model` конфигурация отклоняется как неоднозначная. Явно заданный
+deployment URL сохраняется. Пустая версия использует `/openai/v1`.
+Для датированных версий Responses и связанные resource operations используют
+resource-level `/openai/responses`, а Chat и Embeddings остаются под deployment path.
 `AZURE_CLIENT_ID` также выбирает
 user-assigned managed identity. Разрешены только loopback и link-local identity
 endpoints; redirects и некорректные/просроченные ответы отклоняются. Временный
