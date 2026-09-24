@@ -695,7 +695,7 @@ func TestManagedProviderCapabilityProfilesExposeValidatedCompletionOptions(t *te
 			t.Errorf("%s completion parameters=%+v", providerType, got)
 		}
 	}
-	if got := byType["ollama"].CompletionParameters; !slices.Equal(got.SupportedOptions, compatibleOptions) || !slices.Equal(got.PromptForms, []string{"text"}) {
+	if got := byType["ollama"].CompletionParameters; !slices.Equal(got.SupportedOptions, []string{"frequency_penalty", "logprobs", "max_tokens", "presence_penalty", "seed", "stop", "suffix", "temperature", "top_p"}) || !slices.Equal(got.PromptForms, []string{"text"}) {
 		t.Errorf("ollama completion parameters=%+v", got)
 	}
 	if got := byType["mistral"].CompletionParameters; !slices.Equal(got.SupportedOptions, []string{"metadata", "max_tokens", "min_tokens", "prompt_cache_key", "seed", "stop", "suffix", "temperature", "top_p"}) || !slices.Equal(got.PromptForms, []string{"text"}) {

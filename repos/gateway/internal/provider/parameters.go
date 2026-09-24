@@ -351,6 +351,11 @@ func (Ollama) ValidateCompletionParameters(request openai.CompletionRequest) err
 	}
 	return rejectParameters("ollama",
 		parameterCheck{"prompt", prompt.Kind != openai.CompletionPromptText},
+		parameterCheck{"best_of", request.BestOf != nil},
+		parameterCheck{"echo", request.Echo != nil},
+		parameterCheck{"logit_bias", request.LogitBias != nil},
+		parameterCheck{"n", request.N != nil},
+		parameterCheck{"user", request.User != ""},
 		parameterCheck{"metadata", request.Metadata != nil},
 		parameterCheck{"min_tokens", request.MinTokens != nil},
 		parameterCheck{"prompt_cache_key", request.PromptCacheKey != ""},

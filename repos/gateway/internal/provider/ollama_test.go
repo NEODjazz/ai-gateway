@@ -253,6 +253,42 @@ func TestOllamaCompletionsUsesProviderContract(t *testing.T) {
 	}
 }
 
+func TestOllamaCompletionsRejectIgnoredParametersBeforeUpstream(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		http.Error(w, "unexpected request", http.StatusInternalServerError)
+	}))
+	t.Cleanup(server.Close)
+	one, echo := 1, false
+	for _, test := range []struct {
+		name    string
+		param   string
+		request openai.CompletionRequest
+	}{
+		{name: "best_of", param: "best_of", request: openai.CompletionRequest{BestOf: &one}},
+		{name: "echo", param: "echo", request: openai.CompletionRequest{Echo: &echo}},
+		{name: "logit_bias", param: "logit_bias", request: openai.CompletionRequest{LogitBias: map[string]int{}}},
+		{name: "n", param: "n", request: openai.CompletionRequest{N: &one}},
+		{name: "user", param: "user", request: openai.CompletionRequest{User: "client-user"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request := test.request
+			request.Model = "test-model"
+			request.Prompt = "complete"
+			client := NewOllama(server.URL, true)
+			_, err := client.Completions(t.Context(), request)
+			assertUnsupportedParameter(t, err, test.param)
+			request.Stream = true
+			_, err = client.StreamCompletions(t.Context(), request, func(string) error { return nil })
+			assertUnsupportedParameter(t, err, test.param)
+		})
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("ignored completion parameters reached Ollama: calls=%d", calls.Load())
+	}
+}
+
 func TestOllamaStreamsProviderCompletions(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var upstream openAICompatibleCompletionRequest
