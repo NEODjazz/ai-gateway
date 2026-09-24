@@ -83,6 +83,8 @@ Managed Azure OpenAI resource deployments can advertise `realtime` and use the
 shared routing, admission and per-response quota lifecycle with API-key or Entra
 WebSocket authentication. Foundry project URLs do not expose the resource-level
 Realtime route and are rejected for this capability.
+Realtime preserves a configured reverse-proxy prefix before `/openai/` for both
+GA and preview Azure resource routes.
 
 For Chat model parameter overrides, `supported_options` adds model-specific
 controls to the provider policy and `unsupported_options` removes controls the

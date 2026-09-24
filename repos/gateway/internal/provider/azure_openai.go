@@ -97,6 +97,12 @@ func azureRealtimeEndpoint(baseURL, apiVersion, model string) (*url.URL, error) 
 	if _, project := azureFoundryProjectPath(endpoint.Path); project {
 		return nil, errors.New("Azure Foundry project URL does not expose the Azure OpenAI realtime endpoint")
 	}
+	pathPrefix := ""
+	if index := strings.LastIndex(endpoint.Path, "/openai/"); index >= 0 {
+		pathPrefix = endpoint.Path[:index]
+	} else if strings.HasSuffix(endpoint.Path, "/openai") {
+		pathPrefix = strings.TrimSuffix(endpoint.Path, "/openai")
+	}
 	if endpoint.Scheme == "https" {
 		endpoint.Scheme = "wss"
 	} else {
@@ -106,10 +112,10 @@ func azureRealtimeEndpoint(baseURL, apiVersion, model string) (*url.URL, error) 
 	endpoint.Fragment = ""
 	query := make(url.Values)
 	if apiVersion == "" {
-		endpoint.Path = "/openai/v1/realtime"
+		endpoint.Path = pathPrefix + "/openai/v1/realtime"
 		query.Set("model", model)
 	} else {
-		endpoint.Path = "/openai/realtime"
+		endpoint.Path = pathPrefix + "/openai/realtime"
 		query.Set("api-version", apiVersion)
 		query.Set("deployment", model)
 	}

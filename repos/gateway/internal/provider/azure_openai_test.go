@@ -22,6 +22,8 @@ func TestAzureOpenAIRealtimeUsesNativeURLAndAuthentication(t *testing.T) {
 	}{
 		{name: "GA API key", basePath: "/openai/deployments/legacy", credential: "resource-key", authType: "api_key", wantPath: "/openai/v1/realtime", wantQuery: "model=deployment-a", wantAPIKey: "resource-key"},
 		{name: "preview Entra", basePath: "/openai/deployments/legacy", credential: "entra-token", apiVersion: "2025-04-01-preview", authType: "entra", wantPath: "/openai/realtime", wantQuery: "api-version=2025-04-01-preview&deployment=deployment-a", wantBearer: "Bearer entra-token"},
+		{name: "prefixed GA API key", basePath: "/tenant-a/openai/v1", credential: "resource-key", authType: "api_key", wantPath: "/tenant-a/openai/v1/realtime", wantQuery: "model=deployment-a", wantAPIKey: "resource-key"},
+		{name: "prefixed preview Entra", basePath: "/tenant-a/openai/deployments/legacy", credential: "entra-token", apiVersion: "2025-04-01-preview", authType: "entra", wantPath: "/tenant-a/openai/realtime", wantQuery: "api-version=2025-04-01-preview&deployment=deployment-a", wantBearer: "Bearer entra-token"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			serverErr := make(chan error, 1)
