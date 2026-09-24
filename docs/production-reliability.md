@@ -6,7 +6,8 @@ TPM and remote billing reserve use the same context estimator. For chat, it incl
 
 Native Ollama Chat rejects negative or overflowing provider-reported token counts
 in JSON and terminal SSE responses before usage settlement. An invalid stream
-does not emit a successful completion event.
+does not emit a successful completion event. Terminal SSE usage is validated
+before forwarding content or tool calls from that terminal chunk.
 Native Ollama Chat JSON and stream bodies are bounded to 32 MiB. Ollama Responses
 JSON uses the shared bounded decoder and validates response usage and structure
 before returning the result.

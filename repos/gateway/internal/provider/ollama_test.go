@@ -513,6 +513,37 @@ func TestOllamaRejectsInvalidChatUsage(t *testing.T) {
 	}
 }
 
+func TestOllamaChatStreamValidatesTerminalUsageBeforeForwarding(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		usage      string
+		wantError  bool
+		wantChunks int
+	}{
+		{name: "missing usage", usage: "", wantError: true},
+		{name: "invalid usage", usage: `,"prompt_eval_count":-1,"eval_count":1`, wantError: true},
+		{name: "valid usage", usage: `,"prompt_eval_count":2,"eval_count":1`, wantChunks: 2},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = fmt.Fprintf(w, `{"model":"test-model","message":{"role":"assistant","content":"terminal text"},"done":true%s}`+"\n", test.usage)
+			}))
+			t.Cleanup(server.Close)
+			var payloads []string
+			_, err := NewOllama(server.URL, true).StreamChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "test-model", Stream: true}, func(payload string) error {
+				payloads = append(payloads, payload)
+				return nil
+			})
+			if (err != nil) != test.wantError || len(payloads) != test.wantChunks {
+				t.Fatalf("err=%v payloads=%v", err, payloads)
+			}
+			if !test.wantError && (!strings.Contains(payloads[0], "terminal text") || !strings.Contains(payloads[1], `"finish_reason":"stop"`)) {
+				t.Fatalf("valid terminal content was not forwarded: %v", payloads)
+			}
+		})
+	}
+}
+
 func TestOllamaChatPreservesCachedPromptUsage(t *testing.T) {
 	for _, stream := range []bool{false, true} {
 		name := "json"

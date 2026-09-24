@@ -372,6 +372,14 @@ func (p Ollama) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 			}
 			return openai.ChatCompletionResponse{}, err
 		}
+		var terminalUsage openai.Usage
+		if chunk.Done {
+			var usageErr error
+			terminalUsage, usageErr = ollamaChatUsage(chunk.PromptEvalCount, chunk.PromptEvalCachedCount, chunk.EvalCount)
+			if usageErr != nil {
+				return openai.ChatCompletionResponse{}, usageErr
+			}
+		}
 		if chunk.Model != "" {
 			response.Model = chunk.Model
 		}
@@ -441,13 +449,9 @@ func (p Ollama) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 			}
 		}
 		if chunk.Done {
-			usage, err := ollamaChatUsage(chunk.PromptEvalCount, chunk.PromptEvalCachedCount, chunk.EvalCount)
-			if err != nil {
-				return openai.ChatCompletionResponse{}, err
-			}
 			finishReason := ollamaFinishReason(chunk.DoneReason, len(response.Choices[0].Message.ToolCalls) > 0)
 			response.Choices[0].FinishReason = finishReason
-			response.Usage = usage
+			response.Usage = terminalUsage
 			if err := write(openAIChatCompletionChunkPayload(response.ID, response.Model, 0, "", "", &finishReason)); err != nil {
 				return openai.ChatCompletionResponse{}, err
 			}
