@@ -2040,7 +2040,7 @@ func validateRerankResponse(response openai.RerankResponse, documentCount int) e
 		if units := response.Meta.BilledUnits; units != nil && (units.SearchUnits != units.SearchUnits || units.SearchUnits < 0 || units.SearchUnits > 1.7976931348623157e308 || units.TotalTokens < 0) {
 			return errors.New("provider returned invalid rerank billed units")
 		}
-		if tokens := response.Meta.Tokens; tokens != nil && (tokens.InputTokens < 0 || tokens.OutputTokens < 0) {
+		if tokens := response.Meta.Tokens; tokens != nil && (tokens.InputTokens < 0 || tokens.OutputTokens < 0 || tokens.InputTokens > int(^uint(0)>>1)-tokens.OutputTokens) {
 			return errors.New("provider returned invalid rerank token usage")
 		}
 	}

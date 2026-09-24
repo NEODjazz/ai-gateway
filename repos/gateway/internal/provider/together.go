@@ -774,7 +774,7 @@ func (t Together) Rerank(ctx context.Context, request openai.RerankRequest) (ope
 	if err := decoder.Decode(&struct{}{}); err != io.EOF {
 		return openai.RerankResponse{}, errors.New("invalid trailing rerank response data")
 	}
-	if wire.Usage == nil || wire.Usage.PromptTokens < 0 || wire.Usage.CompletionTokens < 0 || wire.Usage.TotalTokens != wire.Usage.PromptTokens+wire.Usage.CompletionTokens {
+	if wire.Usage == nil || wire.Usage.PromptTokens < 0 || wire.Usage.CompletionTokens < 0 || wire.Usage.TotalTokens < 0 || wire.Usage.PromptTokens > math.MaxInt-wire.Usage.CompletionTokens || wire.Usage.TotalTokens != wire.Usage.PromptTokens+wire.Usage.CompletionTokens {
 		return openai.RerankResponse{}, errors.New("invalid together rerank usage")
 	}
 	return openai.RerankResponse{
