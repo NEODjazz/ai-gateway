@@ -2631,3 +2631,20 @@ Rancher Desktop built `ai-gateway-gateway:foundry-deb8db21` with image ID
 `sha256:4df2677c57ed6edf4dc25627e37dcf15068db5dff11aa90ca4ff8162db23f688`.
 Gateway Helm revision 615 completed successfully with one available replica;
 the local ingress returned HTTP 204 for both `/healthz` and `/readyz`.
+
+## Foundry project discovery
+
+Source `fd94ddac` reads the project deployment inventory through
+`/api/projects/{project}/deployments?api-version=v1` rather than the resource
+model route. It follows bounded `nextLink` pages only on the same origin and
+project path, deduplicates deployment names and rejects malformed responses.
+Local HTTP regressions cover two pages and cross-origin/cross-project link
+rejection. Source `5301a10f` rejects `api_version` on Foundry project inference
+endpoints at both static and managed configuration boundaries. The full Go
+test and race suites, vet and build passed after each change.
+
+Rancher Desktop built `ai-gateway-gateway:foundry-discovery-5301a10f` with
+image ID `sha256:a1668295b40795a6823e17aac392524cbb4834fe1e224a1c951e43c592863640`.
+Gateway Helm revision 616 completed successfully with one available replica;
+the local ingress returned HTTP 204 for `/healthz` and `/readyz`. No external
+Foundry credential was used for live discovery.
