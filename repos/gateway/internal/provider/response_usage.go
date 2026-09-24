@@ -30,6 +30,9 @@ func validateResponseUsage(usage openai.ResponseUsage) error {
 		if details.CachedTokens < 0 || details.CacheWriteTokens < 0 || details.CacheCreationTokens < 0 || details.AudioTokens < 0 || details.ImageTokens < 0 || details.ReasoningTokens < 0 || details.TextTokens < 0 {
 			return errors.New("invalid negative Responses input token details")
 		}
+		if details.CachedTokens > usage.InputTokens || details.CacheWriteTokens > usage.InputTokens-details.CachedTokens || details.CacheCreationTokens > usage.InputTokens-details.CachedTokens {
+			return errors.New("Responses cache token details exceed input usage")
+		}
 	}
 	return nil
 }

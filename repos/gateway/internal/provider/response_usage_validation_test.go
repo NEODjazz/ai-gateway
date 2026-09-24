@@ -18,6 +18,11 @@ func TestResponsesRejectsInvalidUsageBeforeDelivery(t *testing.T) {
 		`{"server_side_tool_usage_details":{"x_users_fetched":-1}}`,
 		fmt.Sprintf(`{"input_tokens":%d,"output_tokens":1}`, int(^uint(0)>>1)),
 		`{"input_tokens":1,"input_tokens_details":{"cached_tokens":-1}}`,
+		`{"input_tokens":1,"output_tokens":1,"total_tokens":2,"input_tokens_details":{"cached_tokens":2}}`,
+		`{"input_tokens":1,"output_tokens":1,"total_tokens":2,"input_tokens_details":{"cache_write_tokens":2}}`,
+		`{"input_tokens":1,"output_tokens":1,"total_tokens":2,"input_tokens_details":{"cache_creation_tokens":2}}`,
+		`{"input_tokens":1,"output_tokens":1,"total_tokens":2,"input_tokens_details":{"cached_tokens":1,"cache_write_tokens":1}}`,
+		`{"input_tokens":1,"output_tokens":1,"total_tokens":2,"input_tokens_details":{"cached_tokens":1,"cache_creation_tokens":1}}`,
 		`{"input_tokens":1,"input_tokens_details":{"cache_write_tokens":-1}}`,
 		`{"input_tokens":1,"input_tokens_details":{"cache_creation_tokens":-1}}`,
 		`{"input_tokens":1,"input_tokens_details":{"audio_tokens":-1}}`,
@@ -67,7 +72,13 @@ func TestResponsesRejectsUnknownUsageCountersBeforeDelivery(t *testing.T) {
 
 func TestResponseUsageRangeBoundary(t *testing.T) {
 	maxInt := int(^uint(0) >> 1)
-	for _, usage := range []openai.ResponseUsage{{}, {InputTokens: maxInt - 1, OutputTokens: 1, TotalTokens: maxInt}, {InputTokens: 7, OutputTokens: 2, TotalTokens: 9}, {InputTokens: 7}} {
+	for _, usage := range []openai.ResponseUsage{
+		{},
+		{InputTokens: maxInt - 1, OutputTokens: 1, TotalTokens: maxInt},
+		{InputTokens: 7, OutputTokens: 2, TotalTokens: 9},
+		{InputTokens: 7},
+		{InputTokens: 7, InputTokensDetails: &openai.InputTokenDetails{CachedTokens: 4, CacheWriteTokens: 3, CacheCreationTokens: 3}},
+	} {
 		if err := validateResponseUsage(usage); err != nil {
 			t.Fatalf("valid usage rejected: %+v: %v", usage, err)
 		}

@@ -23,6 +23,10 @@ inference when it is blank, contains whitespace or NUL, or exceeds 16 KiB.
 This applies to managed Azure OpenAI and Foundry inference as well as direct
 adapter use; an absent explicit token still selects workload identity.
 
+Responses usage validation bounds cache-read and cache-write token details by
+reported input tokens. Cache read plus either cache-write alias cannot exceed
+the input total; invalid JSON or terminal SSE usage fails before delivery.
+
 ## Token accounting and request identity
 
 TPM and remote billing reserve use the same context estimator. For chat, it includes messages, tool calls, tool schemas, tool choice and response format. For Responses, it includes input, instructions, tools, tool choice and text format. The estimate uses serialized context bytes (approximately four bytes per token); image input uses a fixed 4096-token estimate instead of charging for base64 length. This is a reservation estimate, not a provider tokenizer or a guarantee of exact multimodal usage. Provider-reported usage settles the final charge when available; fallback usage remains marked estimated.
