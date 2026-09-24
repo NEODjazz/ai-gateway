@@ -60,6 +60,8 @@ an omitted role becomes assistant, while another role fails before that chunk
 is forwarded to the client.
 Tool-only native Chat streams include the `assistant` role in their first tool
 call chunk, so clients can reconstruct the message without a text delta.
+When a native Chat stream contains no text, reasoning or tool calls, its
+terminal chunk still carries the `assistant` role alongside the finish reason.
 
 Native Messages and GenerateContent requests retain their API family in billing
 reserve, commit and failure events. The gateway sets this classification before

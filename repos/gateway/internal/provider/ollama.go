@@ -464,7 +464,11 @@ func (p Ollama) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 			finishReason := ollamaFinishReason(chunk.DoneReason, len(response.Choices[0].Message.ToolCalls) > 0)
 			response.Choices[0].FinishReason = finishReason
 			response.Usage = terminalUsage
-			if err := write(openAIChatCompletionChunkPayload(response.ID, response.Model, 0, "", "", &finishReason)); err != nil {
+			role := ""
+			if !sentRole {
+				role = "assistant"
+			}
+			if err := write(openAIChatCompletionChunkPayload(response.ID, response.Model, 0, role, "", &finishReason)); err != nil {
 				return openai.ChatCompletionResponse{}, err
 			}
 			return response, nil

@@ -970,6 +970,29 @@ func TestOllamaStreamsNativeToolCalls(t *testing.T) {
 	}
 }
 
+func TestOllamaEmptyChatStreamEmitsAssistantRole(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprintln(w, `{"model":"test-model","message":{"role":"assistant"},"done":true,"done_reason":"stop","prompt_eval_count":2,"eval_count":0}`)
+	}))
+	t.Cleanup(server.Close)
+	var payloads []string
+	response, err := NewOllama(server.URL, true).StreamChatCompletions(t.Context(), openai.ChatCompletionRequest{
+		Model: "test-model", Stream: true, Messages: []openai.Message{{Role: "user", Content: "hello"}},
+	}, func(payload string) error {
+		payloads = append(payloads, payload)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(payloads) != 1 || !strings.Contains(payloads[0], `"role":"assistant"`) || !strings.Contains(payloads[0], `"finish_reason":"stop"`) {
+		t.Fatalf("empty stream omitted assistant role: %v", payloads)
+	}
+	if response.Usage.PromptTokens != 2 || response.Usage.CompletionTokens != 0 {
+		t.Fatalf("empty stream usage=%+v", response.Usage)
+	}
+}
+
 func TestOllamaNativeLogprobsRoundTrip(t *testing.T) {
 	for _, streaming := range []bool{false, true} {
 		t.Run(fmt.Sprintf("stream=%t", streaming), func(t *testing.T) {
