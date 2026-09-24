@@ -432,7 +432,7 @@ func (p OpenAICompatible) completion(ctx context.Context, request openai.Complet
 		return openai.CompletionResponse{}, err
 	}
 	if p.exactCompletionUsage && (!response.UsageReported || response.Usage.TotalTokens != response.Usage.PromptTokens+response.Usage.CompletionTokens) {
-		return openai.CompletionResponse{}, errors.New("Azure Completions requires exact prompt, completion and total token usage")
+		return openai.CompletionResponse{}, fmt.Errorf("%s Completions requires exact prompt, completion and total token usage", p.providerName())
 	}
 	return response, nil
 }

@@ -319,6 +319,60 @@ func TestOllamaStreamsProviderCompletions(t *testing.T) {
 	}
 }
 
+func TestOllamaCompletionsRequireExactUsage(t *testing.T) {
+	for _, tc := range []struct {
+		name, usage string
+		wantError   bool
+	}{
+		{"missing", "", true},
+		{"prompt missing", `,"usage":{"completion_tokens":2,"total_tokens":2}`, true},
+		{"completion missing", `,"usage":{"prompt_tokens":3,"total_tokens":3}`, true},
+		{"total missing", `,"usage":{"prompt_tokens":3,"completion_tokens":2}`, true},
+		{"inconsistent", `,"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":6}`, true},
+		{"reported zero", `,"usage":{"prompt_tokens":0,"completion_tokens":0,"total_tokens":0}`, false},
+		{"reported counts", `,"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}`, false},
+	} {
+		for _, stream := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/stream=%t", tc.name, stream), func(t *testing.T) {
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.URL.Path != "/v1/completions" {
+						t.Errorf("unexpected Ollama Completions path: %s", r.URL.Path)
+					}
+					if stream {
+						var request openAICompatibleCompletionRequest
+						if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request.StreamOptions == nil || !request.StreamOptions.IncludeUsage {
+							t.Errorf("Ollama Completions did not request stream usage: %+v err=%v", request, err)
+						}
+						w.Header().Set("Content-Type", "text/event-stream")
+						_, _ = fmt.Fprint(w, `data: {"id":"cmpl-1","object":"text_completion","created":1,"model":"model","choices":[{"index":0,"text":"ok","finish_reason":"stop"}]}`+"\n\n")
+						_, _ = fmt.Fprint(w, `data: {"id":"cmpl-1","object":"text_completion","created":1,"model":"model","choices":[]`+tc.usage+`}`+"\n\n")
+						_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+					} else {
+						_, _ = fmt.Fprint(w, `{"id":"cmpl-1","object":"text_completion","created":1,"model":"model","choices":[{"index":0,"text":"ok","finish_reason":"stop"}]`+tc.usage+`}`)
+					}
+				}))
+				t.Cleanup(server.Close)
+				client := NewOllama(server.URL, stream)
+				request := openai.CompletionRequest{Model: "model", Prompt: "hello", Stream: stream}
+				var response openai.CompletionResponse
+				var err error
+				if stream {
+					response, err = client.StreamCompletions(t.Context(), request, nil)
+				} else {
+					response, err = client.Completions(t.Context(), request)
+				}
+				if tc.wantError {
+					if err == nil || !strings.Contains(err.Error(), "usage") {
+						t.Fatalf("invalid Ollama Completions usage accepted: response=%+v err=%v", response, err)
+					}
+				} else if err != nil || !response.UsageReported {
+					t.Fatalf("valid Ollama Completions usage rejected: response=%+v err=%v", response, err)
+				}
+			})
+		}
+	}
+}
+
 func TestOllamaChatCompletions(t *testing.T) {
 	promptTokens, completionTokens := 4, 2
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -178,7 +178,7 @@ func (p Ollama) StreamCompletions(ctx context.Context, request openai.Completion
 }
 
 func (p Ollama) completionAdapter() OpenAICompatible {
-	return OpenAICompatible{baseURL: p.baseURL, upstreamStream: p.upstreamStream, completionStreamUsage: true, client: p.client}
+	return OpenAICompatible{baseURL: p.baseURL, upstreamStream: p.upstreamStream, errorProvider: "ollama", exactCompletionUsage: true, completionStreamUsage: true, client: p.client}
 }
 
 func (p Ollama) ChatCompletions(ctx context.Context, request openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
