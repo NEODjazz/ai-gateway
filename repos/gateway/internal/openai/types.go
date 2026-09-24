@@ -903,45 +903,47 @@ type FileSearchHybridSearch struct {
 
 type ResponseResponse struct {
 	Metadata map[string]string `json:"metadata,omitempty"`
-	// InputTokensReported distinguishes an explicit upstream zero from absent usage.
-	InputTokensReported bool                       `json:"-"`
-	Error               *ResponseError             `json:"error,omitempty"`
-	IncompleteDetails   *ResponseIncompleteDetails `json:"incomplete_details,omitempty"`
-	ID                  string                     `json:"id"`
-	Object              string                     `json:"object"`
-	CreatedAt           int64                      `json:"created_at,omitempty"`
-	CompletedAt         int64                      `json:"completed_at,omitempty"`
-	Status              string                     `json:"status,omitempty"`
-	Model               string                     `json:"model"`
-	Background          *bool                      `json:"background,omitempty"`
-	Store               *bool                      `json:"store,omitempty"`
-	PreviousResponseID  *string                    `json:"previous_response_id,omitempty"`
-	ServiceTier         string                     `json:"service_tier,omitempty"`
-	MaxOutputTokens     *int                       `json:"max_output_tokens,omitempty"`
-	MaxToolCalls        *int                       `json:"max_tool_calls,omitempty"`
-	ParallelToolCalls   *bool                      `json:"parallel_tool_calls,omitempty"`
-	Temperature         *float64                   `json:"temperature,omitempty"`
-	TopP                *float64                   `json:"top_p,omitempty"`
-	TopLogprobs         *int                       `json:"top_logprobs,omitempty"`
-	FrequencyPenalty    *float64                   `json:"frequency_penalty,omitempty"`
-	PresencePenalty     *float64                   `json:"presence_penalty,omitempty"`
-	Truncation          *string                    `json:"truncation,omitempty"`
-	Reasoning           *ResponseReasoning         `json:"reasoning,omitempty"`
-	Text                any                        `json:"text,omitempty"`
-	Tools               []ResponseTool             `json:"tools,omitempty"`
-	ToolChoice          any                        `json:"tool_choice,omitempty"`
-	User                string                     `json:"user,omitempty"`
-	SafetyIdentifier    string                     `json:"safety_identifier,omitempty"`
-	PromptCacheKey      string                     `json:"prompt_cache_key,omitempty"`
-	Citations           []string                   `json:"citations,omitempty"`
-	Conversation        *ResponseConversation      `json:"conversation,omitempty"`
-	Output              []ResponseOutputItem       `json:"output,omitempty"`
-	OutputText          string                     `json:"output_text,omitempty"`
-	Usage               ResponseUsage              `json:"usage,omitempty"`
-	Instructions        any                        `json:"instructions,omitempty"`
-	Prompt              *ResponsePrompt            `json:"prompt,omitempty"`
-	Moderation          *ResponseModeration        `json:"moderation,omitempty"`
-	ContextManagement   []ResponseContextEntry     `json:"context_management,omitempty"`
+	// Usage presence flags distinguish explicit upstream zeros from absent counts.
+	InputTokensReported  bool                       `json:"-"`
+	OutputTokensReported bool                       `json:"-"`
+	TotalTokensReported  bool                       `json:"-"`
+	Error                *ResponseError             `json:"error,omitempty"`
+	IncompleteDetails    *ResponseIncompleteDetails `json:"incomplete_details,omitempty"`
+	ID                   string                     `json:"id"`
+	Object               string                     `json:"object"`
+	CreatedAt            int64                      `json:"created_at,omitempty"`
+	CompletedAt          int64                      `json:"completed_at,omitempty"`
+	Status               string                     `json:"status,omitempty"`
+	Model                string                     `json:"model"`
+	Background           *bool                      `json:"background,omitempty"`
+	Store                *bool                      `json:"store,omitempty"`
+	PreviousResponseID   *string                    `json:"previous_response_id,omitempty"`
+	ServiceTier          string                     `json:"service_tier,omitempty"`
+	MaxOutputTokens      *int                       `json:"max_output_tokens,omitempty"`
+	MaxToolCalls         *int                       `json:"max_tool_calls,omitempty"`
+	ParallelToolCalls    *bool                      `json:"parallel_tool_calls,omitempty"`
+	Temperature          *float64                   `json:"temperature,omitempty"`
+	TopP                 *float64                   `json:"top_p,omitempty"`
+	TopLogprobs          *int                       `json:"top_logprobs,omitempty"`
+	FrequencyPenalty     *float64                   `json:"frequency_penalty,omitempty"`
+	PresencePenalty      *float64                   `json:"presence_penalty,omitempty"`
+	Truncation           *string                    `json:"truncation,omitempty"`
+	Reasoning            *ResponseReasoning         `json:"reasoning,omitempty"`
+	Text                 any                        `json:"text,omitempty"`
+	Tools                []ResponseTool             `json:"tools,omitempty"`
+	ToolChoice           any                        `json:"tool_choice,omitempty"`
+	User                 string                     `json:"user,omitempty"`
+	SafetyIdentifier     string                     `json:"safety_identifier,omitempty"`
+	PromptCacheKey       string                     `json:"prompt_cache_key,omitempty"`
+	Citations            []string                   `json:"citations,omitempty"`
+	Conversation         *ResponseConversation      `json:"conversation,omitempty"`
+	Output               []ResponseOutputItem       `json:"output,omitempty"`
+	OutputText           string                     `json:"output_text,omitempty"`
+	Usage                ResponseUsage              `json:"usage,omitempty"`
+	Instructions         any                        `json:"instructions,omitempty"`
+	Prompt               *ResponsePrompt            `json:"prompt,omitempty"`
+	Moderation           *ResponseModeration        `json:"moderation,omitempty"`
+	ContextManagement    []ResponseContextEntry     `json:"context_management,omitempty"`
 
 	PromptCacheOptions     *PromptCacheOptions             `json:"prompt_cache_options,omitempty"`
 	PromptCacheRetention   string                          `json:"prompt_cache_retention,omitempty"`

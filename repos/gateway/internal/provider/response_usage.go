@@ -38,14 +38,18 @@ func validateResponseUsage(usage openai.ResponseUsage) error {
 func recordResponseInputUsage(payload []byte, response *openai.ResponseResponse) error {
 	var wire struct {
 		Usage *struct {
-			InputTokens *int `json:"input_tokens"`
+			InputTokens  *int `json:"input_tokens"`
+			OutputTokens *int `json:"output_tokens"`
+			TotalTokens  *int `json:"total_tokens"`
 		} `json:"usage"`
 	}
 	if err := json.Unmarshal(payload, &wire); err != nil {
 		return err
 	}
-	if wire.Usage != nil && wire.Usage.InputTokens != nil {
-		response.InputTokensReported = true
+	if wire.Usage != nil {
+		response.InputTokensReported = response.InputTokensReported || wire.Usage.InputTokens != nil
+		response.OutputTokensReported = response.OutputTokensReported || wire.Usage.OutputTokens != nil
+		response.TotalTokensReported = response.TotalTokensReported || wire.Usage.TotalTokens != nil
 	}
 	return nil
 }

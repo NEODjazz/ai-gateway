@@ -1222,6 +1222,35 @@ func TestOllamaResponsesRejectInvalidUsage(t *testing.T) {
 	}
 }
 
+const ollamaResponseTestJSON = `{"id":"r","status":"completed","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`
+const ollamaResponseTestTerminal = "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"r\",\"status\":\"completed\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n"
+
+func TestOllamaResponsesRequireExactUsage(t *testing.T) {
+	for _, tc := range []struct {
+		name, usage string
+		wantError   bool
+	}{
+		{"missing", "", true},
+		{"input missing", `,"usage":{"output_tokens":2,"total_tokens":2}`, true},
+		{"output missing", `,"usage":{"input_tokens":3,"total_tokens":3}`, true},
+		{"total missing", `,"usage":{"input_tokens":3,"output_tokens":2}`, true},
+		{"inconsistent total", `,"usage":{"input_tokens":3,"output_tokens":2,"total_tokens":4}`, true},
+		{"reported zero", `,"usage":{"input_tokens":0,"output_tokens":0,"total_tokens":0}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := `{"id":"resp-test","object":"response","status":"completed","model":"test-model","output":[]` + tc.usage + `}`
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = w.Write([]byte(body))
+			}))
+			defer server.Close()
+			_, err := NewOllama(server.URL, false).Responses(t.Context(), openai.ResponseRequest{Model: "test-model", Input: "ping"})
+			if (err != nil) != tc.wantError {
+				t.Fatalf("usage=%s err=%v, wantError=%v", tc.usage, err, tc.wantError)
+			}
+		})
+	}
+}
+
 func TestOllamaStreamsResponses(t *testing.T) {
 	var upstreamRequest openAICompatibleResponseRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1237,7 +1266,7 @@ func TestOllamaStreamsResponses(t *testing.T) {
 		_, _ = w.Write([]byte(`event: response.output_text.delta` + "\n"))
 		_, _ = w.Write([]byte(`data: {"type":"response.output_text.delta","response_id":"resp-test","delta":"g"}` + "\n\n"))
 		_, _ = w.Write([]byte(`event: response.completed` + "\n"))
-		_, _ = w.Write([]byte(`data: {"type":"response.completed","response":{"id":"resp-test","object":"response","status":"completed","model":"test-model","output":[{"type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"pong"}]}],"output_text":"pong"}}` + "\n\n"))
+		_, _ = w.Write([]byte(`data: {"type":"response.completed","response":{"id":"resp-test","object":"response","status":"completed","model":"test-model","output":[{"type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"pong"}]}],"output_text":"pong","usage":{"input_tokens":3,"output_tokens":1,"total_tokens":4}}}` + "\n\n"))
 		_, _ = w.Write([]byte("data: [DONE]\n\n"))
 	}))
 	defer server.Close()
@@ -1268,5 +1297,38 @@ func TestOllamaStreamsResponses(t *testing.T) {
 	}
 	if response.OutputText != "pong" {
 		t.Fatalf("unexpected output_text: %s", response.OutputText)
+	}
+	if response.Usage.TotalTokens != 4 {
+		t.Fatalf("unexpected streamed usage: %+v", response.Usage)
+	}
+}
+
+func TestOllamaStreamsResponsesRejectInvalidTerminalUsage(t *testing.T) {
+	for _, tc := range []struct {
+		name, usage string
+	}{
+		{"missing", ""},
+		{"output missing", `,"usage":{"input_tokens":3,"total_tokens":3}`},
+		{"inconsistent total", `,"usage":{"input_tokens":3,"output_tokens":1,"total_tokens":3}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = w.Write([]byte("data: {\"type\":\"response.output_text.delta\",\"delta\":\"pong\"}\n\n"))
+				_, _ = w.Write([]byte(`data: {"type":"response.completed","response":{"id":"resp-test","status":"completed"` + tc.usage + `}}` + "\n\n"))
+			}))
+			defer server.Close()
+			var events []string
+			_, err := NewOllama(server.URL, true).StreamResponses(t.Context(), openai.ResponseRequest{Model: "test-model", Input: "ping"}, func(event, _ string) error {
+				events = append(events, event)
+				return nil
+			})
+			if err == nil || !strings.Contains(err.Error(), "usage") {
+				t.Fatalf("invalid terminal usage accepted: %v", err)
+			}
+			if len(events) != 1 || events[0] != "response.output_text.delta" {
+				t.Fatalf("terminal success was forwarded without valid usage: %v", events)
+			}
+		})
 	}
 }

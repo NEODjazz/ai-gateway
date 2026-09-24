@@ -27,9 +27,9 @@ func TestOllamaResponsesToolChoiceNoneOmitsTools(t *testing.T) {
 					t.Errorf("unsupported tool_choice reached Ollama: %s", body["tool_choice"])
 				}
 				if stream {
-					_, _ = fmt.Fprint(w, responseTestTerminal)
+					_, _ = fmt.Fprint(w, ollamaResponseTestTerminal)
 				} else {
-					_, _ = fmt.Fprint(w, `{"id":"r","status":"completed"}`)
+					_, _ = fmt.Fprint(w, ollamaResponseTestJSON)
 				}
 			}))
 			t.Cleanup(server.Close)

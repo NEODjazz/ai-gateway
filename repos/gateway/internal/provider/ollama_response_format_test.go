@@ -33,9 +33,9 @@ func TestOllamaResponsesMapsJSONObjectFormat(t *testing.T) {
 					t.Errorf("Ollama cannot enforce format: %+v", body.Text.Format)
 				}
 				if stream {
-					_, _ = fmt.Fprint(w, responseTestTerminal)
+					_, _ = fmt.Fprint(w, ollamaResponseTestTerminal)
 				} else {
-					_, _ = fmt.Fprint(w, `{"id":"r","status":"completed"}`)
+					_, _ = fmt.Fprint(w, ollamaResponseTestJSON)
 				}
 			}))
 			t.Cleanup(server.Close)

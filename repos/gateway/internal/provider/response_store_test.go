@@ -34,9 +34,17 @@ func TestResponsesStoreForwarding(t *testing.T) {
 							t.Errorf("store=%v want=%v", body["store"], want)
 						}
 						if stream {
-							_, _ = fmt.Fprint(w, responseTestTerminal)
+							if adapter == "ollama" {
+								_, _ = fmt.Fprint(w, ollamaResponseTestTerminal)
+							} else {
+								_, _ = fmt.Fprint(w, responseTestTerminal)
+							}
 						} else {
-							_, _ = fmt.Fprint(w, `{"id":"r","status":"completed"}`)
+							if adapter == "ollama" {
+								_, _ = fmt.Fprint(w, ollamaResponseTestJSON)
+							} else {
+								_, _ = fmt.Fprint(w, `{"id":"r","status":"completed"}`)
+							}
 						}
 					}))
 					defer server.Close()

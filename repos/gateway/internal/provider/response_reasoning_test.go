@@ -32,9 +32,17 @@ func TestResponsesReasoningForwarding(t *testing.T) {
 						t.Errorf("reasoning=%v", body["reasoning"])
 					}
 					if stream {
-						_, _ = fmt.Fprint(w, responseTestTerminal)
+						if adapter == "ollama" {
+							_, _ = fmt.Fprint(w, ollamaResponseTestTerminal)
+						} else {
+							_, _ = fmt.Fprint(w, responseTestTerminal)
+						}
 					} else {
-						_, _ = fmt.Fprint(w, `{"id":"r","status":"completed"}`)
+						if adapter == "ollama" {
+							_, _ = fmt.Fprint(w, ollamaResponseTestJSON)
+						} else {
+							_, _ = fmt.Fprint(w, `{"id":"r","status":"completed"}`)
+						}
 					}
 				}))
 				defer server.Close()
@@ -92,9 +100,9 @@ func TestOllamaResponsesDefaultReasoningUsesModelDefault(t *testing.T) {
 					t.Errorf("model default was overridden: %v", reasoning)
 				}
 				if stream {
-					_, _ = fmt.Fprint(w, responseTestTerminal)
+					_, _ = fmt.Fprint(w, ollamaResponseTestTerminal)
 				} else {
-					_, _ = fmt.Fprint(w, `{"id":"r","status":"completed"}`)
+					_, _ = fmt.Fprint(w, ollamaResponseTestJSON)
 				}
 			}))
 			t.Cleanup(server.Close)

@@ -34,9 +34,17 @@ func TestResponsesOutputLimitAliasForwarding(t *testing.T) {
 							t.Errorf("max_tokens=%v", body["max_output_tokens"])
 						}
 						if stream {
-							_, _ = fmt.Fprint(w, responseTestTerminal)
+							if adapter == "ollama" {
+								_, _ = fmt.Fprint(w, ollamaResponseTestTerminal)
+							} else {
+								_, _ = fmt.Fprint(w, responseTestTerminal)
+							}
 						} else {
-							_, _ = fmt.Fprint(w, `{"id":"r","status":"completed"}`)
+							if adapter == "ollama" {
+								_, _ = fmt.Fprint(w, ollamaResponseTestJSON)
+							} else {
+								_, _ = fmt.Fprint(w, `{"id":"r","status":"completed"}`)
+							}
 						}
 					}))
 					defer server.Close()
