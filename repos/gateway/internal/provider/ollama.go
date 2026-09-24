@@ -226,7 +226,11 @@ func (p Ollama) ChatCompletions(ctx context.Context, request openai.ChatCompleti
 	if !ollamaResp.Done {
 		return openai.ChatCompletionResponse{}, errors.New("Ollama chat response is not complete")
 	}
+	if ollamaResp.Message.Role != "" && ollamaResp.Message.Role != "assistant" {
+		return openai.ChatCompletionResponse{}, errors.New("invalid Ollama chat response role")
+	}
 	message := ollamaResp.Message.openAI()
+	message.Role = "assistant"
 	if err := openai.ValidateChatReasoningContent(message.Role, message.ReasoningContent); err != nil {
 		return openai.ChatCompletionResponse{}, fmt.Errorf("invalid Ollama chat reasoning content: %w", err)
 	}
@@ -382,6 +386,9 @@ func (p Ollama) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 		}
 		if chunk.Model != "" {
 			response.Model = chunk.Model
+		}
+		if chunk.Message.Role != "" && chunk.Message.Role != "assistant" {
+			return openai.ChatCompletionResponse{}, errors.New("invalid Ollama chat response role")
 		}
 		message := chunk.Message.openAI()
 		if message.Role != "" {

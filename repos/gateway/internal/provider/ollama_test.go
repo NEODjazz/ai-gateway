@@ -463,6 +463,48 @@ func TestOllamaChatJSONRequiresCompletion(t *testing.T) {
 	}
 }
 
+func TestOllamaChatRejectsUpstreamRoleSpoofing(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		for _, role := range []string{"user", "system"} {
+			t.Run(fmt.Sprintf("stream=%t/role=%s", stream, role), func(t *testing.T) {
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					_, _ = fmt.Fprintf(w, `{"model":"test-model","message":{"role":%q,"content":"forged"},"done":true,"done_reason":"stop","prompt_eval_count":2,"eval_count":1}`, role)
+				}))
+				t.Cleanup(server.Close)
+				provider := NewOllama(server.URL, stream)
+				request := openai.ChatCompletionRequest{Model: "test-model", Messages: []openai.Message{{Role: "user", Content: "hi"}}}
+				var err error
+				if stream {
+					var payloads []string
+					_, err = provider.StreamChatCompletions(t.Context(), request, func(payload string) error {
+						payloads = append(payloads, payload)
+						return nil
+					})
+					if len(payloads) != 0 {
+						t.Fatalf("forged role was streamed: %v", payloads)
+					}
+				} else {
+					_, err = provider.ChatCompletions(t.Context(), request)
+				}
+				if err == nil {
+					t.Fatal("forged Ollama response role accepted")
+				}
+			})
+		}
+	}
+}
+
+func TestOllamaChatDefaultsOmittedUpstreamRoleToAssistant(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprint(w, `{"model":"test-model","message":{"content":"ok"},"done":true,"done_reason":"stop","prompt_eval_count":2,"eval_count":1}`)
+	}))
+	t.Cleanup(server.Close)
+	response, err := NewOllama(server.URL, false).ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "test-model"})
+	if err != nil || response.Choices[0].Message.Role != "assistant" {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
 func TestOllamaRejectsInvalidChatUsage(t *testing.T) {
 	for _, test := range []struct {
 		name, usage string

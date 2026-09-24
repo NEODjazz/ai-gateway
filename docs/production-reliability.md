@@ -36,6 +36,9 @@ counters. Missing or null counters fail before settlement; explicitly reported
 zero remains valid.
 Non-stream native Chat JSON must also report `done: true`; incomplete output is
 not presented as a successful response.
+Native Ollama Chat accepts only assistant or omitted roles in provider output;
+an omitted role becomes assistant, while another role fails before that chunk
+is forwarded to the client.
 
 Native Messages and GenerateContent requests retain their API family in billing
 reserve, commit and failure events. The gateway sets this classification before
