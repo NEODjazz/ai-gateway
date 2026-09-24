@@ -9,8 +9,9 @@ function json(value: unknown, status = 200) {
 }
 
 describe("ModelOnboardingPage", () => {
-  it("shows Foundry model identity and requires explicit Azure capabilities", async () => {
+  it("requires explicit Azure capabilities and prices during Foundry onboarding", async () => {
     const plans: Array<{ deployments: Array<{ capabilities: string[] }> }> = [];
+    const applied: Array<{ catalog: { models: Array<{ input_cost_per_1m: number; output_cost_per_1m: number; currency: string }> } }> = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, options) => {
       const path = String(input);
       if (!options?.method && path === "/admin/v1/providers") return json({ data: [{ id: "foundry", type: "azure-openai", base_url: "https://example.services.ai.azure.com/api/projects/project-a", auth_type: "entra", enabled: true }] });
@@ -24,6 +25,11 @@ describe("ModelOnboardingPage", () => {
         const body = JSON.parse(String(options?.body)) as { deployments: Array<{ capabilities: string[] }> };
         plans.push(body);
         return json({ revision: 1, catalog_version: "v1", deployments: body.deployments, model_groups: [], changes: [] });
+      }
+      if (path === "/admin/v1/model-onboarding/apply") {
+        const body = JSON.parse(String(options?.body));
+        applied.push(body);
+        return json({ revision: 2, catalog_version: "v1", deployments: body.deployments, model_groups: [], changes: [] });
       }
       return json({ error: { message: `Unexpected ${path}` } }, 500);
     });
@@ -39,7 +45,14 @@ describe("ModelOnboardingPage", () => {
     expect(screen.getByRole("button", { name: "Apply configuration" })).toBeDisabled();
     await userEvent.click(screen.getByLabelText("Capabilities deploy-a"));
     await userEvent.click(screen.getByRole("option", { name: /Embeddings/ }));
+    expect(screen.getByRole("button", { name: "Apply configuration" })).toBeDisabled();
+    await userEvent.type(screen.getByLabelText("Input cost deploy-a"), "0.2");
+    expect(screen.getByRole("button", { name: "Apply configuration" })).toBeDisabled();
+    await userEvent.type(screen.getByLabelText("Output cost deploy-a"), "0");
     expect(screen.getByRole("button", { name: "Apply configuration" })).toBeEnabled();
+    await userEvent.click(screen.getByRole("button", { name: "Apply configuration" }));
+    expect(await screen.findByText("Onboarding complete")).toBeInTheDocument();
+    expect(applied[0].catalog.models[0]).toMatchObject({ input_cost_per_1m: 0.2, output_cost_per_1m: 0, currency: "USD" });
   });
 
   it("uses discovered Ollama capabilities and requires explicit selection when metadata is unavailable", async () => {
