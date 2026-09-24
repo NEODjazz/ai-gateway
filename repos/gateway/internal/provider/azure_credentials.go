@@ -18,17 +18,18 @@ import (
 )
 
 const (
-	azureIMDSTokenURL        = "http://169.254.169.254/metadata/identity/oauth2/token"
-	azureAuthorityURL        = "https://login.microsoftonline.com"
-	azureOpenAIResource      = "https://cognitiveservices.azure.com/"
-	azureOpenAIScope         = azureOpenAIResource + ".default"
-	azureFoundryResource     = "https://ai.azure.com/"
-	azureGovernmentAuthority = "https://login.microsoftonline.us"
-	azureGovernmentResource  = "https://cognitiveservices.azure.us/"
-	azureChinaAuthority      = "https://login.chinacloudapi.cn"
-	azureChinaResource       = "https://cognitiveservices.azure.cn/"
-	azureTokenMaxBytes       = 32 << 10
-	azureAssertionMaxBytes   = 64 << 10
+	azureIMDSTokenURL              = "http://169.254.169.254/metadata/identity/oauth2/token"
+	azureAuthorityURL              = "https://login.microsoftonline.com"
+	azureOpenAIResource            = "https://cognitiveservices.azure.com/"
+	azureOpenAIScope               = azureOpenAIResource + ".default"
+	azureFoundryResource           = "https://ai.azure.com/"
+	azureGovernmentAuthority       = "https://login.microsoftonline.us"
+	azureGovernmentResource        = "https://cognitiveservices.azure.us/"
+	azureGovernmentFoundryResource = "https://ai.azure.us/"
+	azureChinaAuthority            = "https://login.chinacloudapi.cn"
+	azureChinaResource             = "https://cognitiveservices.azure.cn/"
+	azureTokenMaxBytes             = 32 << 10
+	azureAssertionMaxBytes         = 64 << 10
 )
 
 type azureTokenSource struct {
@@ -70,6 +71,9 @@ func azureIdentityEndpoints(providerBaseURL ...string) (string, string) {
 			host := strings.ToLower(parsed.Hostname())
 			if strings.HasSuffix(host, ".services.ai.azure.com") {
 				return azureAuthorityURL, azureFoundryResource
+			}
+			if strings.HasSuffix(host, ".services.ai.azure.us") {
+				return azureGovernmentAuthority, azureGovernmentFoundryResource
 			}
 			if strings.HasSuffix(host, ".openai.azure.us") || strings.HasSuffix(host, ".cognitiveservices.azure.us") {
 				return azureGovernmentAuthority, azureGovernmentResource

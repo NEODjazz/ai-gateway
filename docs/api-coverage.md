@@ -74,6 +74,12 @@ availability is not inferred from these tests.
 | Parameter policy | Strict unknown-field decoding; native adapter rejection; generation control validation; machine-readable per-adapter Chat, Completions, Responses, Interactions, Embeddings, Rerank, Moderation, Search, Image Generation, Image Edit, Image Variation, Audio Transcription, Audio Translation, Text-to-Speech, OCR, Video, Fine-tuning and Container creation support, including accepted values and input/document/prompt/query forms, all derived from runtime validators and locked by profile regressions | Model-specific overrides and equivalent matrices for other API families |
 | Provider and deployment quotas | Atomic fixed-window RPM/TPM across inference, token-count, shadow and owned response lifecycle calls; provider totals shared by all linked deployments; bounded memory mode and shared Redis counters; quota-aware fallback | Additional quota dimensions only when backed by an upstream contract |
 
+Foundry project workload identity selects its token audience by cloud. Public
+projects use `https://ai.azure.com/.default`; Azure Government projects on
+`*.services.ai.azure.us` use `https://ai.azure.us/.default` with the government
+Entra authority. Azure OpenAI resource endpoints keep their resource-specific
+audiences.
+
 For Chat model parameter overrides, `supported_options` adds model-specific
 controls to the provider policy and `unsupported_options` removes controls the
 selected model rejects. Native xAI Chat rejects `logprobs` and `top_logprobs`
