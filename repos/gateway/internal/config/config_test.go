@@ -56,10 +56,15 @@ func TestValidateAzureOpenAIConfiguration(t *testing.T) {
 	if err := validateProviderAdmission([]ProviderEndpointConfig{valid}); err != nil {
 		t.Fatalf("valid Azure configuration rejected: %v", err)
 	}
+	if err := validateProviderAdmission([]ProviderEndpointConfig{{Name: "foundry", Type: "azure-openai", BaseURL: "https://resource.services.ai.azure.com/api/projects/project-a", AuthType: "entra"}}); err != nil {
+		t.Fatalf("valid Foundry project configuration rejected: %v", err)
+	}
 	for _, endpoint := range []ProviderEndpointConfig{
 		{Name: "azure", Type: "azure-openai", APIVersion: "2025-13-01"},
 		{Name: "azure", Type: "azure-openai", AuthType: "basic"},
 		{Name: "azure", Type: "azure-openai", BaseURL: "https://example.test?secret=value"},
+		{Name: "foundry", Type: "azure-openai", BaseURL: "https://resource.services.ai.azure.com/api/projects/project-a", APIVersion: "2025-04-01-preview", AuthType: "entra"},
+		{Name: "foundry", Type: "azure-openai", BaseURL: "https://resource.services.ai.azure.com/api/projects/project-a/openai/v1", APIVersion: "2025-04-01-preview", AuthType: "entra"},
 		{Name: "other", Type: "openai-compatible", APIVersion: "2025-04-01-preview"},
 	} {
 		if err := validateProviderAdmission([]ProviderEndpointConfig{endpoint}); err == nil {

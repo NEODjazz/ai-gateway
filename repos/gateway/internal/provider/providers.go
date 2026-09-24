@@ -329,6 +329,9 @@ func normalizeManagedProvider(input ManagedProvider) (ManagedProvider, error) {
 		if parsed.RawQuery != "" || parsed.Fragment != "" || !validAzureProviderVersion(input.APIVersion) || (input.AuthType != "api_key" && input.AuthType != "entra") {
 			return ManagedProvider{}, ErrInvalidProvider
 		}
+		if _, project := azureFoundryProjectPath(parsed.Path); project && input.APIVersion != "" {
+			return ManagedProvider{}, ErrInvalidProvider
+		}
 		input.Region = ""
 	} else if input.Type == "gemini" {
 		input.APIVersion = ""

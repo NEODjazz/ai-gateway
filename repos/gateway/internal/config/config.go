@@ -441,6 +441,8 @@ func validateProviderAdmission(endpoints []ProviderEndpointConfig) error {
 		if endpoint.Type == "azure-openai" {
 			if parsed, err := url.Parse(endpoint.BaseURL); err != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
 				result = errors.Join(result, fmt.Errorf("provider %q base_url must not contain query or fragment", name))
+			} else if azureFoundryProjectPath(parsed.Path) && endpoint.APIVersion != "" {
+				result = errors.Join(result, fmt.Errorf("provider %q Foundry project endpoint must not set api_version", name))
 			}
 			if !validAzureAPIVersion(endpoint.APIVersion) {
 				result = errors.Join(result, fmt.Errorf("provider %q has invalid api_version", name))
@@ -496,6 +498,14 @@ func validateProviderAdmission(endpoints []ProviderEndpointConfig) error {
 		}
 	}
 	return result
+}
+
+func azureFoundryProjectPath(path string) bool {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) != 3 && len(parts) != 5 {
+		return false
+	}
+	return parts[0] == "api" && parts[1] == "projects" && parts[2] != "" && (len(parts) == 3 || parts[3] == "openai" && parts[4] == "v1")
 }
 
 func validVertexGeminiURL(value string) bool {

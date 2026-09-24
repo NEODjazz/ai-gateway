@@ -149,6 +149,8 @@ defaults.
 Foundry resource и project endpoints с host suffix `.services.ai.azure.com`
 используют Entra scope `https://ai.azure.com/.default`; project URL
 `/api/projects/{project}` автоматически дополняется `/openai/v1`.
+Для project endpoint `api_version` должен быть пустым; неверная конфигурация
+отклоняется до provider execution.
 `AZURE_CLIENT_ID` также выбирает
 user-assigned managed identity. Разрешены только loopback и link-local identity
 endpoints; redirects и некорректные/просроченные ответы отклоняются. Временный

@@ -274,6 +274,8 @@ func TestManagedAzureOpenAIRejectsInvalidNativeSettings(t *testing.T) {
 		{ID: "azure", Type: "azure-openai", BaseURL: "https://example.test", AuthType: "basic"},
 		{ID: "azure", Type: "azure-openai", BaseURL: "https://example.test?secret=value"},
 		{ID: "azure", Type: "azure-openai", BaseURL: "https://example.test#fragment"},
+		{ID: "foundry", Type: "azure-openai", BaseURL: "https://resource.services.ai.azure.com/api/projects/project-a", APIVersion: "2025-04-01-preview", AuthType: "entra"},
+		{ID: "foundry", Type: "azure-openai", BaseURL: "https://resource.services.ai.azure.com/api/projects/project-a/openai/v1", APIVersion: "2025-04-01-preview", AuthType: "entra"},
 	} {
 		if _, err := normalizeManagedProvider(input); err == nil {
 			t.Fatalf("invalid managed provider accepted: %+v", input)
