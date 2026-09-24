@@ -10,6 +10,8 @@ does not emit a successful completion event.
 Native Ollama Chat JSON and stream bodies are bounded to 32 MiB. Ollama Responses
 JSON uses the shared bounded decoder and validates response usage and structure
 before returning the result.
+Native Ollama Chat streams require the provider's `done: true` terminal chunk;
+an early EOF returns an error without emitting a successful finish event.
 
 Native Messages and GenerateContent requests retain their API family in billing
 reserve, commit and failure events. The gateway sets this classification before

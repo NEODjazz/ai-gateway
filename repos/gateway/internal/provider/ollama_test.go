@@ -324,6 +324,34 @@ func TestOllamaChatStreamReadLimit(t *testing.T) {
 	}
 }
 
+func TestOllamaChatStreamRequiresTerminalChunk(t *testing.T) {
+	for _, body := range []string{
+		"",
+		`{"model":"test-model","message":{"role":"assistant","content":"partial"},"done":false}` + "\n",
+	} {
+		t.Run(fmt.Sprintf("bytes-%d", len(body)), func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = w.Write([]byte(body))
+			}))
+			defer server.Close()
+
+			var payloads []string
+			_, err := NewOllama(server.URL, true).StreamChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "test-model", Stream: true}, func(payload string) error {
+				payloads = append(payloads, payload)
+				return nil
+			})
+			if err == nil || !strings.Contains(err.Error(), "without a terminal chunk") {
+				t.Fatalf("unfinished Ollama stream accepted: %v", err)
+			}
+			for _, payload := range payloads {
+				if strings.Contains(payload, `"finish_reason":"stop"`) {
+					t.Fatalf("unfinished stream emitted success: %v", payloads)
+				}
+			}
+		})
+	}
+}
+
 func TestOllamaNativeReasoningRoundTrip(t *testing.T) {
 	var upstream ollamaChatRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

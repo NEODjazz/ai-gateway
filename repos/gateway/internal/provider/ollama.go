@@ -445,12 +445,10 @@ func (p Ollama) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 			if err := write(openAIChatCompletionChunkPayload(response.ID, response.Model, 0, "", "", &finishReason)); err != nil {
 				return openai.ChatCompletionResponse{}, err
 			}
+			return response, nil
 		}
 	}
-	if response.Choices[0].FinishReason == "" {
-		response.Choices[0].FinishReason = "stop"
-	}
-	return response, nil
+	return openai.ChatCompletionResponse{}, errors.New("Ollama chat stream ended without a terminal chunk")
 }
 
 func ollamaChatUsage(promptTokens, completionTokens int) (openai.Usage, error) {
