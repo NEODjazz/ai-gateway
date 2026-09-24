@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+
+	"ai-gateway-gateway/internal/azureurl"
 )
 
 type azureOpenAITransport struct {
@@ -165,15 +167,18 @@ func normalizeAzureOpenAIBaseURL(value string) string {
 }
 
 func azureManagedDeploymentBaseURL(baseURL, apiVersion string, deployment ModelDeployment) (string, error) {
+	parsed, err := url.Parse(baseURL)
+	if err != nil || !azureurl.ValidPath(parsed) {
+		return "", ErrInvalidDeployment
+	}
 	if apiVersion == "" || apiVersion == "preview" {
 		return baseURL, nil
 	}
-	parsed, err := url.Parse(baseURL)
-	if err != nil {
-		return "", ErrInvalidDeployment
-	}
 	path := strings.TrimRight(parsed.Path, "/")
-	if strings.Contains(path, "/openai/deployments/") {
+	if index := strings.LastIndex(path, "/openai/deployments/"); index >= 0 {
+		if !validAzureDeploymentPathSegment(path[index+len("/openai/deployments/"):]) {
+			return "", ErrInvalidDeployment
+		}
 		return baseURL, nil
 	}
 	if strings.HasSuffix(path, "/openai/v1") {
@@ -199,7 +204,7 @@ func azureManagedDeploymentBaseURL(baseURL, apiVersion string, deployment ModelD
 }
 
 func validAzureDeploymentPathSegment(value string) bool {
-	if value == "" || len(value) > 256 {
+	if value == "" || value == "." || value == ".." || len(value) > 256 {
 		return false
 	}
 	for _, char := range value {
@@ -211,18 +216,7 @@ func validAzureDeploymentPathSegment(value string) bool {
 }
 
 func azureFoundryProjectPath(path string) (string, bool) {
-	parts := strings.Split(strings.Trim(path, "/"), "/")
-	projectIndex := len(parts) - 3
-	if len(parts) >= 5 && parts[len(parts)-2] == "openai" && parts[len(parts)-1] == "v1" {
-		projectIndex = len(parts) - 5
-	}
-	if projectIndex < 0 || parts[projectIndex] != "api" || parts[projectIndex+1] != "projects" || parts[projectIndex+2] == "" {
-		return "", false
-	}
-	if projectIndex+3 != len(parts) && (projectIndex+5 != len(parts) || parts[projectIndex+3] != "openai" || parts[projectIndex+4] != "v1") {
-		return "", false
-	}
-	return "/" + strings.Join(parts[:projectIndex+3], "/"), true
+	return azureurl.ProjectPath(path)
 }
 
 func normalizeAzureAuthType(value string) string {

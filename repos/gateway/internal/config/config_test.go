@@ -72,6 +72,8 @@ func TestValidateAzureOpenAIConfiguration(t *testing.T) {
 		{Name: "azure", Type: "azure-openai", APIVersion: "2025-13-01"},
 		{Name: "azure", Type: "azure-openai", AuthType: "basic"},
 		{Name: "azure", Type: "azure-openai", BaseURL: "https://example.test?secret=value"},
+		{Name: "azure", Type: "azure-openai", BaseURL: "https://proxy.example.test/tenant/../openai/v1"},
+		{Name: "azure", Type: "azure-openai", BaseURL: "https://proxy.example.test/tenant%2fother/openai/v1"},
 		{Name: "foundry", Type: "azure-openai", BaseURL: "https://resource.services.ai.azure.com/api/projects/project-a", APIVersion: "2025-04-01-preview", AuthType: "entra"},
 		{Name: "foundry", Type: "azure-openai", BaseURL: "https://resource.services.ai.azure.com/api/projects/project-a/openai/v1", APIVersion: "2025-04-01-preview", AuthType: "entra"},
 		{Name: "foundry", Type: "azure-openai", BaseURL: "https://proxy.example.test/tenant/api/projects/project-a", APIVersion: "2025-04-01-preview", AuthType: "entra"},

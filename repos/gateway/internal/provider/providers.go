@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"ai-gateway-gateway/internal/azureurl"
 	"ai-gateway-gateway/internal/config"
 	"ai-gateway-gateway/internal/openai"
 )
@@ -333,7 +334,7 @@ func normalizeManagedProvider(input ManagedProvider) (ManagedProvider, error) {
 	if input.Type == "azure-openai" {
 		input.AuthType = normalizeAzureAuthType(input.AuthType)
 		parsed, _ := url.Parse(input.BaseURL)
-		if parsed.RawQuery != "" || parsed.Fragment != "" || !validAzureProviderVersion(input.APIVersion) || (input.AuthType != "api_key" && input.AuthType != "entra") || (input.AzureCloud != "" && (input.AuthType != "entra" || !validManagedAzureCloud(input.AzureCloud))) || (input.AzureAudience != "" && (input.AuthType != "entra" || !validManagedAzureAudience(input.AzureAudience))) {
+		if parsed.RawQuery != "" || parsed.Fragment != "" || !azureurl.ValidPath(parsed) || !validAzureProviderVersion(input.APIVersion) || (input.AuthType != "api_key" && input.AuthType != "entra") || (input.AzureCloud != "" && (input.AuthType != "entra" || !validManagedAzureCloud(input.AzureCloud))) || (input.AzureAudience != "" && (input.AuthType != "entra" || !validManagedAzureAudience(input.AzureAudience))) {
 			return ManagedProvider{}, ErrInvalidProvider
 		}
 		if input.AzureAudience == "foundry" && (input.AzureCloud == "china" || strings.HasSuffix(strings.ToLower(parsed.Hostname()), ".azure.cn")) {

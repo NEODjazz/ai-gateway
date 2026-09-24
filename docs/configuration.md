@@ -197,6 +197,9 @@ Azure China не поддерживается.
 Для project endpoint `api_version` должен быть пустым; неверная конфигурация
 отклоняется до provider execution. Это правило и запрет `azure_cloud=china`
 действуют также для project URL за reverse proxy с префиксом пути.
+Azure provider URL с `.`/`..` в сегментах пути, двойным разделителем или
+кодированным разделителем отклоняется до выполнения, чтобы proxy и gateway
+не могли по-разному определить границу проекта и deployment.
 Для Azure OpenAI provider с датированной `api_version` можно указать
 resource-root URL и в стартовом конфиге, и в control plane. Каждый model deployment получает собственный путь
 `/openai/deployments/{upstream_model}`; если `upstream_model` не указан,

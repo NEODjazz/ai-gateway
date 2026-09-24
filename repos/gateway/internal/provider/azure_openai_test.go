@@ -477,6 +477,9 @@ func TestAzureManagedDeploymentBaseURL(t *testing.T) {
 		{name: "v1 preview", baseURL: "https://resource.openai.azure.com", apiVersion: "preview", models: []string{"public", "other"}, want: "https://resource.openai.azure.com"},
 		{name: "ambiguous model", baseURL: "https://resource.openai.azure.com", apiVersion: "2024-10-21", models: []string{"one", "two"}, invalid: true},
 		{name: "unsafe deployment segment", baseURL: "https://resource.openai.azure.com", apiVersion: "2024-10-21", upstream: "name/other", models: []string{"public"}, invalid: true},
+		{name: "dot deployment segment", baseURL: "https://resource.openai.azure.com", apiVersion: "2024-10-21", upstream: "..", models: []string{"public"}, invalid: true},
+		{name: "unsafe explicit deployment", baseURL: "https://resource.openai.azure.com/openai/deployments/name/other", apiVersion: "2024-10-21", models: []string{"public"}, invalid: true},
+		{name: "encoded explicit deployment", baseURL: "https://resource.openai.azure.com/openai/deployments/name%2fother", apiVersion: "2024-10-21", models: []string{"public"}, invalid: true},
 		{name: "incomplete explicit path", baseURL: "https://resource.openai.azure.com/openai/deployments", apiVersion: "2024-10-21", models: []string{"public"}, invalid: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -732,6 +735,8 @@ func TestManagedAzureOpenAIRejectsInvalidNativeSettings(t *testing.T) {
 		{ID: "azure", Type: "azure-openai", BaseURL: "https://example.test", APIVersion: "2025-13-01"},
 		{ID: "azure", Type: "azure-openai", BaseURL: "https://example.test", AuthType: "basic"},
 		{ID: "azure", Type: "azure-openai", BaseURL: "https://example.test?secret=value"},
+		{ID: "azure", Type: "azure-openai", BaseURL: "https://proxy.example.test/tenant/../openai/v1"},
+		{ID: "azure", Type: "azure-openai", BaseURL: "https://proxy.example.test/tenant%2fother/openai/v1"},
 		{ID: "azure", Type: "azure-openai", BaseURL: "https://example.test#fragment"},
 		{ID: "foundry", Type: "azure-openai", BaseURL: "https://resource.services.ai.azure.com/api/projects/project-a", APIVersion: "2025-04-01-preview", AuthType: "entra"},
 		{ID: "foundry", Type: "azure-openai", BaseURL: "https://resource.services.ai.azure.com/api/projects/project-a/openai/v1", APIVersion: "2025-04-01-preview", AuthType: "entra"},

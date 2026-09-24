@@ -13,6 +13,7 @@ import (
 	"time"
 	"unicode"
 
+	"ai-gateway-gateway/internal/azureurl"
 	"ai-gateway-gateway/internal/modelcatalog"
 )
 
@@ -441,8 +442,8 @@ func validateProviderAdmission(endpoints []ProviderEndpointConfig) error {
 			result = errors.Join(result, fmt.Errorf("provider %q rerank_path must be an absolute path without query, fragment, or traversal", name))
 		}
 		if endpoint.Type == "azure-openai" {
-			if parsed, err := url.Parse(endpoint.BaseURL); err != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
-				result = errors.Join(result, fmt.Errorf("provider %q base_url must not contain query or fragment", name))
+			if parsed, err := url.Parse(endpoint.BaseURL); err != nil || parsed.RawQuery != "" || parsed.Fragment != "" || !azureurl.ValidPath(parsed) {
+				result = errors.Join(result, fmt.Errorf("provider %q base_url has invalid query, fragment, or path", name))
 			} else if azureFoundryProjectPath(parsed.Path) && endpoint.APIVersion != "" {
 				result = errors.Join(result, fmt.Errorf("provider %q Foundry project endpoint must not set api_version", name))
 			}
@@ -521,15 +522,8 @@ func validateProviderAdmission(endpoints []ProviderEndpointConfig) error {
 }
 
 func azureFoundryProjectPath(path string) bool {
-	parts := strings.Split(strings.Trim(path, "/"), "/")
-	projectIndex := len(parts) - 3
-	if len(parts) >= 5 && parts[len(parts)-2] == "openai" && parts[len(parts)-1] == "v1" {
-		projectIndex = len(parts) - 5
-	}
-	if projectIndex < 0 || parts[projectIndex] != "api" || parts[projectIndex+1] != "projects" || parts[projectIndex+2] == "" {
-		return false
-	}
-	return projectIndex+3 == len(parts) || projectIndex+5 == len(parts) && parts[projectIndex+3] == "openai" && parts[projectIndex+4] == "v1"
+	_, ok := azureurl.ProjectPath(path)
+	return ok
 }
 
 func validVertexGeminiURL(value string) bool {
