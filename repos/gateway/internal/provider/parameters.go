@@ -240,7 +240,7 @@ func (Ollama) ValidateChatParameters(request openai.ChatCompletionRequest) error
 		return err
 	}
 	return rejectParameters("ollama",
-		parameterCheck{"tool_choice", request.ToolChoice != nil},
+		parameterCheck{"tool_choice", !ollamaChatToolChoiceSupported(request.ToolChoice)},
 		parameterCheck{"parallel_tool_calls", request.ParallelToolCalls != nil},
 	)
 }

@@ -647,7 +647,7 @@ adapter используют те же проверки, включая streamin
 | Anthropic chat | `seed`; `stop` неверного типа или более четырёх последовательностей |
 | Anthropic Responses | `previous_response_id`, `safety_identifier` |
 | Ollama Responses | `previous_response_id`, provider-side `conversation`, `store=true`, `truncation`, `include`, `metadata`, `top_logprobs`, `tool_choice` кроме `none`, `parallel_tool_calls`, `reasoning.context`, `reasoning.mode`, `reasoning.summary`, `reasoning.generate_summary`, `safety_identifier` |
-| Ollama native chat | `tool_choice`, `parallel_tool_calls` |
+| Ollama native chat | `tool_choice` кроме `auto` и `none`, `parallel_tool_calls` |
 | Ollama embeddings | token-ID input; `user`; `encoding_format`, отличный от `float` |
 | Gemini embeddings | token-ID input; `user`; `encoding_format`, отличный от `float` |
 | Native adapters without a tier contract | `service_tier`; Anthropic Chat accepts only `auto` and `standard_only` |
@@ -664,6 +664,9 @@ adapter используют те же проверки, включая streamin
 endpoint игнорирует (включая `strict`), возвращают явную ошибку.
 `tool_choice=none` исполняется без отправки tools в Ollama, поэтому модель
 не получает доступ к объявленным функциям в этом вызове.
+Для native Chat действует то же правило; `tool_choice=auto` передаёт объявленные
+tools без дополнительного параметра upstream. Ответ с вызовом функции, не
+объявленной в эффективном наборе tools, отклоняется до выдачи этого вызова клиенту.
 Успешные Ollama Responses должны содержать явные `input_tokens`,
 `output_tokens` и согласованный `total_tokens`. Для SSE эти поля обязательны
 в терминальном событии до отправки его клиенту. Отсутствующий usage завершает

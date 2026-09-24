@@ -189,10 +189,11 @@ func (p Ollama) ChatCompletions(ctx context.Context, request openai.ChatCompleti
 	if err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
+	tools := ollamaChatTools(request)
 	body, err := json.Marshal(ollamaChatRequest{
 		Model:    request.Model,
 		Messages: messages,
-		Tools:    request.Tools,
+		Tools:    tools,
 		Format:   ollamaResponseFormat(request.ResponseFormat),
 		Options:  ollamaRequestOptions(request),
 		Stream:   request.Stream && p.upstreamStream,
@@ -235,7 +236,7 @@ func (p Ollama) ChatCompletions(ctx context.Context, request openai.ChatCompleti
 		return openai.ChatCompletionResponse{}, fmt.Errorf("invalid Ollama chat reasoning content: %w", err)
 	}
 	normalizeOllamaToolCalls(&message)
-	if err := validateOllamaResponseToolCalls(message.ToolCalls, request.Tools, nil); err != nil {
+	if err := validateOllamaResponseToolCalls(message.ToolCalls, tools, nil); err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
 
@@ -326,11 +327,12 @@ func (p Ollama) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 	if err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
+	tools := ollamaChatTools(request)
 
 	body, err := json.Marshal(ollamaChatRequest{
 		Model:    request.Model,
 		Messages: messages,
-		Tools:    request.Tools,
+		Tools:    tools,
 		Format:   ollamaResponseFormat(request.ResponseFormat),
 		Options:  ollamaRequestOptions(request),
 		Stream:   true,
@@ -398,7 +400,7 @@ func (p Ollama) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 			response.Choices[0].Message.Role = message.Role
 		}
 		normalizeOllamaToolCalls(&message)
-		if err := validateOllamaResponseToolCalls(message.ToolCalls, request.Tools, response.Choices[0].Message.ToolCalls); err != nil {
+		if err := validateOllamaResponseToolCalls(message.ToolCalls, tools, response.Choices[0].Message.ToolCalls); err != nil {
 			return openai.ChatCompletionResponse{}, err
 		}
 		reasoningContent := message.ReasoningContent
@@ -645,6 +647,21 @@ func normalizeOllamaToolCalls(message *openai.Message) {
 			message.ToolCalls[index].Type = "function"
 		}
 	}
+}
+
+func ollamaChatToolChoiceSupported(choice any) bool {
+	if choice == nil {
+		return true
+	}
+	value, ok := choice.(string)
+	return ok && (value == "auto" || value == "none")
+}
+
+func ollamaChatTools(request openai.ChatCompletionRequest) []openai.Tool {
+	if choice, ok := request.ToolChoice.(string); ok && choice == "none" {
+		return nil
+	}
+	return request.Tools
 }
 
 func validateOllamaResponseToolCalls(calls []openai.ToolCall, tools []openai.Tool, previous []openai.ToolCall) error {
