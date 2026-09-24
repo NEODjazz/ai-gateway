@@ -1444,8 +1444,10 @@ Task-specific embedding options, multimodal input and asynchronous batches remai
 separate gaps. [Native embedding protocol](https://ai.google.dev/api/embeddings).
 
 OpenAI-compatible and Ollama embeddings also preserve provider-reported zero
-usage. Only absent usage falls back to the pipeline estimate. OpenAI-compatible
-usage objects must include nonnegative prompt_tokens and total_tokens, with total
+usage. Absent usage falls back to the pipeline estimate only for generic
+OpenAI-compatible deployments; native Ollama embeddings require the upstream
+`prompt_eval_count` for exact billing and reject missing or null usage.
+OpenAI-compatible usage objects must include nonnegative prompt_tokens and total_tokens, with total
 at least prompt and no completion tokens; malformed objects now return an error.
 Ollama rejects negative prompt_eval_count. This is a stricter upstream response
 validation rule; the public request/response schema is unchanged. Regression tests

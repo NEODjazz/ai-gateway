@@ -37,6 +37,12 @@ func TestEmbeddingProviderUsagePresence(t *testing.T) {
 					client = NewOllama(server.URL, false)
 				}
 				result, err := client.Embeddings(context.Background(), openai.EmbeddingRequest{Model: "m", Input: "input"})
+				if adapter == "ollama" && !tc.reported {
+					if err == nil {
+						t.Fatal("missing Ollama usage accepted")
+					}
+					return
+				}
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -56,6 +62,7 @@ func TestEmbeddingProvidersRejectMalformedUsage(t *testing.T) {
 		{"compatible", `{"usage":{"prompt_tokens":-1,"total_tokens":0}}`},
 		{"compatible", `{"usage":{"prompt_tokens":2,"total_tokens":1}}`},
 		{"compatible", `{"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`},
+		{"ollama", `{"model":"m","embeddings":[[1,2]],"prompt_eval_count":null}`},
 		{"ollama", `{"prompt_eval_count":-1}`},
 	} {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = fmt.Fprint(w, tc.body) }))

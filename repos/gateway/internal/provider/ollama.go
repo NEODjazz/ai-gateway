@@ -290,13 +290,10 @@ func (p Ollama) Embeddings(ctx context.Context, request openai.EmbeddingRequest)
 	if err := decodeEmbeddingResponse(resp.Body, &upstream); err != nil {
 		return openai.EmbeddingResponse{}, err
 	}
-	tokens := 0
-	if upstream.PromptEvalCount != nil {
-		tokens = *upstream.PromptEvalCount
-		if tokens < 0 {
-			return openai.EmbeddingResponse{}, errors.New("invalid Ollama embedding usage")
-		}
+	if upstream.PromptEvalCount == nil || *upstream.PromptEvalCount < 0 {
+		return openai.EmbeddingResponse{}, errors.New("invalid Ollama embedding usage")
 	}
+	tokens := *upstream.PromptEvalCount
 	data := make([]openai.Embedding, len(upstream.Embeddings))
 	for index, vector := range upstream.Embeddings {
 		data[index] = openai.Embedding{Object: "embedding", Embedding: vector, Index: index}
@@ -306,7 +303,7 @@ func (p Ollama) Embeddings(ctx context.Context, request openai.EmbeddingRequest)
 	}
 	return openai.EmbeddingResponse{
 		Object: "list", Data: data, Model: upstream.Model,
-		UsageReported: upstream.PromptEvalCount != nil,
+		UsageReported: true,
 		Usage:         openai.Usage{PromptTokens: tokens, TotalTokens: tokens},
 	}, nil
 }
