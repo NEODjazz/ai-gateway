@@ -63,6 +63,13 @@ func (r *Router) DiscoverProviderModels(ctx context.Context, providerID, credent
 	if err != nil {
 		return nil, err
 	}
+	if managed.Type == "azure-openai" {
+		if parsed, parseErr := url.Parse(managed.BaseURL); parseErr == nil {
+			if projectPath, project := azureFoundryProjectPath(parsed.Path); project {
+				return discoverAzureFoundryProjectModels(ctx, managed, secret, projectPath)
+			}
+		}
+	}
 	if managed.Type == "gemini" {
 		return discoverGeminiModels(ctx, managed.BaseURL, secret, managed.AuthType)
 	}
@@ -124,6 +131,94 @@ func (r *Router) DiscoverProviderModels(ctx context.Context, providerID, credent
 		return nil, ErrProviderProbeFailed
 	}
 	return models, nil
+}
+
+func discoverAzureFoundryProjectModels(ctx context.Context, managed ManagedProvider, secret, projectPath string) ([]DiscoveredModel, error) {
+	endpoint, err := url.Parse(managed.BaseURL)
+	if err != nil {
+		return nil, ErrProviderProbeFailed
+	}
+	endpoint.Path = projectPath + "/deployments"
+	endpoint.RawQuery = "api-version=v1"
+	endpoint.Fragment = ""
+	client := newProviderHTTPClient(10 * time.Second)
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	tokenSource := newAzureTokenSource(secret, managed.BaseURL)
+	seenURLs := make(map[string]bool)
+	seenModels := make(map[string]bool)
+	models := make([]DiscoveredModel, 0)
+	for page := 0; page < 64; page++ {
+		if seenURLs[endpoint.String()] {
+			return nil, ErrProviderProbeFailed
+		}
+		seenURLs[endpoint.String()] = true
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
+		if err != nil {
+			return nil, ErrProviderProbeFailed
+		}
+		request.Header.Set("Accept", "application/json")
+		if normalizeAzureAuthType(managed.AuthType) == "entra" {
+			token, tokenErr := tokenSource.Token(ctx)
+			if tokenErr != nil {
+				return nil, ErrProviderProbeFailed
+			}
+			request.Header.Set("Authorization", "Bearer "+token)
+		} else if secret != "" {
+			request.Header.Set("api-key", secret)
+		}
+		response, err := client.Do(request)
+		if err != nil {
+			return nil, ErrProviderProbeFailed
+		}
+		payload, readErr := io.ReadAll(io.LimitReader(response.Body, (2<<20)+1))
+		closeErr := response.Body.Close()
+		if response.StatusCode < 200 || response.StatusCode >= 300 || readErr != nil || closeErr != nil || len(payload) > 2<<20 {
+			return nil, ErrProviderProbeFailed
+		}
+		var body struct {
+			Value *[]struct {
+				Name string `json:"name"`
+				Type string `json:"type"`
+			} `json:"value"`
+			NextLink string `json:"nextLink"`
+		}
+		if json.Unmarshal(payload, &body) != nil || body.Value == nil {
+			return nil, ErrProviderProbeFailed
+		}
+		for _, item := range *body.Value {
+			name := strings.TrimSpace(item.Name)
+			if item.Type != "ModelDeployment" || name == "" || len(name) > 256 {
+				return nil, ErrProviderProbeFailed
+			}
+			if !seenModels[name] {
+				models = append(models, DiscoveredModel{ID: name})
+				seenModels[name] = true
+			}
+		}
+		if len(models) > 10000 {
+			return nil, ErrProviderProbeFailed
+		}
+		if body.NextLink == "" {
+			sort.Slice(models, func(i, j int) bool { return models[i].ID < models[j].ID })
+			return models, nil
+		}
+		if len(body.NextLink) > 4096 {
+			return nil, ErrProviderProbeFailed
+		}
+		next, parseErr := url.Parse(body.NextLink)
+		if parseErr != nil {
+			return nil, ErrProviderProbeFailed
+		}
+		next = endpoint.ResolveReference(next)
+		if next.Scheme != endpoint.Scheme || !strings.EqualFold(next.Host, endpoint.Host) || next.User != nil || next.Path != projectPath+"/deployments" || next.Fragment != "" {
+			return nil, ErrProviderProbeFailed
+		}
+		query := next.Query()
+		query.Set("api-version", "v1")
+		next.RawQuery = query.Encode()
+		endpoint = next
+	}
+	return nil, ErrProviderProbeFailed
 }
 
 func discoveryURL(managed ManagedProvider) (string, error) {

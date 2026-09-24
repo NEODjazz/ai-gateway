@@ -2425,6 +2425,12 @@ Once cleanup succeeds, later requests return `404 response_not_found` without an
 upstream call. Deletion does not open a generation billing lifecycle.
 Provider type `azure-openai` добавляет `/openai/v1` к resource-root URL и сохраняет явно настроенный path, включая `/openai/deployments/{deployment}` для versioned data plane. Непустой `api_version` передается ровно один раз как query parameter `api-version` во всех versioned HTTP operations. Realtime независимо строит native GA или preview WebSocket URL и не смешивает параметры этих контрактов. `auth_type=api_key` использует header `api-key`; `auth_type=entra` использует статический bearer token из write-only credential vault либо, при отсутствии credential, AKS projected-token federation, App Service/Container Apps managed identity или VM IMDS. Provider endpoints с официальным Azure US Government suffix автоматически используют `login.microsoftonline.us` и `cognitiveservices.azure.us`; Azure China suffix выбирает `login.chinacloudapi.cn` и `cognitiveservices.azure.cn`. Остальные endpoints используют public-cloud authority и audience. Временные tokens обновляются до истечения срока, параллельные refresh объединяются. Redirects запрещены, чтобы credential не мог перейти на другой origin. Discovery использует тот же authentication contract; для versioned deployment path оно выполняется через resource-level `/openai/models`.
 
+Для Foundry project endpoint `/api/projects/{project}` inference использует
+`/openai/v1`, а discovery читает project deployments через
+`/api/projects/{project}/deployments?api-version=v1`. Пагинация ограничена;
+`nextLink` принимается только для того же origin и project path, чтобы
+credential не передавался в другой проект или на другой сервер.
+
 ## Vector stores
 
 `POST /v1/vector_stores`, `GET /v1/vector_stores`, and the owned `GET`,

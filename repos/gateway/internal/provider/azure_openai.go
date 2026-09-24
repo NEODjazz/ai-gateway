@@ -124,10 +124,21 @@ func normalizeAzureOpenAIBaseURL(value string) string {
 	parsed.Fragment = ""
 	if strings.Trim(parsed.Path, "/") == "" {
 		parsed.Path = "/openai/v1"
-	} else if parts := strings.Split(strings.Trim(parsed.Path, "/"), "/"); len(parts) == 3 && parts[0] == "api" && parts[1] == "projects" && parts[2] != "" {
+	} else if _, projectRoot := azureFoundryProjectPath(parsed.Path); projectRoot && !strings.HasSuffix(parsed.Path, "/openai/v1") {
 		parsed.Path = strings.TrimRight(parsed.Path, "/") + "/openai/v1"
 	}
 	return strings.TrimRight(parsed.String(), "/")
+}
+
+func azureFoundryProjectPath(path string) (string, bool) {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) < 3 || parts[0] != "api" || parts[1] != "projects" || parts[2] == "" {
+		return "", false
+	}
+	if len(parts) != 3 && (len(parts) != 5 || parts[3] != "openai" || parts[4] != "v1") {
+		return "", false
+	}
+	return "/api/projects/" + parts[2], true
 }
 
 func normalizeAzureAuthType(value string) string {
