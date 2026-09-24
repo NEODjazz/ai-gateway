@@ -18,7 +18,11 @@ func TestResponsesTopLogprobsForwarding(t *testing.T) {
 		if err := json.Unmarshal([]byte(value), &want); err != nil {
 			t.Fatal(err)
 		}
-		for _, adapter := range []string{"compatible", "ollama"} {
+		adapters := []string{"compatible"}
+		if value == `null` {
+			adapters = append(adapters, "ollama")
+		}
+		for _, adapter := range adapters {
 			for _, stream := range []bool{false, true} {
 				t.Run(fmt.Sprintf("%s/%v/%s", adapter, stream, value), func(t *testing.T) {
 					called := false
@@ -73,7 +77,7 @@ func TestResponsesTopLogprobsRejectsUnsupportedAdapters(t *testing.T) {
 	if err := json.Unmarshal([]byte(`{"model":"m","input":"hello","top_logprobs":0}`), &request); err != nil {
 		t.Fatal(err)
 	}
-	for name, client := range map[string]Client{"anthropic": NewAnthropic("http://127.0.0.1:1", "", true), "demo": Demo{}} {
+	for name, client := range map[string]Client{"anthropic": NewAnthropic("http://127.0.0.1:1", "", true), "demo": Demo{}, "ollama": NewOllama("http://127.0.0.1:1", true)} {
 		err := validateResponseAdapter(client, request)
 		var failure *Error
 		if !errors.As(err, &failure) || failure.Param != "top_logprobs" || failure.StatusCode != 400 || failure.UpstreamCode != "unsupported_parameter" {

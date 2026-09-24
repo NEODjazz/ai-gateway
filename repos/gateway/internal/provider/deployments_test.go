@@ -607,7 +607,7 @@ func TestManagedProviderCapabilityProfilesExposeAllValidatedResponseOptions(t *t
 	tiered := append(append([]string(nil), compatible...), "service_tier")
 	expected := map[string]ProviderResponseParameterPolicy{
 		"demo": {}, "gemini": {}, "cohere": {}, "mistral": {}, "voyage": {}, "bedrock": {}, "opensandbox": {},
-		"ollama":            {SupportedOptions: []string{"metadata", "top_logprobs", "truncation", "store", "include", "parallel_tool_calls", "previous_response_id", "max_output_tokens", "max_tokens", "temperature", "top_p", "reasoning"}, ReasoningEffort: allReasoning},
+		"ollama":            {SupportedOptions: []string{"max_output_tokens", "max_tokens", "temperature", "top_p", "reasoning"}, ReasoningEffort: allReasoning},
 		"openai":            {SupportedOptions: tiered, ReasoningEffort: allReasoning, ServiceTier: []string{"auto", "default", "flex", "priority", "fast", "ultrafast"}},
 		"openai-compatible": {SupportedOptions: compatible, ReasoningEffort: allReasoning},
 		"openrouter":        {SupportedOptions: tiered, ReasoningEffort: allReasoning, ServiceTier: allTiers},

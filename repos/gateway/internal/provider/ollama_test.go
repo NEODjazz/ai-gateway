@@ -825,7 +825,6 @@ func TestOllamaResponses(t *testing.T) {
 	maxOutputTokens := 11
 	temperature := 0.2
 	topP := 0.8
-	parallel := true
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/responses" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
@@ -843,8 +842,7 @@ func TestOllamaResponses(t *testing.T) {
 		}
 		if request.MaxOutputTokens == nil || *request.MaxOutputTokens != maxOutputTokens ||
 			request.Temperature == nil || *request.Temperature != temperature ||
-			request.TopP == nil || *request.TopP != topP || request.PreviousResponse != "resp-previous" ||
-			request.ParallelToolCalls == nil || !*request.ParallelToolCalls || len(request.Tools) != 1 {
+			request.TopP == nil || *request.TopP != topP || len(request.Tools) != 1 {
 			t.Fatalf("Responses fields were not forwarded: %+v", request)
 		}
 
@@ -875,8 +873,7 @@ func TestOllamaResponses(t *testing.T) {
 	provider := NewOllama(server.URL, false)
 	response, err := provider.Responses(context.Background(), openai.ResponseRequest{
 		Model: "test-model", Input: "ping", Stream: true,
-		Tools: []openai.ResponseTool{{Type: "function", Name: "weather.get"}}, ToolChoice: "required",
-		ParallelToolCalls: &parallel, PreviousResponse: "resp-previous",
+		Tools:           []openai.ResponseTool{{Type: "function", Name: "weather.get"}},
 		MaxOutputTokens: &maxOutputTokens, Temperature: &temperature, TopP: &topP,
 	})
 	if err != nil {

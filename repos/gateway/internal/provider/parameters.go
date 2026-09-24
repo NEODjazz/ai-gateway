@@ -139,7 +139,38 @@ func (Anthropic) ValidateResponseParameters(request openai.ResponseRequest) erro
 
 func (Ollama) ValidateResponseParameters(request openai.ResponseRequest) error {
 	_, verbositySupplied := openai.ResponseTextVerbosity(request.Text)
-	return rejectParameters("ollama", parameterCheck{"background", request.Background}, parameterCheck{"context_management", len(request.ContextManagement) > 0}, parameterCheck{"moderation", request.Moderation != nil}, parameterCheck{"user", request.User != ""}, parameterCheck{"safety_identifier", request.SafetyIdentifier != ""}, parameterCheck{"prompt_cache_key", request.PromptCacheKey != ""}, parameterCheck{"prompt_cache_options", request.PromptCacheOptions != nil}, parameterCheck{"prompt_cache_retention", request.PromptCacheRetention != ""}, parameterCheck{"stream_options", request.StreamOptions != nil}, parameterCheck{"text.verbosity", verbositySupplied}, parameterCheck{"service_tier", request.ServiceTier != ""}, parameterCheck{"frequency_penalty", request.FrequencyPenalty != nil}, parameterCheck{"presence_penalty", request.PresencePenalty != nil}, parameterCheck{"max_tool_calls", request.MaxToolCalls != nil})
+	contextSupplied, modeSupplied := false, false
+	if request.Reasoning != nil {
+		contextSupplied = request.Reasoning.Context != nil
+		modeSupplied = request.Reasoning.Mode != nil
+	}
+	return rejectParameters("ollama",
+		parameterCheck{"background", request.Background},
+		parameterCheck{"context_management", len(request.ContextManagement) > 0},
+		parameterCheck{"moderation", request.Moderation != nil},
+		parameterCheck{"previous_response_id", request.PreviousResponse != ""},
+		parameterCheck{"conversation", request.Conversation != nil},
+		parameterCheck{"truncation", request.Truncation != nil},
+		parameterCheck{"store", request.Store != nil && *request.Store},
+		parameterCheck{"include", len(request.Include) > 0},
+		parameterCheck{"metadata", len(request.Metadata) > 0},
+		parameterCheck{"top_logprobs", request.TopLogprobs != nil},
+		parameterCheck{"tool_choice", request.ToolChoice != nil},
+		parameterCheck{"parallel_tool_calls", request.ParallelToolCalls != nil},
+		parameterCheck{"reasoning.context", contextSupplied},
+		parameterCheck{"reasoning.mode", modeSupplied},
+		parameterCheck{"user", request.User != ""},
+		parameterCheck{"safety_identifier", request.SafetyIdentifier != ""},
+		parameterCheck{"prompt_cache_key", request.PromptCacheKey != ""},
+		parameterCheck{"prompt_cache_options", request.PromptCacheOptions != nil},
+		parameterCheck{"prompt_cache_retention", request.PromptCacheRetention != ""},
+		parameterCheck{"stream_options", request.StreamOptions != nil},
+		parameterCheck{"text.verbosity", verbositySupplied},
+		parameterCheck{"service_tier", request.ServiceTier != ""},
+		parameterCheck{"frequency_penalty", request.FrequencyPenalty != nil},
+		parameterCheck{"presence_penalty", request.PresencePenalty != nil},
+		parameterCheck{"max_tool_calls", request.MaxToolCalls != nil},
+	)
 }
 
 func (Ollama) ValidateChatParameters(request openai.ChatCompletionRequest) error {

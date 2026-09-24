@@ -332,6 +332,51 @@ func TestNativeResponseAndEmbeddingParameterPolicy(t *testing.T) {
 	assertUnsupportedParameter(t, err, "user")
 }
 
+func TestOllamaRejectsUnsupportedResponsesControlsBeforeUpstream(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	t.Cleanup(server.Close)
+	trueValue := true
+	falseValue := false
+	truncation := "auto"
+	topLogprobs := 1
+	context := "auto"
+	mode := "standard"
+	for _, test := range []struct {
+		name    string
+		request openai.ResponseRequest
+	}{
+		{name: "previous_response_id", request: openai.ResponseRequest{PreviousResponse: "resp_prior"}},
+		{name: "conversation", request: openai.ResponseRequest{Conversation: &openai.ResponseConversation{ID: "conv_prior"}}},
+		{name: "truncation", request: openai.ResponseRequest{Truncation: &truncation}},
+		{name: "store", request: openai.ResponseRequest{Store: &trueValue}},
+		{name: "include", request: openai.ResponseRequest{Include: []string{"reasoning.encrypted_content"}}},
+		{name: "metadata", request: openai.ResponseRequest{Metadata: map[string]string{"trace": "one"}}},
+		{name: "top_logprobs", request: openai.ResponseRequest{TopLogprobs: &topLogprobs}},
+		{name: "tool_choice", request: openai.ResponseRequest{ToolChoice: "required"}},
+		{name: "parallel_tool_calls", request: openai.ResponseRequest{ParallelToolCalls: &falseValue}},
+		{name: "reasoning.context", request: openai.ResponseRequest{Reasoning: &openai.ResponseReasoning{Context: &context}}},
+		{name: "reasoning.mode", request: openai.ResponseRequest{Reasoning: &openai.ResponseReasoning{Mode: &mode}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request := test.request
+			request.Model = "model"
+			request.Input = "hello"
+			client := NewOllama(server.URL, true)
+			_, err := client.Responses(t.Context(), request)
+			assertUnsupportedParameter(t, err, test.name)
+			_, err = client.StreamResponses(t.Context(), request, func(string, string) error { t.Error("unexpected stream output"); return nil })
+			assertUnsupportedParameter(t, err, test.name)
+		})
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("unsupported Ollama requests reached upstream: %d", calls.Load())
+	}
+}
+
 func TestNativeAdaptersRejectResponseContextManagement(t *testing.T) {
 	threshold := 1_000
 	request := openai.ResponseRequest{

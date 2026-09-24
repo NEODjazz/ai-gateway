@@ -15,6 +15,12 @@ func TestResponsesReasoningForwarding(t *testing.T) {
 	for _, adapter := range []string{"compatible", "ollama"} {
 		for _, stream := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/%v", adapter, stream), func(t *testing.T) {
+				requestBody := `{"model":"m","input":"hello","reasoning":{"effort":"high","summary":"auto","generate_summary":"auto","context":"auto","mode":"standard"}}`
+				wantReasoning := map[string]any{"effort": "high", "summary": "auto", "generate_summary": "auto", "context": "auto", "mode": "standard"}
+				if adapter == "ollama" {
+					requestBody = `{"model":"m","input":"hello","reasoning":{"effort":"high","summary":"auto","generate_summary":"auto"}}`
+					wantReasoning = map[string]any{"effort": "high", "summary": "auto", "generate_summary": "auto"}
+				}
 				called := false
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					called = true
@@ -22,7 +28,7 @@ func TestResponsesReasoningForwarding(t *testing.T) {
 					if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 						t.Error(err)
 					}
-					if !reflect.DeepEqual(body["reasoning"], map[string]any{"effort": "high", "summary": "auto", "generate_summary": "auto", "context": "auto", "mode": "standard"}) {
+					if !reflect.DeepEqual(body["reasoning"], wantReasoning) {
 						t.Errorf("reasoning=%v", body["reasoning"])
 					}
 					if stream {
@@ -33,7 +39,7 @@ func TestResponsesReasoningForwarding(t *testing.T) {
 				}))
 				defer server.Close()
 				var request openai.ResponseRequest
-				if err := json.Unmarshal([]byte(`{"model":"m","input":"hello","reasoning":{"effort":"high","summary":"auto","generate_summary":"auto","context":"auto","mode":"standard"}}`), &request); err != nil {
+				if err := json.Unmarshal([]byte(requestBody), &request); err != nil {
 					t.Fatal(err)
 				}
 				var err error

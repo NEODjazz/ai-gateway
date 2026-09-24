@@ -604,7 +604,7 @@ adapter используют те же проверки, включая streamin
 | --- | --- |
 | Anthropic chat | `seed`; `stop` неверного типа или более четырёх последовательностей |
 | Anthropic Responses | `previous_response_id`, `safety_identifier` |
-| Ollama Responses | `safety_identifier` |
+| Ollama Responses | `previous_response_id`, provider-side `conversation`, `store=true`, `truncation`, `include`, `metadata`, `top_logprobs`, `tool_choice`, `parallel_tool_calls`, `reasoning.context`, `reasoning.mode`, `safety_identifier` |
 | Ollama native chat | `tool_choice`, `parallel_tool_calls` |
 | Ollama embeddings | token-ID input; `user`; `encoding_format`, отличный от `float` |
 | Gemini embeddings | token-ID input; `user`; `encoding_format`, отличный от `float` |
@@ -2042,21 +2042,22 @@ empty string remains present. This change preserves returned context; it does no
 add a response-storage or background-job lifecycle API.
 
 The Responses request contract now accepts optional `include` string arrays.
-OpenAI-compatible and Ollama Responses adapters forward them in both JSON and
+OpenAI-compatible Responses adapters forward them in both JSON and
 streaming requests; supported values remain an upstream capability. This enables
 clients to request `reasoning.encrypted_content` where the upstream supports it.
-Anthropic and Demo reject nonempty `include` with `unsupported_parameter` instead
+Anthropic, Ollama and Demo reject nonempty `include` with `unsupported_parameter` instead
 of silently dropping the option. Empty or omitted arrays preserve prior behavior.
-Local HTTP regression tests check the actual upstream payload in all four
+Local HTTP regression tests check the actual upstream payload in both
 forwarding paths and adapter rejection. The public OpenAPI schema includes the
 new optional request field.
 
-Responses also accepts optional boolean `store`. OpenAI-compatible and Ollama
-forward explicit `true` and `false` in JSON and SSE requests; an absent or null
-value leaves the upstream default in effect. Anthropic and Demo reject either
+Responses also accepts optional boolean `store`. OpenAI-compatible adapters
+forward explicit `true` and `false` in JSON and SSE requests; Ollama accepts
+`false` but rejects `true` because its Responses endpoint has no stored-resource
+lifecycle. An absent or null value leaves the upstream default in effect. Anthropic and Demo reject either
 explicit value with `unsupported_parameter` because these adapters cannot express
 the requested Responses storage control. This is an additive request-schema
-change, covered by local HTTP payload tests for both values and default behavior.
+change, covered by local HTTP payload tests for supported values and default behavior.
 
 `store` controls upstream response storage. An explicit `true` also enables the
 gateway ownership binding required by `GET /v1/responses/{id}`. Gateway logging
@@ -2119,14 +2120,15 @@ test verifies grouping and block order for text before, between and after result
 ### Responses reasoning request options
 
 The optional `reasoning` object accepts `effort`, `summary`, `generate_summary`,
-`context` and `mode` string fields. OpenAI-compatible and Ollama Responses adapters
-forward supplied fields in both JSON and streaming requests. Upstream/model
+`context` and `mode` string fields. OpenAI-compatible Responses adapters forward
+all supplied fields; Ollama forwards `effort`, `summary` and `generate_summary`
+but rejects `context` and `mode` in JSON and streaming requests. Upstream/model
 support determines valid values; the gateway does not translate them into a
 different provider's thinking controls. Anthropic and Demo return
 `unsupported_parameter` for a supplied object. Omission preserves prior defaults.
 
 This adds an optional typed request object and its OpenAPI schema. HTTP regression
-tests verify all five fields on the wire for both adapters and modes, alongside
+tests verify supported fields on the wire for each adapter and mode, alongside
 unsupported-adapter rejection. Fields follow the
 [Responses create contract](https://developers.openai.com/api/reference/cli/resources/responses/methods/create).
 
@@ -2168,11 +2170,11 @@ The public response schema includes the annotation array. Event fields follow th
 ### Responses context truncation
 
 Responses accepts optional `truncation` (`auto` or `disabled`) and forwards the
-explicit value through OpenAI-compatible and Ollama native Responses requests,
+explicit value through OpenAI-compatible Responses requests,
 including streaming. Omission leaves the upstream default unchanged. The upstream
 implements context truncation; the gateway validates the enum and still reserves
 tokens against the complete input context before execution. Anthropic conversion
-and the demo adapter reject explicit truncation with `400 unsupported_parameter`
+and the Ollama and demo adapters reject explicit truncation with `400 unsupported_parameter`
 and `param=truncation` rather than discarding the requested behavior.
 
 ### Responses assistant message phase
@@ -2195,11 +2197,11 @@ Clients can request this data with `include: ["message.output_text.logprobs"]`
 when supported by the upstream model. These diagnostic values do not alter usage
 totals or billing.
 
-Responses also forwards optional integer `top_logprobs` to OpenAI-compatible and
-Ollama native Responses endpoints in both JSON and streaming mode, preserving
+Responses also forwards optional integer `top_logprobs` to OpenAI-compatible
+Responses endpoints in both JSON and streaming mode, preserving
 explicit zero. The gateway validates the 0–20 range before running request
 modules or routing; the upstream validates model compatibility. Omission leaves the upstream default unchanged. Anthropic
-conversion and demo reject supplied values with `400 unsupported_parameter` and
+conversion, Ollama and demo reject supplied values with `400 unsupported_parameter` and
 `param=top_logprobs`, including zero.
 
 Anthropic Responses conversion rejects non-null `phase` on input items with
@@ -2244,11 +2246,11 @@ This changes the upstream wire field for clients using the legacy alias while
 preserving their configured token limit.
 
 Responses accepts string-valued `metadata` and forwards it through native
-OpenAI-compatible and Ollama JSON/SSE requests. Upstream response metadata is
+OpenAI-compatible JSON/SSE requests. Upstream response metadata is
 retained in JSON, assembled SSE and synthetic SSE snapshots. An explicit metadata
 snapshot replaces earlier metadata rather than merging stale keys. The upstream
 may apply additional metadata restrictions. The gateway enforces at most 16
-entries, 64 Unicode code points per key and 512 per value before execution. Anthropic conversion and demo reject nonempty metadata
+entries, 64 Unicode code points per key and 512 per value before execution. Anthropic conversion, Ollama and demo reject nonempty metadata
 with `400 unsupported_parameter`; it is not silently mapped to unrelated native
 metadata semantics. Gateway authorization and billing identities are not derived
 from this client-supplied object.
