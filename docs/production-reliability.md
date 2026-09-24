@@ -9,6 +9,9 @@ For Anthropic Chat and Responses SSE, the gateway also validates the combined
 usage across `message_start` and `message_delta`. Responses streaming validates
 the initial provider usage before forwarding `response.created`; overflowing
 final usage cannot produce a successful terminal response or billing settlement.
+The stream assembler uses cumulative provider counts, including input added by
+server tools and output already reported at `message_start`. Missing delta fields
+retain the prior count; decreasing counts fail before terminal settlement.
 
 ## Token accounting and request identity
 
