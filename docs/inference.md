@@ -517,6 +517,8 @@ uses the Foundry audience even when the endpoint has a custom hostname. Known
 Azure Government hostnames select the corresponding sovereign audience. When a
 sovereign endpoint uses a custom hostname, set `azure_cloud=usgov` or `china`
 with `auth_type=entra`; Foundry project URLs support `usgov` but not `china`.
+Project URLs behind a reverse-proxy path prefix retain that prefix for discovery
+and inference, and use the same Foundry audience selection.
 Without a bound token, Entra authentication also accepts an environment-backed
 service principal (`AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`).
 Its client-credentials exchange uses the selected cloud authority and audience;

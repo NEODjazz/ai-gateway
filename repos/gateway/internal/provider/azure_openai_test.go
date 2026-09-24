@@ -254,6 +254,44 @@ func TestAzureFoundryProjectUsesV1AndEntraBearer(t *testing.T) {
 	}
 }
 
+func TestAzureFoundryProjectBehindPathPrefix(t *testing.T) {
+	for _, test := range []struct {
+		path string
+		want string
+		ok   bool
+	}{
+		{"/tenant/api/projects/project-a", "/tenant/api/projects/project-a", true},
+		{"/tenant/api/projects/project-a/openai/v1", "/tenant/api/projects/project-a", true},
+		{"/tenant/api/projects/project-a/other", "", false},
+		{"/tenant/api/projects/", "", false},
+	} {
+		got, ok := azureFoundryProjectPath(test.path)
+		if got != test.want || ok != test.ok {
+			t.Errorf("project path %q = %q, %t; want %q, %t", test.path, got, ok, test.want, test.ok)
+		}
+	}
+	if _, err := normalizeManagedProvider(ManagedProvider{ID: "foundry", Type: "azure-openai", BaseURL: "https://proxy.example.test/tenant/api/projects/project-a", APIVersion: "2025-04-01-preview", AuthType: "entra"}); err == nil {
+		t.Fatal("versioned Foundry project URL behind path prefix was accepted")
+	}
+	if azureRealtimeSupportedBaseURL("https://proxy.example.test/tenant/api/projects/project-a/openai/v1") {
+		t.Fatal("Foundry project behind path prefix advertised resource Realtime")
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/tenant/api/projects/project-a/openai/v1/chat/completions" || r.Header.Get("Authorization") != "Bearer project-token" || r.Header.Get("api-key") != "" {
+			t.Errorf("unexpected Foundry request: %s headers=%v", r.URL, r.Header)
+			http.Error(w, "invalid request", http.StatusBadRequest)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(openai.ChatCompletionResponse{ID: "chat-foundry", Model: "deployment"})
+	}))
+	t.Cleanup(server.Close)
+	client := NewAzureOpenAI(server.URL+"/tenant/api/projects/project-a", "project-token", false, "", "entra")
+	if _, err := client.ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "deployment", Messages: []openai.Message{{Role: "user", Content: "hello"}}}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestAzureFoundryProjectManagedIdentityEndToEnd(t *testing.T) {
 	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	var tokenCalls atomic.Int32

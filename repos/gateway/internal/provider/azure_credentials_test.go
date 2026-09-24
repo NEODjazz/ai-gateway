@@ -193,6 +193,7 @@ func TestAzureIdentityEndpointsExplicitCloudForProxy(t *testing.T) {
 		{baseURL: "https://proxy.example.test/api/projects/project-a/openai/v1", cloud: "usgov", authority: azureGovernmentAuthority, resource: azureGovernmentFoundryResource},
 		{baseURL: "https://proxy.example.test/openai/v1", cloud: "china", authority: azureChinaAuthority, resource: azureChinaResource},
 		{baseURL: "https://proxy.example.test/api/projects/project-a/openai/v1", cloud: "public", authority: azureAuthorityURL, resource: azureFoundryResource},
+		{baseURL: "https://proxy.example.test/tenant/api/projects/project-a/openai/v1", cloud: "public", authority: azureAuthorityURL, resource: azureFoundryResource},
 	} {
 		source := newAzureTokenSourceWithCloud("", test.baseURL, test.cloud)
 		if source.authorityBaseURL != test.authority || source.resource != test.resource || source.scope != test.resource+".default" {

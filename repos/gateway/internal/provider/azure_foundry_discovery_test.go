@@ -109,6 +109,56 @@ func TestAzureFoundryProjectDiscoveryPaginatesDeployments(t *testing.T) {
 	}
 }
 
+func TestAzureFoundryPrefixedProjectDiscoveryKeepsAuthAndPath(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		if r.URL.Path != "/tenant/api/projects/project-a/deployments" || r.URL.Query().Get("api-version") != "v1" || r.Header.Get("Authorization") != "Bearer foundry-token" || r.Header.Get("api-key") != "" {
+			t.Errorf("unexpected prefixed discovery request: %s headers=%v", r.URL, r.Header)
+			http.Error(w, "invalid request", http.StatusBadRequest)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"value": []any{map[string]any{"name": "model-a", "type": "ModelDeployment"}}})
+	}))
+	t.Cleanup(server.Close)
+	router := New(Config{CredentialEncryptionKey: []byte("prefixed-foundry-discovery-test-key")}).(*Router)
+	if _, err := router.CreateProvider(ManagedProvider{ID: "foundry", Type: "azure-openai", BaseURL: server.URL + "/tenant/api/projects/project-a/openai/v1", AuthType: "entra", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := router.CreateCredential(CredentialInput{ID: "foundry-token", ProviderID: "foundry", Secret: "foundry-token"}); err != nil {
+		t.Fatal(err)
+	}
+	models, err := router.DiscoverProviderModels(t.Context(), "foundry", "foundry-token")
+	if err != nil || len(models) != 1 || models[0].ID != "model-a" || calls.Load() != 1 {
+		t.Fatalf("models=%+v calls=%d err=%v", models, calls.Load(), err)
+	}
+}
+
+func TestAzureFoundryPrefixedProjectDiscoveryRejectsAnotherPrefix(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"value":    []any{map[string]any{"name": "model-a", "type": "ModelDeployment"}},
+			"nextLink": "/another-tenant/api/projects/project-a/deployments?api-version=v1",
+		})
+	}))
+	t.Cleanup(server.Close)
+	router := New(Config{CredentialEncryptionKey: []byte("prefixed-foundry-discovery-test-key")}).(*Router)
+	if _, err := router.CreateProvider(ManagedProvider{ID: "foundry", Type: "azure-openai", BaseURL: server.URL + "/tenant/api/projects/project-a", AuthType: "entra", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := router.CreateCredential(CredentialInput{ID: "foundry-token", ProviderID: "foundry", Secret: "foundry-token"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := router.DiscoverProviderModels(t.Context(), "foundry", "foundry-token"); err == nil {
+		t.Fatal("cross-prefix continuation was accepted")
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("cross-prefix continuation made %d requests", got)
+	}
+}
+
 func TestAzureFoundryProjectDiscoveryRejectsCrossOriginNextLink(t *testing.T) {
 	var forwarded atomic.Bool
 	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { forwarded.Store(true) }))

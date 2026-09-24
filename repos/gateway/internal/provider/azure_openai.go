@@ -212,13 +212,17 @@ func validAzureDeploymentPathSegment(value string) bool {
 
 func azureFoundryProjectPath(path string) (string, bool) {
 	parts := strings.Split(strings.Trim(path, "/"), "/")
-	if len(parts) < 3 || parts[0] != "api" || parts[1] != "projects" || parts[2] == "" {
+	projectIndex := len(parts) - 3
+	if len(parts) >= 5 && parts[len(parts)-2] == "openai" && parts[len(parts)-1] == "v1" {
+		projectIndex = len(parts) - 5
+	}
+	if projectIndex < 0 || parts[projectIndex] != "api" || parts[projectIndex+1] != "projects" || parts[projectIndex+2] == "" {
 		return "", false
 	}
-	if len(parts) != 3 && (len(parts) != 5 || parts[3] != "openai" || parts[4] != "v1") {
+	if projectIndex+3 != len(parts) && (projectIndex+5 != len(parts) || parts[projectIndex+3] != "openai" || parts[projectIndex+4] != "v1") {
 		return "", false
 	}
-	return "/api/projects/" + parts[2], true
+	return "/" + strings.Join(parts[:projectIndex+3], "/"), true
 }
 
 func normalizeAzureAuthType(value string) string {
