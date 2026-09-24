@@ -1141,6 +1141,12 @@ func validateAnthropicContextManagement(requested, reported json.RawMessage) err
 }
 
 func validateAnthropicRequestedToolUsage(usage anthropicUsage, search *openai.ChatWebSearchOptions, fetch *openai.ChatWebFetchOptions, codeExecution bool) error {
+	if search == nil && anthropicSearchRequests(usage) > 0 {
+		return errors.New("Anthropic reported unrequested web search usage")
+	}
+	if fetch == nil && usage.ServerToolUse != nil && usage.ServerToolUse.WebFetchRequests > 0 {
+		return errors.New("Anthropic reported unrequested web fetch usage")
+	}
 	searchLimit := openai.WebSearchMaxUses
 	if search != nil && search.MaxUses != nil {
 		searchLimit = *search.MaxUses

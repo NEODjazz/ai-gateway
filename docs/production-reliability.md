@@ -15,6 +15,8 @@ retain the prior count; decreasing counts fail before terminal settlement.
 Chat SSE applies the same rule to server-tool request counts: a partial delta
 cannot erase web-search or code-execution usage, and a lower cumulative count
 fails before billing settlement.
+Anthropic Chat also rejects reported web-search, web-fetch or code-execution
+usage when the corresponding server tool was not enabled in the request.
 
 ## Token accounting and request identity
 
