@@ -1795,6 +1795,11 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 			if err := validateResponseUsage(response.Usage); err != nil {
 				return err
 			}
+			if event == "response.completed" || event == "response.incomplete" || event == "response.failed" {
+				if err := validateReportedResponseTotal(response); err != nil {
+					return err
+				}
+			}
 			if err := validateResponseEnvelope(response); err != nil {
 				return err
 			}

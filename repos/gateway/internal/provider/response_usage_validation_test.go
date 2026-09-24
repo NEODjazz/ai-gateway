@@ -70,6 +70,30 @@ func TestResponsesRejectsUnknownUsageCountersBeforeDelivery(t *testing.T) {
 	}
 }
 
+func TestResponsesRejectsInconsistentReportedTotalBeforeDelivery(t *testing.T) {
+	document := `{"id":"r","object":"response","model":"m","status":"completed","usage":{"input_tokens":3,"output_tokens":2,"total_tokens":4}}`
+	if _, err := decodeResponseJSON(strings.NewReader(document)); err == nil {
+		t.Fatal("inconsistent JSON total accepted")
+	}
+	callbacks := 0
+	wire := "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":" + document + "}\n\n"
+	if _, err := streamResponseData(strings.NewReader(wire), "m", func(string, string) error { callbacks++; return nil }); err == nil || callbacks != 0 {
+		t.Fatalf("inconsistent SSE total delivered: err=%v callbacks=%d", err, callbacks)
+	}
+}
+
+func TestResponsesChecksReportedTotalAtTerminalSnapshot(t *testing.T) {
+	wire := "event: response.created\ndata: " +
+		`{"type":"response.created","response":{"id":"r","status":"in_progress","usage":{"input_tokens":3,"output_tokens":2,"total_tokens":4}}}` + "\n\n" +
+		"event: response.completed\ndata: " +
+		`{"type":"response.completed","response":{"id":"r","status":"completed","usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}}` + "\n\n"
+	callbacks := 0
+	response, err := streamResponseData(strings.NewReader(wire), "m", func(string, string) error { callbacks++; return nil })
+	if err != nil || callbacks != 2 || response.Usage.TotalTokens != 5 {
+		t.Fatalf("response=%+v callbacks=%d err=%v", response, callbacks, err)
+	}
+}
+
 func TestResponseUsageRangeBoundary(t *testing.T) {
 	maxInt := int(^uint(0) >> 1)
 	for _, usage := range []openai.ResponseUsage{

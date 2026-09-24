@@ -37,6 +37,14 @@ func validateResponseUsage(usage openai.ResponseUsage) error {
 	return nil
 }
 
+func validateReportedResponseTotal(response openai.ResponseResponse) error {
+	if response.InputTokensReported && response.OutputTokensReported && response.TotalTokensReported &&
+		response.Usage.TotalTokens != response.Usage.InputTokens+response.Usage.OutputTokens {
+		return errors.New("Responses total token usage is inconsistent")
+	}
+	return nil
+}
+
 func validateExactResponseUsage(response openai.ResponseResponse, providerName string) error {
 	if response.Status != "" && response.Status != "completed" && response.Status != "incomplete" {
 		return nil

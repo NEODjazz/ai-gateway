@@ -26,6 +26,9 @@ adapter use; an absent explicit token still selects workload identity.
 Responses usage validation bounds cache-read and cache-write token details by
 reported input tokens. Cache read plus either cache-write alias cannot exceed
 the input total; invalid JSON or terminal SSE usage fails before delivery.
+When a completed JSON response or terminal SSE snapshot reports all three
+token counters, `total_tokens` must equal input plus output. Intermediate SSE
+snapshots may be partial and are checked at the terminal boundary.
 
 ## Token accounting and request identity
 

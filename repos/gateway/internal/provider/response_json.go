@@ -47,6 +47,9 @@ func decodeResponseJSON(reader io.Reader) (openai.ResponseResponse, error) {
 	if err := validateResponseUsage(response.Usage); err != nil {
 		return openai.ResponseResponse{}, err
 	}
+	if err := validateReportedResponseTotal(*response); err != nil {
+		return openai.ResponseResponse{}, err
+	}
 	if err := validateResponseEnvelope(*response); err != nil {
 		return openai.ResponseResponse{}, err
 	}
