@@ -157,7 +157,7 @@ func (Ollama) ValidateResponseParameters(request openai.ResponseRequest) error {
 		parameterCheck{"include", len(request.Include) > 0},
 		parameterCheck{"metadata", len(request.Metadata) > 0},
 		parameterCheck{"top_logprobs", request.TopLogprobs != nil},
-		parameterCheck{"tool_choice", request.ToolChoice != nil && !ollamaResponseToolChoiceNone(request.ToolChoice)},
+		parameterCheck{"tool_choice", !ollamaToolChoiceSupported(request.ToolChoice)},
 		parameterCheck{"parallel_tool_calls", request.ParallelToolCalls != nil},
 		parameterCheck{"reasoning.context", contextSupplied},
 		parameterCheck{"reasoning.mode", modeSupplied},
@@ -240,7 +240,7 @@ func (Ollama) ValidateChatParameters(request openai.ChatCompletionRequest) error
 		return err
 	}
 	return rejectParameters("ollama",
-		parameterCheck{"tool_choice", !ollamaChatToolChoiceSupported(request.ToolChoice)},
+		parameterCheck{"tool_choice", !ollamaToolChoiceSupported(request.ToolChoice)},
 		parameterCheck{"parallel_tool_calls", request.ParallelToolCalls != nil},
 	)
 }

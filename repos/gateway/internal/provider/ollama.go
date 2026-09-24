@@ -649,7 +649,7 @@ func normalizeOllamaToolCalls(message *openai.Message) {
 	}
 }
 
-func ollamaChatToolChoiceSupported(choice any) bool {
+func ollamaToolChoiceSupported(choice any) bool {
 	if choice == nil {
 		return true
 	}
