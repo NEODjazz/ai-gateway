@@ -413,6 +413,9 @@ func TestAzureTokenSourceRejectsInvalidFederatedResponses(t *testing.T) {
 		{name: "authority failure", status: http.StatusServiceUnavailable, body: "sensitive error"},
 		{name: "malformed response", status: http.StatusOK, body: "{"},
 		{name: "excessive lifetime", status: http.StatusOK, body: `{"access_token":"token","expires_in":90000,"token_type":"Bearer"}`},
+		{name: "token with space", status: http.StatusOK, body: `{"access_token":"bad token","expires_in":3600,"token_type":"Bearer"}`},
+		{name: "token with tab", status: http.StatusOK, body: `{"access_token":"bad\ttoken","expires_in":3600,"token_type":"Bearer"}`},
+		{name: "token with NUL", status: http.StatusOK, body: `{"access_token":"bad\u0000token","expires_in":3600,"token_type":"Bearer"}`},
 		{name: "oversized response", status: http.StatusOK, body: string(make([]byte, azureTokenMaxBytes+1))},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -424,8 +427,8 @@ func TestAzureTokenSourceRejectsInvalidFederatedResponses(t *testing.T) {
 			source := newAzureTokenSource("")
 			source.authorityBaseURL = server.URL
 			source.getenv = awsTestEnvironment(map[string]string{"AZURE_TENANT_ID": "tenant", "AZURE_CLIENT_ID": "client", "AZURE_FEDERATED_TOKEN_FILE": tokenFile})
-			if _, err := source.Token(t.Context()); err == nil {
-				t.Fatal("invalid federated response accepted")
+			if token, err := source.Token(t.Context()); err == nil || token != "" || strings.Contains(err.Error(), "bad token") {
+				t.Fatalf("invalid federated response accepted or exposed: token=%q err=%v", token, err)
 			}
 		})
 	}

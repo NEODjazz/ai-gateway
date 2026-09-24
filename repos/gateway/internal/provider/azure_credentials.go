@@ -146,7 +146,7 @@ func azureIdentityEndpoints(providerBaseURL ...string) (string, string) {
 
 func (s *azureTokenSource) Token(ctx context.Context) (string, error) {
 	if s.explicit != "" {
-		if len(s.explicit) > 16<<10 || strings.ContainsAny(s.explicit, " \t\r\n\x00") {
+		if !validAzureBearerToken(s.explicit) {
 			return "", errors.New("invalid explicit Azure Entra token")
 		}
 		return s.explicit, nil
@@ -295,10 +295,14 @@ func (s *azureTokenSource) fetchToken(request *http.Request, useExpiresIn bool) 
 			err = nil
 		}
 	}
-	if err != nil || value.AccessToken == "" || len(value.AccessToken) > 16<<10 || strings.ContainsAny(value.AccessToken, "\r\n") || !strings.EqualFold(value.TokenType, "Bearer") || !expiration.After(s.now()) {
+	if err != nil || !validAzureBearerToken(value.AccessToken) || !strings.EqualFold(value.TokenType, "Bearer") || !expiration.After(s.now()) {
 		return "", time.Time{}, errors.New("Azure token response is invalid")
 	}
 	return value.AccessToken, expiration, nil
+}
+
+func validAzureBearerToken(value string) bool {
+	return value != "" && len(value) <= 16<<10 && !strings.ContainsAny(value, " \t\r\n\x00")
 }
 
 func (s *azureTokenSource) loadFederated(ctx context.Context, tenantID, clientID, tokenFile string) (string, time.Time, error) {

@@ -22,6 +22,8 @@ An explicitly configured Azure Entra bearer token is rejected before HTTP
 inference when it is blank, contains whitespace or NUL, or exceeds 16 KiB.
 This applies to managed Azure OpenAI and Foundry inference as well as direct
 adapter use; an absent explicit token still selects workload identity.
+Tokens returned by Entra or managed-identity endpoints use the same length and
+whitespace validation before they are cached or sent to Azure inference.
 
 Responses usage validation bounds cache-read and cache-write token details by
 reported input tokens. Cache read plus either cache-write alias cannot exceed

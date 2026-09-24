@@ -206,6 +206,36 @@ func TestAzureOpenAIHTTPRejectsInvalidEntraTokenBeforeUpstream(t *testing.T) {
 	}
 }
 
+func TestAzureManagedIdentityRejectsInvalidTokenBeforeInference(t *testing.T) {
+	for _, name := range []string{"AZURE_TENANT_ID", "AZURE_CLIENT_ID", "AZURE_CLIENT_SECRET", "AZURE_FEDERATED_TOKEN_FILE"} {
+		t.Setenv(name, "")
+	}
+	identity := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprintf(w, `{"access_token":"bad token","expires_on":%d,"token_type":"Bearer"}`, time.Now().Add(time.Hour).Unix())
+	}))
+	t.Cleanup(identity.Close)
+	t.Setenv("IDENTITY_ENDPOINT", identity.URL)
+	t.Setenv("IDENTITY_HEADER", "test-header")
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+	for _, path := range []string{"/openai/v1", "/api/projects/project-a/openai/v1"} {
+		t.Run(path, func(t *testing.T) {
+			client := NewAzureOpenAI(server.URL+path, "", false, "", "entra")
+			_, err := client.ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "deployment", Messages: []openai.Message{{Role: "user", Content: "hello"}}})
+			if err == nil {
+				t.Fatal("invalid managed-identity token was accepted")
+			}
+		})
+	}
+	if got := calls.Load(); got != 0 {
+		t.Fatalf("invalid managed-identity token reached inference %d times", got)
+	}
+}
+
 func TestAzureChatRequiresExactUsage(t *testing.T) {
 	for _, tc := range []struct {
 		name, usage string
