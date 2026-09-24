@@ -964,6 +964,43 @@ func TestOllamaRejectsInvalidVisionBeforeUpstream(t *testing.T) {
 	}
 }
 
+func TestOllamaRejectsUnmappableChatResponseFormats(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		http.Error(w, "unexpected upstream call", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	strictFalse := false
+	for _, test := range []struct {
+		name   string
+		format openai.ResponseFormat
+	}{
+		{"unknown type", openai.ResponseFormat{Type: "xml"}},
+		{"missing schema", openai.ResponseFormat{Type: "json_schema", JSONSchema: &openai.JSONSchemaFormat{Name: "result"}}},
+		{"schema with text", openai.ResponseFormat{Type: "text", JSONSchema: &openai.JSONSchemaFormat{Schema: map[string]any{"type": "object"}}}},
+		{"non-strict schema", openai.ResponseFormat{Type: "json_schema", JSONSchema: &openai.JSONSchemaFormat{Name: "result", Schema: map[string]any{"type": "object"}, Strict: &strictFalse}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request := openai.ChatCompletionRequest{Model: "test", Messages: []openai.Message{{Role: "user", Content: "hello"}}, ResponseFormat: &test.format}
+			provider := NewOllama(server.URL, true)
+			for _, run := range []func() error{
+				func() error { _, err := provider.ChatCompletions(t.Context(), request); return err },
+				func() error { _, err := provider.StreamChatCompletions(t.Context(), request, nil); return err },
+			} {
+				var failure *Error
+				if err := run(); !errors.As(err, &failure) || failure.Class != FailureClientRequest || failure.Param != "response_format" {
+					t.Fatalf("unmappable format was not rejected as a client error: %v", err)
+				}
+			}
+		})
+	}
+	if got := calls.Load(); got != 0 {
+		t.Fatalf("unmappable response format reached upstream %d times", got)
+	}
+}
+
 func TestOllamaEmbeddingsMapsNativeContract(t *testing.T) {
 	promptTokens := 4
 	var upstream ollamaEmbeddingRequest

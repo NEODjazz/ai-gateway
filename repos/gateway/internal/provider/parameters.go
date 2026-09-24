@@ -185,6 +185,9 @@ func (Ollama) ValidateChatParameters(request openai.ChatCompletionRequest) error
 	if _, err := openai.ChatImageAttachments(request.Messages); err != nil {
 		return &Error{Class: FailureClientRequest, Provider: "ollama", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_image", Param: "messages", Err: err}
 	}
+	if err := validateOllamaChatResponseFormat(request.ResponseFormat); err != nil {
+		return err
+	}
 	if err := rejectChatModeration("ollama", request); err != nil {
 		return err
 	}
@@ -234,6 +237,31 @@ func (Ollama) ValidateChatParameters(request openai.ChatCompletionRequest) error
 		parameterCheck{"tool_choice", request.ToolChoice != nil},
 		parameterCheck{"parallel_tool_calls", request.ParallelToolCalls != nil},
 	)
+}
+
+func validateOllamaChatResponseFormat(format *openai.ResponseFormat) error {
+	if format == nil {
+		return nil
+	}
+	invalid := func(detail string) error {
+		return &Error{Class: FailureClientRequest, Provider: "ollama", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_parameter", Param: "response_format", Err: errors.New(detail)}
+	}
+	switch format.Type {
+	case "text", "json_object":
+		if format.JSONSchema != nil {
+			return invalid("response_format.json_schema requires type=json_schema")
+		}
+	case "json_schema":
+		if format.JSONSchema == nil || format.JSONSchema.Schema == nil {
+			return invalid("response_format.json_schema.schema is required")
+		}
+		if strict := format.JSONSchema.Strict; strict != nil && !*strict {
+			return invalid("response_format.json_schema.strict=false is not supported")
+		}
+	default:
+		return invalid("response_format.type must be text, json_object, or json_schema")
+	}
+	return nil
 }
 
 func (Ollama) ValidateEmbeddingParameters(request openai.EmbeddingRequest) error {
