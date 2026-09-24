@@ -243,7 +243,7 @@ func (p Ollama) ChatCompletions(ctx context.Context, request openai.ChatCompleti
 	}
 
 	return openai.ChatCompletionResponse{
-		ID:     "chatcmpl-ollama",
+		ID:     "chatcmpl-" + rand.Text(),
 		Object: "chat.completion",
 		Model:  ollamaResp.Model,
 		Choices: []openai.Choice{
@@ -343,7 +343,7 @@ func (p Ollama) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 	}
 
 	response := openai.ChatCompletionResponse{
-		ID:     "chatcmpl-ollama",
+		ID:     "chatcmpl-" + rand.Text(),
 		Object: "chat.completion",
 		Model:  request.Model,
 		Choices: []openai.Choice{

@@ -269,6 +269,15 @@ func TestOllamaChatCompletions(t *testing.T) {
 	if response.Usage.TotalTokens != 6 {
 		t.Fatalf("unexpected total tokens: %d", response.Usage.TotalTokens)
 	}
+	if !strings.HasPrefix(response.ID, "chatcmpl-") {
+		t.Fatalf("unexpected completion ID: %q", response.ID)
+	}
+	second, err := provider.ChatCompletions(context.Background(), openai.ChatCompletionRequest{
+		Model: "test-model", Messages: []openai.Message{{Role: "user", Content: "hi again"}},
+	})
+	if err != nil || second.ID == response.ID || !strings.HasPrefix(second.ID, "chatcmpl-") {
+		t.Fatalf("completion IDs are not unique: first=%q second=%q err=%v", response.ID, second.ID, err)
+	}
 }
 
 func TestOllamaChatJSONRequiresCompletion(t *testing.T) {
@@ -789,6 +798,14 @@ func TestOllamaStreamsChatCompletions(t *testing.T) {
 	}
 	if len(payloads) != 3 {
 		t.Fatalf("expected three streamed payloads, got %d: %v", len(payloads), payloads)
+	}
+	if !strings.HasPrefix(response.ID, "chatcmpl-") {
+		t.Fatalf("unexpected streamed completion ID: %q", response.ID)
+	}
+	for _, payload := range payloads {
+		if !strings.Contains(payload, `"id":"`+response.ID+`"`) {
+			t.Fatalf("stream chunk has a different completion ID: %s", payload)
+		}
 	}
 	if !strings.Contains(payloads[0], `"content":"hel"`) || !strings.Contains(payloads[1], `"content":"lo"`) {
 		t.Fatalf("unexpected streamed payloads: %v", payloads)
