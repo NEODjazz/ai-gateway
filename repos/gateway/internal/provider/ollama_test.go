@@ -217,6 +217,7 @@ func TestOllamaChatCompletions(t *testing.T) {
 
 		_ = json.NewEncoder(w).Encode(ollamaChatResponse{
 			Model: "test-model",
+			Done:  true,
 			Message: ollamaResponseMessage{
 				Role:    "assistant",
 				Content: "hello",
@@ -247,6 +248,22 @@ func TestOllamaChatCompletions(t *testing.T) {
 	}
 	if response.Usage.TotalTokens != 6 {
 		t.Fatalf("unexpected total tokens: %d", response.Usage.TotalTokens)
+	}
+}
+
+func TestOllamaChatJSONRequiresCompletion(t *testing.T) {
+	for _, doneField := range []string{"", `,"done":false`} {
+		t.Run(fmt.Sprintf("done-field-%d", len(doneField)), func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = fmt.Fprintf(w, `{"model":"test-model","message":{"role":"assistant","content":"partial"},"prompt_eval_count":2,"eval_count":1%s}`, doneField)
+			}))
+			defer server.Close()
+
+			_, err := NewOllama(server.URL, false).ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "test-model"})
+			if err == nil || !strings.Contains(err.Error(), "not complete") {
+				t.Fatalf("unfinished Ollama chat JSON accepted: %v", err)
+			}
+		})
 	}
 }
 
@@ -458,7 +475,7 @@ func TestOllamaReasoningEffortContract(t *testing.T) {
 
 func TestOllamaRejectsOversizedReasoningResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_ = json.NewEncoder(w).Encode(ollamaChatResponse{Model: "qwen3", Message: ollamaResponseMessage{Role: "assistant", Thinking: strings.Repeat("x", openai.MaxChatReasoningContentBytes+1)}})
+		_ = json.NewEncoder(w).Encode(ollamaChatResponse{Model: "qwen3", Done: true, Message: ollamaResponseMessage{Role: "assistant", Thinking: strings.Repeat("x", openai.MaxChatReasoningContentBytes+1)}})
 	}))
 	defer server.Close()
 

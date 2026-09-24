@@ -15,6 +15,8 @@ an early EOF returns an error without emitting a successful finish event.
 The final native Chat JSON or stream chunk must include both provider token
 counters. Missing or null counters fail before settlement; explicitly reported
 zero remains valid.
+Non-stream native Chat JSON must also report `done: true`; incomplete output is
+not presented as a successful response.
 
 Native Messages and GenerateContent requests retain their API family in billing
 reserve, commit and failure events. The gateway sets this classification before

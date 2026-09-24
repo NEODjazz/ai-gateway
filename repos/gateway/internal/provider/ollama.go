@@ -215,6 +215,9 @@ func (p Ollama) ChatCompletions(ctx context.Context, request openai.ChatCompleti
 	if err := decodeOllamaChatResponse(resp.Body, &ollamaResp); err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
+	if !ollamaResp.Done {
+		return openai.ChatCompletionResponse{}, errors.New("Ollama chat response is not complete")
+	}
 	message := ollamaResp.Message.openAI()
 	if err := openai.ValidateChatReasoningContent(message.Role, message.ReasoningContent); err != nil {
 		return openai.ChatCompletionResponse{}, fmt.Errorf("invalid Ollama chat reasoning content: %w", err)
