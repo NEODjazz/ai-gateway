@@ -157,7 +157,7 @@ func (Ollama) ValidateResponseParameters(request openai.ResponseRequest) error {
 		parameterCheck{"include", len(request.Include) > 0},
 		parameterCheck{"metadata", len(request.Metadata) > 0},
 		parameterCheck{"top_logprobs", request.TopLogprobs != nil},
-		parameterCheck{"tool_choice", request.ToolChoice != nil},
+		parameterCheck{"tool_choice", request.ToolChoice != nil && !ollamaResponseToolChoiceNone(request.ToolChoice)},
 		parameterCheck{"parallel_tool_calls", request.ParallelToolCalls != nil},
 		parameterCheck{"reasoning.context", contextSupplied},
 		parameterCheck{"reasoning.mode", modeSupplied},

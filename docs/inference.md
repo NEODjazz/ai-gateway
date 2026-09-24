@@ -604,7 +604,7 @@ adapter используют те же проверки, включая streamin
 | --- | --- |
 | Anthropic chat | `seed`; `stop` неверного типа или более четырёх последовательностей |
 | Anthropic Responses | `previous_response_id`, `safety_identifier` |
-| Ollama Responses | `previous_response_id`, provider-side `conversation`, `store=true`, `truncation`, `include`, `metadata`, `top_logprobs`, `tool_choice`, `parallel_tool_calls`, `reasoning.context`, `reasoning.mode`, `reasoning.summary`, `reasoning.generate_summary`, `safety_identifier` |
+| Ollama Responses | `previous_response_id`, provider-side `conversation`, `store=true`, `truncation`, `include`, `metadata`, `top_logprobs`, `tool_choice` кроме `none`, `parallel_tool_calls`, `reasoning.context`, `reasoning.mode`, `reasoning.summary`, `reasoning.generate_summary`, `safety_identifier` |
 | Ollama native chat | `tool_choice`, `parallel_tool_calls` |
 | Ollama embeddings | token-ID input; `user`; `encoding_format`, отличный от `float` |
 | Gemini embeddings | token-ID input; `user`; `encoding_format`, отличный от `float` |
@@ -620,6 +620,8 @@ adapter используют те же проверки, включая streamin
 до обращения к upstream; исходный объект запроса не меняется. `json_schema`
 требует объект `schema`; неизвестные типы формата и поля, которые native
 endpoint игнорирует (включая `strict`), возвращают явную ошибку.
+`tool_choice=none` исполняется без отправки tools в Ollama, поэтому модель
+не получает доступ к объявленным функциям в этом вызове.
 
 Остальные верхнеуровневые поля действующего OpenAI-compatible контракта
 передаются соответствующим upstream wire request. Это не подтверждает поддержку

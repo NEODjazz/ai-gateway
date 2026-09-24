@@ -687,6 +687,18 @@ func ollamaResponseReasoning(reasoning *openai.ResponseReasoning) *openai.Respon
 	return &copy
 }
 
+func ollamaResponseToolChoiceNone(choice any) bool {
+	value, ok := choice.(string)
+	return ok && value == "none"
+}
+
+func ollamaResponseTools(request openai.ResponseRequest) []openai.ResponseTool {
+	if ollamaResponseToolChoiceNone(request.ToolChoice) {
+		return nil
+	}
+	return request.Tools
+}
+
 func (p Ollama) Responses(ctx context.Context, request openai.ResponseRequest) (openai.ResponseResponse, error) {
 	if err := p.ValidateResponseParameters(request); err != nil {
 		return openai.ResponseResponse{}, err
@@ -698,7 +710,7 @@ func (p Ollama) Responses(ctx context.Context, request openai.ResponseRequest) (
 	body, err := json.Marshal(openAICompatibleResponseRequest{
 		Include: request.Include, Store: request.Store, Reasoning: ollamaResponseReasoning(request.Reasoning), Truncation: request.Truncation, TopLogprobs: request.TopLogprobs, Metadata: request.Metadata,
 		Model: request.Model, Input: request.Input, Instructions: request.Instructions,
-		Tools: request.Tools, ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls,
+		Tools: ollamaResponseTools(request), ParallelToolCalls: request.ParallelToolCalls,
 		Text: text, PreviousResponse: request.PreviousResponse, Stream: false,
 		MaxOutputTokens: responseOutputTokenLimit(request),
 		Temperature:     request.Temperature, TopP: request.TopP,
@@ -741,7 +753,7 @@ func (p Ollama) StreamResponses(ctx context.Context, request openai.ResponseRequ
 	body, err := json.Marshal(openAICompatibleResponseRequest{
 		Include: request.Include, Store: request.Store, Reasoning: ollamaResponseReasoning(request.Reasoning), Truncation: request.Truncation, TopLogprobs: request.TopLogprobs, Metadata: request.Metadata,
 		Model: request.Model, Input: request.Input, Instructions: request.Instructions,
-		Tools: request.Tools, ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls,
+		Tools: ollamaResponseTools(request), ParallelToolCalls: request.ParallelToolCalls,
 		Text: text, PreviousResponse: request.PreviousResponse, Stream: true,
 		MaxOutputTokens: responseOutputTokenLimit(request),
 		Temperature:     request.Temperature, TopP: request.TopP,
