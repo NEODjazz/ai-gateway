@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -15,6 +17,12 @@ import (
 	"ai-gateway-gateway/internal/openai"
 	"golang.org/x/net/websocket"
 )
+
+type azureRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f azureRoundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return f(request)
+}
 
 func TestAzureOpenAIRealtimeUsesNativeURLAndAuthentication(t *testing.T) {
 	for _, test := range []struct {
@@ -212,6 +220,57 @@ func TestAzureFoundryProjectUsesV1AndEntraBearer(t *testing.T) {
 	client := NewAzureOpenAI(server.URL+"/api/projects/project-a", "project-token", false, "", "entra")
 	if _, err := client.ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "deployment", Messages: []openai.Message{{Role: "user", Content: "hello"}}}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestAzureFoundryProjectManagedIdentityEndToEnd(t *testing.T) {
+	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	var tokenCalls atomic.Int32
+	identity := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tokenCalls.Add(1)
+		if r.Header.Get("Metadata") != "true" || r.URL.Query().Get("resource") != azureFoundryResource {
+			t.Errorf("managed identity request: headers=%v query=%v", r.Header, r.URL.Query())
+		}
+		_, _ = fmt.Fprintf(w, `{"access_token":"project-identity-token","expires_on":%d,"token_type":"Bearer"}`, now.Add(time.Hour).Unix())
+	}))
+	t.Cleanup(identity.Close)
+	var inferenceCalls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		inferenceCalls.Add(1)
+		if r.URL.Path != "/api/projects/project-a/openai/v1/chat/completions" || r.URL.RawQuery != "" || r.Header.Get("Authorization") != "Bearer project-identity-token" || r.Header.Get("api-key") != "" {
+			t.Errorf("Foundry inference request: %s headers=%v", r.URL.String(), r.Header)
+			http.Error(w, "invalid request", http.StatusBadRequest)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(openai.ChatCompletionResponse{ID: "chat-foundry", Model: "deployment"})
+	}))
+	t.Cleanup(upstream.Close)
+	upstreamURL, err := url.Parse(upstream.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := NewAzureOpenAI("https://resource.services.ai.azure.com/api/projects/project-a", "", false, "", "entra")
+	transport := client.client.Transport.(azureOpenAITransport)
+	transport.tokenSource.now = func() time.Time { return now }
+	transport.tokenSource.getenv = awsTestEnvironment(nil)
+	transport.tokenSource.imdsURL = identity.URL
+	transport.base = azureRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if request.URL.Host != "resource.services.ai.azure.com" || request.URL.Scheme != "https" {
+			t.Errorf("unexpected provider origin: %s", request.URL.String())
+		}
+		cloned := request.Clone(request.Context())
+		cloned.URL.Scheme, cloned.URL.Host, cloned.Host = upstreamURL.Scheme, upstreamURL.Host, upstreamURL.Host
+		return http.DefaultTransport.RoundTrip(cloned)
+	})
+	client.client.Transport = transport
+	request := openai.ChatCompletionRequest{Model: "deployment", Messages: []openai.Message{{Role: "user", Content: "hello"}}}
+	for range 2 {
+		if _, err := client.ChatCompletions(t.Context(), request); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if tokenCalls.Load() != 1 || inferenceCalls.Load() != 2 {
+		t.Fatalf("token requests=%d inference requests=%d", tokenCalls.Load(), inferenceCalls.Load())
 	}
 }
 
