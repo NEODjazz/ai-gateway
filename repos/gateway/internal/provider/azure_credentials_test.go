@@ -466,6 +466,32 @@ func TestAzureTokenSourceUsesCachedTokenUntilExpiration(t *testing.T) {
 	}
 }
 
+func TestAzureTokenSourceDoesNotReturnTokenExpiredDuringRefresh(t *testing.T) {
+	base := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	var clock atomic.Int64
+	var calls atomic.Int32
+	clock.Store(base.Add(9 * time.Minute).UnixNano())
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		clock.Store(base.Add(11 * time.Minute).UnixNano())
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(server.Close)
+	source := newAzureTokenSource("")
+	source.now = func() time.Time { return time.Unix(0, clock.Load()) }
+	source.getenv = awsTestEnvironment(nil)
+	source.imdsURL = server.URL
+	source.token = "expired-token"
+	source.refreshAt = base.Add(5 * time.Minute)
+	source.expiresAt = base.Add(10 * time.Minute)
+	if token, err := source.Token(t.Context()); err == nil || token != "" {
+		t.Fatalf("token expired during refresh was returned: token=%q err=%v", token, err)
+	}
+	if token, err := source.Token(t.Context()); err == nil || token != "" || calls.Load() != 1 {
+		t.Fatalf("refresh retried before backoff elapsed: token=%q calls=%d err=%v", token, calls.Load(), err)
+	}
+}
+
 func TestAzureTokenSourceCanceledRefreshDoesNotRejectNextRequest(t *testing.T) {
 	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	var calls atomic.Int32

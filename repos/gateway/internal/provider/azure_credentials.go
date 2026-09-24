@@ -184,6 +184,7 @@ func (s *azureTokenSource) Token(ctx context.Context) (string, error) {
 		done := s.refreshCompleted
 		s.mu.Unlock()
 		token, expiration, err := s.load(ctx)
+		now = s.now()
 		s.mu.Lock()
 		if err == nil {
 			s.token, s.expiresAt = token, expiration
