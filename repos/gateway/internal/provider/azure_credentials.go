@@ -30,6 +30,7 @@ const (
 	azureChinaResource             = "https://cognitiveservices.azure.cn/"
 	azureTokenMaxBytes             = 32 << 10
 	azureAssertionMaxBytes         = 64 << 10
+	azureClientSecretMaxBytes      = 8 << 10
 )
 
 type azureTokenSource struct {
@@ -211,7 +212,14 @@ func azureTokenRefreshAt(now, expiration time.Time) time.Time {
 func (s *azureTokenSource) load(ctx context.Context) (string, time.Time, error) {
 	tenantID := strings.TrimSpace(s.getenv("AZURE_TENANT_ID"))
 	clientID := strings.TrimSpace(s.getenv("AZURE_CLIENT_ID"))
+	clientSecret := s.getenv("AZURE_CLIENT_SECRET")
 	tokenFile := strings.TrimSpace(s.getenv("AZURE_FEDERATED_TOKEN_FILE"))
+	if clientSecret != "" {
+		if tenantID == "" || clientID == "" || tokenFile != "" {
+			return "", time.Time{}, errors.New("invalid Azure client secret configuration")
+		}
+		return s.loadClientSecret(ctx, tenantID, clientID, clientSecret)
+	}
 	if tenantID != "" || tokenFile != "" {
 		if tenantID == "" || clientID == "" || tokenFile == "" {
 			return "", time.Time{}, errors.New("incomplete Azure federated workload identity configuration")
@@ -263,16 +271,16 @@ func (s *azureTokenSource) fetchToken(request *http.Request, useExpiresIn bool) 
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return "", time.Time{}, fmt.Errorf("Azure managed identity endpoint returned status %d", response.StatusCode)
+		return "", time.Time{}, fmt.Errorf("Azure token endpoint returned status %d", response.StatusCode)
 	}
 	data, err := io.ReadAll(io.LimitReader(response.Body, azureTokenMaxBytes+1))
 	if err != nil || len(data) > azureTokenMaxBytes {
-		return "", time.Time{}, errors.New("Azure managed identity response is invalid")
+		return "", time.Time{}, errors.New("Azure token response is invalid")
 	}
 	var value azureTokenResponse
 	decoder := json.NewDecoder(strings.NewReader(string(data)))
 	if decoder.Decode(&value) != nil || decoder.Decode(&struct{}{}) != io.EOF {
-		return "", time.Time{}, errors.New("Azure managed identity response is invalid")
+		return "", time.Time{}, errors.New("Azure token response is invalid")
 	}
 	expiration, err := azureTokenExpiration(value.ExpiresOn)
 	if useExpiresIn {
@@ -285,7 +293,7 @@ func (s *azureTokenSource) fetchToken(request *http.Request, useExpiresIn bool) 
 		}
 	}
 	if err != nil || value.AccessToken == "" || len(value.AccessToken) > 16<<10 || strings.ContainsAny(value.AccessToken, "\r\n") || !strings.EqualFold(value.TokenType, "Bearer") || !expiration.After(s.now()) {
-		return "", time.Time{}, errors.New("Azure managed identity response is invalid")
+		return "", time.Time{}, errors.New("Azure token response is invalid")
 	}
 	return value.AccessToken, expiration, nil
 }
@@ -313,6 +321,25 @@ func (s *azureTokenSource) loadFederated(ctx context.Context, tenantID, clientID
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
 	if err != nil {
 		return "", time.Time{}, errors.New("invalid Azure federated token request")
+	}
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	return s.fetchToken(request, true)
+}
+
+func (s *azureTokenSource) loadClientSecret(ctx context.Context, tenantID, clientID, clientSecret string) (string, time.Time, error) {
+	if !validAzureIdentifier(tenantID) || !validAzureIdentifier(clientID) || len(clientSecret) > azureClientSecretMaxBytes || strings.TrimSpace(clientSecret) == "" || strings.ContainsAny(clientSecret, "\x00\r\n") {
+		return "", time.Time{}, errors.New("invalid Azure client secret configuration")
+	}
+	form := url.Values{
+		"client_id":     {clientID},
+		"client_secret": {clientSecret},
+		"scope":         {s.scope},
+		"grant_type":    {"client_credentials"},
+	}
+	endpoint := strings.TrimRight(s.authorityBaseURL, "/") + "/" + url.PathEscape(tenantID) + "/oauth2/v2.0/token"
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
+	if err != nil {
+		return "", time.Time{}, errors.New("invalid Azure client secret token request")
 	}
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	return s.fetchToken(request, true)

@@ -189,6 +189,37 @@ func TestAzureOpenAIRealtimeUsesAmbientManagedIdentity(t *testing.T) {
 	}
 }
 
+func TestAzureOpenAIInferenceUsesClientSecretIdentity(t *testing.T) {
+	mux := http.NewServeMux()
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	mux.HandleFunc("/tenant-id/oauth2/v2.0/token", func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Error(err)
+		}
+		if r.Form.Get("client_secret") != "private-value" || r.Form.Get("scope") != azureOpenAIScope {
+			t.Errorf("invalid service principal request: scope=%q", r.Form.Get("scope"))
+		}
+		_, _ = fmt.Fprint(w, `{"access_token":"client-secret-token","expires_in":3600,"token_type":"Bearer"}`)
+	})
+	mux.HandleFunc("/openai/v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer client-secret-token" || r.Header.Get("api-key") != "" {
+			t.Errorf("invalid Azure inference authentication")
+		}
+		_ = json.NewEncoder(w).Encode(openai.ChatCompletionResponse{ID: "chat-azure", Model: "deployment"})
+	})
+	t.Setenv("AZURE_TENANT_ID", "tenant-id")
+	t.Setenv("AZURE_CLIENT_ID", "client-id")
+	t.Setenv("AZURE_CLIENT_SECRET", "private-value")
+	t.Setenv("AZURE_FEDERATED_TOKEN_FILE", "")
+	client := NewAzureOpenAI(server.URL, "", false, "", "entra")
+	transport := client.client.Transport.(azureOpenAITransport)
+	transport.tokenSource.authorityBaseURL = server.URL
+	if _, err := client.ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "deployment", Messages: []openai.Message{{Role: "user", Content: "hello"}}}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestAzureOpenAIResourceRootUsesV1AndAPIKey(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/openai/v1/chat/completions" || r.URL.RawQuery != "" {

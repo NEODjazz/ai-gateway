@@ -1,4 +1,5 @@
 {{- $adminSSO := default (dict) .Values.gateway.adminUI.sso -}}
+{{- $azureIdentity := default (dict) .Values.gateway.azureIdentity -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -83,6 +84,17 @@ spec:
               value: {{ .Values.gateway.apiDocs.enabled | quote }}
             - name: API_DOCS_TRY_IT_OUT_ENABLED
               value: {{ .Values.gateway.apiDocs.tryItOutEnabled | quote }}
+            {{- if or $azureIdentity.tenantId $azureIdentity.clientId $azureIdentity.clientSecretSecretName }}
+            - name: AZURE_TENANT_ID
+              value: {{ required "gateway.azureIdentity.tenantId is required" $azureIdentity.tenantId | quote }}
+            - name: AZURE_CLIENT_ID
+              value: {{ required "gateway.azureIdentity.clientId is required" $azureIdentity.clientId | quote }}
+            - name: AZURE_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "gateway.azureIdentity.clientSecretSecretName is required" $azureIdentity.clientSecretSecretName | quote }}
+                  key: {{ default "AZURE_CLIENT_SECRET" $azureIdentity.clientSecretSecretKey | quote }}
+            {{- end }}
             - name: PROVIDER_TYPE
               valueFrom:
                 configMapKeyRef:

@@ -14,6 +14,12 @@ devMode:
 
 gateway:
   replicaCount: 1
+  azureIdentity:
+    tenantId: ""
+    clientId: ""
+    # Reference an existing Secret; never put the client secret in chart values.
+    clientSecretSecretName: ""
+    clientSecretSecretKey: AZURE_CLIENT_SECRET
   # Resolve external provider names before cluster search suffixes. This also
   # avoids corporate DNS suffix timeouts for multi-label public hostnames.
   dnsConfig:

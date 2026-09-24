@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -57,6 +58,103 @@ func TestAzureTokenSourceUsesAndCachesFederatedWorkloadIdentity(t *testing.T) {
 	}
 	if calls.Load() != 1 {
 		t.Fatalf("token calls=%d", calls.Load())
+	}
+}
+
+func TestAzureClientSecretUsesSelectedAudienceAndCachesToken(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		if r.Method != http.MethodPost || r.URL.Path != "/tenant-id/oauth2/v2.0/token" || r.Header.Get("Content-Type") != "application/x-www-form-urlencoded" {
+			t.Errorf("unexpected token request: %s %s", r.Method, r.URL.Path)
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Error(err)
+		}
+		for field, want := range map[string]string{
+			"client_id": "client-id", "client_secret": "s+e&c=r%et",
+			"scope": azureGovernmentFoundryResource + ".default", "grant_type": "client_credentials",
+		} {
+			if got := r.Form.Get(field); got != want {
+				t.Errorf("%s=%q, want %q", field, got, want)
+			}
+		}
+		if r.Form.Get("client_assertion") != "" {
+			t.Error("client assertion sent with client secret")
+		}
+		_, _ = fmt.Fprint(w, `{"access_token":"service-principal-token","expires_in":3600,"token_type":"Bearer"}`)
+	}))
+	t.Cleanup(server.Close)
+	source := newAzureTokenSourceWithPolicy("", "https://proxy.example.test/api/projects/project-a", "usgov", "foundry")
+	if source.authorityBaseURL != azureGovernmentAuthority {
+		t.Fatalf("authority=%q", source.authorityBaseURL)
+	}
+	source.authorityBaseURL = server.URL
+	source.getenv = awsTestEnvironment(map[string]string{
+		"AZURE_TENANT_ID": "tenant-id", "AZURE_CLIENT_ID": "client-id", "AZURE_CLIENT_SECRET": "s+e&c=r%et",
+	})
+	for range 2 {
+		if token, err := source.Token(t.Context()); err != nil || token != "service-principal-token" {
+			t.Fatalf("token=%q err=%v", token, err)
+		}
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("token requests=%d", calls.Load())
+	}
+}
+
+func TestAzureClientSecretRejectsInvalidConfiguration(t *testing.T) {
+	for name, values := range map[string]map[string]string{
+		"missing tenant":       {"AZURE_CLIENT_ID": "client-id", "AZURE_CLIENT_SECRET": "private-token-value"},
+		"missing client":       {"AZURE_TENANT_ID": "tenant-id", "AZURE_CLIENT_SECRET": "private-token-value"},
+		"ambiguous credential": {"AZURE_TENANT_ID": "tenant-id", "AZURE_CLIENT_ID": "client-id", "AZURE_CLIENT_SECRET": "private-token-value", "AZURE_FEDERATED_TOKEN_FILE": "/tmp/token"},
+		"oversized secret":     {"AZURE_TENANT_ID": "tenant-id", "AZURE_CLIENT_ID": "client-id", "AZURE_CLIENT_SECRET": strings.Repeat("s", 8<<10+1)},
+		"unsafe tenant":        {"AZURE_TENANT_ID": "../tenant", "AZURE_CLIENT_ID": "client-id", "AZURE_CLIENT_SECRET": "private-token-value"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			source := newAzureTokenSource("")
+			source.getenv = awsTestEnvironment(values)
+			if _, err := source.Token(t.Context()); err == nil || !strings.Contains(err.Error(), "Azure client secret") || strings.Contains(err.Error(), values["AZURE_CLIENT_SECRET"]) {
+				t.Fatalf("invalid client secret configuration error=%v", err)
+			}
+		})
+	}
+}
+
+func TestAzureClientSecretTokenErrorRedactsResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = fmt.Fprint(w, "secret-token-body")
+	}))
+	t.Cleanup(server.Close)
+	source := newAzureTokenSource("")
+	source.authorityBaseURL = server.URL
+	source.getenv = awsTestEnvironment(map[string]string{
+		"AZURE_TENANT_ID": "tenant-id", "AZURE_CLIENT_ID": "client-id", "AZURE_CLIENT_SECRET": "secret-token-body",
+	})
+	if _, err := source.Token(t.Context()); err == nil || strings.Contains(err.Error(), "secret-token-body") {
+		t.Fatalf("token error exposed credential: %v", err)
+	}
+}
+
+func TestAzureClientSecretDoesNotFollowRedirect(t *testing.T) {
+	var forwarded atomic.Bool
+	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { forwarded.Store(true) }))
+	t.Cleanup(target.Close)
+	authority := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusTemporaryRedirect)
+	}))
+	t.Cleanup(authority.Close)
+	source := newAzureTokenSource("")
+	source.authorityBaseURL = authority.URL
+	source.getenv = awsTestEnvironment(map[string]string{
+		"AZURE_TENANT_ID": "tenant-id", "AZURE_CLIENT_ID": "client-id", "AZURE_CLIENT_SECRET": "private-token-value",
+	})
+	if _, err := source.Token(t.Context()); err == nil {
+		t.Fatal("redirecting Entra authority was accepted")
+	}
+	if forwarded.Load() {
+		t.Fatal("client secret was forwarded to redirect target")
 	}
 }
 

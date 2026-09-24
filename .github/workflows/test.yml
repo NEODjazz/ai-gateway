@@ -209,6 +209,21 @@ jobs:
           grep -A1 'name: ASSISTANT_RUN_RETENTION_SECONDS' <<< "$rendered" | grep -q 'value: "2592000"'
           grep -A1 'name: A2A_TASK_TTL_SECONDS' <<< "$rendered" | grep -q 'value: "2592000"'
 
+      - name: Verify Azure service principal Secret reference
+        if: matrix.chart == 'ai-gateway'
+        shell: bash
+        run: |
+          default_rendered="$(helm template ai-gateway charts/ai-gateway --namespace ai-gateway)"
+          if grep -q 'name: AZURE_CLIENT_SECRET' <<< "$default_rendered"; then
+            echo "Azure client secret must be opt-in"
+            exit 1
+          fi
+          rendered="$(helm template ai-gateway charts/ai-gateway --namespace ai-gateway --set gateway.azureIdentity.tenantId=tenant-id --set gateway.azureIdentity.clientId=client-id --set gateway.azureIdentity.clientSecretSecretName=azure-sp)"
+          grep -A1 'name: AZURE_TENANT_ID' <<< "$rendered" | grep -q 'value: "tenant-id"'
+          grep -A1 'name: AZURE_CLIENT_ID' <<< "$rendered" | grep -q 'value: "client-id"'
+          grep -A5 'name: AZURE_CLIENT_SECRET' <<< "$rendered" | grep -q 'name: "azure-sp"'
+          grep -A5 'name: AZURE_CLIENT_SECRET' <<< "$rendered" | grep -q 'key: "AZURE_CLIENT_SECRET"'
+
       - name: Verify published image defaults
         shell: bash
         run: |

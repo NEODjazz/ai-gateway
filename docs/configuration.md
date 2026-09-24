@@ -138,10 +138,32 @@ Provider form загружает этот профиль и показывает
 
 Для `azure-openai` режим `auth_type=entra` использует статический bearer token
 из привязанного write-only credential. Без credential gateway сначала проверяет
-AKS workload identity через `AZURE_TENANT_ID`, `AZURE_CLIENT_ID` и абсолютный
+service principal через `AZURE_TENANT_ID`, `AZURE_CLIENT_ID` и
+`AZURE_CLIENT_SECRET`, затем AKS workload identity через первые два поля и абсолютный
 `AZURE_FEDERATED_TOKEN_FILE`, затем локальные `IDENTITY_ENDPOINT` и
-`IDENTITY_HEADER` App Service/Container Apps, затем Azure VM IMDS. Projected token
-обменивается на scope `https://cognitiveservices.azure.com/.default` через
+`IDENTITY_HEADER` App Service/Container Apps, затем Azure VM IMDS. Клиентский
+секрет и projected token обмениваются на короткоживущий access token; повторное получение
+выполняется до истечения срока. `AZURE_CLIENT_SECRET` и
+`AZURE_FEDERATED_TOKEN_FILE` нельзя задавать одновременно: неоднозначная или
+неполная конфигурация отклоняется без fallback на IMDS.
+В Helm chart service principal включается только явной ссылкой на существующий
+Kubernetes Secret; значение секрета не указывается в chart values:
+
+```yaml
+gateway:
+  azureIdentity:
+    tenantId: <tenant-id>
+    clientId: <client-id>
+    clientSecretSecretName: azure-service-principal
+    clientSecretSecretKey: AZURE_CLIENT_SECRET
+```
+
+Для этого способа provider должен иметь `auth_type=entra` без привязанного
+статического credential. Выбранный для endpoint cloud и `azure_audience`
+определяют token scope и authority.
+
+По умолчанию для Azure OpenAI resource endpoint в public cloud используется scope
+`https://cognitiveservices.azure.com/.default` через
 public-cloud Entra authority. Для endpoint с suffix `.openai.azure.us` или
 `.cognitiveservices.azure.us` gateway автоматически использует authority
 `https://login.microsoftonline.us` и resource
