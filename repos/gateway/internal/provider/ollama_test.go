@@ -23,6 +23,12 @@ func TestOllamaMapsMaxCompletionTokensToNumPredict(t *testing.T) {
 	}
 }
 
+func TestOllamaToolCallsPreserveLengthFinishReason(t *testing.T) {
+	if got := ollamaFinishReason("length", true); got != "length" {
+		t.Fatalf("truncated tool call finish reason = %q, want length", got)
+	}
+}
+
 func TestNormalizeOllamaBaseURL(t *testing.T) {
 	for _, test := range []struct{ input, want string }{
 		{input: "https://ollama.com", want: "https://ollama.com"},
@@ -548,6 +554,7 @@ func TestOllamaNormalizesToolArgumentsAndForwardsOptions(t *testing.T) {
 		t.Fatalf("reasoning disable was not forwarded: %#v", upstream.Think)
 	}
 	if len(response.Choices) != 1 || len(response.Choices[0].Message.ToolCalls) != 1 ||
+		response.Choices[0].FinishReason != "tool_calls" ||
 		response.Choices[0].Message.ToolCalls[0].Type != "function" ||
 		response.Choices[0].Message.ToolCalls[0].Function.Arguments != `{"city":"Moscow"}` {
 		t.Fatalf("Ollama tool arguments were not normalized: %+v", response)
@@ -578,7 +585,7 @@ func TestOllamaStreamsNativeToolCalls(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(response.Choices[0].Message.ToolCalls) != 1 || response.Choices[0].Message.ToolCalls[0].Type != "function" {
+	if len(response.Choices[0].Message.ToolCalls) != 1 || response.Choices[0].Message.ToolCalls[0].Type != "function" || response.Choices[0].FinishReason != "tool_calls" {
 		t.Fatalf("streamed tool call was not accumulated: %+v", response)
 	}
 	if upstream.Options.TopK == nil || *upstream.Options.TopK != 20 || upstream.Options.MinP == nil || *upstream.Options.MinP != 0.1 {
@@ -588,6 +595,7 @@ func TestOllamaStreamsNativeToolCalls(t *testing.T) {
 		t.Fatalf("streaming reasoning disable was not forwarded: %#v", upstream.Think)
 	}
 	if len(payloads) != 2 || !strings.Contains(payloads[0], `"type":"function"`) ||
+		!strings.Contains(payloads[1], `"finish_reason":"tool_calls"`) ||
 		!strings.Contains(payloads[0], `"arguments":"{\"city\":\"Moscow\"}"`) {
 		t.Fatalf("unexpected streamed tool payloads: %v", payloads)
 	}

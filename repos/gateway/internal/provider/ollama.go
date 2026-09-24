@@ -224,10 +224,7 @@ func (p Ollama) ChatCompletions(ctx context.Context, request openai.ChatCompleti
 	}
 	normalizeOllamaToolCalls(&message)
 
-	finishReason := ollamaResp.DoneReason
-	if finishReason == "" {
-		finishReason = "stop"
-	}
+	finishReason := ollamaFinishReason(ollamaResp.DoneReason, len(message.ToolCalls) > 0)
 	logprobs, logprobText, err := ollamaChoiceLogprobs(ollamaResp.Logprobs)
 	if err != nil || len(ollamaResp.Logprobs) > 0 && logprobText != openai.ContentText(message.Content) {
 		return openai.ChatCompletionResponse{}, errors.New("invalid Ollama chat logprobs")
@@ -439,10 +436,7 @@ func (p Ollama) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 			if err != nil {
 				return openai.ChatCompletionResponse{}, err
 			}
-			finishReason := chunk.DoneReason
-			if finishReason == "" {
-				finishReason = "stop"
-			}
+			finishReason := ollamaFinishReason(chunk.DoneReason, len(response.Choices[0].Message.ToolCalls) > 0)
 			response.Choices[0].FinishReason = finishReason
 			response.Usage = usage
 			if err := write(openAIChatCompletionChunkPayload(response.ID, response.Model, 0, "", "", &finishReason)); err != nil {
@@ -462,6 +456,16 @@ func ollamaChatUsage(promptTokens, completionTokens *int) (openai.Usage, error) 
 		PromptTokens: *promptTokens, CompletionTokens: *completionTokens,
 		TotalTokens: *promptTokens + *completionTokens,
 	}, nil
+}
+
+func ollamaFinishReason(reason string, hasToolCalls bool) string {
+	if hasToolCalls && (reason == "" || reason == "stop") {
+		return "tool_calls"
+	}
+	if reason == "" {
+		return "stop"
+	}
+	return reason
 }
 
 func decodeOllamaChatResponse(reader io.Reader, response *ollamaChatResponse) error {
