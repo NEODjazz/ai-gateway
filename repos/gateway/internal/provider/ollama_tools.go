@@ -61,12 +61,41 @@ func validOllamaToolSchema(value any, root bool) bool {
 	if !ok {
 		return false
 	}
+	if root && schema["type"] != "object" {
+		return false
+	}
 	for field, item := range schema {
 		switch field {
-		case "type", "items", "required":
+		case "type":
+			if !validOllamaToolType(item) {
+				return false
+			}
+		case "items":
+			if !validOllamaToolSchema(item, false) {
+				return false
+			}
+		case "required":
+			values, ok := item.([]any)
+			if !ok {
+				return false
+			}
+			for _, value := range values {
+				if name, ok := value.(string); !ok || name == "" {
+					return false
+				}
+			}
 		case "$defs":
 			if !root {
 				return false
+			}
+			definitions, ok := item.(map[string]any)
+			if !ok {
+				return false
+			}
+			for name, definition := range definitions {
+				if name == "" || !validOllamaToolSchema(definition, false) {
+					return false
+				}
 			}
 		case "properties":
 			properties, ok := item.(map[string]any)
@@ -82,7 +111,17 @@ func validOllamaToolSchema(value any, root bool) bool {
 			if root {
 				return false
 			}
-			if field == "anyOf" {
+			switch field {
+			case "description":
+				if _, ok := item.(string); !ok {
+					return false
+				}
+			case "enum":
+				values, ok := item.([]any)
+				if !ok || len(values) == 0 {
+					return false
+				}
+			case "anyOf":
 				variants, ok := item.([]any)
 				if !ok || len(variants) == 0 {
 					return false
@@ -96,6 +135,32 @@ func validOllamaToolSchema(value any, root bool) bool {
 		default:
 			return false
 		}
+	}
+	return true
+}
+
+func validOllamaToolType(value any) bool {
+	valid := func(value string) bool {
+		switch value {
+		case "array", "boolean", "integer", "null", "number", "object", "string":
+			return true
+		}
+		return false
+	}
+	if value, ok := value.(string); ok {
+		return valid(value)
+	}
+	values, ok := value.([]any)
+	if !ok || len(values) == 0 {
+		return false
+	}
+	seen := make(map[string]bool, len(values))
+	for _, value := range values {
+		name, ok := value.(string)
+		if !ok || !valid(name) || seen[name] {
+			return false
+		}
+		seen[name] = true
 	}
 	return true
 }

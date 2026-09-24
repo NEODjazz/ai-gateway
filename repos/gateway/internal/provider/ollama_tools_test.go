@@ -28,6 +28,14 @@ func TestOllamaRejectsUnsupportedChatToolSchemas(t *testing.T) {
 		{"nested const", ollamaTestTool(map[string]any{"type": "object", "properties": map[string]any{"kind": map[string]any{"type": "string", "const": "city"}}}), "tools.function.parameters"},
 		{"nested oneOf", ollamaTestTool(map[string]any{"type": "object", "properties": map[string]any{"kind": map[string]any{"oneOf": []any{map[string]any{"type": "string"}}}}}), "tools.function.parameters"},
 		{"root anyOf", ollamaTestTool(map[string]any{"anyOf": []any{map[string]any{"type": "object"}}}), "tools.function.parameters"},
+		{"missing root type", ollamaTestTool(map[string]any{"properties": map[string]any{}}), "tools.function.parameters"},
+		{"invalid root type", ollamaTestTool(map[string]any{"type": []any{"object"}}), "tools.function.parameters"},
+		{"invalid required", ollamaTestTool(map[string]any{"type": "object", "required": "city"}), "tools.function.parameters"},
+		{"invalid nested type", ollamaTestTool(map[string]any{"type": "object", "properties": map[string]any{"city": map[string]any{"type": 7}}}), "tools.function.parameters"},
+		{"invalid nested description", ollamaTestTool(map[string]any{"type": "object", "properties": map[string]any{"city": map[string]any{"description": false}}}), "tools.function.parameters"},
+		{"invalid nested enum", ollamaTestTool(map[string]any{"type": "object", "properties": map[string]any{"city": map[string]any{"enum": "Moscow"}}}), "tools.function.parameters"},
+		{"invalid items", ollamaTestTool(map[string]any{"type": "object", "properties": map[string]any{"cities": map[string]any{"type": "array", "items": "string"}}}), "tools.function.parameters"},
+		{"invalid definitions", ollamaTestTool(map[string]any{"type": "object", "$defs": "city"}), "tools.function.parameters"},
 		{"unknown tool type", openai.Tool{Type: "web_search", Function: openai.FunctionDefinition{Name: "search"}}, "tools"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -57,6 +65,7 @@ func TestOllamaAcceptsRepresentableChatToolSchema(t *testing.T) {
 			"description": "City name", "enum": []any{"Moscow", nil},
 		}},
 		"required": []any{"city"},
+		"$defs":    map[string]any{"unused": map[string]any{"type": "string"}},
 	})
 	if err := (Ollama{}).ValidateChatParameters(openai.ChatCompletionRequest{Tools: []openai.Tool{tool}}); err != nil {
 		t.Fatalf("representable tool schema was rejected: %v", err)
