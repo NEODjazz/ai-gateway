@@ -290,7 +290,7 @@ func parseDiscoveredModels(providerType string, payload []byte) ([]DiscoveredMod
 	ids := []string{}
 	if providerType == "ollama" {
 		var body struct {
-			Models []struct {
+			Models *[]struct {
 				Name  string `json:"name"`
 				Model string `json:"model"`
 			} `json:"models"`
@@ -298,7 +298,10 @@ func parseDiscoveredModels(providerType string, payload []byte) ([]DiscoveredMod
 		if err := json.Unmarshal(payload, &body); err != nil {
 			return nil, err
 		}
-		for _, item := range body.Models {
+		if body.Models == nil {
+			return nil, errors.New("Ollama discovery response omitted models")
+		}
+		for _, item := range *body.Models {
 			id := item.Name
 			if id == "" {
 				id = item.Model

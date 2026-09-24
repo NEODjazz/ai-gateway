@@ -133,6 +133,44 @@ func TestOllamaDiscoveryNormalizesAPIBaseURL(t *testing.T) {
 	}
 }
 
+func TestOllamaDiscoveryRequiresModelsField(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		payload string
+		wantErr bool
+	}{
+		{name: "missing", payload: `{}`, wantErr: true},
+		{name: "null", payload: `{"models":null}`, wantErr: true},
+		{name: "upstream error envelope", payload: `{"error":"temporarily unavailable"}`, wantErr: true},
+		{name: "empty list", payload: `{"models":[]}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			models, err := parseDiscoveredModels("ollama", []byte(test.payload))
+			if (err != nil) != test.wantErr || !test.wantErr && len(models) != 0 {
+				t.Fatalf("models=%v err=%v", models, err)
+			}
+		})
+	}
+}
+
+func TestOllamaProbeRejectsMalformedModelList(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/tags" {
+			t.Errorf("unexpected discovery path: %s", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"error":"temporarily unavailable"}`))
+	}))
+	t.Cleanup(server.Close)
+	router := New(Config{}).(*Router)
+	if _, err := router.CreateProvider(ManagedProvider{ID: "ollama", Type: "ollama", BaseURL: server.URL, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	probe, err := router.TestProvider(t.Context(), "ollama", "")
+	if !errors.Is(err, ErrProviderProbeFailed) || probe.Status != "unavailable" {
+		t.Fatalf("probe=%+v err=%v", probe, err)
+	}
+}
+
 func TestOllamaLocalRequestsDoNotSendAuthorization(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Authorization"); got != "" {
