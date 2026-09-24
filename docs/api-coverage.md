@@ -85,6 +85,9 @@ WebSocket authentication. Foundry project URLs do not expose the resource-level
 Realtime route and are rejected for this capability.
 Realtime preserves a configured reverse-proxy prefix before `/openai/` for both
 GA and preview Azure resource routes.
+Foundry project discovery requests only model deployments on every page, skips
+other returned deployment types, and keeps its credential and same-project
+continuation checks for API-key and Entra authentication.
 
 Ollama model discovery reads `/api/tags` and inspects up to 128 listed models
 through `/api/show` within a 10-second metadata budget. Verified completion,

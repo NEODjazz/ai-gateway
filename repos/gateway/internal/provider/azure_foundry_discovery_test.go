@@ -24,7 +24,7 @@ func TestAzureFoundryProjectDiscoveryUsesExplicitGovernmentIdentity(t *testing.T
 	t.Setenv("IDENTITY_ENDPOINT", identity.URL)
 	t.Setenv("IDENTITY_HEADER", "test-header")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/projects/project-a/deployments" || r.URL.Query().Get("api-version") != "v1" || r.Header.Get("Authorization") != "Bearer government-project-token" {
+		if r.URL.Path != "/api/projects/project-a/deployments" || r.URL.Query().Get("api-version") != "v1" || r.URL.Query().Get("deploymentType") != "ModelDeployment" || r.Header.Get("Authorization") != "Bearer government-project-token" {
 			t.Errorf("government discovery request: %s headers=%v", r.URL.String(), r.Header)
 			http.Error(w, "invalid discovery request", http.StatusBadRequest)
 			return
@@ -76,7 +76,7 @@ func TestAzureFoundryProjectDiscoveryPaginatesDeployments(t *testing.T) {
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
-		if r.URL.Path != "/api/projects/project-a/deployments" || r.URL.Query().Get("api-version") != "v1" || r.Header.Get("Authorization") != "Bearer foundry-token" || r.Header.Get("api-key") != "" {
+		if r.URL.Path != "/api/projects/project-a/deployments" || r.URL.Query().Get("api-version") != "v1" || r.URL.Query().Get("deploymentType") != "ModelDeployment" || r.Header.Get("Authorization") != "Bearer foundry-token" || r.Header.Get("api-key") != "" {
 			t.Errorf("unexpected discovery request: %s headers=%v", r.URL.String(), r.Header)
 			http.Error(w, "invalid request", http.StatusBadRequest)
 			return
@@ -84,8 +84,11 @@ func TestAzureFoundryProjectDiscoveryPaginatesDeployments(t *testing.T) {
 		switch r.URL.Query().Get("page") {
 		case "":
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"value":    []any{map[string]any{"name": "z-model", "type": "ModelDeployment"}},
-				"nextLink": "?page=2",
+				"value": []any{
+					map[string]any{"name": "z-model", "type": "ModelDeployment"},
+					map[string]any{"name": "non-model", "type": "ServerlessEndpoint"},
+				},
+				"nextLink": "?page=2&deploymentType=ServerlessEndpoint",
 			})
 		case "2":
 			_ = json.NewEncoder(w).Encode(map[string]any{
@@ -106,6 +109,29 @@ func TestAzureFoundryProjectDiscoveryPaginatesDeployments(t *testing.T) {
 	models, err := router.DiscoverProviderModels(t.Context(), "foundry", "foundry-token")
 	if err != nil || len(models) != 2 || models[0].ID != "a-model" || models[1].ID != "z-model" || calls.Load() != 2 {
 		t.Fatalf("models=%+v calls=%d err=%v", models, calls.Load(), err)
+	}
+}
+
+func TestAzureFoundryProjectDiscoveryFiltersWithAPIKey(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/projects/project-a/deployments" || r.URL.Query().Get("api-version") != "v1" || r.URL.Query().Get("deploymentType") != "ModelDeployment" || r.Header.Get("api-key") != "foundry-key" || r.Header.Get("Authorization") != "" {
+			t.Errorf("unexpected API-key discovery request: %s", r.URL)
+			http.Error(w, "invalid request", http.StatusBadRequest)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"value": []any{map[string]any{"name": "model-a", "type": "ModelDeployment"}}})
+	}))
+	t.Cleanup(server.Close)
+	router := New(Config{CredentialEncryptionKey: []byte("foundry-api-key-discovery-test")}).(*Router)
+	if _, err := router.CreateProvider(ManagedProvider{ID: "foundry", Type: "azure-openai", BaseURL: server.URL + "/api/projects/project-a", AuthType: "api_key", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := router.CreateCredential(CredentialInput{ID: "foundry-key", ProviderID: "foundry", Secret: "foundry-key"}); err != nil {
+		t.Fatal(err)
+	}
+	models, err := router.DiscoverProviderModels(t.Context(), "foundry", "foundry-key")
+	if err != nil || len(models) != 1 || models[0].ID != "model-a" {
+		t.Fatalf("models=%+v err=%v", models, err)
 	}
 }
 

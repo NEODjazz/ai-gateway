@@ -224,7 +224,7 @@ func discoverAzureFoundryProjectModels(ctx context.Context, managed ManagedProvi
 		return nil, ErrProviderProbeFailed
 	}
 	endpoint.Path = projectPath + "/deployments"
-	endpoint.RawQuery = "api-version=v1"
+	endpoint.RawQuery = "api-version=v1&deploymentType=ModelDeployment"
 	endpoint.Fragment = ""
 	client := newProviderHTTPClient(10 * time.Second)
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
@@ -271,8 +271,14 @@ func discoverAzureFoundryProjectModels(ctx context.Context, managed ManagedProvi
 			return nil, ErrProviderProbeFailed
 		}
 		for _, item := range *body.Value {
+			if item.Type == "" {
+				return nil, ErrProviderProbeFailed
+			}
+			if item.Type != "ModelDeployment" {
+				continue
+			}
 			name := strings.TrimSpace(item.Name)
-			if item.Type != "ModelDeployment" || name == "" || len(name) > 256 {
+			if name == "" || len(name) > 256 {
 				return nil, ErrProviderProbeFailed
 			}
 			if !seenModels[name] {
@@ -300,6 +306,7 @@ func discoverAzureFoundryProjectModels(ctx context.Context, managed ManagedProvi
 		}
 		query := next.Query()
 		query.Set("api-version", "v1")
+		query.Set("deploymentType", "ModelDeployment")
 		next.RawQuery = query.Encode()
 		endpoint = next
 	}
