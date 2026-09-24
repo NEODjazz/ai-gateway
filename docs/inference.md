@@ -502,6 +502,10 @@ selected model uses its own default. The managed capability profile lists this
 value alongside the explicit supported levels. The compatibility aliases
 `minimal` and `xhigh` map to native `think=low` and `think=max` respectively.
 
+For Azure Foundry project URLs under `/api/projects/{project}`, managed identity
+uses the Foundry audience even when the endpoint has a custom hostname. Known
+Azure Government hostnames select the corresponding sovereign audience.
+
 OpenAI-compatible adapter один раз повторяет запрос с
 `max_completion_tokens`, только когда upstream явно отверг legacy
 `max_tokens`. Unsupported non-default `temperature` не переписывается

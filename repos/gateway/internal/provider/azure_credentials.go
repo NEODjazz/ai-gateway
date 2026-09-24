@@ -81,6 +81,9 @@ func azureIdentityEndpoints(providerBaseURL ...string) (string, string) {
 			if strings.HasSuffix(host, ".openai.azure.cn") || strings.HasSuffix(host, ".cognitiveservices.azure.cn") {
 				return azureChinaAuthority, azureChinaResource
 			}
+			if _, project := azureFoundryProjectPath(parsed.Path); project {
+				return azureAuthorityURL, azureFoundryResource
+			}
 		}
 	}
 	return azureAuthorityURL, azureOpenAIResource

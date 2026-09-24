@@ -69,6 +69,8 @@ func TestAzureIdentityEndpointsSelectSupportedCloud(t *testing.T) {
 		{baseURL: "https://resource.openai.azure.com", authority: azureAuthorityURL, resource: azureOpenAIResource},
 		{baseURL: "https://resource.services.ai.azure.com/openai/v1", authority: azureAuthorityURL, resource: azureFoundryResource},
 		{baseURL: "https://resource.services.ai.azure.com/api/projects/project-a/openai/v1", authority: azureAuthorityURL, resource: azureFoundryResource},
+		{baseURL: "https://proxy.example.test/api/projects/project-a", authority: azureAuthorityURL, resource: azureFoundryResource},
+		{baseURL: "https://proxy.example.test/api/projects/project-a/openai/v1", authority: azureAuthorityURL, resource: azureFoundryResource},
 		{baseURL: "https://resource.openai.azure.us/openai/v1", authority: azureGovernmentAuthority, resource: azureGovernmentResource},
 		{baseURL: "https://resource.cognitiveservices.azure.us", authority: azureGovernmentAuthority, resource: azureGovernmentResource},
 		{baseURL: "https://resource.services.ai.azure.us/api/projects/project-a/openai/v1", authority: azureGovernmentAuthority, resource: azureGovernmentFoundryResource},
