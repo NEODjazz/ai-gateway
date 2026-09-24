@@ -2458,14 +2458,15 @@ Records are bounded to 4 KiB, use an explicit TTL and require a configured share
 SessionStore; absence, corrupt data and storage failures do not permit an upstream
 lookup. Backend error details are not returned to callers.
 
-Ownership persistence now requires atomic create-or-equal storage. Redis executes
-comparison and insertion in one Lua operation. An identical retry succeeds without
+Ownership persistence now requires atomic create-or-equal storage. PostgreSQL
+uses a conditional upsert when the control-plane database is configured; Redis
+uses a Lua operation otherwise. An identical retry succeeds without
 refreshing TTL; a different model/deployment binding for the same scoped response
 ID returns an ownership conflict and preserves the original record. The ownership
 store no longer accepts a backend providing only unconditional Set.
 
 Creation now persists this binding for an explicit `store=true` request. Such a
-request requires a configured Redis-backed ownership store and an authenticated
+request requires a configured shared ownership store and an authenticated
 gateway credential before provider execution. It bypasses exact response caching
 and shadow mirroring so a stored resource cannot be substituted or duplicated.
 After a successful provider call, post-response accounting completes before the
@@ -2512,8 +2513,8 @@ objects so newly introduced provider fields are not silently discarded. Listing
 does not open a generation billing lifecycle.
 
 `DELETE /v1/responses/{id}` removes the upstream resource before deleting its
-ownership binding. Redis compare-and-delete prevents a stale cleanup from removing
-a different immutable record. If Redis cleanup fails after upstream success, the
+ownership binding. Atomic compare-and-delete prevents a stale cleanup from removing
+a different immutable record. If storage cleanup fails after upstream success, the
 gateway returns `503 response_ownership_unavailable` and retains the binding; a
 retry treats upstream 404 as the desired deleted state and retries atomic cleanup.
 Once cleanup succeeds, later requests return `404 response_not_found` without an

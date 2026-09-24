@@ -116,6 +116,7 @@ gateway:
   routing:
     strategy: weighted
     adaptiveEwmaAlpha: "0.2"
+    # With controlPlane.postgresDsn, Responses affinity and ownership use PostgreSQL.
     responsesAffinityTtlSeconds: 3600
     responsesOwnershipTtlSeconds: 2592000
   controlPlane:

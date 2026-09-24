@@ -275,8 +275,10 @@ half-open probe lease. Успех закрывает circuit, а ошибка pr
 новый `cooldown_seconds`. При ошибке Redis router использует локальный tracker,
 но readiness остается неуспешным до восстановления Redis.
 Responses `previous_response_id` закрепляется за создавшим его endpoint в
-tenant-scoped affinity store. С Redis это общий state для всех replicas, без
-Redis — локальный memory fallback. Provider-scoped response ID не отправляется
+tenant-scoped affinity store. При настроенном PostgreSQL affinity и ownership
+хранятся в общей для replicas таблице с TTL и не зависят от Redis. Без PostgreSQL
+используется Redis, а без обоих хранилищ — локальный memory fallback для affinity.
+Provider-scoped response ID не отправляется
 другому endpoint при failover.
 
 Semantic cache выключен по умолчанию. Для допустимого text-only chat запроса он
