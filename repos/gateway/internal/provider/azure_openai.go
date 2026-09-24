@@ -43,7 +43,9 @@ func (t azureOpenAITransport) RoundTrip(request *http.Request) (*http.Response, 
 			return nil, err
 		}
 		cloned.Header.Set("Authorization", "Bearer "+token)
-	} else if t.credential != "" {
+	} else if strings.TrimSpace(t.credential) == "" {
+		return nil, errors.New("Azure OpenAI API key is required")
+	} else {
 		cloned.Header.Set("api-key", t.credential)
 	}
 	base := t.base

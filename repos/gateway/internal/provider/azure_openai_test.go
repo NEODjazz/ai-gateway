@@ -156,6 +156,48 @@ func TestAzureOpenAIRealtimeFailsClosedWithoutAPIKey(t *testing.T) {
 	}
 }
 
+func TestAzureOpenAIHTTPFailsClosedWithoutAPIKey(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+	client := NewAzureOpenAI(server.URL, " ", false, "", "api_key")
+	if _, err := client.ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "deployment", Messages: []openai.Message{{Role: "user", Content: "hello"}}}); err == nil {
+		t.Fatal("Azure Chat sent without an API key")
+	}
+	if _, err := client.Responses(t.Context(), openai.ResponseRequest{Model: "deployment", Input: "hello"}); err == nil {
+		t.Fatal("Azure Responses sent without an API key")
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("unauthenticated requests reached upstream: %d", calls.Load())
+	}
+}
+
+func TestAzureDiscoveryFailsClosedWithoutAPIKey(t *testing.T) {
+	for _, path := range []string{"", "/api/projects/project-a"} {
+		t.Run(path, func(t *testing.T) {
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				w.WriteHeader(http.StatusOK)
+			}))
+			t.Cleanup(server.Close)
+			router := New(Config{CredentialEncryptionKey: []byte("azure-discovery-key-test")}).(*Router)
+			if _, err := router.CreateProvider(ManagedProvider{ID: "azure", Type: "azure-openai", BaseURL: server.URL + path, AuthType: "api_key", Enabled: true}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := router.DiscoverProviderModels(t.Context(), "azure", ""); !errors.Is(err, ErrProviderProbeFailed) {
+				t.Fatalf("missing API key accepted by discovery: %v", err)
+			}
+			if calls.Load() != 0 {
+				t.Fatalf("unauthenticated discovery reached upstream: %d", calls.Load())
+			}
+		})
+	}
+}
+
 func TestAzureOpenAIRealtimeUsesAmbientManagedIdentity(t *testing.T) {
 	serverErr := make(chan error, 1)
 	mux := http.NewServeMux()

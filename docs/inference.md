@@ -2478,6 +2478,11 @@ Once cleanup succeeds, later requests return `404 response_not_found` without an
 upstream call. Deletion does not open a generation billing lifecycle.
 Provider type `azure-openai` добавляет `/openai/v1` к resource-root URL при пустом `api_version`. При датированной `api_version` resource-root URL преобразуется в `/openai/deployments/{upstream_model}` как для стартового конфига, так и для managed deployments. Стартовый конфиг может связать несколько публичных имён с одним upstream deployment через `model_aliases`; неоднозначное соответствие отклоняется. Явно настроенный deployment path сохраняется. Датированные Responses operations используют resource-level `/openai/responses`. Версия передается один раз как query parameter `api-version` во всех versioned HTTP operations. Realtime независимо строит native GA или preview WebSocket URL и не смешивает параметры этих контрактов. `auth_type=api_key` использует header `api-key`; `auth_type=entra` использует статический bearer token из write-only credential vault либо, при отсутствии credential, AKS projected-token federation, App Service/Container Apps managed identity или VM IMDS. Provider endpoints с официальным Azure US Government suffix автоматически используют `login.microsoftonline.us` и `cognitiveservices.azure.us`; Azure China suffix выбирает `login.chinacloudapi.cn` и `cognitiveservices.azure.cn`. Остальные endpoints используют public-cloud authority и audience. Временные tokens обновляются до истечения срока, параллельные refresh объединяются. Redirects запрещены, чтобы credential не мог перейти на другой origin. Discovery использует тот же authentication contract; для versioned deployment path оно выполняется через resource-level `/openai/models`.
 
+В режиме `auth_type=api_key` пустой или состоящий из пробелов credential
+отклоняется до HTTP inference и model discovery для Azure OpenAI и Foundry.
+В режиме `auth_type=entra` отсутствие статического токена по-прежнему включает
+настроенную workload identity.
+
 Для Foundry project endpoint `/api/projects/{project}` inference использует
 `/openai/v1`, а discovery читает project deployments через
 `/api/projects/{project}/deployments?api-version=v1`. Пагинация ограничена;

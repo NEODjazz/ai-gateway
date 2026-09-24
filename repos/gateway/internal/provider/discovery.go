@@ -63,6 +63,9 @@ func (r *Router) DiscoverProviderModels(ctx context.Context, providerID, credent
 	if err != nil {
 		return nil, err
 	}
+	if managed.Type == "azure-openai" && normalizeAzureAuthType(managed.AuthType) == "api_key" && strings.TrimSpace(secret) == "" {
+		return nil, ErrProviderProbeFailed
+	}
 	if managed.Type == "azure-openai" {
 		if parsed, parseErr := url.Parse(managed.BaseURL); parseErr == nil {
 			if projectPath, project := azureFoundryProjectPath(parsed.Path); project {
