@@ -1432,6 +1432,10 @@ func decodeResponseStream(body io.Reader, fallbackModel string) (openai.Response
 }
 
 func streamResponseData(body io.Reader, fallbackModel string, write ResponseStreamWriter) (openai.ResponseResponse, error) {
+	return streamResponseDataValidated(body, fallbackModel, write, nil)
+}
+
+func streamResponseDataValidated(body io.Reader, fallbackModel string, write ResponseStreamWriter, validate func(openai.ResponseResponse) error) (openai.ResponseResponse, error) {
 	response := openai.ResponseResponse{
 		Object: "response",
 		Model:  fallbackModel,
@@ -1826,6 +1830,11 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 			}
 			response.Status = status
 			terminal = true
+		}
+		if validate != nil {
+			if err := validate(response); err != nil {
+				return err
+			}
 		}
 		if write != nil {
 			if err := write(event, payload); err != nil {

@@ -788,6 +788,25 @@ func ollamaResponseTools(request openai.ResponseRequest) []openai.ResponseTool {
 	return request.Tools
 }
 
+func validateOllamaResponseOutputTools(response openai.ResponseResponse, tools []openai.ResponseTool) error {
+	for _, item := range response.Output {
+		if item.Type != "function_call" && item.Type != "custom_tool_call" {
+			continue
+		}
+		declared := false
+		for _, tool := range tools {
+			if item.Name == tool.Name && (item.Type == "function_call" && tool.Type == "function" || item.Type == "custom_tool_call" && tool.Type == "custom") {
+				declared = true
+				break
+			}
+		}
+		if !declared {
+			return errors.New("invalid Ollama response tool call")
+		}
+	}
+	return nil
+}
+
 func (p Ollama) Responses(ctx context.Context, request openai.ResponseRequest) (openai.ResponseResponse, error) {
 	if err := p.ValidateResponseParameters(request); err != nil {
 		return openai.ResponseResponse{}, err
@@ -826,6 +845,9 @@ func (p Ollama) Responses(ctx context.Context, request openai.ResponseRequest) (
 
 	response, err := decodeResponseJSON(resp.Body)
 	if err != nil {
+		return openai.ResponseResponse{}, err
+	}
+	if err := validateOllamaResponseOutputTools(response, ollamaResponseTools(request)); err != nil {
 		return openai.ResponseResponse{}, err
 	}
 	if err := validateExactResponseUsage(response, "Ollama"); err != nil {
@@ -874,7 +896,7 @@ func (p Ollama) StreamResponses(ctx context.Context, request openai.ResponseRequ
 		return openai.ResponseResponse{}, responseStatusError("ollama", resp)
 	}
 
-	response, err := streamResponseData(resp.Body, request.Model, func(event, payload string) error {
+	response, err := streamResponseDataValidated(resp.Body, request.Model, func(event, payload string) error {
 		if event == "response.completed" || event == "response.incomplete" {
 			if err := validateExactResponseTerminalUsage(payload, "Ollama"); err != nil {
 				return err
@@ -884,6 +906,8 @@ func (p Ollama) StreamResponses(ctx context.Context, request openai.ResponseRequ
 			return write(event, payload)
 		}
 		return nil
+	}, func(response openai.ResponseResponse) error {
+		return validateOllamaResponseOutputTools(response, ollamaResponseTools(request))
 	})
 	if err != nil {
 		return openai.ResponseResponse{}, err
