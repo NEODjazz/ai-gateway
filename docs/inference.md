@@ -484,7 +484,7 @@ signature. Лимиты: 8 изображений, 8 MiB каждое, 16 MiB de
 | `openai`, `openai-compatible`, `openrouter` | OpenAI wire format, including bounded compatible `reasoning_content` passthrough |
 | `azure-openai` | Native Azure OpenAI HTTP and Realtime WebSocket URLs, API version, API key, static Entra token, public/US Government/China cloud identity selection, AKS workload federation or refreshable ambient managed identity |
 | `anthropic` | Преобразование chat/tools/vision в native Messages API |
-| `ollama` | Native chat/stream/embeddings и provider completions JSON/SSE для строкового prompt; native `top_k`, `min_p`, log probabilities и reasoning history/output |
+| `ollama` | Native chat/stream/embeddings и provider completions JSON/SSE для строкового prompt; native `top_k`, `min_p`, log probabilities и reasoning history/output; optional bearer credential for remote inference |
 | `gemini` | Native GenerateContent chat/stream, tools, inline vision, structured output, text embeddings, audio transcription/translation and schema-constrained OCR; Interactions text-to-speech; API key or GCP workload identity |
 | `mistral` | Native Chat JSON/SSE and embeddings wire contract; FIM completions; Bearer API key |
 | `voyage` | Native text embeddings and rerank; Bearer API key |

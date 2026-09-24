@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"ai-gateway-gateway/internal/openai"
@@ -18,6 +19,87 @@ func TestOllamaMapsMaxCompletionTokensToNumPredict(t *testing.T) {
 	options := ollamaRequestOptions(openai.ChatCompletionRequest{MaxCompletionTokens: &limit})
 	if options.NumPredict == nil || *options.NumPredict != limit {
 		t.Fatalf("max_completion_tokens was not mapped: %+v", options)
+	}
+}
+
+func TestOllamaManagedCredentialAuthenticatesInference(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer cloud-token" {
+			t.Errorf("missing Ollama bearer credential on %s", r.URL.Path)
+			http.Error(w, "missing credential", http.StatusUnauthorized)
+			return
+		}
+		switch r.URL.Path {
+		case "/api/chat":
+			var upstream ollamaChatRequest
+			if err := json.NewDecoder(r.Body).Decode(&upstream); err != nil {
+				t.Error(err)
+				return
+			}
+			if upstream.Stream {
+				_, _ = w.Write([]byte("{\"model\":\"test-model\",\"message\":{\"role\":\"assistant\",\"content\":\"hello\"}}\n"))
+				_, _ = w.Write([]byte("{\"model\":\"test-model\",\"done\":true,\"prompt_eval_count\":2,\"eval_count\":1}\n"))
+				return
+			}
+			_, _ = w.Write([]byte(`{"model":"test-model","message":{"role":"assistant","content":"hello"},"done":true,"prompt_eval_count":2,"eval_count":1}`))
+		case "/api/embed":
+			_, _ = w.Write([]byte(`{"model":"test-model","embeddings":[[0.1,0.2]],"prompt_eval_count":2}`))
+		case "/v1/completions":
+			_, _ = w.Write([]byte(`{"id":"cmpl-ollama","object":"text_completion","created":7,"model":"test-model","choices":[{"index":0,"text":"done","finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	router := New(Config{CredentialEncryptionKey: []byte("ollama-cloud-test-key")}).(*Router)
+	endpoint, err := router.endpointForManagedDeploymentWithSecret(ModelDeployment{ID: "ollama-deployment", ProviderID: "ollama", Models: []string{"test-model"}, Capabilities: []string{"chat", "stream", "embeddings", "completions"}}, ManagedProvider{ID: "ollama", Type: "ollama", BaseURL: server.URL, Enabled: true}, "cloud-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, ok := endpoint.Provider.(Ollama)
+	if !ok {
+		t.Fatalf("unexpected Ollama client type: %T", endpoint.Provider)
+	}
+	if _, err := client.ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "test-model", Messages: []openai.Message{{Role: "user", Content: "hello"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.StreamChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "test-model", Stream: true, Messages: []openai.Message{{Role: "user", Content: "hello"}}}, func(string) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Embeddings(t.Context(), openai.EmbeddingRequest{Model: "test-model", Input: "hello"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Completions(t.Context(), openai.CompletionRequest{Model: "test-model", Prompt: "hello"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestOllamaLocalRequestsDoNotSendAuthorization(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "" {
+			t.Errorf("unexpected local authorization: %q", got)
+		}
+		_, _ = w.Write([]byte(`{"model":"test-model","message":{"role":"assistant","content":"hello"},"done":true}`))
+	}))
+	t.Cleanup(server.Close)
+	if _, err := NewOllama(server.URL, false).ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "test-model", Messages: []openai.Message{{Role: "user", Content: "hello"}}}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestOllamaBearerCredentialDoesNotFollowRedirect(t *testing.T) {
+	var forwarded atomic.Bool
+	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { forwarded.Store(true) }))
+	t.Cleanup(target.Close)
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusTemporaryRedirect)
+	}))
+	t.Cleanup(source.Close)
+	if _, err := newOllamaWithToken(source.URL, "cloud-token", false).ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "test-model", Messages: []openai.Message{{Role: "user", Content: "hello"}}}); err == nil {
+		t.Fatal("credential-bearing redirect was accepted")
+	}
+	if forwarded.Load() {
+		t.Fatal("credential reached redirect target")
 	}
 }
 

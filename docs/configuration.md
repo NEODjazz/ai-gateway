@@ -65,6 +65,9 @@ Route выбирает endpoint только при наличии capabilities,
 Provider API key в static config можно передать полем `api_key` или переменной
 `PROVIDER_API_KEY_<NORMALIZED_ENDPOINT_NAME>`. Managed credentials шифруются в
 control-plane snapshot и никогда не возвращаются read API.
+Для локального `ollama` credential не требуется. Удалённый Ollama endpoint
+получает настроенный `api_key` или managed credential в `Authorization: Bearer`
+для chat, streaming, embeddings и completions. Redirects не выполняются.
 
 ### Managed control plane
 

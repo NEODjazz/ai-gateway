@@ -20,6 +20,21 @@ type Ollama struct {
 	client         *http.Client
 }
 
+type ollamaBearerTransport struct {
+	base  http.RoundTripper
+	token string
+}
+
+func (t ollamaBearerTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	cloned := request.Clone(request.Context())
+	cloned.Header.Set("Authorization", "Bearer "+t.token)
+	base := t.base
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	return base.RoundTrip(cloned)
+}
+
 type ollamaChatRequest struct {
 	Model       string                 `json:"model"`
 	Messages    []ollamaRequestMessage `json:"messages"`
@@ -107,10 +122,18 @@ type ollamaEmbeddingResponse struct {
 }
 
 func NewOllama(baseURL string, upstreamStream bool) Ollama {
+	return newOllamaWithToken(baseURL, "", upstreamStream)
+}
+
+func newOllamaWithToken(baseURL, token string, upstreamStream bool) Ollama {
+	client := newProviderHTTPClient(180 * time.Second)
+	if token != "" {
+		client.Transport = ollamaBearerTransport{base: client.Transport, token: token}
+	}
 	return Ollama{
 		baseURL:        strings.TrimRight(baseURL, "/"),
 		upstreamStream: upstreamStream,
-		client:         newProviderHTTPClient(180 * time.Second),
+		client:         client,
 	}
 }
 

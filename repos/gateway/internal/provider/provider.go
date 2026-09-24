@@ -3837,7 +3837,7 @@ func (r Router) weightedOrder(candidates []Endpoint) []Endpoint {
 func providerFor(endpoint config.ProviderEndpointConfig) Client {
 	switch endpoint.Type {
 	case "ollama":
-		return NewOllama(endpoint.BaseURL, endpoint.Stream)
+		return newOllamaWithToken(endpoint.BaseURL, endpoint.APIKey, endpoint.Stream)
 	case "openai":
 		client := NewOpenAICompatibleWithRerankPath(endpoint.BaseURL, endpoint.APIKey, endpoint.Stream, endpoint.RerankPath)
 		client.errorProvider = "openai"
