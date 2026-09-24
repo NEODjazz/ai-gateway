@@ -666,6 +666,8 @@ endpoint игнорирует (включая `strict`), возвращают я
 не получает доступ к объявленным функциям в этом вызове.
 Для Responses gateway сверяет function calls в JSON и каждом SSE-событии с
 фактически отправленными tools до выдачи вызова клиенту.
+Function tools в Ollama Responses отклоняют `tools[].strict` и поля схемы,
+которые native adapter не может сохранить; проверка выполняется до HTTP-вызова.
 `tool_choice=auto` сохраняет объявленные tools и использует обычное поведение
 Ollama без дополнительного upstream-параметра.
 Для native Chat действует то же правило; `tool_choice=auto` передаёт объявленные

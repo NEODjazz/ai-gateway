@@ -29,6 +29,29 @@ func validateOllamaChatTools(tools []openai.Tool) error {
 	return nil
 }
 
+func validateOllamaResponseTools(tools []openai.ResponseTool) error {
+	for index, tool := range tools {
+		if tool.Type != "function" {
+			continue
+		}
+		if tool.Strict != nil {
+			return ollamaToolParameterError("tools.strict", fmt.Sprintf("tool %d has unsupported strict control", index))
+		}
+		if tool.Parameters == nil {
+			continue
+		}
+		encoded, err := json.Marshal(tool.Parameters)
+		if err != nil {
+			return ollamaToolParameterError("tools.parameters", "tool parameters must be JSON")
+		}
+		var schema any
+		if json.Unmarshal(encoded, &schema) != nil || !validOllamaToolSchema(schema, true) {
+			return ollamaToolParameterError("tools.parameters", "tool parameters contain unsupported schema fields")
+		}
+	}
+	return nil
+}
+
 func ollamaToolParameterError(param, detail string) error {
 	return &Error{Class: FailureClientRequest, Provider: "ollama", StatusCode: http.StatusBadRequest, UpstreamCode: "unsupported_parameter", Param: param, Err: errors.New(detail)}
 }

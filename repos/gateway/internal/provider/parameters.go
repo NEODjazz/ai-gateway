@@ -138,6 +138,9 @@ func (Anthropic) ValidateResponseParameters(request openai.ResponseRequest) erro
 }
 
 func (Ollama) ValidateResponseParameters(request openai.ResponseRequest) error {
+	if err := validateOllamaResponseTools(request.Tools); err != nil {
+		return err
+	}
 	_, verbositySupplied := openai.ResponseTextVerbosity(request.Text)
 	contextSupplied, modeSupplied, summarySupplied, generateSummarySupplied := false, false, false, false
 	if request.Reasoning != nil {
