@@ -1,6 +1,8 @@
 package provider
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -326,6 +328,31 @@ func TestAzureTokenSourceUsesCachedTokenUntilExpiration(t *testing.T) {
 	}
 	if calls.Load() != 3 {
 		t.Fatalf("token calls=%d", calls.Load())
+	}
+}
+
+func TestAzureTokenSourceCanceledRefreshDoesNotRejectNextRequest(t *testing.T) {
+	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		_, _ = fmt.Fprintf(w, `{"access_token":"fresh-token","expires_on":%d,"token_type":"Bearer"}`, now.Add(time.Hour).Unix())
+	}))
+	t.Cleanup(server.Close)
+	source := newAzureTokenSource("")
+	source.now = func() time.Time { return now }
+	source.getenv = awsTestEnvironment(nil)
+	source.imdsURL = server.URL
+	canceled, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := source.Token(canceled); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled refresh error=%v", err)
+	}
+	if token, err := source.Token(t.Context()); err != nil || token != "fresh-token" {
+		t.Fatalf("independent request token=%q err=%v", token, err)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("successful token requests=%d, want 1", calls.Load())
 	}
 }
 

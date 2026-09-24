@@ -128,6 +128,8 @@ func (s *azureTokenSource) Token(ctx context.Context) (string, error) {
 			s.token, s.expiresAt = token, expiration
 			s.refreshAt = azureTokenRefreshAt(now, expiration)
 			s.lastErr, s.retryAt = nil, time.Time{}
+		} else if ctx.Err() != nil {
+			s.lastErr, s.retryAt = nil, time.Time{}
 		} else {
 			s.lastErr, s.retryAt = err, now.Add(time.Second)
 			if s.token != "" && now.Before(s.expiresAt) {
