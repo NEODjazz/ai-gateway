@@ -526,6 +526,9 @@ func (r *Router) endpointForManagedDeploymentWithSecret(deployment ModelDeployme
 }
 
 func supportsManagedAdapterCapability(endpoint Endpoint, capability string) bool {
+	if capability == "web_search" && endpoint.Type == "azure-openai" && hasCapability(endpoint.Capabilities, "responses") {
+		return endpoint.supportsCapabilities("responses", "web_search")
+	}
 	if !endpoint.supportsCapabilities(capability) {
 		return false
 	}

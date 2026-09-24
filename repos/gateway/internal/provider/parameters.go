@@ -550,6 +550,7 @@ func (p OpenAICompatible) ValidateChatParameters(request openai.ChatCompletionRe
 		return &Error{Class: FailureClientRequest, Provider: providerName, StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: fmt.Errorf("%s", message)}
 	}
 	return rejectParameters(providerName,
+		parameterCheck{"web_search_options", request.WebSearchOptions != nil && !p.SupportsWebSearch()},
 		parameterCheck{"store", request.Store != nil && *request.Store},
 		parameterCheck{"clear_thinking", request.ClearThinking != nil && providerName != "cerebras"},
 		parameterCheck{"citation_options", request.CitationOptions != "" && providerName != "groq"},
@@ -635,6 +636,13 @@ func (p OpenAICompatible) ValidateResponseParameters(request openai.ResponseRequ
 		return &Error{Class: FailureClientRequest, Provider: p.providerName(), StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: fmt.Errorf("%s", message)}
 	}
 	providerName := p.providerName()
+	if !p.SupportsResponseWebSearch() {
+		for _, tool := range request.Tools {
+			if openai.IsResponseWebSearchTool(tool.Type) {
+				return rejectParameters(providerName, parameterCheck{"tools", true})
+			}
+		}
+	}
 	return rejectParameters(providerName, parameterCheck{"service_tier", !supportedCompatibleServiceTier(providerName, request.ServiceTier)})
 }
 

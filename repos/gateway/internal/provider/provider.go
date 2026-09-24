@@ -3578,6 +3578,12 @@ func (e Endpoint) supportsCapabilities(required ...string) bool {
 		if client, ok := e.Provider.(interface{ SupportsChat() bool }); ok && !client.SupportsChat() {
 			return false
 		}
+		if e.Type == "azure-openai" && hasCapability(required, "web_search") {
+			client, ok := e.Provider.(interface{ SupportsWebSearch() bool })
+			if !ok || !client.SupportsWebSearch() {
+				return false
+			}
+		}
 	}
 	if hasCapability(required, "responses") {
 		if client, ok := e.Provider.(interface{ SupportsResponses() bool }); ok && !client.SupportsResponses() {

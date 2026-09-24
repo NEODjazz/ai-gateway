@@ -558,13 +558,14 @@ func TestManagedProviderCapabilityProfilesExposeAllValidatedChatOptions(t *testi
 	compatible := []string{"metadata", "modalities", "audio", "moderation", "n", "safety_identifier", "prompt_cache_key", "prompt_cache_options", "prompt_cache_retention", "prediction", "user", "verbosity", "web_search_options", "web_fetch_options", "logprobs", "top_logprobs", "frequency_penalty", "presence_penalty", "min_p", "top_k", "top_a", "repetition_penalty", "logit_bias", "reasoning_effort"}
 	openRouter := []string{"metadata", "modalities", "audio", "n", "safety_identifier", "prompt_cache_key", "prompt_cache_options", "prompt_cache_retention", "prediction", "user", "verbosity", "web_search_options", "web_fetch_options", "logprobs", "top_logprobs", "frequency_penalty", "presence_penalty", "min_p", "top_k", "top_a", "repetition_penalty", "logit_bias", "reasoning_effort", "service_tier"}
 	compatibleTiered := append(append([]string(nil), compatible...), "service_tier")
+	azureCompatible := slices.DeleteFunc(slices.Clone(compatible), func(option string) bool { return option == "web_search_options" })
 	expected := map[string][]string{
 		"demo": {}, "voyage": {}, "opensandbox": {},
 		"ollama":            {"logprobs", "top_logprobs", "min_p", "top_k", "reasoning_effort"},
 		"openai":            compatibleTiered,
 		"openai-compatible": compatible,
 		"openrouter":        openRouter,
-		"azure-openai":      compatible,
+		"azure-openai":      azureCompatible,
 		"anthropic":         {"metadata", "web_search_options", "web_fetch_options", "top_k", "reasoning_effort", "service_tier"},
 		"gemini":            {"store", "modalities", "n", "web_search_options", "logprobs", "top_logprobs", "frequency_penalty", "presence_penalty", "top_k", "reasoning_effort", "service_tier"},
 		"cohere":            {"logprobs", "frequency_penalty", "presence_penalty", "top_k"},

@@ -503,6 +503,12 @@ signature. Лимиты: 8 изображений, 8 MiB каждое, 16 MiB de
 | `xai` | Chat/stream, Responses and Embeddings with bearer authentication, merged text/embedding model discovery, structured output, vision, web search, response compaction and owned retrieve/input-items/delete lifecycle; priority tier, bounded reasoning/logprobs, Responses execution controls, lifecycle, isolation, prompt-cache diagnostics, moderation results, compaction settings and deanonymized instruction metadata, effective generation settings and strict echoed tool configuration with response preservation, float/base64 vectors, exact embedding token usage and validated server-side tool item counters |
 | `demo` | Локальный deterministic fallback для разработки |
 
+Azure OpenAI resource endpoints не объявляют `web_search` для Chat или
+Responses. Foundry project endpoints допускают `web_search` только в Responses;
+`web_search_options` в Chat отклоняется до upstream-вызова. При настройке
+managed deployment capability `web_search` разрешён для Foundry project с
+`responses`, но Chat-запросы с веб-поиском не выбирают этот deployment.
+
 For native Ollama Chat, `reasoning_effort=default` leaves `think` unset so the
 selected model uses its own default. The managed capability profile lists this
 value alongside the explicit supported levels. The compatibility aliases

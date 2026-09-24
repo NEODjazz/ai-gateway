@@ -157,6 +157,15 @@ func azureRealtimeSupportedBaseURL(baseURL string) bool {
 	return !project
 }
 
+func azureFoundryProjectBaseURL(baseURL string) bool {
+	parsed, err := url.Parse(baseURL)
+	if err != nil {
+		return false
+	}
+	_, project := azureFoundryProjectPath(parsed.Path)
+	return project
+}
+
 func normalizeAzureOpenAIBaseURL(value string) string {
 	value = strings.TrimRight(strings.TrimSpace(value), "/")
 	parsed, err := url.Parse(value)

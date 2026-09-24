@@ -179,6 +179,133 @@ func TestAzureOpenAIHTTPFailsClosedWithoutAPIKey(t *testing.T) {
 	}
 }
 
+func TestAzureWebSearchCapabilitiesFollowEndpointContract(t *testing.T) {
+	for _, test := range []struct {
+		name, baseURL string
+		responses     bool
+	}{
+		{name: "resource root", baseURL: "https://resource.openai.azure.com"},
+		{name: "versioned deployment", baseURL: "https://resource.openai.azure.com/openai/deployments/model"},
+		{name: "Foundry project", baseURL: "https://resource.services.ai.azure.com/api/projects/project-a", responses: true},
+		{name: "prefixed Foundry project", baseURL: "https://proxy.example.test/tenant/api/projects/project-a/openai/v1", responses: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			client := NewAzureOpenAI(test.baseURL, "credential", false, "", "api_key")
+			endpoint := Endpoint{Type: "azure-openai", Provider: client, Capabilities: []string{"chat", "responses", "web_search"}}
+			if client.SupportsWebSearch() || endpoint.supportsCapabilities("chat", "web_search") {
+				t.Fatal("Azure Chat incorrectly advertised web search")
+			}
+			if client.SupportsResponseWebSearch() != test.responses || endpoint.supportsCapabilities("responses", "web_search") != test.responses {
+				t.Fatalf("Responses web search support does not match endpoint: client=%t endpoint=%t", client.SupportsResponseWebSearch(), endpoint.supportsCapabilities("responses", "web_search"))
+			}
+		})
+	}
+	compatible := NewOpenAICompatible("https://provider.example", "", false)
+	if !compatible.SupportsWebSearch() || !compatible.SupportsResponseWebSearch() {
+		t.Fatal("generic compatible adapter lost declared web search support")
+	}
+}
+
+func TestAzureUnsupportedWebSearchFailsBeforeUpstream(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		http.Error(w, "unexpected upstream call", http.StatusInternalServerError)
+	}))
+	t.Cleanup(server.Close)
+	for _, test := range []struct {
+		name, path string
+	}{
+		{name: "resource"},
+		{name: "Foundry project", path: "/api/projects/project-a"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			client := NewAzureOpenAI(server.URL+test.path, "credential", true, "", "api_key")
+			chat := openai.ChatCompletionRequest{Model: "m", Messages: []openai.Message{{Role: "user", Content: "news"}}, ChatGenerationOptions: openai.ChatGenerationOptions{WebSearchOptions: &openai.ChatWebSearchOptions{}}}
+			for _, run := range []func() error{
+				func() error { _, err := client.ChatCompletions(t.Context(), chat); return err },
+				func() error { _, err := client.StreamChatCompletions(t.Context(), chat, nil); return err },
+			} {
+				var failure *Error
+				if err := run(); !errors.As(err, &failure) || failure.Param != "web_search_options" {
+					t.Fatalf("unsupported Chat web search was accepted: %v", err)
+				}
+			}
+			if test.path == "" {
+				request := openai.ResponseRequest{Model: "m", Input: "news", Tools: []openai.ResponseTool{{Type: "web_search"}}}
+				for _, run := range []func() error{
+					func() error { _, err := client.Responses(t.Context(), request); return err },
+					func() error { _, err := client.StreamResponses(t.Context(), request, nil); return err },
+				} {
+					var failure *Error
+					if err := run(); !errors.As(err, &failure) || failure.Param != "tools" {
+						t.Fatalf("unsupported Responses web search was accepted: %v", err)
+					}
+				}
+			}
+		})
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("unsupported web search reached Azure %d times", calls.Load())
+	}
+}
+
+func TestAzureFoundryResponsesWebSearchUsesProjectAuthentication(t *testing.T) {
+	for _, authType := range []string{"api_key", "entra"} {
+		t.Run(authType, func(t *testing.T) {
+			wantAPIKey, wantBearer := "credential", ""
+			if authType == "entra" {
+				wantAPIKey, wantBearer = "", "Bearer credential"
+			}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/api/projects/project-a/openai/v1/responses" || r.Header.Get("api-key") != wantAPIKey || r.Header.Get("Authorization") != wantBearer {
+					t.Errorf("unexpected Foundry request path or authentication: %s", r.URL.Path)
+					http.Error(w, "invalid request", http.StatusBadRequest)
+					return
+				}
+				var request openai.ResponseRequest
+				if err := json.NewDecoder(r.Body).Decode(&request); err != nil || len(request.Tools) != 1 || request.Tools[0].Type != "web_search" {
+					t.Errorf("web search tool was not forwarded: %+v err=%v", request.Tools, err)
+				}
+				_, _ = fmt.Fprint(w, `{"id":"response-a","object":"response","status":"completed","model":"m","output":[{"id":"message-a","type":"message","role":"assistant","content":[{"type":"output_text","text":"answer"}]}],"usage":{"input_tokens":3,"output_tokens":1,"total_tokens":4}}`)
+			}))
+			t.Cleanup(server.Close)
+			client := NewAzureOpenAI(server.URL+"/api/projects/project-a", "credential", false, "", authType)
+			response, err := client.Responses(t.Context(), openai.ResponseRequest{Model: "m", Input: "news", Tools: []openai.ResponseTool{{Type: "web_search"}}})
+			if err != nil || response.Usage.TotalTokens != 4 {
+				t.Fatalf("Foundry Responses web search failed: response=%+v err=%v", response, err)
+			}
+		})
+	}
+}
+
+func TestManagedAzureWebSearchCapabilityIsResponsesOnly(t *testing.T) {
+	for _, test := range []struct {
+		name, baseURL string
+		capabilities  []string
+		accepted      bool
+	}{
+		{name: "resource Responses", baseURL: "https://resource.openai.azure.com", capabilities: []string{"responses", "web_search"}},
+		{name: "Foundry Chat", baseURL: "https://resource.services.ai.azure.com/api/projects/project-a", capabilities: []string{"chat", "web_search"}},
+		{name: "Foundry Responses", baseURL: "https://resource.services.ai.azure.com/api/projects/project-a", capabilities: []string{"responses", "web_search"}, accepted: true},
+		{name: "Foundry Chat and Responses", baseURL: "https://resource.services.ai.azure.com/api/projects/project-a", capabilities: []string{"chat", "responses", "web_search"}, accepted: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			router := New(Config{CredentialEncryptionKey: []byte("azure-web-search-test-key")}).(*Router)
+			if _, err := router.CreateProvider(ManagedProvider{ID: "azure", Type: "azure-openai", BaseURL: test.baseURL, AuthType: "api_key", Enabled: true}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := router.CreateCredential(CredentialInput{ID: "credential", ProviderID: "azure", Secret: "test-secret"}); err != nil {
+				t.Fatal(err)
+			}
+			_, err := router.CreateModelDeployment(ModelDeployment{ID: "deployment", ProviderID: "azure", CredentialID: "credential", Models: []string{"m"}, Capabilities: test.capabilities, Enabled: true})
+			if test.accepted && err != nil || !test.accepted && !errors.Is(err, ErrUnsupportedProviderCapability) {
+				t.Fatalf("deployment acceptance=%t err=%v", test.accepted, err)
+			}
+		})
+	}
+}
+
 func TestAzureOpenAIHTTPRejectsInvalidEntraTokenBeforeUpstream(t *testing.T) {
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
