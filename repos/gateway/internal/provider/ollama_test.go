@@ -995,6 +995,27 @@ func TestOllamaEmptyChatStreamEmitsAssistantRole(t *testing.T) {
 	}
 }
 
+func TestOllamaChatStreamRejectsChangedModel(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprintln(w, `{"model":"model-a","message":{"role":"assistant","content":"first"},"done":false}`)
+		_, _ = fmt.Fprintln(w, `{"model":"model-b","message":{"role":"assistant","content":"second"},"done":true,"done_reason":"stop","prompt_eval_count":2,"eval_count":2}`)
+	}))
+	t.Cleanup(server.Close)
+	var payloads []string
+	_, err := NewOllama(server.URL, true).StreamChatCompletions(t.Context(), openai.ChatCompletionRequest{
+		Model: "model-a", Stream: true, Messages: []openai.Message{{Role: "user", Content: "hello"}},
+	}, func(payload string) error {
+		payloads = append(payloads, payload)
+		return nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "model changed") {
+		t.Fatalf("changed upstream model was accepted: %v", err)
+	}
+	if len(payloads) != 1 || strings.Contains(payloads[0], "second") {
+		t.Fatalf("changed model content reached client: %v", payloads)
+	}
+}
+
 func TestOllamaNativeLogprobsRoundTrip(t *testing.T) {
 	for _, streaming := range []bool{false, true} {
 		t.Run(fmt.Sprintf("stream=%t", streaming), func(t *testing.T) {

@@ -373,6 +373,7 @@ func (p Ollama) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 
 	decoder := json.NewDecoder(&responseStreamReader{source: resp.Body, remaining: maxResponseStreamBytes})
 	sentRole := false
+	upstreamModel := ""
 	for {
 		var chunk ollamaChatResponse
 		if err := decoder.Decode(&chunk); err != nil {
@@ -390,6 +391,10 @@ func (p Ollama) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 			}
 		}
 		if chunk.Model != "" {
+			if upstreamModel != "" && chunk.Model != upstreamModel {
+				return openai.ChatCompletionResponse{}, errors.New("Ollama chat stream model changed")
+			}
+			upstreamModel = chunk.Model
 			response.Model = chunk.Model
 		}
 		if chunk.Message.Role != "" && chunk.Message.Role != "assistant" {

@@ -526,6 +526,8 @@ unmappable formats and `strict=false` fail before provider execution.
 Native Chat preserves `prompt_eval_cached_count` as cached input-token detail
 while `prompt_eval_count` remains the full input-token total for quota and
 billing. Negative cached counts or counts above the input total fail closed.
+Native Chat streaming rejects an upstream model change between chunks before
+forwarding content from the changed model to the client.
 Native Ollama Embeddings sends `truncate=false`; inputs that exceed the selected
 model's context window must fail upstream instead of producing an embedding for
 silently shortened text.
