@@ -9,6 +9,39 @@ function json(value: unknown, status = 200) {
 }
 
 describe("ModelOnboardingPage", () => {
+  it("shows Foundry model identity and requires explicit Azure capabilities", async () => {
+    const plans: Array<{ deployments: Array<{ capabilities: string[] }> }> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, options) => {
+      const path = String(input);
+      if (!options?.method && path === "/admin/v1/providers") return json({ data: [{ id: "foundry", type: "azure-openai", base_url: "https://example.services.ai.azure.com/api/projects/project-a", auth_type: "entra", enabled: true }] });
+      if (!options?.method && path === "/admin/v1/credentials") return json({ data: [] });
+      if (!options?.method && path === "/admin/v1/model-catalog") return json({ version: "v1", models: [] });
+      if (!options?.method && path === "/admin/v1/model-groups") return json({ data: [] });
+      if (!options?.method && path === "/admin/v1/provider-capabilities") return json({ data: [{ type: "azure-openai", capabilities: ["chat", "stream", "embeddings"] }] });
+      if (path.endsWith("/test")) return json({ status: "available", latency_ms: 1, model_count: 1 });
+      if (path.endsWith("/discover-models")) return json({ data: [{ id: "deploy-a", model_name: "text-embedding-3-large", model_publisher: "Microsoft" }] });
+      if (path === "/admin/v1/model-onboarding/plan") {
+        const body = JSON.parse(String(options?.body)) as { deployments: Array<{ capabilities: string[] }> };
+        plans.push(body);
+        return json({ revision: 1, catalog_version: "v1", deployments: body.deployments, model_groups: [], changes: [] });
+      }
+      return json({ error: { message: `Unexpected ${path}` } }, 500);
+    });
+    sessionStorage.setItem("ai-gateway.admin-token", "token");
+    render(<MemoryRouter><AuthProvider><ModelOnboardingPage /></AuthProvider></MemoryRouter>);
+    await screen.findByRole("option", { name: "foundry — azure-openai" });
+    await userEvent.click(screen.getByRole("button", { name: "Test & discover models" }));
+    expect(await screen.findByText("deploy-a — text-embedding-3-large (Microsoft)")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("checkbox"));
+    await userEvent.click(screen.getByRole("button", { name: "Review 1 model(s)" }));
+    await screen.findByText("Review onboarding plan");
+    expect(plans[0].deployments[0].capabilities).toEqual([]);
+    expect(screen.getByRole("button", { name: "Apply configuration" })).toBeDisabled();
+    await userEvent.click(screen.getByLabelText("Capabilities deploy-a"));
+    await userEvent.click(screen.getByRole("option", { name: /Embeddings/ }));
+    expect(screen.getByRole("button", { name: "Apply configuration" })).toBeEnabled();
+  });
+
   it("uses discovered Ollama capabilities and requires explicit selection when metadata is unavailable", async () => {
     const plans: Array<{ deployments: Array<{ upstream_model: string; capabilities: string[] }> }> = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, options) => {

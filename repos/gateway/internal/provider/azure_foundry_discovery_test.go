@@ -2,9 +2,11 @@ package provider
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -85,7 +87,7 @@ func TestAzureFoundryProjectDiscoveryPaginatesDeployments(t *testing.T) {
 		case "":
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"value": []any{
-					map[string]any{"name": "z-model", "type": "ModelDeployment"},
+					map[string]any{"name": "z-model", "type": "ModelDeployment", "modelName": "embedding-base", "modelPublisher": "contoso"},
 					map[string]any{"name": "non-model", "type": "ServerlessEndpoint"},
 				},
 				"nextLink": "?page=2&deploymentType=ServerlessEndpoint",
@@ -107,7 +109,7 @@ func TestAzureFoundryProjectDiscoveryPaginatesDeployments(t *testing.T) {
 		t.Fatal(err)
 	}
 	models, err := router.DiscoverProviderModels(t.Context(), "foundry", "foundry-token")
-	if err != nil || len(models) != 2 || models[0].ID != "a-model" || models[1].ID != "z-model" || calls.Load() != 2 {
+	if err != nil || len(models) != 2 || models[0].ID != "a-model" || models[1].ID != "z-model" || models[1].ModelName != "embedding-base" || models[1].Publisher != "contoso" || calls.Load() != 2 {
 		t.Fatalf("models=%+v calls=%d err=%v", models, calls.Load(), err)
 	}
 }
@@ -132,6 +134,28 @@ func TestAzureFoundryProjectDiscoveryFiltersWithAPIKey(t *testing.T) {
 	models, err := router.DiscoverProviderModels(t.Context(), "foundry", "foundry-key")
 	if err != nil || len(models) != 1 || models[0].ID != "model-a" {
 		t.Fatalf("models=%+v err=%v", models, err)
+	}
+}
+
+func TestAzureFoundryProjectDiscoveryRejectsOversizedModelIdentity(t *testing.T) {
+	for _, field := range []string{"modelName", "modelPublisher"} {
+		t.Run(field, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				item := map[string]any{"name": "model-a", "type": "ModelDeployment", field: strings.Repeat("x", 257)}
+				_ = json.NewEncoder(w).Encode(map[string]any{"value": []any{item}})
+			}))
+			t.Cleanup(server.Close)
+			router := New(Config{CredentialEncryptionKey: []byte("foundry-model-metadata-test")}).(*Router)
+			if _, err := router.CreateProvider(ManagedProvider{ID: "foundry", Type: "azure-openai", BaseURL: server.URL + "/api/projects/project-a", AuthType: "api_key", Enabled: true}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := router.CreateCredential(CredentialInput{ID: "foundry-key", ProviderID: "foundry", Secret: "foundry-key"}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := router.DiscoverProviderModels(t.Context(), "foundry", "foundry-key"); !errors.Is(err, ErrProviderProbeFailed) {
+				t.Fatalf("oversized %s was accepted: %v", field, err)
+			}
+		})
 	}
 }
 

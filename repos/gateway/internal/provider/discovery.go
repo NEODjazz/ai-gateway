@@ -24,6 +24,8 @@ type ProviderProbe struct {
 type DiscoveredModel struct {
 	ID           string   `json:"id"`
 	Capabilities []string `json:"capabilities,omitempty"`
+	ModelName    string   `json:"model_name,omitempty"`
+	Publisher    string   `json:"model_publisher,omitempty"`
 }
 
 type ProviderDiscoveryController interface {
@@ -262,8 +264,10 @@ func discoverAzureFoundryProjectModels(ctx context.Context, managed ManagedProvi
 		}
 		var body struct {
 			Value *[]struct {
-				Name string `json:"name"`
-				Type string `json:"type"`
+				Name           string `json:"name"`
+				Type           string `json:"type"`
+				ModelName      string `json:"modelName"`
+				ModelPublisher string `json:"modelPublisher"`
 			} `json:"value"`
 			NextLink string `json:"nextLink"`
 		}
@@ -278,11 +282,13 @@ func discoverAzureFoundryProjectModels(ctx context.Context, managed ManagedProvi
 				continue
 			}
 			name := strings.TrimSpace(item.Name)
-			if name == "" || len(name) > 256 {
+			modelName := strings.TrimSpace(item.ModelName)
+			publisher := strings.TrimSpace(item.ModelPublisher)
+			if name == "" || len(name) > 256 || len(modelName) > 256 || len(publisher) > 256 {
 				return nil, ErrProviderProbeFailed
 			}
 			if !seenModels[name] {
-				models = append(models, DiscoveredModel{ID: name})
+				models = append(models, DiscoveredModel{ID: name, ModelName: modelName, Publisher: publisher})
 				seenModels[name] = true
 			}
 		}

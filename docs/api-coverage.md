@@ -88,6 +88,10 @@ GA and preview Azure resource routes.
 Foundry project discovery requests only model deployments on every page, skips
 other returned deployment types, and keeps its credential and same-project
 continuation checks for API-key and Entra authentication.
+It exposes the deployment's upstream model name and publisher in onboarding.
+Azure discovery does not infer gateway operations from a deployment name or an
+unspecified provider capability object: the operator selects capabilities
+explicitly before applying the plan.
 For ambient Entra credentials, an upstream `401` invalidates only the token used
 by that request, so the next independent request refreshes it. The rejected
 inference request is not replayed; explicitly supplied bearer tokens remain
