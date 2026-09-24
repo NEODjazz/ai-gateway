@@ -8,6 +8,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -112,12 +113,26 @@ func TestOllamaManagedCredentialAuthenticatesInference(t *testing.T) {
 
 func TestOllamaDiscoveryNormalizesAPIBaseURL(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/tags" || r.Header.Get("Authorization") != "Bearer cloud-token" {
+		if r.Header.Get("Authorization") != "Bearer cloud-token" {
 			t.Errorf("unexpected Ollama discovery request: %s headers=%v", r.URL.String(), r.Header)
 			http.Error(w, "invalid request", http.StatusBadRequest)
 			return
 		}
-		_, _ = w.Write([]byte(`{"models":[{"name":"test-model"}]}`))
+		switch r.URL.Path {
+		case "/api/tags":
+			_, _ = w.Write([]byte(`{"models":[{"name":"test-model"}]}`))
+		case "/api/show":
+			var body struct {
+				Model string `json:"model"`
+			}
+			if r.Method != http.MethodPost || json.NewDecoder(r.Body).Decode(&body) != nil || body.Model != "test-model" {
+				t.Errorf("unexpected model detail request: %s", r.URL.String())
+			}
+			_, _ = w.Write([]byte(`{"capabilities":["completion","tools","vision"]}`))
+		default:
+			t.Errorf("unexpected discovery path: %s", r.URL.Path)
+			http.NotFound(w, r)
+		}
 	}))
 	t.Cleanup(server.Close)
 	router := New(Config{CredentialEncryptionKey: []byte("ollama-discovery-test-key")}).(*Router)
@@ -128,8 +143,92 @@ func TestOllamaDiscoveryNormalizesAPIBaseURL(t *testing.T) {
 		t.Fatal(err)
 	}
 	models, err := router.DiscoverProviderModels(t.Context(), "ollama", "ollama-token")
-	if err != nil || len(models) != 1 || models[0].ID != "test-model" {
+	if err != nil || len(models) != 1 || models[0].ID != "test-model" || !slices.Equal(models[0].Capabilities, []string{"chat", "completions", "responses", "stream", "tools", "vision"}) {
 		t.Fatalf("models=%+v err=%v", models, err)
+	}
+}
+
+func TestOllamaDiscoveryDoesNotAdvertiseUnknownCapabilities(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/tags":
+			_, _ = w.Write([]byte(`{"models":[{"name":"embedding-model"},{"name":"unknown-model"}]}`))
+		case "/api/show":
+			var body struct {
+				Model string `json:"model"`
+			}
+			if json.NewDecoder(r.Body).Decode(&body) != nil {
+				t.Error("invalid model detail request")
+			}
+			if body.Model == "embedding-model" {
+				_, _ = w.Write([]byte(`{"capabilities":["embedding","thinking"]}`))
+			} else {
+				http.Error(w, "unavailable", http.StatusServiceUnavailable)
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	router := New(Config{}).(*Router)
+	if _, err := router.CreateProvider(ManagedProvider{ID: "ollama", Type: "ollama", BaseURL: server.URL, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	models, err := router.DiscoverProviderModels(t.Context(), "ollama", "")
+	if err != nil || len(models) != 2 || !slices.Equal(models[0].Capabilities, []string{"embeddings"}) || len(models[1].Capabilities) != 0 {
+		t.Fatalf("models=%+v err=%v", models, err)
+	}
+}
+
+func TestOllamaProbeOnlyListsModels(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/tags" {
+			t.Errorf("probe requested model details: %s", r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`{"models":[{"name":"model"}]}`))
+	}))
+	t.Cleanup(server.Close)
+	router := New(Config{}).(*Router)
+	if _, err := router.CreateProvider(ManagedProvider{ID: "ollama", Type: "ollama", BaseURL: server.URL, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	probe, err := router.TestProvider(t.Context(), "ollama", "")
+	if err != nil || probe.Status != "available" || probe.ModelCount != 1 {
+		t.Fatalf("probe=%+v err=%v", probe, err)
+	}
+}
+
+func TestOllamaDiscoveryBoundsModelDetailRequests(t *testing.T) {
+	var detailRequests atomic.Int32
+	tags := struct {
+		Models []map[string]string `json:"models"`
+	}{Models: make([]map[string]string, 129)}
+	for index := range tags.Models {
+		tags.Models[index] = map[string]string{"name": fmt.Sprintf("model-%03d", index)}
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/tags":
+			if err := json.NewEncoder(w).Encode(tags); err != nil {
+				t.Error(err)
+			}
+		case "/api/show":
+			detailRequests.Add(1)
+			_, _ = w.Write([]byte(`{"capabilities":["completion"]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	router := New(Config{}).(*Router)
+	if _, err := router.CreateProvider(ManagedProvider{ID: "ollama", Type: "ollama", BaseURL: server.URL, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	models, err := router.DiscoverProviderModels(t.Context(), "ollama", "")
+	if err != nil || len(models) != 129 || detailRequests.Load() != 128 || len(models[128].Capabilities) != 0 {
+		t.Fatalf("models=%d detail requests=%d last capabilities=%v err=%v", len(models), detailRequests.Load(), models[128].Capabilities, err)
 	}
 }
 

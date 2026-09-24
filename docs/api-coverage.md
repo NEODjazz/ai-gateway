@@ -86,6 +86,14 @@ Realtime route and are rejected for this capability.
 Realtime preserves a configured reverse-proxy prefix before `/openai/` for both
 GA and preview Azure resource routes.
 
+Ollama model discovery reads `/api/tags` and inspects up to 128 listed models
+through `/api/show` within a 10-second metadata budget. Verified completion,
+embedding, tool and vision capabilities become onboarding suggestions. Failed or
+uninspected metadata produces no automatic capability selection; the operator
+must choose a capability before applying the plan. The connection probe only
+checks the model list, so unavailable detail metadata does not mark the provider
+offline.
+
 For Chat model parameter overrides, `supported_options` adds model-specific
 controls to the provider policy and `unsupported_options` removes controls the
 selected model rejects. Native xAI Chat rejects `logprobs` and `top_logprobs`

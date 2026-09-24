@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -21,7 +22,8 @@ type ProviderProbe struct {
 }
 
 type DiscoveredModel struct {
-	ID string `json:"id"`
+	ID           string   `json:"id"`
+	Capabilities []string `json:"capabilities,omitempty"`
 }
 
 type ProviderDiscoveryController interface {
@@ -33,7 +35,7 @@ var ErrProviderProbeFailed = errors.New("provider connection test failed")
 
 func (r *Router) TestProvider(ctx context.Context, providerID, credentialID string) (ProviderProbe, error) {
 	started := time.Now()
-	models, err := r.DiscoverProviderModels(ctx, providerID, credentialID)
+	models, err := r.discoverProviderModels(ctx, providerID, credentialID, false)
 	probe := ProviderProbe{ProviderID: strings.TrimSpace(providerID), Status: "available", LatencyMS: time.Since(started).Milliseconds(), ModelCount: len(models)}
 	if err != nil {
 		probe.Status = "unavailable"
@@ -43,6 +45,10 @@ func (r *Router) TestProvider(ctx context.Context, providerID, credentialID stri
 }
 
 func (r *Router) DiscoverProviderModels(ctx context.Context, providerID, credentialID string) ([]DiscoveredModel, error) {
+	return r.discoverProviderModels(ctx, providerID, credentialID, true)
+}
+
+func (r *Router) discoverProviderModels(ctx context.Context, providerID, credentialID string, inspectCapabilities bool) ([]DiscoveredModel, error) {
 	if err := r.refreshControlPlane(ctx); err != nil {
 		return nil, err
 	}
@@ -136,7 +142,80 @@ func (r *Router) DiscoverProviderModels(ctx context.Context, providerID, credent
 	if err != nil {
 		return nil, ErrProviderProbeFailed
 	}
+	if managed.Type == "ollama" && inspectCapabilities {
+		discoverOllamaCapabilities(ctx, client, endpoint, secret, models)
+	}
 	return models, nil
+}
+
+// Ollama's model list does not include capabilities. Metadata failures leave a
+// model's capabilities unknown rather than advertising unsupported operations.
+func discoverOllamaCapabilities(ctx context.Context, client *http.Client, tagsURL, secret string, models []DiscoveredModel) {
+	const maxInspectedModels = 128
+	endpoint, err := url.Parse(tagsURL)
+	if err != nil {
+		return
+	}
+	endpoint.Path = strings.TrimSuffix(endpoint.Path, "/tags") + "/show"
+	inspectionCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	for index := range models {
+		if index >= maxInspectedModels || inspectionCtx.Err() != nil {
+			return
+		}
+		body, err := json.Marshal(struct {
+			Model string `json:"model"`
+		}{Model: models[index].ID})
+		if err != nil {
+			continue
+		}
+		request, err := http.NewRequestWithContext(inspectionCtx, http.MethodPost, endpoint.String(), bytes.NewReader(body))
+		if err != nil {
+			continue
+		}
+		request.Header.Set("Accept", "application/json")
+		request.Header.Set("Content-Type", "application/json")
+		if secret != "" {
+			request.Header.Set("Authorization", "Bearer "+secret)
+		}
+		response, err := client.Do(request)
+		if err != nil {
+			continue
+		}
+		payload, readErr := io.ReadAll(io.LimitReader(response.Body, (256<<10)+1))
+		closeErr := response.Body.Close()
+		if response.StatusCode < 200 || response.StatusCode >= 300 || readErr != nil || closeErr != nil || len(payload) > 256<<10 {
+			continue
+		}
+		var details struct {
+			Capabilities *[]string `json:"capabilities"`
+		}
+		if json.Unmarshal(payload, &details) != nil || details.Capabilities == nil {
+			continue
+		}
+		models[index].Capabilities = ollamaGatewayCapabilities(*details.Capabilities)
+	}
+}
+
+func ollamaGatewayCapabilities(native []string) []string {
+	available := make(map[string]bool, len(native))
+	for _, capability := range native {
+		available[capability] = true
+	}
+	capabilities := make([]string, 0, 7)
+	if available["completion"] {
+		capabilities = append(capabilities, "chat", "completions", "responses", "stream")
+		if available["tools"] {
+			capabilities = append(capabilities, "tools")
+		}
+		if available["vision"] {
+			capabilities = append(capabilities, "vision")
+		}
+	}
+	if available["embedding"] {
+		capabilities = append(capabilities, "embeddings")
+	}
+	return capabilities
 }
 
 func discoverAzureFoundryProjectModels(ctx context.Context, managed ManagedProvider, secret, projectPath string) ([]DiscoveredModel, error) {

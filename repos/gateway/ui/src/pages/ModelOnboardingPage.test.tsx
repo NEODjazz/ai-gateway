@@ -9,6 +9,43 @@ function json(value: unknown, status = 200) {
 }
 
 describe("ModelOnboardingPage", () => {
+  it("uses discovered Ollama capabilities and requires explicit selection when metadata is unavailable", async () => {
+    const plans: Array<{ deployments: Array<{ upstream_model: string; capabilities: string[] }> }> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, options) => {
+      const path = String(input);
+      if (!options?.method && path === "/admin/v1/providers") return json({ data: [{ id: "ollama", type: "ollama", base_url: "http://localhost:11434", enabled: true }] });
+      if (!options?.method && path === "/admin/v1/credentials") return json({ data: [] });
+      if (!options?.method && path === "/admin/v1/model-catalog") return json({ version: "v1", models: [] });
+      if (!options?.method && path === "/admin/v1/model-groups") return json({ data: [] });
+      if (!options?.method && path === "/admin/v1/provider-capabilities") return json({ data: [{ type: "ollama", capabilities: ["chat", "responses", "embeddings", "stream"] }] });
+      if (path.endsWith("/test")) return json({ status: "available", latency_ms: 1, model_count: 2 });
+      if (path.endsWith("/discover-models")) return json({ data: [{ id: "embed", capabilities: ["embeddings"] }, { id: "unknown" }] });
+      if (path === "/admin/v1/model-onboarding/plan") {
+        const body = JSON.parse(String(options?.body)) as { deployments: Array<{ upstream_model: string; capabilities: string[] }> };
+        plans.push(body);
+        return json({ revision: 1, catalog_version: "v1", deployments: body.deployments, model_groups: [], changes: [] });
+      }
+      return json({ error: { message: `Unexpected ${path}` } }, 500);
+    });
+    sessionStorage.setItem("ai-gateway.admin-token", "token");
+    render(<MemoryRouter><AuthProvider><ModelOnboardingPage /></AuthProvider></MemoryRouter>);
+    await screen.findByRole("option", { name: "ollama — ollama" });
+    await userEvent.click(screen.getByRole("button", { name: "Test & discover models" }));
+    expect(await screen.findByText("embed")).toBeInTheDocument();
+    await userEvent.click(screen.getAllByRole("checkbox")[0]);
+    await userEvent.click(screen.getAllByRole("checkbox")[1]);
+    await userEvent.click(screen.getByRole("button", { name: "Review 2 model(s)" }));
+    await screen.findByText("Review onboarding plan");
+    expect(plans[0].deployments).toEqual(expect.arrayContaining([
+      expect.objectContaining({ upstream_model: "embed", capabilities: ["embeddings"] }),
+      expect.objectContaining({ upstream_model: "unknown", capabilities: [] })
+    ]));
+    expect(screen.getByRole("button", { name: "Apply configuration" })).toBeDisabled();
+    await userEvent.click(screen.getByLabelText("Capabilities unknown"));
+    await userEvent.click(screen.getByRole("option", { name: /Chat/ }));
+    expect(screen.getByRole("button", { name: "Apply configuration" })).toBeEnabled();
+  });
+
   it("discovers models, validates a plan and applies one atomic configuration", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, options) => {
       const path = String(input);
