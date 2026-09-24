@@ -117,6 +117,8 @@ type ollamaEmbeddingRequest struct {
 	Model      string `json:"model"`
 	Input      any    `json:"input"`
 	Dimensions *int   `json:"dimensions,omitempty"`
+	// Ollama otherwise silently truncates inputs that exceed the model context.
+	Truncate bool `json:"truncate"`
 }
 
 type ollamaEmbeddingResponse struct {

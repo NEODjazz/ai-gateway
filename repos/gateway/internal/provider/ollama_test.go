@@ -146,6 +146,34 @@ func TestOllamaLocalRequestsDoNotSendAuthorization(t *testing.T) {
 	}
 }
 
+func TestOllamaEmbeddingsRejectUpstreamTruncation(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/embed" {
+			t.Errorf("path=%q", r.URL.Path)
+		}
+		var request map[string]json.RawMessage
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+		}
+		if got := string(request["truncate"]); got != "false" {
+			t.Errorf("truncate=%q, want explicit false", got)
+		}
+		if string(request["input"]) == `"too long"` {
+			http.Error(w, `{"error":"input exceeds context window"}`, http.StatusBadRequest)
+			return
+		}
+		_, _ = w.Write([]byte(`{"model":"embed-model","embeddings":[[0.1,0.2]],"prompt_eval_count":2}`))
+	}))
+	t.Cleanup(server.Close)
+	response, err := NewOllama(server.URL, false).Embeddings(t.Context(), openai.EmbeddingRequest{Model: "embed-model", Input: "full input"})
+	if err != nil || response.Usage.PromptTokens != 2 {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+	if _, err := NewOllama(server.URL, false).Embeddings(t.Context(), openai.EmbeddingRequest{Model: "embed-model", Input: "too long"}); err == nil {
+		t.Fatal("upstream context-window rejection was ignored")
+	}
+}
+
 func TestOllamaBearerCredentialDoesNotFollowRedirect(t *testing.T) {
 	var forwarded atomic.Bool
 	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { forwarded.Store(true) }))

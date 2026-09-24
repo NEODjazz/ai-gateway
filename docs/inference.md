@@ -504,6 +504,9 @@ value alongside the explicit supported levels. The compatibility aliases
 Native Chat preserves `prompt_eval_cached_count` as cached input-token detail
 while `prompt_eval_count` remains the full input-token total for quota and
 billing. Negative cached counts or counts above the input total fail closed.
+Native Ollama Embeddings sends `truncate=false`; inputs that exceed the selected
+model's context window must fail upstream instead of producing an embedding for
+silently shortened text.
 
 For Azure Foundry project URLs under `/api/projects/{project}`, managed identity
 uses the Foundry audience even when the endpoint has a custom hostname. Known
