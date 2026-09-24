@@ -3,6 +3,7 @@ package provider
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -593,6 +594,9 @@ func normalizeOllamaToolCalls(message *openai.Message) {
 		return
 	}
 	for index := range message.ToolCalls {
+		if message.ToolCalls[index].ID == "" {
+			message.ToolCalls[index].ID = "call_" + rand.Text()
+		}
 		if message.ToolCalls[index].Type == "" {
 			message.ToolCalls[index].Type = "function"
 		}

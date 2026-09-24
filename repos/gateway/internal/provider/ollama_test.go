@@ -29,6 +29,20 @@ func TestOllamaToolCallsPreserveLengthFinishReason(t *testing.T) {
 	}
 }
 
+func TestNormalizeOllamaToolCallsAssignsDistinctIDs(t *testing.T) {
+	message := openai.Message{ToolCalls: []openai.ToolCall{{}, {}, {ID: "provider-id"}}}
+	normalizeOllamaToolCalls(&message)
+	first, second, preserved := message.ToolCalls[0], message.ToolCalls[1], message.ToolCalls[2]
+	if !strings.HasPrefix(first.ID, "call_") || !strings.HasPrefix(second.ID, "call_") || first.ID == second.ID || preserved.ID != "provider-id" {
+		t.Fatalf("tool call IDs were not normalized: %+v", message.ToolCalls)
+	}
+	for _, call := range message.ToolCalls {
+		if call.Type != "function" {
+			t.Fatalf("tool call type was not normalized: %+v", call)
+		}
+	}
+}
+
 func TestNormalizeOllamaBaseURL(t *testing.T) {
 	for _, test := range []struct{ input, want string }{
 		{input: "https://ollama.com", want: "https://ollama.com"},
@@ -513,7 +527,7 @@ func TestOllamaNormalizesToolArgumentsAndForwardsOptions(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&upstream); err != nil {
 			t.Fatal(err)
 		}
-		_, _ = w.Write([]byte(`{"model":"llama3.2:latest","message":{"role":"assistant","content":"","tool_calls":[{"id":"call_1","function":{"name":"weather.get","arguments":{"city":"Moscow"}}}]},"done":true,"done_reason":"stop","prompt_eval_count":2,"eval_count":1}`))
+		_, _ = w.Write([]byte(`{"model":"llama3.2:latest","message":{"role":"assistant","content":"","tool_calls":[{"function":{"name":"weather.get","arguments":{"city":"Moscow"}}}]},"done":true,"done_reason":"stop","prompt_eval_count":2,"eval_count":1}`))
 	}))
 	defer server.Close()
 
@@ -555,6 +569,7 @@ func TestOllamaNormalizesToolArgumentsAndForwardsOptions(t *testing.T) {
 	}
 	if len(response.Choices) != 1 || len(response.Choices[0].Message.ToolCalls) != 1 ||
 		response.Choices[0].FinishReason != "tool_calls" ||
+		!strings.HasPrefix(response.Choices[0].Message.ToolCalls[0].ID, "call_") ||
 		response.Choices[0].Message.ToolCalls[0].Type != "function" ||
 		response.Choices[0].Message.ToolCalls[0].Function.Arguments != `{"city":"Moscow"}` {
 		t.Fatalf("Ollama tool arguments were not normalized: %+v", response)
@@ -567,7 +582,7 @@ func TestOllamaStreamsNativeToolCalls(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&upstream); err != nil {
 			t.Fatal(err)
 		}
-		_, _ = w.Write([]byte("{\"model\":\"llama3.2:latest\",\"message\":{\"role\":\"assistant\",\"tool_calls\":[{\"id\":\"call_1\",\"function\":{\"name\":\"weather.get\",\"arguments\":{\"city\":\"Moscow\"}}}]}}\n"))
+		_, _ = w.Write([]byte("{\"model\":\"llama3.2:latest\",\"message\":{\"role\":\"assistant\",\"tool_calls\":[{\"function\":{\"name\":\"weather.get\",\"arguments\":{\"city\":\"Moscow\"}}}]}}\n"))
 		_, _ = w.Write([]byte("{\"model\":\"llama3.2:latest\",\"done\":true,\"done_reason\":\"stop\",\"prompt_eval_count\":2,\"eval_count\":1}\n"))
 	}))
 	defer server.Close()
@@ -585,7 +600,7 @@ func TestOllamaStreamsNativeToolCalls(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(response.Choices[0].Message.ToolCalls) != 1 || response.Choices[0].Message.ToolCalls[0].Type != "function" || response.Choices[0].FinishReason != "tool_calls" {
+	if len(response.Choices[0].Message.ToolCalls) != 1 || response.Choices[0].Message.ToolCalls[0].Type != "function" || response.Choices[0].FinishReason != "tool_calls" || !strings.HasPrefix(response.Choices[0].Message.ToolCalls[0].ID, "call_") {
 		t.Fatalf("streamed tool call was not accumulated: %+v", response)
 	}
 	if upstream.Options.TopK == nil || *upstream.Options.TopK != 20 || upstream.Options.MinP == nil || *upstream.Options.MinP != 0.1 {
@@ -595,6 +610,7 @@ func TestOllamaStreamsNativeToolCalls(t *testing.T) {
 		t.Fatalf("streaming reasoning disable was not forwarded: %#v", upstream.Think)
 	}
 	if len(payloads) != 2 || !strings.Contains(payloads[0], `"type":"function"`) ||
+		!strings.Contains(payloads[0], `"id":"`+response.Choices[0].Message.ToolCalls[0].ID+`"`) ||
 		!strings.Contains(payloads[1], `"finish_reason":"tool_calls"`) ||
 		!strings.Contains(payloads[0], `"arguments":"{\"city\":\"Moscow\"}"`) {
 		t.Fatalf("unexpected streamed tool payloads: %v", payloads)
