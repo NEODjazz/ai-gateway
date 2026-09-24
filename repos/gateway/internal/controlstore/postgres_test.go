@@ -119,7 +119,7 @@ func TestPostgresControlPlaneSnapshotLifecycleIntegration(t *testing.T) {
 	snapshot := provider.ControlPlaneSnapshot{
 		Providers: []provider.ManagedProvider{
 			{ID: "ollama", Type: "ollama", BaseURL: "http://ollama:11434", Enabled: true},
-			{ID: "foundry-gov", Type: "azure-openai", BaseURL: "https://proxy.example.test/api/projects/project-a", AuthType: "entra", AzureCloud: "usgov", Enabled: true},
+			{ID: "foundry-gov", Type: "azure-openai", BaseURL: "https://proxy.example.test/api/projects/project-a", AuthType: "entra", AzureCloud: "usgov", AzureAudience: "foundry", Enabled: true},
 		},
 		Credentials: []provider.EncryptedCredentialSnapshot{{Credential: provider.Credential{ID: "ollama-key"}, Nonce: []byte("nonce"), Ciphertext: []byte("ciphertext")}},
 		Deployments: []provider.ModelDeployment{{ID: "local", ProviderID: "ollama", ProviderType: "ollama", Models: []string{"public"}, UpstreamModel: "qwen", Weight: 1, Enabled: true}},
@@ -130,7 +130,7 @@ func TestPostgresControlPlaneSnapshotLifecycleIntegration(t *testing.T) {
 		t.Fatalf("save revision=%d err=%v", revision, err)
 	}
 	loaded, found, err := store.Load(ctx)
-	if err != nil || !found || loaded.Revision != 1 || len(loaded.Credentials) != 1 || string(loaded.Credentials[0].Ciphertext) != "ciphertext" || len(loaded.Providers) != 2 || loaded.Providers[1].AzureCloud != "usgov" {
+	if err != nil || !found || loaded.Revision != 1 || len(loaded.Credentials) != 1 || string(loaded.Credentials[0].Ciphertext) != "ciphertext" || len(loaded.Providers) != 2 || loaded.Providers[1].AzureCloud != "usgov" || loaded.Providers[1].AzureAudience != "foundry" {
 		t.Fatalf("unexpected loaded snapshot: found=%v err=%v snapshot=%+v", found, err, loaded)
 	}
 	if _, err := store.Save(ctx, 0, snapshot); !errors.Is(err, provider.ErrControlPlaneConflict) {

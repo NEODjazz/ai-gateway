@@ -42,6 +42,36 @@ func TestAzureFoundryProjectDiscoveryUsesExplicitGovernmentIdentity(t *testing.T
 	}
 }
 
+func TestAzureFoundryProjectDiscoveryUsesConfiguredAudience(t *testing.T) {
+	for _, name := range []string{"AZURE_TENANT_ID", "AZURE_CLIENT_ID", "AZURE_FEDERATED_TOKEN_FILE"} {
+		t.Setenv(name, "")
+	}
+	identity := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("resource") != azureGovernmentResource {
+			t.Errorf("resource=%q", r.URL.Query().Get("resource"))
+		}
+		_, _ = fmt.Fprintf(w, `{"access_token":"cognitive-token","expires_on":%d,"token_type":"Bearer"}`, time.Now().Add(time.Hour).Unix())
+	}))
+	t.Cleanup(identity.Close)
+	t.Setenv("IDENTITY_ENDPOINT", identity.URL)
+	t.Setenv("IDENTITY_HEADER", "test-header")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/projects/project-a/deployments" || r.Header.Get("Authorization") != "Bearer cognitive-token" {
+			t.Errorf("discovery request=%s authorization=%q", r.URL, r.Header.Get("Authorization"))
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"value": []any{map[string]any{"name": "model-a", "type": "ModelDeployment"}}})
+	}))
+	t.Cleanup(server.Close)
+	router := New(Config{}).(*Router)
+	if _, err := router.CreateProvider(ManagedProvider{ID: "foundry-gov", Type: "azure-openai", BaseURL: server.URL + "/api/projects/project-a", AuthType: "entra", AzureCloud: "usgov", AzureAudience: "cognitive", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	models, err := router.DiscoverProviderModels(t.Context(), "foundry-gov", "")
+	if err != nil || len(models) != 1 || models[0].ID != "model-a" {
+		t.Fatalf("models=%+v err=%v", models, err)
+	}
+}
+
 func TestAzureFoundryProjectDiscoveryPaginatesDeployments(t *testing.T) {
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

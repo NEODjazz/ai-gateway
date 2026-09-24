@@ -11297,6 +11297,10 @@ components:
           type: string
           enum: [public, usgov, china]
           description: Optional cloud selection for azure-openai with auth_type=entra. Omission infers the cloud from the endpoint. Use usgov or china for a sovereign Azure endpoint behind a custom hostname. China is not supported for Foundry project URLs.
+        azure_audience:
+          type: string
+          enum: [cognitive, foundry]
+          description: Optional Entra token audience for azure-openai with auth_type=entra. Omission keeps endpoint-derived behavior. Use cognitive for the Cognitive Services resource or foundry for the Foundry resource when required by the configured endpoint. Foundry audience is not supported in Azure China.
         region:
           type: string
           maxLength: 64

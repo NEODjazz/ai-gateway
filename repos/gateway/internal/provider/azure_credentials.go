@@ -94,6 +94,31 @@ func newAzureTokenSourceWithCloud(explicit, providerBaseURL, cloud string) *azur
 	return source
 }
 
+func newAzureTokenSourceWithPolicy(explicit, providerBaseURL, cloud, audience string) *azureTokenSource {
+	source := newAzureTokenSourceWithCloud(explicit, providerBaseURL, cloud)
+	if audience != "cognitive" && audience != "foundry" {
+		return source
+	}
+	switch source.authorityBaseURL {
+	case azureGovernmentAuthority:
+		if audience == "foundry" {
+			source.resource = azureGovernmentFoundryResource
+		} else {
+			source.resource = azureGovernmentResource
+		}
+	case azureChinaAuthority:
+		source.resource = azureChinaResource
+	default:
+		if audience == "foundry" {
+			source.resource = azureFoundryResource
+		} else {
+			source.resource = azureOpenAIResource
+		}
+	}
+	source.scope = source.resource + ".default"
+	return source
+}
+
 func azureIdentityEndpoints(providerBaseURL ...string) (string, string) {
 	if len(providerBaseURL) > 0 {
 		if parsed, err := url.Parse(providerBaseURL[0]); err == nil {

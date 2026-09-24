@@ -124,6 +124,7 @@ export function ProvidersPage() {
     const id = String(current?.id || value.id || "");
     const body = { ...value };
     if (!body.azure_cloud) delete body.azure_cloud;
+    if (!body.azure_audience) delete body.azure_audience;
     await client.request(current ? `/admin/v1/providers/${encodeURIComponent(id)}` : "/admin/v1/providers", { method: current ? "PUT" : "POST", body });
     setEditing(undefined); await load();
   }

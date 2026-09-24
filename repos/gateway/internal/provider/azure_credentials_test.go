@@ -103,6 +103,22 @@ func TestAzureIdentityEndpointsExplicitCloudForProxy(t *testing.T) {
 	}
 }
 
+func TestAzureIdentityEndpointsExplicitAudience(t *testing.T) {
+	for _, test := range []struct {
+		baseURL, cloud, audience, authority, resource string
+	}{
+		{baseURL: "https://resource.services.ai.azure.com/openai/v1", audience: "cognitive", authority: azureAuthorityURL, resource: azureOpenAIResource},
+		{baseURL: "https://resource.services.ai.azure.com/openai/v1", audience: "foundry", authority: azureAuthorityURL, resource: azureFoundryResource},
+		{baseURL: "https://proxy.example.test/openai/v1", cloud: "usgov", audience: "cognitive", authority: azureGovernmentAuthority, resource: azureGovernmentResource},
+		{baseURL: "https://proxy.example.test/api/projects/project-a/openai/v1", cloud: "usgov", audience: "foundry", authority: azureGovernmentAuthority, resource: azureGovernmentFoundryResource},
+	} {
+		source := newAzureTokenSourceWithPolicy("", test.baseURL, test.cloud, test.audience)
+		if source.authorityBaseURL != test.authority || source.resource != test.resource || source.scope != test.resource+".default" {
+			t.Fatalf("base=%q cloud=%q audience=%q authority=%q resource=%q scope=%q", test.baseURL, test.cloud, test.audience, source.authorityBaseURL, source.resource, source.scope)
+		}
+	}
+}
+
 func TestAzureFoundryFederationUsesProjectScope(t *testing.T) {
 	tokenFile := filepath.Join(t.TempDir(), "federated-token")
 	if err := os.WriteFile(tokenFile, []byte("projected.jwt"), 0o600); err != nil {

@@ -94,7 +94,7 @@ func (r *Router) DiscoverProviderModels(ctx context.Context, providerID, credent
 			return nil, ErrProviderProbeFailed
 		}
 	} else if managed.Type == "azure-openai" && normalizeAzureAuthType(managed.AuthType) == "entra" {
-		token, tokenErr := newAzureTokenSourceWithCloud(secret, managed.BaseURL, managed.AzureCloud).Token(ctx)
+		token, tokenErr := newAzureTokenSourceWithPolicy(secret, managed.BaseURL, managed.AzureCloud, managed.AzureAudience).Token(ctx)
 		if tokenErr != nil {
 			return nil, ErrProviderProbeFailed
 		}
@@ -143,7 +143,7 @@ func discoverAzureFoundryProjectModels(ctx context.Context, managed ManagedProvi
 	endpoint.Fragment = ""
 	client := newProviderHTTPClient(10 * time.Second)
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	tokenSource := newAzureTokenSourceWithCloud(secret, managed.BaseURL, managed.AzureCloud)
+	tokenSource := newAzureTokenSourceWithPolicy(secret, managed.BaseURL, managed.AzureCloud, managed.AzureAudience)
 	seenURLs := make(map[string]bool)
 	seenModels := make(map[string]bool)
 	models := make([]DiscoveredModel, 0)

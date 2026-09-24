@@ -62,6 +62,9 @@ func TestValidateAzureOpenAIConfiguration(t *testing.T) {
 	if err := validateProviderAdmission([]ProviderEndpointConfig{{Name: "foundry-gov", Type: "azure-openai", BaseURL: "https://proxy.example.test/api/projects/project-a", AuthType: "entra", AzureCloud: "usgov"}}); err != nil {
 		t.Fatalf("valid sovereign Foundry proxy rejected: %v", err)
 	}
+	if err := validateProviderAdmission([]ProviderEndpointConfig{{Name: "foundry-resource", Type: "azure-openai", BaseURL: "https://resource.services.ai.azure.com/openai/v1", AuthType: "entra", AzureAudience: "cognitive"}}); err != nil {
+		t.Fatalf("valid explicit Cognitive Services audience rejected: %v", err)
+	}
 	for _, endpoint := range []ProviderEndpointConfig{
 		{Name: "azure", Type: "azure-openai", APIVersion: "2025-13-01"},
 		{Name: "azure", Type: "azure-openai", AuthType: "basic"},
@@ -73,6 +76,11 @@ func TestValidateAzureOpenAIConfiguration(t *testing.T) {
 		{Name: "azure", Type: "azure-openai", AuthType: "api_key", AzureCloud: "usgov"},
 		{Name: "foundry", Type: "azure-openai", BaseURL: "https://proxy.example.test/api/projects/project-a", AuthType: "entra", AzureCloud: "china"},
 		{Name: "other", Type: "openai-compatible", AzureCloud: "usgov"},
+		{Name: "azure", Type: "azure-openai", AuthType: "entra", AzureAudience: "unknown"},
+		{Name: "azure", Type: "azure-openai", AuthType: "api_key", AzureAudience: "foundry"},
+		{Name: "azure", Type: "azure-openai", BaseURL: "https://resource.openai.azure.cn", AuthType: "entra", AzureAudience: "foundry"},
+		{Name: "azure", Type: "azure-openai", BaseURL: "https://proxy.example.test", AuthType: "entra", AzureCloud: "china", AzureAudience: "foundry"},
+		{Name: "other", Type: "openai-compatible", AzureAudience: "cognitive"},
 	} {
 		if err := validateProviderAdmission([]ProviderEndpointConfig{endpoint}); err == nil {
 			t.Fatalf("invalid Azure configuration accepted: %+v", endpoint)

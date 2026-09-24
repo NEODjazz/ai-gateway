@@ -157,6 +157,10 @@ Foundry resource и project endpoints с host suffix `.services.ai.azure.com`
 `/api/projects/{project}` автоматически дополняется `/openai/v1`.
 Для Azure endpoint за собственным hostname можно задать `azure_cloud=public`,
 `usgov` или `china` при `auth_type=entra`; без настройки cloud определяется по URL.
+Если endpoint требует конкретный Entra token audience, задайте
+`azure_audience=cognitive` или `azure_audience=foundry` при `auth_type=entra`.
+Без этого поля audience по-прежнему определяется по URL. Foundry audience в
+Azure China не поддерживается.
 Для Foundry project в Government выбираются authority `login.microsoftonline.us`
 и audience `https://ai.azure.us/`. `azure_cloud=china` для Foundry project
 отклоняется, поскольку этот контракт не поддерживается.

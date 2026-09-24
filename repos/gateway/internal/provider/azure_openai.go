@@ -61,12 +61,14 @@ func NewAzureOpenAI(baseURL, credential string, upstreamStream bool, apiVersion,
 	client.errorProvider = "azure-openai"
 	transport := client.client.Transport
 	normalizedAuthType := normalizeAzureAuthType(authType)
-	var tokenSource *azureTokenSource
+	cloud, audience := "", ""
 	if len(azureCloud) > 0 {
-		tokenSource = newAzureTokenSourceWithCloud(credential, baseURL, azureCloud[0])
-	} else {
-		tokenSource = newAzureTokenSource(credential, baseURL)
+		cloud = azureCloud[0]
 	}
+	if len(azureCloud) > 1 {
+		audience = azureCloud[1]
+	}
+	tokenSource := newAzureTokenSourceWithPolicy(credential, baseURL, cloud, audience)
 	client.client.Transport = azureOpenAITransport{
 		base: transport, credential: credential, tokenSource: tokenSource, authType: normalizedAuthType, apiVersion: strings.TrimSpace(apiVersion), legacyPath: legacyPath,
 	}

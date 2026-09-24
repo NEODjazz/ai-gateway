@@ -15,16 +15,17 @@ import (
 )
 
 type ManagedProvider struct {
-	ID           string `json:"id"`
-	Type         string `json:"type"`
-	BaseURL      string `json:"base_url,omitempty"`
-	APIVersion   string `json:"api_version,omitempty"`
-	AuthType     string `json:"auth_type,omitempty"`
-	AzureCloud   string `json:"azure_cloud,omitempty"`
-	Region       string `json:"region,omitempty"`
-	RateLimitRPM int    `json:"rate_limit_rpm,omitempty"`
-	RateLimitTPM int    `json:"rate_limit_tpm,omitempty"`
-	Enabled      bool   `json:"enabled"`
+	ID            string `json:"id"`
+	Type          string `json:"type"`
+	BaseURL       string `json:"base_url,omitempty"`
+	APIVersion    string `json:"api_version,omitempty"`
+	AuthType      string `json:"auth_type,omitempty"`
+	AzureCloud    string `json:"azure_cloud,omitempty"`
+	AzureAudience string `json:"azure_audience,omitempty"`
+	Region        string `json:"region,omitempty"`
+	RateLimitRPM  int    `json:"rate_limit_rpm,omitempty"`
+	RateLimitTPM  int    `json:"rate_limit_tpm,omitempty"`
+	Enabled       bool   `json:"enabled"`
 }
 
 type ProviderCapabilityProfile struct {
@@ -315,6 +316,7 @@ func normalizeManagedProvider(input ManagedProvider) (ManagedProvider, error) {
 	input.APIVersion = strings.TrimSpace(input.APIVersion)
 	input.AuthType = strings.ToLower(strings.TrimSpace(input.AuthType))
 	input.AzureCloud = strings.ToLower(strings.TrimSpace(input.AzureCloud))
+	input.AzureAudience = strings.ToLower(strings.TrimSpace(input.AzureAudience))
 	input.Region = strings.ToLower(strings.TrimSpace(input.Region))
 	if input.ID == "" || len(input.ID) > 128 || !validProviderType(input.Type) || len(input.BaseURL) > 2048 || input.RateLimitRPM < 0 || input.RateLimitRPM > 10000000 || input.RateLimitTPM < 0 || input.RateLimitTPM > 1000000000 {
 		return ManagedProvider{}, ErrInvalidProvider
@@ -325,13 +327,16 @@ func normalizeManagedProvider(input ManagedProvider) (ManagedProvider, error) {
 			return ManagedProvider{}, ErrInvalidProvider
 		}
 	}
-	if input.Type != "azure-openai" && input.AzureCloud != "" {
+	if input.Type != "azure-openai" && (input.AzureCloud != "" || input.AzureAudience != "") {
 		return ManagedProvider{}, ErrInvalidProvider
 	}
 	if input.Type == "azure-openai" {
 		input.AuthType = normalizeAzureAuthType(input.AuthType)
 		parsed, _ := url.Parse(input.BaseURL)
-		if parsed.RawQuery != "" || parsed.Fragment != "" || !validAzureProviderVersion(input.APIVersion) || (input.AuthType != "api_key" && input.AuthType != "entra") || (input.AzureCloud != "" && (input.AuthType != "entra" || !validManagedAzureCloud(input.AzureCloud))) {
+		if parsed.RawQuery != "" || parsed.Fragment != "" || !validAzureProviderVersion(input.APIVersion) || (input.AuthType != "api_key" && input.AuthType != "entra") || (input.AzureCloud != "" && (input.AuthType != "entra" || !validManagedAzureCloud(input.AzureCloud))) || (input.AzureAudience != "" && (input.AuthType != "entra" || !validManagedAzureAudience(input.AzureAudience))) {
+			return ManagedProvider{}, ErrInvalidProvider
+		}
+		if input.AzureAudience == "foundry" && (input.AzureCloud == "china" || strings.HasSuffix(strings.ToLower(parsed.Hostname()), ".azure.cn")) {
 			return ManagedProvider{}, ErrInvalidProvider
 		}
 		if _, project := azureFoundryProjectPath(parsed.Path); project && input.APIVersion != "" {
@@ -1485,6 +1490,10 @@ func validAzureProviderVersion(value string) bool {
 
 func validManagedAzureCloud(value string) bool {
 	return value == "public" || value == "usgov" || value == "china"
+}
+
+func validManagedAzureAudience(value string) bool {
+	return value == "cognitive" || value == "foundry"
 }
 
 func cloneProviders(current map[string]ManagedProvider) map[string]ManagedProvider {

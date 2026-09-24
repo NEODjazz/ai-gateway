@@ -202,6 +202,7 @@ type ProviderEndpointConfig struct {
 	APIVersion            string            `json:"api_version,omitempty"`
 	AuthType              string            `json:"auth_type,omitempty"`
 	AzureCloud            string            `json:"azure_cloud,omitempty"`
+	AzureAudience         string            `json:"azure_audience,omitempty"`
 	Region                string            `json:"region,omitempty"`
 }
 
@@ -455,8 +456,14 @@ func validateProviderAdmission(endpoints []ProviderEndpointConfig) error {
 			if endpoint.AzureCloud != "" && (authType != "entra" || !validAzureCloud(endpoint.AzureCloud)) {
 				result = errors.Join(result, fmt.Errorf("provider %q azure_cloud requires Entra authentication and a supported cloud", name))
 			}
+			if endpoint.AzureAudience != "" && (authType != "entra" || !validAzureAudience(endpoint.AzureAudience)) {
+				result = errors.Join(result, fmt.Errorf("provider %q azure_audience requires Entra authentication and cognitive or foundry", name))
+			}
 			if parsed, err := url.Parse(endpoint.BaseURL); err == nil && azureFoundryProjectPath(parsed.Path) && endpoint.AzureCloud == "china" {
 				result = errors.Join(result, fmt.Errorf("provider %q Foundry project does not support azure_cloud=china", name))
+			}
+			if endpoint.AzureAudience == "foundry" && (endpoint.AzureCloud == "china" || strings.HasSuffix(strings.ToLower(endpointBaseHost(endpoint.BaseURL)), ".azure.cn")) {
+				result = errors.Join(result, fmt.Errorf("provider %q azure_audience=foundry is unsupported in Azure China", name))
 			}
 		} else if endpoint.Type == "gemini" {
 			authType := strings.ToLower(strings.TrimSpace(endpoint.AuthType))
@@ -502,6 +509,9 @@ func validateProviderAdmission(endpoints []ProviderEndpointConfig) error {
 		}
 		if endpoint.Type != "azure-openai" && endpoint.AzureCloud != "" {
 			result = errors.Join(result, fmt.Errorf("provider %q azure_cloud is only supported for Azure OpenAI", name))
+		}
+		if endpoint.Type != "azure-openai" && endpoint.AzureAudience != "" {
+			result = errors.Join(result, fmt.Errorf("provider %q azure_audience is only supported for Azure OpenAI", name))
 		}
 		if endpoint.QueueCapacity > 0 && endpoint.QueueTimeoutMS <= 0 {
 			result = errors.Join(result, fmt.Errorf("provider %q queue requires queue_timeout_ms", name))
@@ -584,6 +594,18 @@ func validAzureAPIVersion(value string) bool {
 
 func validAzureCloud(value string) bool {
 	return value == "public" || value == "usgov" || value == "china"
+}
+
+func validAzureAudience(value string) bool {
+	return value == "cognitive" || value == "foundry"
+}
+
+func endpointBaseHost(baseURL string) string {
+	parsed, err := url.Parse(baseURL)
+	if err != nil {
+		return ""
+	}
+	return parsed.Hostname()
 }
 
 func loadGuardrailPolicies() map[string]GuardrailPolicyConfig {

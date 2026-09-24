@@ -134,12 +134,14 @@ describe("ProvidersPage", () => {
     await userEvent.selectOptions(within(form).getByLabelText("Type"), "azure-openai");
     await userEvent.type(within(form).getByLabelText("Base URL"), "https://proxy.example.test/api/projects/project-a");
     expect(within(form).queryByLabelText("Azure cloud")).not.toBeInTheDocument();
+    expect(within(form).queryByLabelText("Entra token audience")).not.toBeInTheDocument();
     await userEvent.selectOptions(within(form).getByLabelText("Authentication"), "entra");
     await userEvent.selectOptions(within(form).getByLabelText("Azure cloud"), "usgov");
+    await userEvent.selectOptions(within(form).getByLabelText("Entra token audience"), "foundry");
     await userEvent.click(within(form).getByRole("button", { name: "Save" }));
     await waitFor(() => expect(calls.some((call) => call.path === "/admin/v1/providers" && call.method === "POST")).toBe(true));
     const created = calls.find((call) => call.path === "/admin/v1/providers" && call.method === "POST")!;
-    expect(JSON.parse(created.body!)).toMatchObject({ id: "foundry-gov", type: "azure-openai", auth_type: "entra", azure_cloud: "usgov" });
+    expect(JSON.parse(created.body!)).toMatchObject({ id: "foundry-gov", type: "azure-openai", auth_type: "entra", azure_cloud: "usgov", azure_audience: "foundry" });
   });
 
   it("configures Bedrock SigV4 authentication and region", async () => {
