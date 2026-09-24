@@ -12,6 +12,9 @@ JSON uses the shared bounded decoder and validates response usage and structure
 before returning the result.
 Native Ollama Chat streams require the provider's `done: true` terminal chunk;
 an early EOF returns an error without emitting a successful finish event.
+The final native Chat JSON or stream chunk must include both provider token
+counters. Missing or null counters fail before settlement; explicitly reported
+zero remains valid.
 
 Native Messages and GenerateContent requests retain their API family in billing
 reserve, commit and failure events. The gateway sets this classification before

@@ -90,8 +90,8 @@ type ollamaChatResponse struct {
 	Model              string                `json:"model"`
 	Message            ollamaResponseMessage `json:"message"`
 	Done               bool                  `json:"done"`
-	PromptEvalCount    int                   `json:"prompt_eval_count"`
-	EvalCount          int                   `json:"eval_count"`
+	PromptEvalCount    *int                  `json:"prompt_eval_count,omitempty"`
+	EvalCount          *int                  `json:"eval_count,omitempty"`
 	DoneReason         string                `json:"done_reason"`
 	TotalDuration      int64                 `json:"total_duration"`
 	LoadDuration       int64                 `json:"load_duration"`
@@ -451,13 +451,13 @@ func (p Ollama) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 	return openai.ChatCompletionResponse{}, errors.New("Ollama chat stream ended without a terminal chunk")
 }
 
-func ollamaChatUsage(promptTokens, completionTokens int) (openai.Usage, error) {
-	if promptTokens < 0 || completionTokens < 0 || promptTokens > math.MaxInt-completionTokens {
+func ollamaChatUsage(promptTokens, completionTokens *int) (openai.Usage, error) {
+	if promptTokens == nil || completionTokens == nil || *promptTokens < 0 || *completionTokens < 0 || *promptTokens > math.MaxInt-*completionTokens {
 		return openai.Usage{}, errors.New("invalid Ollama chat usage")
 	}
 	return openai.Usage{
-		PromptTokens: promptTokens, CompletionTokens: completionTokens,
-		TotalTokens: promptTokens + completionTokens,
+		PromptTokens: *promptTokens, CompletionTokens: *completionTokens,
+		TotalTokens: *promptTokens + *completionTokens,
 	}, nil
 }
 

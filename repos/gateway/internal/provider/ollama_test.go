@@ -118,7 +118,7 @@ func TestOllamaLocalRequestsDoNotSendAuthorization(t *testing.T) {
 		if got := r.Header.Get("Authorization"); got != "" {
 			t.Errorf("unexpected local authorization: %q", got)
 		}
-		_, _ = w.Write([]byte(`{"model":"test-model","message":{"role":"assistant","content":"hello"},"done":true}`))
+		_, _ = w.Write([]byte(`{"model":"test-model","message":{"role":"assistant","content":"hello"},"done":true,"prompt_eval_count":2,"eval_count":1}`))
 	}))
 	t.Cleanup(server.Close)
 	if _, err := NewOllama(server.URL, false).ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "test-model", Messages: []openai.Message{{Role: "user", Content: "hello"}}}); err != nil {
@@ -198,6 +198,7 @@ func TestOllamaStreamsProviderCompletions(t *testing.T) {
 }
 
 func TestOllamaChatCompletions(t *testing.T) {
+	promptTokens, completionTokens := 4, 2
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/chat" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
@@ -221,8 +222,8 @@ func TestOllamaChatCompletions(t *testing.T) {
 				Content: "hello",
 			},
 			DoneReason:      "stop",
-			PromptEvalCount: 4,
-			EvalCount:       2,
+			PromptEvalCount: &promptTokens,
+			EvalCount:       &completionTokens,
 		})
 	}))
 	defer server.Close()
@@ -253,6 +254,10 @@ func TestOllamaRejectsInvalidChatUsage(t *testing.T) {
 	for _, test := range []struct {
 		name, usage string
 	}{
+		{name: "missing both", usage: ""},
+		{name: "missing prompt", usage: `"eval_count":1`},
+		{name: "missing completion", usage: `"prompt_eval_count":1`},
+		{name: "null prompt", usage: `"prompt_eval_count":null,"eval_count":1`},
 		{name: "negative prompt", usage: `"prompt_eval_count":-1,"eval_count":1`},
 		{name: "negative completion", usage: `"prompt_eval_count":1,"eval_count":-1`},
 		{name: "overflow", usage: fmt.Sprintf(`"prompt_eval_count":%d,"eval_count":1`, math.MaxInt)},
@@ -264,7 +269,11 @@ func TestOllamaRejectsInvalidChatUsage(t *testing.T) {
 			}
 			t.Run(name, func(t *testing.T) {
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					_, _ = fmt.Fprintf(w, `{"model":"test-model","message":{"role":"assistant","content":"ok"},"done":true,%s}`+"\n", test.usage)
+					usageFields := ""
+					if test.usage != "" {
+						usageFields = "," + test.usage
+					}
+					_, _ = fmt.Fprintf(w, `{"model":"test-model","message":{"role":"assistant","content":"ok"},"done":true%s}`+"\n", usageFields)
 				}))
 				defer server.Close()
 
@@ -290,9 +299,15 @@ func TestOllamaRejectsInvalidChatUsage(t *testing.T) {
 }
 
 func TestOllamaChatUsageMaxBoundary(t *testing.T) {
-	usage, err := ollamaChatUsage(math.MaxInt, 0)
+	promptTokens, completionTokens := math.MaxInt, 0
+	usage, err := ollamaChatUsage(&promptTokens, &completionTokens)
 	if err != nil || usage.TotalTokens != math.MaxInt {
 		t.Fatalf("unexpected boundary usage: %+v, %v", usage, err)
+	}
+	promptTokens = 0
+	usage, err = ollamaChatUsage(&promptTokens, &completionTokens)
+	if err != nil || usage.TotalTokens != 0 {
+		t.Fatalf("valid zero usage rejected: %+v, %v", usage, err)
 	}
 }
 
@@ -358,7 +373,7 @@ func TestOllamaNativeReasoningRoundTrip(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&upstream); err != nil {
 			t.Fatal(err)
 		}
-		_, _ = w.Write([]byte(`{"model":"qwen3","message":{"role":"assistant","thinking":"new plan","content":"answer"},"done":true,"done_reason":"stop"}`))
+		_, _ = w.Write([]byte(`{"model":"qwen3","message":{"role":"assistant","thinking":"new plan","content":"answer"},"done":true,"done_reason":"stop","prompt_eval_count":2,"eval_count":1}`))
 	}))
 	defer server.Close()
 
@@ -389,7 +404,7 @@ func TestOllamaStreamsNativeReasoning(t *testing.T) {
 		}
 		_, _ = w.Write([]byte("{\"model\":\"qwen3\",\"message\":{\"role\":\"assistant\",\"thinking\":\"plan \"}}\n"))
 		_, _ = w.Write([]byte("{\"model\":\"qwen3\",\"message\":{\"role\":\"assistant\",\"thinking\":\"more\",\"content\":\"answer\"}}\n"))
-		_, _ = w.Write([]byte("{\"model\":\"qwen3\",\"done\":true,\"done_reason\":\"stop\"}\n"))
+		_, _ = w.Write([]byte("{\"model\":\"qwen3\",\"done\":true,\"done_reason\":\"stop\",\"prompt_eval_count\":2,\"eval_count\":1}\n"))
 	}))
 	defer server.Close()
 
@@ -475,7 +490,7 @@ func TestOllamaNormalizesToolArgumentsAndForwardsOptions(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&upstream); err != nil {
 			t.Fatal(err)
 		}
-		_, _ = w.Write([]byte(`{"model":"llama3.2:latest","message":{"role":"assistant","content":"","tool_calls":[{"id":"call_1","function":{"name":"weather.get","arguments":{"city":"Moscow"}}}]},"done":true,"done_reason":"stop"}`))
+		_, _ = w.Write([]byte(`{"model":"llama3.2:latest","message":{"role":"assistant","content":"","tool_calls":[{"id":"call_1","function":{"name":"weather.get","arguments":{"city":"Moscow"}}}]},"done":true,"done_reason":"stop","prompt_eval_count":2,"eval_count":1}`))
 	}))
 	defer server.Close()
 
@@ -529,7 +544,7 @@ func TestOllamaStreamsNativeToolCalls(t *testing.T) {
 			t.Fatal(err)
 		}
 		_, _ = w.Write([]byte("{\"model\":\"llama3.2:latest\",\"message\":{\"role\":\"assistant\",\"tool_calls\":[{\"id\":\"call_1\",\"function\":{\"name\":\"weather.get\",\"arguments\":{\"city\":\"Moscow\"}}}]}}\n"))
-		_, _ = w.Write([]byte("{\"model\":\"llama3.2:latest\",\"done\":true,\"done_reason\":\"stop\"}\n"))
+		_, _ = w.Write([]byte("{\"model\":\"llama3.2:latest\",\"done\":true,\"done_reason\":\"stop\",\"prompt_eval_count\":2,\"eval_count\":1}\n"))
 	}))
 	defer server.Close()
 
@@ -686,6 +701,7 @@ func TestOllamaEmbeddingsMapsNativeContract(t *testing.T) {
 }
 
 func TestOllamaStreamsChatCompletions(t *testing.T) {
+	promptTokens, completionTokens := 4, 2
 	var upstreamRequest ollamaChatRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/chat" {
@@ -706,8 +722,8 @@ func TestOllamaStreamsChatCompletions(t *testing.T) {
 			Model:           "test-model",
 			Done:            true,
 			DoneReason:      "stop",
-			PromptEvalCount: 4,
-			EvalCount:       2,
+			PromptEvalCount: &promptTokens,
+			EvalCount:       &completionTokens,
 		})
 	}))
 	defer server.Close()
