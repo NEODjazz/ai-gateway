@@ -12,6 +12,9 @@ final usage cannot produce a successful terminal response or billing settlement.
 The stream assembler uses cumulative provider counts, including input added by
 server tools and output already reported at `message_start`. Missing delta fields
 retain the prior count; decreasing counts fail before terminal settlement.
+Chat SSE applies the same rule to server-tool request counts: a partial delta
+cannot erase web-search or code-execution usage, and a lower cumulative count
+fails before billing settlement.
 
 ## Token accounting and request identity
 

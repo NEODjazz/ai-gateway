@@ -1219,6 +1219,11 @@ func mergeAnthropicStreamUsage(current anthropicUsage, payload string) (anthropi
 			OutputTokens             *int `json:"output_tokens"`
 			CacheReadInputTokens     *int `json:"cache_read_input_tokens"`
 			CacheCreationInputTokens *int `json:"cache_creation_input_tokens"`
+			ServerToolUse            *struct {
+				WebSearchRequests     *int `json:"web_search_requests"`
+				WebFetchRequests      *int `json:"web_fetch_requests"`
+				CodeExecutionRequests *int `json:"code_execution_requests"`
+			} `json:"server_tool_use"`
 		} `json:"usage"`
 	}
 	if err := json.Unmarshal([]byte(payload), &event); err != nil {
@@ -1241,6 +1246,28 @@ func mergeAnthropicStreamUsage(current anthropicUsage, payload string) (anthropi
 			}
 			*field.target = *field.reported
 		}
+	}
+	if event.Usage.ServerToolUse != nil {
+		tools := anthropicServerToolUsage{}
+		if current.ServerToolUse != nil {
+			tools = *current.ServerToolUse
+		}
+		for _, field := range []struct {
+			reported *int
+			target   *int
+		}{
+			{event.Usage.ServerToolUse.WebSearchRequests, &tools.WebSearchRequests},
+			{event.Usage.ServerToolUse.WebFetchRequests, &tools.WebFetchRequests},
+			{event.Usage.ServerToolUse.CodeExecutionRequests, &tools.CodeExecutionRequests},
+		} {
+			if field.reported != nil {
+				if *field.reported < *field.target {
+					return anthropicUsage{}, errors.New("Anthropic stream usage decreased")
+				}
+				*field.target = *field.reported
+			}
+		}
+		next.ServerToolUse = &tools
 	}
 	if err := validateAnthropicUsage(next); err != nil {
 		return anthropicUsage{}, err
@@ -1526,11 +1553,11 @@ func streamAnthropicChat(body io.Reader, fallbackModel string, structured bool, 
 			if err := validateAnthropicUsage(streamEvent.Usage); err != nil {
 				return err
 			}
-			if err := validateAnthropicRequestedToolUsage(streamEvent.Usage, webSearch, webFetch, codeExecution); err != nil {
-				return err
-			}
 			cumulativeUsage, err = mergeAnthropicStreamUsage(cumulativeUsage, payload)
 			if err != nil {
+				return err
+			}
+			if err := validateAnthropicRequestedToolUsage(cumulativeUsage, webSearch, webFetch, codeExecution); err != nil {
 				return err
 			}
 			response.Usage.PromptTokens = anthropicInputTokens(cumulativeUsage)
@@ -1546,10 +1573,8 @@ func streamAnthropicChat(body io.Reader, fallbackModel string, structured bool, 
 			if streamEvent.Usage.OutputTokensDetails != nil {
 				response.Usage.CompletionTokensDetails = anthropicCompletionTokenDetails(streamEvent.Usage)
 			}
-			if streamEvent.Usage.ServerToolUse != nil {
-				response.Usage.SearchRequests = anthropicSearchRequests(streamEvent.Usage)
-				response.Usage.ToolRequests = anthropicCodeExecutionRequests(streamEvent.Usage)
-			}
+			response.Usage.SearchRequests = anthropicSearchRequests(cumulativeUsage)
+			response.Usage.ToolRequests = anthropicCodeExecutionRequests(cumulativeUsage)
 			if streamEvent.Usage.ServiceTier != "" {
 				if response.ServiceTier != "" && response.ServiceTier != streamEvent.Usage.ServiceTier {
 					return errors.New("Anthropic changed service tier during stream")
