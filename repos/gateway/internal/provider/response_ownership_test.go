@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -29,6 +30,37 @@ type ownershipResponseClient struct {
 
 type ownershipPostModule struct {
 	postCalls int
+}
+
+type cancelingOwnershipPostModule struct {
+	cancel context.CancelFunc
+}
+
+func (*cancelingOwnershipPostModule) Name() string   { return "cancel-ownership" }
+func (*cancelingOwnershipPostModule) Required() bool { return true }
+func (*cancelingOwnershipPostModule) Handle(context.Context, *modules.RequestContext) error {
+	return nil
+}
+func (*cancelingOwnershipPostModule) PostResponseEnabled() bool { return true }
+func (m *cancelingOwnershipPostModule) HandlePostResponse(context.Context, *modules.RequestContext) error {
+	m.cancel()
+	return nil
+}
+
+type contextCheckingOwnershipStore struct {
+	*ownershipTestStore
+	detached bool
+}
+
+func (s *contextCheckingOwnershipStore) SetIfAbsentOrEqual(ctx context.Context, key string, value []byte, ttl time.Duration) (bool, error) {
+	if ctx.Err() != nil {
+		return false, ctx.Err()
+	}
+	if _, ok := ctx.Deadline(); !ok {
+		return false, errors.New("ownership write has no deadline")
+	}
+	s.detached = true
+	return s.ownershipTestStore.SetIfAbsentOrEqual(ctx, key, value, ttl)
 }
 
 func (*ownershipPostModule) Name() string   { return "ownership-post" }
@@ -191,6 +223,35 @@ func TestStoredStreamingResponsePersistsOwnership(t *testing.T) {
 	}
 	if _, found, err := router.ownership.get(t.Context(), req, response.ID); err != nil || !found {
 		t.Fatalf("ownership found=%v err=%v", found, err)
+	}
+}
+
+func TestStoredResponsePersistsOwnershipAfterClientCancellation(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprintf("stream=%v", stream), func(t *testing.T) {
+			store := true
+			request := openai.ResponseRequest{Model: "public-model", Input: "hello", Store: &store, Stream: stream}
+			req := modules.RequestContext{CredentialID: "credential", UserID: "user", Request: openai.ChatCompletionRequest{Model: request.Model}, ResponseRequest: &request}
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			backend := &contextCheckingOwnershipStore{ownershipTestStore: &ownershipTestStore{data: map[string][]byte{}}}
+			client := &ownershipResponseClient{}
+			endpoint := Endpoint{Name: "deployment", Type: "test", Models: []string{"public-model"}, Provider: client, Admission: newAdmissionController(0, 0, 0)}
+			router := Router{endpoints: []Endpoint{endpoint}, modules: modules.NewPipeline([]modules.Module{&cancelingOwnershipPostModule{cancel: cancel}}), health: newEndpointHealthTracker(), routeCounter: &atomic.Uint64{}, ownership: newResponseOwnershipStore(time.Hour, backend)}
+			var response openai.ResponseResponse
+			var err error
+			if stream {
+				response, _, err = router.StreamResponses(ctx, req, func(string, string) error { return nil })
+			} else {
+				response, err = router.Responses(ctx, req)
+			}
+			if err != nil || response.ID != "resp_owned" || !backend.detached {
+				t.Fatalf("response=%+v detached=%v err=%v", response, backend.detached, err)
+			}
+			if _, found, err := router.ownership.get(t.Context(), req, response.ID); err != nil || !found {
+				t.Fatalf("ownership found=%v err=%v", found, err)
+			}
+		})
 	}
 }
 

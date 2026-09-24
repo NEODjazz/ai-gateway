@@ -1535,6 +1535,9 @@ retains the existing logged best-effort behavior and is a separate durability ga
 The write uses a five-second bounded context independent of client cancellation,
 so a completed provider response can still record its deployment after the
 client disconnects.
+Persistent response ownership uses the same bounded cancellation-independent
+write after provider completion, including JSON and streaming responses. A
+storage failure still prevents a successful stored-response result.
 Regression tests cover JSON and streaming lookup failures, no provider execution,
 no provider-module execution, and preservation of the existing pinned non-streaming
 fallback tests.
