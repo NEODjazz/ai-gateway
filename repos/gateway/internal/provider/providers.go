@@ -10,20 +10,23 @@ import (
 	"sync/atomic"
 	"time"
 
+	"ai-gateway-gateway/internal/azureurl"
 	"ai-gateway-gateway/internal/config"
 	"ai-gateway-gateway/internal/openai"
 )
 
 type ManagedProvider struct {
-	ID           string `json:"id"`
-	Type         string `json:"type"`
-	BaseURL      string `json:"base_url,omitempty"`
-	APIVersion   string `json:"api_version,omitempty"`
-	AuthType     string `json:"auth_type,omitempty"`
-	Region       string `json:"region,omitempty"`
-	RateLimitRPM int    `json:"rate_limit_rpm,omitempty"`
-	RateLimitTPM int    `json:"rate_limit_tpm,omitempty"`
-	Enabled      bool   `json:"enabled"`
+	ID            string `json:"id"`
+	Type          string `json:"type"`
+	BaseURL       string `json:"base_url,omitempty"`
+	APIVersion    string `json:"api_version,omitempty"`
+	AuthType      string `json:"auth_type,omitempty"`
+	AzureCloud    string `json:"azure_cloud,omitempty"`
+	AzureAudience string `json:"azure_audience,omitempty"`
+	Region        string `json:"region,omitempty"`
+	RateLimitRPM  int    `json:"rate_limit_rpm,omitempty"`
+	RateLimitTPM  int    `json:"rate_limit_tpm,omitempty"`
+	Enabled       bool   `json:"enabled"`
 }
 
 type ProviderCapabilityProfile struct {
@@ -51,25 +54,37 @@ type ProviderCapabilityProfile struct {
 	FineTuningCreateParameters   ProviderFineTuningCreateParameterPolicy   `json:"fine_tuning_create_parameters"`
 	ContainerCreateParameters    ProviderContainerCreateParameterPolicy    `json:"container_create_parameters"`
 	ChatModelParameters          []ProviderChatModelParameterPolicy        `json:"chat_model_parameters"`
+	ResponseModelParameters      []ProviderResponseModelParameterPolicy    `json:"response_model_parameters"`
 }
 
 type ProviderChatParameterPolicy struct {
 	SupportedOptions []string `json:"supported_options"`
 	ReasoningEffort  []string `json:"reasoning_effort"`
+	ReasoningFormat  []string `json:"reasoning_format"`
+	CitationOptions  []string `json:"citation_options"`
+	Thinking         []string `json:"thinking"`
 	Logprobs         []string `json:"logprobs"`
 	ServiceTier      []string `json:"service_tier"`
 }
 
 type ProviderChatModelParameterPolicy struct {
-	Model            string   `json:"model"`
-	SupportedOptions []string `json:"supported_options"`
-	ReasoningEffort  []string `json:"reasoning_effort"`
+	Model              string   `json:"model"`
+	SupportedOptions   []string `json:"supported_options"`
+	UnsupportedOptions []string `json:"unsupported_options,omitempty"`
+	ReasoningEffort    []string `json:"reasoning_effort"`
+	ReasoningFormat    []string `json:"reasoning_format"`
 }
 
 type ProviderResponseParameterPolicy struct {
 	SupportedOptions []string `json:"supported_options"`
 	ReasoningEffort  []string `json:"reasoning_effort"`
 	ServiceTier      []string `json:"service_tier"`
+}
+
+type ProviderResponseModelParameterPolicy struct {
+	Model            string   `json:"model"`
+	SupportedOptions []string `json:"supported_options"`
+	ReasoningEffort  []string `json:"reasoning_effort"`
 }
 
 type ProviderInteractionParameterPolicy struct {
@@ -168,7 +183,7 @@ var managedOperationCapabilities = []string{
 var managedFeatureCapabilities = []string{
 	"tools", "custom_tools", "response_image_generation", "response_computer", "response_shell", "response_apply_patch", "structured_output", "mcp", "code_interpreter", "file_search", "vision", "web_search", "tool_search", "audio_input", "video_input",
 	"web_fetch", "audio", "prompt_cache", "assistant_prefill", "memory_tool", "bash_tool", "text_editor_tool", "computer_toolset", "browser_toolset", "thinking", "zero_output", "inference_geo", "context_management", "tool_result_error", "document_citations", "document_metadata", "document_text",
-	"background_responses", "background_interactions", "file_input", "interaction_agents", "interaction_environment_reuse", "gemini_safety_settings", "gemini_code_execution", "url_context", "google_maps",
+	"background_responses", "background_interactions", "file_input", "interaction_agents", "interaction_environment_reuse", "gemini_safety_settings", "gemini_code_execution", "gemini_audio_timestamp", "gemini_media_resolution", "gemini_media_processing", "gemini_search_time_range", "gemini_file_search", "gemini_computer_use", "gemini_mcp", "url_context", "google_maps",
 }
 
 type ProviderController interface {
@@ -301,6 +316,8 @@ func normalizeManagedProvider(input ManagedProvider) (ManagedProvider, error) {
 	input.BaseURL = strings.TrimRight(strings.TrimSpace(input.BaseURL), "/")
 	input.APIVersion = strings.TrimSpace(input.APIVersion)
 	input.AuthType = strings.ToLower(strings.TrimSpace(input.AuthType))
+	input.AzureCloud = strings.ToLower(strings.TrimSpace(input.AzureCloud))
+	input.AzureAudience = strings.ToLower(strings.TrimSpace(input.AzureAudience))
 	input.Region = strings.ToLower(strings.TrimSpace(input.Region))
 	if input.ID == "" || len(input.ID) > 128 || !validProviderType(input.Type) || len(input.BaseURL) > 2048 || input.RateLimitRPM < 0 || input.RateLimitRPM > 10000000 || input.RateLimitTPM < 0 || input.RateLimitTPM > 1000000000 {
 		return ManagedProvider{}, ErrInvalidProvider
@@ -311,10 +328,28 @@ func normalizeManagedProvider(input ManagedProvider) (ManagedProvider, error) {
 			return ManagedProvider{}, ErrInvalidProvider
 		}
 	}
+	if input.Type == "ollama" {
+		parsed, err := url.Parse(input.BaseURL)
+		if err != nil || parsed.RawQuery != "" || parsed.ForceQuery || strings.Contains(input.BaseURL, "#") {
+			return ManagedProvider{}, ErrInvalidProvider
+		}
+	}
+	if input.Type != "azure-openai" && (input.AzureCloud != "" || input.AzureAudience != "") {
+		return ManagedProvider{}, ErrInvalidProvider
+	}
 	if input.Type == "azure-openai" {
 		input.AuthType = normalizeAzureAuthType(input.AuthType)
 		parsed, _ := url.Parse(input.BaseURL)
-		if parsed.RawQuery != "" || parsed.Fragment != "" || !validAzureProviderVersion(input.APIVersion) || (input.AuthType != "api_key" && input.AuthType != "entra") {
+		if parsed.RawQuery != "" || parsed.ForceQuery || strings.Contains(input.BaseURL, "#") || !azureurl.ValidPath(parsed) || !validAzureProviderVersion(input.APIVersion) || (input.AuthType != "api_key" && input.AuthType != "entra") || (input.AzureCloud != "" && (input.AuthType != "entra" || !validManagedAzureCloud(input.AzureCloud))) || (input.AzureAudience != "" && (input.AuthType != "entra" || !validManagedAzureAudience(input.AzureAudience))) {
+			return ManagedProvider{}, ErrInvalidProvider
+		}
+		if input.AzureAudience == "foundry" && (input.AzureCloud == "china" || strings.HasSuffix(strings.ToLower(parsed.Hostname()), ".azure.cn")) {
+			return ManagedProvider{}, ErrInvalidProvider
+		}
+		if _, project := azureFoundryProjectPath(parsed.Path); project && input.APIVersion != "" {
+			return ManagedProvider{}, ErrInvalidProvider
+		}
+		if _, project := azureFoundryProjectPath(parsed.Path); project && input.AzureCloud == "china" {
 			return ManagedProvider{}, ErrInvalidProvider
 		}
 		input.Region = ""
@@ -440,6 +475,7 @@ func ManagedProviderCapabilityProfiles() []ProviderCapabilityProfile {
 			FineTuningCreateParameters:   managedProviderFineTuningCreateParameterPolicy(client, slicesContain(operations, "fine_tuning")),
 			ContainerCreateParameters:    managedProviderContainerCreateParameterPolicy(client, operations),
 			ChatModelParameters:          managedProviderChatModelParameterPolicies(client, slicesContain(operations, "chat")),
+			ResponseModelParameters:      managedProviderResponseModelParameterPolicies(client, slicesContain(operations, "responses")),
 		})
 	}
 	return profiles
@@ -455,12 +491,18 @@ func managedProviderChatModelParameterPolicies(client Client, supported bool) []
 	for _, model := range prober.ManagedChatModelProbes() {
 		policy := managedProviderChatParameterPolicyForModel(client, true, model)
 		options := make([]string, 0, len(policy.SupportedOptions))
+		unsupported := make([]string, 0)
 		for _, option := range policy.SupportedOptions {
 			if !slicesContain(base.SupportedOptions, option) {
 				options = append(options, option)
 			}
 		}
-		result = append(result, ProviderChatModelParameterPolicy{Model: model, SupportedOptions: options, ReasoningEffort: policy.ReasoningEffort})
+		for _, option := range base.SupportedOptions {
+			if !slicesContain(policy.SupportedOptions, option) {
+				unsupported = append(unsupported, option)
+			}
+		}
+		result = append(result, ProviderChatModelParameterPolicy{Model: model, SupportedOptions: options, UnsupportedOptions: unsupported, ReasoningEffort: policy.ReasoningEffort, ReasoningFormat: policy.ReasoningFormat})
 	}
 	return result
 }
@@ -1156,11 +1198,35 @@ func managedProviderRerankParameterPolicy(client Client, supported bool) Provide
 }
 
 func managedProviderResponseParameterPolicy(client Client, supportsResponses bool) ProviderResponseParameterPolicy {
+	return managedProviderResponseParameterPolicyForModel(client, supportsResponses, "model")
+}
+
+func managedProviderResponseModelParameterPolicies(client Client, supported bool) []ProviderResponseModelParameterPolicy {
+	result := []ProviderResponseModelParameterPolicy{}
+	prober, ok := client.(interface{ ManagedResponseModelProbes() []string })
+	if !supported || !ok {
+		return result
+	}
+	base := managedProviderResponseParameterPolicy(client, true)
+	for _, model := range prober.ManagedResponseModelProbes() {
+		policy := managedProviderResponseParameterPolicyForModel(client, true, model)
+		options := make([]string, 0, len(policy.SupportedOptions))
+		for _, option := range policy.SupportedOptions {
+			if !slicesContain(base.SupportedOptions, option) {
+				options = append(options, option)
+			}
+		}
+		result = append(result, ProviderResponseModelParameterPolicy{Model: model, SupportedOptions: options, ReasoningEffort: policy.ReasoningEffort})
+	}
+	return result
+}
+
+func managedProviderResponseParameterPolicyForModel(client Client, supportsResponses bool, model string) ProviderResponseParameterPolicy {
 	policy := ProviderResponseParameterPolicy{SupportedOptions: []string{}, ReasoningEffort: []string{}, ServiceTier: []string{}}
 	if !supportsResponses {
 		return policy
 	}
-	baseline := openai.ResponseRequest{Model: "model", Input: "test"}
+	baseline := openai.ResponseRequest{Model: model, Input: "test"}
 	for _, value := range []string{"none", "minimal", "low", "medium", "high", "xhigh", "max", "default"} {
 		request, effort := baseline, value
 		request.Reasoning = &openai.ResponseReasoning{Effort: &effort}
@@ -1178,7 +1244,7 @@ func managedProviderResponseParameterPolicy(client Client, supportsResponses boo
 	for _, probe := range managedResponseOptionProbes() {
 		request := baseline
 		probe.apply(&request)
-		if validateResponseAdapter(client, request) == nil {
+		if managedResponseOptionSupported(client, probe.name, request) {
 			policy.SupportedOptions = append(policy.SupportedOptions, probe.name)
 		}
 	}
@@ -1191,6 +1257,25 @@ func managedProviderResponseParameterPolicy(client Client, supportsResponses boo
 	return policy
 }
 
+func managedResponseOptionSupported(client Client, name string, request openai.ResponseRequest) bool {
+	if validateResponseAdapter(client, request) == nil {
+		return true
+	}
+	var effort string
+	switch name {
+	case "temperature":
+		effort = "none"
+	case "top_p":
+		effort = "high"
+		value := 0.97
+		request.TopP = &value
+	default:
+		return false
+	}
+	request.Reasoning = &openai.ResponseReasoning{Effort: &effort}
+	return validateResponseAdapter(client, request) == nil
+}
+
 type managedResponseOptionProbe struct {
 	name  string
 	apply func(*openai.ResponseRequest)
@@ -1199,6 +1284,13 @@ type managedResponseOptionProbe struct {
 func managedResponseOptionProbes() []managedResponseOptionProbe {
 	return []managedResponseOptionProbe{
 		{name: "metadata", apply: func(request *openai.ResponseRequest) { request.Metadata = map[string]string{"trace": "profile-probe"} }},
+		{name: "context_management", apply: func(request *openai.ResponseRequest) {
+			threshold := 1000
+			request.ContextManagement = []openai.ResponseContextEntry{{Type: "compaction", CompactThreshold: &threshold}}
+		}},
+		{name: "moderation", apply: func(request *openai.ResponseRequest) {
+			request.Moderation = &openai.ProviderModeration{Model: "omni-moderation-latest", Policy: &openai.ProviderModerationPolicy{Input: &openai.ProviderModerationRule{Mode: "block"}}}
+		}},
 		{name: "top_logprobs", apply: func(request *openai.ResponseRequest) { value := 1; request.TopLogprobs = &value }},
 		{name: "truncation", apply: func(request *openai.ResponseRequest) { value := "auto"; request.Truncation = &value }},
 		{name: "store", apply: func(request *openai.ResponseRequest) { value := true; request.Store = &value }},
@@ -1232,7 +1324,7 @@ func managedProviderChatParameterPolicy(client Client, supportsChat bool) Provid
 }
 
 func managedProviderChatParameterPolicyForModel(client Client, supportsChat bool, model string) ProviderChatParameterPolicy {
-	policy := ProviderChatParameterPolicy{SupportedOptions: []string{}, ReasoningEffort: []string{}, Logprobs: []string{}, ServiceTier: []string{}}
+	policy := ProviderChatParameterPolicy{SupportedOptions: []string{}, ReasoningEffort: []string{}, ReasoningFormat: []string{}, CitationOptions: []string{}, Thinking: []string{}, Logprobs: []string{}, ServiceTier: []string{}}
 	if !supportsChat {
 		return policy
 	}
@@ -1242,6 +1334,27 @@ func managedProviderChatParameterPolicyForModel(client Client, supportsChat bool
 		request.ReasoningEffort = value
 		if validateChatAdapter(client, request) == nil {
 			policy.ReasoningEffort = append(policy.ReasoningEffort, value)
+		}
+	}
+	for _, value := range []string{"hidden", "raw", "parsed"} {
+		request := baseline
+		request.ReasoningFormat = value
+		if validateChatAdapter(client, request) == nil {
+			policy.ReasoningFormat = append(policy.ReasoningFormat, value)
+		}
+	}
+	for _, value := range []string{"enabled", "disabled"} {
+		request := baseline
+		request.CitationOptions = value
+		if validateChatAdapter(client, request) == nil {
+			policy.CitationOptions = append(policy.CitationOptions, value)
+		}
+	}
+	for _, value := range []string{"enabled", "disabled"} {
+		request := baseline
+		request.Thinking = &openai.ChatThinkingOptions{Type: value}
+		if validateChatAdapter(client, request) == nil {
+			policy.Thinking = append(policy.Thinking, value)
 		}
 	}
 	for _, value := range []bool{false, true} {
@@ -1268,6 +1381,15 @@ func managedProviderChatParameterPolicyForModel(client Client, supportsChat bool
 	if len(policy.ReasoningEffort) > 0 {
 		policy.SupportedOptions = append(policy.SupportedOptions, "reasoning_effort")
 	}
+	if len(policy.ReasoningFormat) > 0 {
+		policy.SupportedOptions = append(policy.SupportedOptions, "reasoning_format")
+	}
+	if len(policy.CitationOptions) > 0 {
+		policy.SupportedOptions = append(policy.SupportedOptions, "citation_options")
+	}
+	if len(policy.Thinking) > 0 {
+		policy.SupportedOptions = append(policy.SupportedOptions, "thinking")
+	}
 	if len(policy.ServiceTier) > 0 {
 		policy.SupportedOptions = append(policy.SupportedOptions, "service_tier")
 	}
@@ -1293,6 +1415,11 @@ func managedChatOptionProbes() []managedChatOptionProbe {
 			request.Modalities = []string{"audio"}
 			request.Audio = &openai.ChatAudioOptions{Format: "wav", Voice: openai.ChatAudioVoice{Name: "alloy"}}
 		}},
+		{name: "moderation", apply: func(request *openai.ChatCompletionRequest) {
+			request.Moderation = &openai.ProviderModeration{Model: "omni-moderation-latest", Policy: &openai.ProviderModerationPolicy{Input: &openai.ProviderModerationRule{Mode: "block"}}}
+		}},
+		{name: "clear_thinking", apply: setBool(func(request *openai.ChatCompletionRequest) **bool { return &request.ClearThinking }, true)},
+		{name: "include_reasoning", apply: setBool(func(request *openai.ChatCompletionRequest) **bool { return &request.IncludeReasoning }, true)},
 		{name: "safe_prompt", apply: setBool(func(request *openai.ChatCompletionRequest) **bool { return &request.SafePrompt }, true)},
 		{name: "n", apply: func(request *openai.ChatCompletionRequest) { value := 2; request.N = &value }},
 		{name: "safety_identifier", apply: func(request *openai.ChatCompletionRequest) { request.SafetyIdentifier = "profile-probe" }},
@@ -1366,6 +1493,14 @@ func validAzureProviderVersion(value string) bool {
 	}
 	_, err := time.Parse("2006-01-02", date)
 	return err == nil
+}
+
+func validManagedAzureCloud(value string) bool {
+	return value == "public" || value == "usgov" || value == "china"
+}
+
+func validManagedAzureAudience(value string) bool {
+	return value == "cognitive" || value == "foundry"
 }
 
 func cloneProviders(current map[string]ManagedProvider) map[string]ManagedProvider {

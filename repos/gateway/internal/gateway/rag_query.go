@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -92,7 +94,81 @@ func (h Handler) RAGQuery(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	chat.Messages = insertRAGContext(chat.Messages, results)
-	h.serveChatAs(w, r, chat, "rag_query")
+	citations := newRAGStreamCitations(results)
+	h.serveChatWithAdapter(w, r, chat, "rag_query", chatResponseAdapter{
+		decorate: func(response *openai.ChatCompletionResponse) {
+			*response = annotateRAGResponse(*response, results)
+		},
+		stream: citations.decorate,
+	})
+}
+
+var ragCitationMarker = regexp.MustCompile(`\[([1-9][0-9]?)\]`)
+
+func annotateRAGResponse(response openai.ChatCompletionResponse, results []vectorSearchResult) openai.ChatCompletionResponse {
+	for index := range response.Choices {
+		message := &response.Choices[index].Message
+		content, ok := message.Content.(string)
+		if !ok || len(message.Annotations) >= 128 {
+			continue
+		}
+		byteOffset, runeOffset, codeTicks := 0, 0, 0
+		for byteOffset < len(content) && len(message.Annotations) < 128 {
+			match := ragCitationMarker.FindStringSubmatchIndex(content[byteOffset:])
+			if match == nil {
+				break
+			}
+			startByte, endByte := byteOffset+match[0], byteOffset+match[1]
+			numberText := content[byteOffset+match[2] : byteOffset+match[3]]
+			codeTicks = ragCodeTicksBefore(content, byteOffset, startByte, codeTicks)
+			start := runeOffset + utf8.RuneCountInString(content[byteOffset:startByte])
+			runeOffset = start + utf8.RuneCountInString(content[startByte:endByte])
+			byteOffset = endByte
+			if codeTicks != 0 || endByte < len(content) && content[endByte] == '(' {
+				continue
+			}
+			number, err := strconv.Atoi(numberText)
+			if err != nil || number < 1 || number > len(results) {
+				continue
+			}
+			result := results[number-1]
+			documentIndex := number - 1
+			annotation := openai.ChatAnnotation{
+				Type: "source_citation",
+				SourceCitation: &openai.ChatSourceCitation{
+					StartIndex: start, EndIndex: runeOffset,
+					Title: result.Filename, Source: result.FileID,
+					LocationType: "document_chunk", DocumentIndex: &documentIndex,
+					LocationStart: result.chunkIndex, LocationEnd: result.chunkIndex + 1,
+				},
+			}
+			if openai.ValidateChatAnnotations([]openai.ChatAnnotation{annotation}) == nil {
+				message.Annotations = append(message.Annotations, annotation)
+			}
+		}
+	}
+	return response
+}
+
+func ragCodeTicksBefore(content string, from, to, open int) int {
+	for index := from; index < to; {
+		if content[index] != '`' || index > 0 && content[index-1] == '\\' {
+			index++
+			continue
+		}
+		end := index + 1
+		for end < to && content[end] == '`' {
+			end++
+		}
+		count := end - index
+		if open == 0 {
+			open = count
+		} else if open == count {
+			open = 0
+		}
+		index = end
+	}
+	return open
 }
 
 func decodeRAGQueryRequest(w http.ResponseWriter, r *http.Request) (openai.ChatCompletionRequest, ragRetrievalConfig, ragRerankConfig, bool) {

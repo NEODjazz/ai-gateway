@@ -32,7 +32,7 @@ func TestGeminiCounterIncludesSystemToolsAndImages(t *testing.T) {
 		if len(body.Contents) != 0 || native.Model != "models/gemini-test" || native.System == nil || native.System.Parts[0].Text != "Be concise" || len(native.Tools) != 1 || native.Tools[0].Functions[0].Name != "weather" {
 			t.Errorf("full context lost: %+v", body)
 		}
-		if len(native.Contents) != 1 || len(native.Contents[0].Parts) != 2 || native.Contents[0].Parts[1].InlineData == nil {
+		if len(native.Contents) != 1 || len(native.Contents[0].Parts) != 2 || native.Contents[0].Parts[1].InlineData == nil || native.Generation.MediaResolution != "MEDIA_RESOLUTION_HIGH" {
 			t.Error("inline image lost")
 		}
 		if native.Generation.MaxOutputTokens != nil {
@@ -43,6 +43,7 @@ func TestGeminiCounterIncludesSystemToolsAndImages(t *testing.T) {
 	defer server.Close()
 	request := countTestRequest()
 	request.Model = "models/gemini-test"
+	request.GeminiMediaResolution = "MEDIA_RESOLUTION_HIGH"
 	var counter TokenCountClient = NewGemini(server.URL, "test-key", false)
 	result, err := counter.CountTokens(context.Background(), request)
 	if err != nil || result.InputTokens != 456 || result.Source != "gemini" || result.Model != request.Model {

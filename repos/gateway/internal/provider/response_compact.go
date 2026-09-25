@@ -23,6 +23,19 @@ func decodeCompactedResponse(reader io.Reader) (openai.CompactedResponse, error)
 	if len(payload) > maxResponseJSONBytes {
 		return openai.CompactedResponse{}, errors.New("compacted response exceeds 32 MiB")
 	}
+	var usageFields struct {
+		Usage *struct {
+			InputTokens  *int `json:"input_tokens"`
+			OutputTokens *int `json:"output_tokens"`
+			TotalTokens  *int `json:"total_tokens"`
+		} `json:"usage"`
+	}
+	if err := json.Unmarshal(payload, &usageFields); err != nil {
+		return openai.CompactedResponse{}, err
+	}
+	if usageFields.Usage == nil || usageFields.Usage.InputTokens == nil || usageFields.Usage.OutputTokens == nil || usageFields.Usage.TotalTokens == nil {
+		return openai.CompactedResponse{}, errors.New("compacted response requires exact input, output and total token usage")
+	}
 	var response openai.CompactedResponse
 	if err := json.Unmarshal(payload, &response); err != nil {
 		return openai.CompactedResponse{}, err
@@ -55,7 +68,13 @@ func validateCompactedResponse(response openai.CompactedResponse) error {
 			}
 		}
 	}
-	return validateResponseUsage(response.Usage)
+	if err := validateResponseUsage(response.Usage); err != nil {
+		return err
+	}
+	if response.Usage.TotalTokens != response.Usage.InputTokens+response.Usage.OutputTokens {
+		return errors.New("compacted response has inconsistent token usage")
+	}
+	return nil
 }
 
 func (r Router) CompactResponse(ctx context.Context, req modules.RequestContext) (openai.CompactedResponse, error) {

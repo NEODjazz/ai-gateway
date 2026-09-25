@@ -63,14 +63,20 @@ func (g Gemini) authorize(request *http.Request) error {
 	}
 }
 
-func (Gemini) SupportsVision() bool        { return true }
-func (Gemini) SupportsWebSearch() bool     { return true }
-func (Gemini) SupportsCodeExecution() bool { return true }
-func (Gemini) SupportsURLContext() bool    { return true }
-func (Gemini) SupportsGoogleMaps() bool    { return true }
-func (Gemini) SupportsAudioInput() bool    { return true }
-func (Gemini) SupportsFileInput() bool     { return true }
-func (Gemini) SupportsVideoInput() bool    { return true }
+func (Gemini) SupportsVision() bool            { return true }
+func (Gemini) SupportsWebSearch() bool         { return true }
+func (Gemini) SupportsCodeExecution() bool     { return true }
+func (Gemini) SupportsURLContext() bool        { return true }
+func (Gemini) SupportsSearchTimeRange() bool   { return true }
+func (Gemini) SupportsGeminiFileSearch() bool  { return true }
+func (Gemini) SupportsGeminiComputerUse() bool { return true }
+func (Gemini) SupportsGeminiMCP() bool         { return true }
+func (Gemini) SupportsGoogleMaps() bool        { return true }
+func (Gemini) SupportsAudioInput() bool        { return true }
+func (Gemini) SupportsFileInput() bool         { return true }
+func (Gemini) SupportsVideoInput() bool        { return true }
+func (Gemini) SupportsMediaResolution() bool   { return true }
+func (Gemini) SupportsMediaProcessing() bool   { return true }
 
 func (Gemini) SupportsResponses() bool { return false }
 
@@ -87,6 +93,8 @@ type geminiPart struct {
 	CodeExecutionResult *openai.GeminiCodeExecutionResult `json:"codeExecutionResult,omitempty"`
 	Thought             bool                              `json:"thought,omitempty"`
 	ThoughtSignature    string                            `json:"thoughtSignature,omitempty"`
+	MediaResolution     *openai.GeminiMediaResolution     `json:"mediaResolution,omitempty"`
+	MediaProcessing     string                            `json:"mediaProcessing,omitempty"`
 }
 type geminiInlineData struct {
 	MIMEType string `json:"mimeType"`
@@ -112,11 +120,16 @@ type geminiFunction struct {
 	Parameters  any    `json:"parametersJsonSchema,omitempty"`
 }
 type geminiTool struct {
-	Functions     []geminiFunction `json:"functionDeclarations,omitempty"`
-	GoogleSearch  *struct{}        `json:"googleSearch,omitempty"`
-	GoogleMaps    *struct{}        `json:"googleMaps,omitempty"`
-	CodeExecution *struct{}        `json:"codeExecution,omitempty"`
-	URLContext    *struct{}        `json:"urlContext,omitempty"`
+	Functions    []geminiFunction `json:"functionDeclarations,omitempty"`
+	GoogleSearch *struct {
+		TimeRange *openai.GeminiSearchTimeRange `json:"timeRangeFilter,omitempty"`
+	} `json:"googleSearch,omitempty"`
+	GoogleMaps    *struct{}                       `json:"googleMaps,omitempty"`
+	CodeExecution *struct{}                       `json:"codeExecution,omitempty"`
+	URLContext    *struct{}                       `json:"urlContext,omitempty"`
+	FileSearch    *openai.GeminiFileSearchConfig  `json:"fileSearch,omitempty"`
+	ComputerUse   *openai.GeminiComputerUseConfig `json:"computerUse,omitempty"`
+	MCPServers    []openai.GeminiMCPServer        `json:"mcpServers,omitempty"`
 }
 type geminiGeneration struct {
 	MaxOutputTokens    *int                            `json:"maxOutputTokens,omitempty"`
@@ -131,6 +144,8 @@ type geminiGeneration struct {
 	ThinkingConfig     *geminiThinkingConfig           `json:"thinkingConfig,omitempty"`
 	ImageConfig        *geminiImageConfig              `json:"imageConfig,omitempty"`
 	AudioTranscription *geminiAudioTranscriptionConfig `json:"audioTranscriptionConfig,omitempty"`
+	AudioTimestamp     *bool                           `json:"audioTimestamp,omitempty"`
+	MediaResolution    string                          `json:"mediaResolution,omitempty"`
 	ResponseModalities []string                        `json:"responseModalities,omitempty"`
 	Seed               *int64                          `json:"seed,omitempty"`
 	Stop               []string                        `json:"stopSequences,omitempty"`
@@ -236,6 +251,9 @@ func geminiInvalid(param string) error {
 }
 
 func (Gemini) ValidateChatParameters(request openai.ChatCompletionRequest) error {
+	if err := rejectChatModeration("gemini", request); err != nil {
+		return err
+	}
 	if err := validateChatReasoningContent("gemini", request.Messages, false); err != nil {
 		return err
 	}
@@ -256,6 +274,36 @@ func geminiChatRequest(request openai.ChatCompletionRequest) (geminiRequest, err
 	}
 	if err := openai.ValidateGeminiSafetySettings(request.GeminiSafetySettings); err != nil {
 		return result, geminiInvalid("safety_settings")
+	}
+	if request.WebSearchOptions != nil && !openai.ValidGeminiSearchTimeRange(request.WebSearchOptions.GeminiTimeRange) {
+		return result, geminiInvalid("web_search_options.time_range")
+	}
+	if request.GeminiFileSearch != nil && (!openai.ValidGeminiFileSearchConfig(request.GeminiFileSearch) || len(request.Tools) > 0 || request.WebSearchOptions != nil || request.GeminiCodeExecution || request.GeminiURLContext || request.GeminiGoogleMaps) {
+		return result, geminiInvalid("file_search")
+	}
+	if request.GeminiComputerUse != nil && !openai.ValidGeminiComputerUseConfig(request.GeminiComputerUse) {
+		return result, geminiInvalid("computer_use")
+	}
+	if len(request.GeminiMCPServerIDs) > 0 && (len(request.GeminiMCPServers) != len(request.GeminiMCPServerIDs) || !openai.ValidGeminiMCPServerIDs(request.GeminiMCPServerIDs)) {
+		return result, geminiInvalid("mcp_servers")
+	}
+	for index, server := range request.GeminiMCPServers {
+		transport := server.StreamableHTTPTransport
+		parsed, err := url.Parse(transport.URL)
+		if index >= len(request.GeminiMCPServerIDs) || server.Name != request.GeminiMCPServerIDs[index] || err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || transport.Timeout != "30s" || transport.SSEReadTimeout != "60s" || !transport.TerminateOnClose || len(transport.Headers) > 1 {
+			return result, geminiInvalid("mcp_servers")
+		}
+		for name, value := range transport.Headers {
+			if name != "Authorization" || !strings.HasPrefix(value, "Bearer ") || len(value) <= len("Bearer ") || len(value) > 32775 {
+				return result, geminiInvalid("mcp_servers")
+			}
+		}
+	}
+	if err := openai.ValidateChatGeminiPartMediaResolutions(request); err != nil {
+		return result, geminiInvalid("messages.content.media_resolution")
+	}
+	if err := openai.ValidateChatGeminiPartMediaProcessing(request); err != nil {
+		return result, geminiInvalid("messages.content.media_processing")
 	}
 	if err := validateChatMessagePrefix("gemini", request.Messages, false); err != nil {
 		return result, err
@@ -368,7 +416,17 @@ func geminiChatRequest(request openai.ChatCompletionRequest) (geminiRequest, err
 		FrequencyPenalty: request.FrequencyPenalty, PresencePenalty: request.PresencePenalty,
 		ResponseLogprobs: request.Logprobs, Logprobs: request.TopLogprobs, CandidateCount: request.N,
 		ThinkingConfig: thinkingConfig, Seed: request.Seed, Stop: stop,
-		ResponseModalities: responseModalities,
+		AudioTimestamp: request.GeminiAudioTimestamp, MediaResolution: request.GeminiMediaResolution, ResponseModalities: responseModalities,
+	}
+	if request.GeminiMediaResolution != "" {
+		switch request.GeminiMediaResolution {
+		case "MEDIA_RESOLUTION_UNSPECIFIED", "MEDIA_RESOLUTION_LOW", "MEDIA_RESOLUTION_MEDIUM", "MEDIA_RESOLUTION_HIGH":
+		default:
+			return result, geminiInvalid("media_resolution")
+		}
+		if !openai.HasChatMediaInput(request) {
+			return result, geminiInvalid("media_resolution")
+		}
 	}
 	result.ServiceTier = serviceTier
 	result.Store = request.Store
@@ -521,7 +579,10 @@ func geminiChatRequest(request openai.ChatCompletionRequest) (geminiRequest, err
 		result.Tools = []geminiTool{tool}
 	}
 	if request.WebSearchOptions != nil {
-		result.Tools = append(result.Tools, geminiTool{GoogleSearch: &struct{}{}})
+		search := &struct {
+			TimeRange *openai.GeminiSearchTimeRange `json:"timeRangeFilter,omitempty"`
+		}{TimeRange: request.WebSearchOptions.GeminiTimeRange}
+		result.Tools = append(result.Tools, geminiTool{GoogleSearch: search})
 	}
 	if request.GeminiCodeExecution {
 		result.Tools = append(result.Tools, geminiTool{CodeExecution: &struct{}{}})
@@ -540,6 +601,25 @@ func geminiChatRequest(request openai.ChatCompletionRequest) (geminiRequest, err
 		}
 	} else if request.GeminiRetrievalLocation != nil {
 		return result, geminiInvalid("retrieval_config")
+	}
+	if request.GeminiFileSearch != nil {
+		config := *request.GeminiFileSearch
+		config.StoreNames = append([]string(nil), request.GeminiFileSearch.StoreNames...)
+		result.Tools = append(result.Tools, geminiTool{FileSearch: &config})
+	}
+	if request.GeminiComputerUse != nil {
+		config := *request.GeminiComputerUse
+		config.ExcludedPredefinedFunctions = append([]string(nil), request.GeminiComputerUse.ExcludedPredefinedFunctions...)
+		config.DisabledSafetyPolicies = append([]string(nil), request.GeminiComputerUse.DisabledSafetyPolicies...)
+		result.Tools = append(result.Tools, geminiTool{ComputerUse: &config})
+	}
+	if len(request.GeminiMCPServers) > 0 {
+		servers := make([]openai.GeminiMCPServer, len(request.GeminiMCPServers))
+		for index := range request.GeminiMCPServers {
+			servers[index] = request.GeminiMCPServers[index]
+			servers[index].StreamableHTTPTransport.Headers = cloneStringMap(request.GeminiMCPServers[index].StreamableHTTPTransport.Headers)
+		}
+		result.Tools = append(result.Tools, geminiTool{MCPServers: servers})
 	}
 	if request.ToolChoice != nil {
 		if len(request.Tools) == 0 {
@@ -593,6 +673,14 @@ func geminiMessageParts(value any) ([]geminiPart, error) {
 			if !ok {
 				return nil, geminiInvalid("messages.content")
 			}
+			resolution, err := openai.GeminiPartMediaResolution(part)
+			if err != nil {
+				return nil, geminiInvalid("messages.content.media_resolution")
+			}
+			processing, err := openai.GeminiPartMediaProcessing(part)
+			if err != nil {
+				return nil, geminiInvalid("messages.content.media_processing")
+			}
 			switch part["type"] {
 			case "text":
 				text, ok := part["text"].(string)
@@ -607,25 +695,25 @@ func geminiMessageParts(value any) ([]geminiPart, error) {
 				if err != nil {
 					return nil, err
 				}
-				parts = append(parts, geminiPart{InlineData: &geminiInlineData{MIMEType: attachment.MediaType, Data: attachment.Data}})
+				parts = append(parts, geminiPart{InlineData: &geminiInlineData{MIMEType: attachment.MediaType, Data: attachment.Data}, MediaResolution: resolution})
 			case "input_audio":
 				attachments, err := openai.ResponseAudioAttachments([]any{part})
 				if err != nil || len(attachments) != 1 {
 					return nil, openai.ErrInvalidAudio
 				}
-				parts = append(parts, geminiPart{InlineData: &geminiInlineData{MIMEType: attachments[0].MediaType, Data: attachments[0].Data}})
+				parts = append(parts, geminiPart{InlineData: &geminiInlineData{MIMEType: attachments[0].MediaType, Data: attachments[0].Data}, MediaResolution: resolution})
 			case "input_file":
 				attachments, err := openai.ResponseFileAttachments([]any{part})
 				if err != nil || len(attachments) != 1 {
 					return nil, openai.ErrInvalidFileInput
 				}
-				parts = append(parts, geminiPart{InlineData: &geminiInlineData{MIMEType: attachments[0].MediaType, Data: attachments[0].Data}})
+				parts = append(parts, geminiPart{InlineData: &geminiInlineData{MIMEType: attachments[0].MediaType, Data: attachments[0].Data}, MediaResolution: resolution})
 			case "input_video":
 				attachments, err := openai.ChatVideoAttachments([]openai.Message{{Role: "user", Content: []any{part}}})
 				if err != nil || len(attachments) != 1 {
 					return nil, openai.ErrInvalidVideoInput
 				}
-				parts = append(parts, geminiPart{InlineData: &geminiInlineData{MIMEType: attachments[0].MediaType, Data: attachments[0].Data}})
+				parts = append(parts, geminiPart{InlineData: &geminiInlineData{MIMEType: attachments[0].MediaType, Data: attachments[0].Data}, MediaResolution: resolution, MediaProcessing: processing})
 			default:
 				return nil, geminiInvalid("messages.content.type")
 			}
@@ -946,6 +1034,22 @@ func geminiGrounding(raw json.RawMessage, text string) ([]openai.ChatAnnotation,
 					} `json:"reviewSnippets"`
 				} `json:"placeAnswerSources"`
 			} `json:"maps"`
+			RetrievedContext *struct {
+				URI             string `json:"uri"`
+				Title           string `json:"title"`
+				Text            string `json:"text"`
+				FileSearchStore string `json:"fileSearchStore"`
+				PageNumber      *int   `json:"pageNumber"`
+				MediaID         string `json:"mediaId"`
+				CustomMetadata  []struct {
+					Key             string  `json:"key"`
+					StringValue     *string `json:"stringValue"`
+					StringListValue *struct {
+						Values []string `json:"values"`
+					} `json:"stringListValue"`
+					NumericValue *float64 `json:"numericValue"`
+				} `json:"customMetadata"`
+			} `json:"retrievedContext"`
 		} `json:"groundingChunks"`
 		Supports []struct {
 			Indices []int `json:"groundingChunkIndices"`
@@ -974,12 +1078,48 @@ func geminiGrounding(raw json.RawMessage, text string) ([]openai.ChatAnnotation,
 	}
 	mapsUsed := metadata.MapsWidget != ""
 	for _, chunk := range metadata.Chunks {
-		if (chunk.Web == nil) == (chunk.Maps == nil) {
+		sources := 0
+		for _, present := range []bool{chunk.Web != nil, chunk.Maps != nil, chunk.RetrievedContext != nil} {
+			if present {
+				sources++
+			}
+		}
+		if sources != 1 {
 			return nil, 0, errors.New("invalid Gemini grounding source")
 		}
 		if chunk.Web != nil {
 			if !validGeminiGroundingURL(chunk.Web.URI, false) || len(chunk.Web.Title) > 8192 {
 				return nil, 0, errors.New("invalid Gemini grounding source")
+			}
+			continue
+		}
+		if chunk.RetrievedContext != nil {
+			retrieved := chunk.RetrievedContext
+			if retrieved.FileSearchStore != "" && !openai.ValidGeminiFileSearchStoreName(retrieved.FileSearchStore) || retrieved.URI != "" && !validGeminiGroundingURL(retrieved.URI, false) || len(retrieved.Title) > 8192 || len(retrieved.Text) > 65536 || retrieved.PageNumber != nil && (*retrieved.PageNumber < 1 || *retrieved.PageNumber > 10_000_000) || retrieved.MediaID != "" && !openai.ValidGeminiFileSearchMediaID(retrieved.MediaID, retrieved.FileSearchStore) || len(retrieved.CustomMetadata) > 64 {
+				return nil, 0, errors.New("invalid Gemini file search grounding source")
+			}
+			seenKeys := map[string]bool{}
+			for _, value := range retrieved.CustomMetadata {
+				members := 0
+				for _, present := range []bool{value.StringValue != nil, value.StringListValue != nil, value.NumericValue != nil} {
+					if present {
+						members++
+					}
+				}
+				if strings.TrimSpace(value.Key) == "" || len(value.Key) > 256 || seenKeys[value.Key] || members != 1 || value.StringValue != nil && len(*value.StringValue) > 8192 || value.NumericValue != nil && (math.IsNaN(*value.NumericValue) || math.IsInf(*value.NumericValue, 0)) {
+					return nil, 0, errors.New("invalid Gemini file search metadata")
+				}
+				seenKeys[value.Key] = true
+				if value.StringListValue != nil {
+					if len(value.StringListValue.Values) == 0 || len(value.StringListValue.Values) > 128 {
+						return nil, 0, errors.New("invalid Gemini file search metadata")
+					}
+					for _, item := range value.StringListValue.Values {
+						if len(item) > 8192 {
+							return nil, 0, errors.New("invalid Gemini file search metadata")
+						}
+					}
+				}
 			}
 			continue
 		}
@@ -1013,8 +1153,10 @@ func geminiGrounding(raw json.RawMessage, text string) ([]openai.ChatAnnotation,
 			chunk := metadata.Chunks[index]
 			if chunk.Web != nil {
 				annotations = append(annotations, openai.ChatAnnotation{Type: "url_citation", URLCitation: &openai.ChatURLCitation{StartIndex: support.Segment.Start, EndIndex: support.Segment.End, Title: chunk.Web.Title, URL: chunk.Web.URI}})
-			} else {
+			} else if chunk.Maps != nil {
 				annotations = append(annotations, openai.ChatAnnotation{Type: "url_citation", URLCitation: &openai.ChatURLCitation{StartIndex: support.Segment.Start, EndIndex: support.Segment.End, Title: chunk.Maps.Title, URL: chunk.Maps.URI}})
+			} else if chunk.RetrievedContext.URI != "" {
+				annotations = append(annotations, openai.ChatAnnotation{Type: "url_citation", URLCitation: &openai.ChatURLCitation{StartIndex: support.Segment.Start, EndIndex: support.Segment.End, Title: chunk.RetrievedContext.Title, URL: chunk.RetrievedContext.URI}})
 			}
 		}
 	}
@@ -1032,6 +1174,17 @@ func validGeminiGroundingURL(value string, httpsOnly bool) bool {
 	parsed, err := url.Parse(value)
 	validScheme := parsed.Scheme == "https" || !httpsOnly && parsed.Scheme == "http"
 	return err == nil && validScheme && parsed.Host != "" && parsed.User == nil && len(value) <= 8192
+}
+
+func cloneStringMap(values map[string]string) map[string]string {
+	if len(values) == 0 {
+		return nil
+	}
+	result := make(map[string]string, len(values))
+	for key, value := range values {
+		result[key] = value
+	}
+	return result
 }
 
 func validateGeminiReasoning(blocks []openai.ReasoningBlock) error {

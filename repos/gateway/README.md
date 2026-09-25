@@ -13,6 +13,13 @@ go run ./cmd/gateway
 The complete route and schema reference is [OpenAPI](api/openapi.yaml).
 Chat Completions accepts both modern tool calls and the legacy `functions` / `function_call` contract on compatible deployments. The two contracts are mutually exclusive, use the same function-name authorization policy, participate in token reservation, and bypass semantic caching. Native adapters return an explicit unsupported-parameter error for legacy function calls.
 
+Chat Completions and Responses accept provider-side `moderation` configuration
+on compatible, OpenAI and Azure OpenAI deployments. The gateway validates the
+model and input/output policy modes before execution. These requests bypass
+exact and semantic response caches and shadow execution so the provider applies
+its current moderation policy on every call; other adapters return an explicit
+unsupported-parameter error.
+
 For MCP registry management, client-side tools, Responses passthrough and
 permission examples, see [MCP integration](../../docs/mcp.md).
 

@@ -52,6 +52,55 @@ func TestResponseStreamOptionsRequireStreaming(t *testing.T) {
 	}
 }
 
+func TestResponseContextManagementValidation(t *testing.T) {
+	threshold := 1000
+	valid := ResponseRequest{ContextManagement: []ResponseContextEntry{{Type: "compaction", CompactThreshold: &threshold}}}
+	if message := valid.Validate(); message != "" {
+		t.Fatalf("valid context management rejected: %s", message)
+	}
+	zero := 0
+	for _, request := range []ResponseRequest{
+		{ContextManagement: []ResponseContextEntry{{Type: "unknown"}}},
+		{ContextManagement: []ResponseContextEntry{{Type: "compaction", CompactThreshold: &zero}}},
+		{ContextManagement: []ResponseContextEntry{{Type: "compaction"}, {Type: "compaction"}}},
+	} {
+		if message := request.Validate(); message == "" {
+			t.Fatalf("invalid context management accepted: %+v", request.ContextManagement)
+		}
+	}
+}
+
+func TestProviderModerationValidation(t *testing.T) {
+	valid := ResponseRequest{Moderation: &ProviderModeration{
+		Model: "omni-moderation-latest",
+		Policy: &ProviderModerationPolicy{
+			Input:  &ProviderModerationRule{Mode: "block"},
+			Output: &ProviderModerationRule{Mode: "score"},
+		},
+	}}
+	if message := valid.Validate(); message != "" {
+		t.Fatalf("valid moderation rejected: %s", message)
+	}
+	for _, moderation := range []*ProviderModeration{
+		{},
+		{Model: strings.Repeat("м", 257)},
+		{Model: "moderation", Policy: &ProviderModerationPolicy{Input: &ProviderModerationRule{Mode: "allow"}}},
+		{Model: "moderation", Policy: &ProviderModerationPolicy{Output: &ProviderModerationRule{}}},
+	} {
+		if message := (ResponseRequest{Moderation: moderation}).Validate(); message == "" {
+			t.Fatalf("invalid moderation accepted: %+v", moderation)
+		}
+	}
+}
+
+func TestResponsePromptCachePrewarmValidation(t *testing.T) {
+	enabled := true
+	request := ResponseRequest{PromptCacheOptions: &PromptCacheOptions{Prewarm: &enabled}}
+	if message := request.Validate(); message != "" {
+		t.Fatalf("valid prewarm rejected: %s", message)
+	}
+}
+
 func TestResponseBackgroundRequiresDurableNonStreamingStorage(t *testing.T) {
 	store := true
 	if message := (ResponseRequest{Background: true, Store: &store}).Validate(); message != "" {
@@ -200,6 +249,19 @@ func TestResponseToolChoiceValidation(t *testing.T) {
 	}
 }
 
+func TestResponseToolChoiceAutoWithoutTools(t *testing.T) {
+	request := ResponseRequest{Model: "m", Input: "hello", ToolChoice: "auto"}
+	if message := request.Validate(); message != "" {
+		t.Fatalf("auto without tools rejected: %s", message)
+	}
+	if message := ValidateResponseConfiguration(nil, "auto", nil, nil); message != "" {
+		t.Fatalf("echoed auto without tools rejected: %s", message)
+	}
+	if message := (ResponseRequest{Model: "m", Input: "hello", ToolChoice: "required"}).Validate(); message == "" {
+		t.Fatal("required without tools was accepted")
+	}
+}
+
 func TestResponseImageGenerationToolValidation(t *testing.T) {
 	compression, partialImages := 90, 3
 	validMask := "data:image/png;base64,iVBORw0KGgpmaXh0dXJl"
@@ -323,7 +385,6 @@ func TestResponseToolDefinitionValidation(t *testing.T) {
 		{name: "missing function name", tools: []ResponseTool{{Type: "function"}}},
 		{name: "invalid function name", tools: []ResponseTool{{Type: "function", Name: "bad name"}}},
 		{name: "long function name", tools: []ResponseTool{{Type: "function", Name: strings.Repeat("a", 65)}}},
-		{name: "long function description", tools: []ResponseTool{{Type: "function", Name: "lookup", Description: strings.Repeat("d", 4097)}}},
 		{name: "non-object parameters", tools: []ResponseTool{{Type: "function", Name: "lookup", Parameters: []any{"invalid"}}}},
 		{name: "function with MCP field", tools: []ResponseTool{{Type: "function", Name: "lookup", ServerURL: "https://example.test"}}},
 		{name: "duplicate function name", tools: []ResponseTool{{Type: "function", Name: "lookup"}, {Type: "function", Name: "lookup"}}},
@@ -358,6 +419,20 @@ func TestResponseToolDefinitionValidation(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			if message := (ResponseRequest{Tools: test.tools}).Validate(); message == "" {
 				t.Fatalf("invalid tools accepted: %+v", test.tools)
+			}
+		})
+	}
+}
+
+func TestResponseToolDescriptionsCanExceed4096Characters(t *testing.T) {
+	for _, toolType := range []string{"function", "custom"} {
+		t.Run(toolType, func(t *testing.T) {
+			tools := []ResponseTool{{Type: toolType, Name: "lookup", Description: strings.Repeat("d", 8192)}}
+			if message := (ResponseRequest{Tools: tools}).Validate(); message != "" {
+				t.Fatalf("request rejected: %s", message)
+			}
+			if message := ValidateResponseConfiguration(tools, nil, nil, nil); message != "" {
+				t.Fatalf("provider response rejected: %s", message)
 			}
 		})
 	}
@@ -425,12 +500,23 @@ func TestResponseReasoningValidation(t *testing.T) {
 
 func TestServiceTierValues(t *testing.T) {
 	for _, value := range []string{"", "auto", "default", "on_demand", "flex", "performance", "scale", "priority", "fast", "ultrafast"} {
-		if !validServiceTier(value) {
+		if !ValidServiceTier(value) {
 			t.Fatalf("documented service tier rejected: %q", value)
 		}
 	}
-	if validServiceTier("unknown") {
+	if ValidServiceTier("unknown") {
 		t.Fatal("unknown service tier accepted")
+	}
+}
+
+func TestReportedServiceTierValues(t *testing.T) {
+	for _, value := range []string{"", "default", "priority", "standard", "batch"} {
+		if !ValidReportedServiceTier(value) {
+			t.Fatalf("valid reported service tier rejected: %q", value)
+		}
+	}
+	if ValidReportedServiceTier("unknown") {
+		t.Fatal("unknown reported service tier accepted")
 	}
 }
 
@@ -463,6 +549,54 @@ func TestResponseSafetyIdentifierUsesUnicodeCharacterLimit(t *testing.T) {
 	}
 }
 
+func TestResponseIsolationIdentifiersUseUnicodeCharacterLimits(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		request ResponseRequest
+		valid   bool
+	}{
+		{name: "64 character prompt cache key", request: ResponseRequest{PromptCacheKey: strings.Repeat("я", 64)}, valid: true},
+		{name: "65 character prompt cache key", request: ResponseRequest{PromptCacheKey: strings.Repeat("я", 65)}, valid: false},
+		{name: "256 character user", request: ResponseRequest{User: strings.Repeat("я", 256)}, valid: true},
+		{name: "257 character user", request: ResponseRequest{User: strings.Repeat("я", 257)}, valid: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			message := tc.request.Validate()
+			if (message == "") != tc.valid {
+				t.Fatalf("validation result %q, valid=%v", message, tc.valid)
+			}
+		})
+	}
+}
+
+func TestValidateResponseInstructions(t *testing.T) {
+	for _, value := range []any{"be concise", []any{map[string]any{"role": "developer", "content": "be concise"}}} {
+		if message := ValidateResponseInstructions(value); message != "" {
+			t.Fatalf("valid instructions rejected: %v: %s", value, message)
+		}
+	}
+	for _, value := range []any{42, []any{}, []any{"be concise"}, []any{nil}} {
+		if message := ValidateResponseInstructions(value); message == "" {
+			t.Fatalf("invalid instructions accepted: %v", value)
+		}
+	}
+}
+
+func TestValidateResponseContextManagement(t *testing.T) {
+	threshold := 4096
+	for _, entries := range [][]ResponseContextEntry{nil, {{Type: "compaction"}}, {{Type: "compaction", CompactThreshold: &threshold}}} {
+		if message := ValidateResponseContextManagement(entries); message != "" {
+			t.Fatalf("valid context management rejected: %+v: %s", entries, message)
+		}
+	}
+	zero := 0
+	for _, entries := range [][]ResponseContextEntry{{}, {{Type: "unknown"}}, {{Type: "compaction", CompactThreshold: &zero}}, {{Type: "compaction"}, {Type: "compaction"}}} {
+		if message := ValidateResponseContextManagement(entries); message == "" {
+			t.Fatalf("invalid context management accepted: %+v", entries)
+		}
+	}
+}
+
 func TestResponseRejectsNonPositiveOutputLimits(t *testing.T) {
 	for _, value := range []int{-1, 0} {
 		for _, request := range []ResponseRequest{{MaxOutputTokens: &value}, {MaxTokens: &value}} {
@@ -479,5 +613,30 @@ func TestResponseRejectsConflictingOutputLimits(t *testing.T) {
 		if request.Validate() == "" {
 			t.Fatalf("both output caps accepted: %v", pair)
 		}
+	}
+}
+
+func TestResponseConversationReferenceValidation(t *testing.T) {
+	for _, body := range []string{
+		`{"conversation":"conv_one"}`,
+		`{"conversation":{"id":"conv_two"}}`,
+	} {
+		var request ResponseRequest
+		if err := json.Unmarshal([]byte(body), &request); err != nil || request.Conversation == nil || request.Conversation.ID == "" || request.Validate() != "" {
+			t.Fatalf("body=%s request=%+v err=%v validation=%q", body, request, err, request.Validate())
+		}
+	}
+	invalid := []ResponseRequest{
+		{Conversation: &ResponseConversation{ID: "bad"}},
+		{Conversation: &ResponseConversation{ID: "conv_one"}, PreviousResponse: "resp_one"},
+	}
+	for _, request := range invalid {
+		if request.Validate() == "" {
+			t.Fatalf("invalid conversation request accepted: %+v", request)
+		}
+	}
+	store := true
+	if message := (ResponseRequest{Conversation: &ResponseConversation{ID: "conv_one"}, Background: true, Store: &store}).Validate(); message != "" {
+		t.Fatalf("background conversation rejected: %s", message)
 	}
 }

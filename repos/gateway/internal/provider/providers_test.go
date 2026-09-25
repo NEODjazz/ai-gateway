@@ -70,6 +70,81 @@ func TestManagedGeminiWorkloadAuthentication(t *testing.T) {
 	}
 }
 
+func TestManagedOllamaRejectsBaseURLQueryOrFragment(t *testing.T) {
+	for _, baseURL := range []string{
+		"https://ollama.example.test/tenant?token=secret",
+		"https://ollama.example.test/tenant#fragment",
+		"https://ollama.example.test/tenant?",
+	} {
+		_, err := normalizeManagedProvider(ManagedProvider{ID: "ollama", Type: "ollama", BaseURL: baseURL, Enabled: true})
+		if !errors.Is(err, ErrInvalidProvider) {
+			t.Errorf("Ollama base URL %q accepted: %v", baseURL, err)
+		}
+	}
+	if _, err := normalizeManagedProvider(ManagedProvider{ID: "ollama", Type: "ollama", BaseURL: "https://ollama.example.test/tenant/api", Enabled: true}); err != nil {
+		t.Fatalf("valid Ollama reverse-proxy URL rejected: %v", err)
+	}
+}
+
+func TestAzureAudienceSelectionReachesManagedAndStartupInference(t *testing.T) {
+	baseURL := "https://proxy.example.test/api/projects/project-a"
+	router := New(Config{}).(*Router)
+	managed, err := router.CreateProvider(ManagedProvider{ID: "foundry-gov", Type: "azure-openai", BaseURL: baseURL, AuthType: "entra", AzureCloud: "usgov", AzureAudience: "cognitive", Enabled: true})
+	if err != nil || managed.AzureCloud != "usgov" || managed.AzureAudience != "cognitive" {
+		t.Fatalf("managed provider=%+v err=%v", managed, err)
+	}
+	deployment := ModelDeployment{ID: "foundry-model", ProviderID: managed.ID, Models: []string{"deployment"}, Capabilities: []string{"chat"}, Enabled: true}
+	endpoint, err := router.endpointForManagedDeploymentWithSecret(deployment, managed, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertAzureCloudTransport(t, endpoint.Provider, azureGovernmentAuthority, azureGovernmentResource)
+
+	startup := New(Config{Endpoints: []config.ProviderEndpointConfig{{Name: "foundry-gov", Type: "azure-openai", BaseURL: baseURL, AuthType: "entra", AzureCloud: "usgov", AzureAudience: "cognitive", Models: []string{"deployment"}}}}).(*Router)
+	providers := startup.ListProviders(t.Context())
+	if len(providers) != 1 || providers[0].AzureCloud != "usgov" || providers[0].AzureAudience != "cognitive" {
+		t.Fatalf("startup provider=%+v", providers)
+	}
+	for _, runtime := range startup.runtimeEndpoints() {
+		if runtime.Name == "foundry-gov" {
+			assertAzureCloudTransport(t, runtime.Provider, azureGovernmentAuthority, azureGovernmentResource)
+			return
+		}
+	}
+	t.Fatal("startup Azure endpoint missing")
+}
+
+func assertAzureCloudTransport(t *testing.T, client Client, authority, resource string) {
+	t.Helper()
+	azure, ok := client.(OpenAICompatible)
+	if !ok {
+		t.Fatalf("Azure client type=%T", client)
+	}
+	transport, ok := azure.client.Transport.(azureOpenAITransport)
+	if !ok || transport.tokenSource.authorityBaseURL != authority || transport.tokenSource.resource != resource {
+		t.Fatalf("Azure transport=%+v", azure.client.Transport)
+	}
+}
+
+func TestManagedAzureCloudRejectsInvalidSelections(t *testing.T) {
+	router := New(Config{}).(*Router)
+	for _, input := range []ManagedProvider{
+		{ID: "unknown", Type: "azure-openai", BaseURL: "https://proxy.example.test", AuthType: "entra", AzureCloud: "unknown", Enabled: true},
+		{ID: "api-key", Type: "azure-openai", BaseURL: "https://proxy.example.test", AuthType: "api_key", AzureCloud: "usgov", Enabled: true},
+		{ID: "china-project", Type: "azure-openai", BaseURL: "https://proxy.example.test/api/projects/project-a", AuthType: "entra", AzureCloud: "china", Enabled: true},
+		{ID: "other", Type: "openai-compatible", BaseURL: "https://proxy.example.test", AzureCloud: "usgov", Enabled: true},
+		{ID: "unknown-audience", Type: "azure-openai", BaseURL: "https://proxy.example.test", AuthType: "entra", AzureAudience: "unknown", Enabled: true},
+		{ID: "api-key-audience", Type: "azure-openai", BaseURL: "https://proxy.example.test", AuthType: "api_key", AzureAudience: "cognitive", Enabled: true},
+		{ID: "china-audience", Type: "azure-openai", BaseURL: "https://proxy.example.test", AuthType: "entra", AzureCloud: "china", AzureAudience: "foundry", Enabled: true},
+		{ID: "china-host-audience", Type: "azure-openai", BaseURL: "https://resource.openai.azure.cn", AuthType: "entra", AzureAudience: "foundry", Enabled: true},
+		{ID: "other-audience", Type: "openai-compatible", BaseURL: "https://proxy.example.test", AzureAudience: "foundry", Enabled: true},
+	} {
+		if _, err := router.CreateProvider(input); !errors.Is(err, ErrInvalidProvider) {
+			t.Fatalf("invalid cloud selection accepted: %+v err=%v", input, err)
+		}
+	}
+}
+
 func TestManagedVertexGeminiConfiguration(t *testing.T) {
 	router := New(Config{}).(*Router)
 	baseURL := "https://us-central1-aiplatform.googleapis.com/v1/projects/project-1/locations/us-central1/publishers/google"

@@ -12,7 +12,7 @@ func TestCapabilityContractIsSharedByDeploymentsAndOnboarding(t *testing.T) {
 		"image_generation", "image_edit", "image_variation",
 		"audio_transcription", "audio_translation", "audio_speech", "ocr", "search", "skills", "fine_tuning", "video", "video_remix", "video_extension", "container", "container_files", "container_network", "cached_content", "sandbox", "realtime",
 		"stream", "tools", "custom_tools", "response_image_generation", "response_computer", "response_shell", "response_apply_patch", "structured_output", "mcp", "vision",
-		"web_search", "web_fetch", "tool_search", "memory_tool", "bash_tool", "text_editor_tool", "computer_toolset", "browser_toolset", "thinking", "zero_output", "inference_geo", "context_management", "tool_result_error", "document_citations", "document_metadata", "document_text", "audio", "audio_input", "video_input", "prompt_cache", "assistant_prefill", "background_responses", "background_interactions", "file_input", "bedrock_invoke", "interaction_agents", "interaction_environment_reuse", "gemini_safety_settings", "gemini_code_execution", "url_context", "google_maps",
+		"web_search", "web_fetch", "tool_search", "memory_tool", "bash_tool", "text_editor_tool", "computer_toolset", "browser_toolset", "thinking", "zero_output", "inference_geo", "context_management", "tool_result_error", "document_citations", "document_metadata", "document_text", "audio", "audio_input", "video_input", "prompt_cache", "assistant_prefill", "background_responses", "background_interactions", "file_input", "bedrock_invoke", "interaction_agents", "interaction_environment_reuse", "gemini_safety_settings", "gemini_code_execution", "gemini_audio_timestamp", "gemini_media_resolution", "gemini_media_processing", "gemini_search_time_range", "gemini_file_search", "gemini_computer_use", "gemini_mcp", "url_context", "google_maps",
 	}
 	if !validDeploymentCapabilities(capabilities) {
 		t.Fatal("deployment rejected a supported model capability")
@@ -104,6 +104,70 @@ func TestGeminiSafetySettingsRequireChat(t *testing.T) {
 func TestGeminiCodeExecutionRequiresChat(t *testing.T) {
 	if validDeploymentCapabilities([]string{"gemini_code_execution"}) || !validDeploymentCapabilities([]string{"chat", "gemini_code_execution"}) {
 		t.Fatal("Gemini code execution capability dependency is incorrect")
+	}
+}
+
+func TestGeminiAudioTimestampRequiresChatAndAudioInput(t *testing.T) {
+	for _, capabilities := range [][]string{{"gemini_audio_timestamp"}, {"chat", "gemini_audio_timestamp"}, {"audio_input", "gemini_audio_timestamp"}} {
+		if validDeploymentCapabilities(capabilities) {
+			t.Fatalf("audio timestamp accepted without chat and audio input: %v", capabilities)
+		}
+	}
+	if !validDeploymentCapabilities([]string{"chat", "audio_input", "gemini_audio_timestamp"}) {
+		t.Fatal("audio timestamp rejected with chat and audio input")
+	}
+}
+
+func TestGeminiMediaResolutionRequiresChatAndMediaInput(t *testing.T) {
+	for _, capabilities := range [][]string{{"gemini_media_resolution"}, {"chat", "gemini_media_resolution"}} {
+		if validDeploymentCapabilities(capabilities) {
+			t.Fatalf("media resolution accepted without chat and media input: %v", capabilities)
+		}
+	}
+	for _, mediaCapability := range []string{"vision", "audio_input", "video_input", "file_input"} {
+		if !validDeploymentCapabilities([]string{"chat", mediaCapability, "gemini_media_resolution"}) {
+			t.Fatalf("media resolution rejected with %s", mediaCapability)
+		}
+	}
+}
+
+func TestGeminiMediaProcessingRequiresChatAndVideoInput(t *testing.T) {
+	for _, capabilities := range [][]string{{"gemini_media_processing"}, {"chat", "gemini_media_processing"}, {"video_input", "gemini_media_processing"}, {"chat", "vision", "gemini_media_processing"}} {
+		if validDeploymentCapabilities(capabilities) {
+			t.Fatalf("media processing accepted without chat and video input: %v", capabilities)
+		}
+	}
+	if !validDeploymentCapabilities([]string{"chat", "video_input", "gemini_media_processing"}) {
+		t.Fatal("media processing rejected with chat and video input")
+	}
+}
+
+func TestGeminiSearchTimeRangeRequiresChatAndWebSearch(t *testing.T) {
+	for _, capabilities := range [][]string{{"gemini_search_time_range"}, {"chat", "gemini_search_time_range"}, {"web_search", "gemini_search_time_range"}} {
+		if validDeploymentCapabilities(capabilities) {
+			t.Fatalf("search time range accepted without chat and web search: %v", capabilities)
+		}
+	}
+	if !validDeploymentCapabilities([]string{"chat", "web_search", "gemini_search_time_range"}) {
+		t.Fatal("search time range rejected with chat and web search")
+	}
+}
+
+func TestGeminiFileSearchRequiresChat(t *testing.T) {
+	if validDeploymentCapabilities([]string{"gemini_file_search"}) || !validDeploymentCapabilities([]string{"chat", "gemini_file_search"}) {
+		t.Fatal("Gemini file search capability dependency is incorrect")
+	}
+}
+
+func TestGeminiComputerUseRequiresChat(t *testing.T) {
+	if validDeploymentCapabilities([]string{"gemini_computer_use"}) || !validDeploymentCapabilities([]string{"chat", "gemini_computer_use"}) {
+		t.Fatal("Gemini computer use capability dependency is incorrect")
+	}
+}
+
+func TestGeminiMCPRequiresChat(t *testing.T) {
+	if validDeploymentCapabilities([]string{"gemini_mcp"}) || !validDeploymentCapabilities([]string{"chat", "gemini_mcp"}) {
+		t.Fatal("Gemini MCP capability dependency is incorrect")
 	}
 }
 

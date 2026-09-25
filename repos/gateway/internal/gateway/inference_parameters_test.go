@@ -137,6 +137,8 @@ func TestChatRejectsInvalidGenerationOptionsBeforePipeline(t *testing.T) {
 	for _, test := range []struct{ body, message string }{
 		{`{"model":"test","messages":[],"top_logprobs":2}`, "requires logprobs=true"},
 		{`{"model":"test","messages":[],"modalities":[]}`, "modalities must contain unique text or audio values"},
+		{`{"model":"test","messages":[],"moderation":{}}`, "moderation.model must contain between 1 and 256 characters"},
+		{`{"model":"test","messages":[],"moderation":{"model":"moderation","policy":{"input":{"mode":"allow"}}}}`, "moderation policy mode must be score or block"},
 		{`{"model":"test","messages":[],"modalities":["audio"]}`, "audio output requires audio format and voice"},
 		{`{"model":"test","messages":[],"modalities":["audio"],"audio":{"format":"ogg","voice":"alloy"}}`, "audio.format must be"},
 		{`{"model":"test","messages":[],"modalities":["text"],"audio":{"format":"mp3","voice":"alloy"}}`, "audio requires the audio output modality"},
@@ -166,6 +168,17 @@ func TestChatRejectsInvalidGenerationOptionsBeforePipeline(t *testing.T) {
 		if response.Code != 400 || !strings.Contains(response.Body.String(), test.message) || access.calls != 0 {
 			t.Fatalf("invalid generation options: status=%d body=%s pipeline=%d", response.Code, response.Body.String(), access.calls)
 		}
+	}
+}
+
+func TestChatPreservesProviderModerationConfiguration(t *testing.T) {
+	upstream := &chatProvider{}
+	handler := NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}}}), upstream)
+	response := httptest.NewRecorder()
+	handler.ChatCompletions(response, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"m","messages":[{"role":"user","content":"hello"}],"moderation":{"model":"omni-moderation-latest","policy":{"input":{"mode":"block"},"output":{"mode":"score"}}}}`)))
+	moderation := upstream.request.Request.Moderation
+	if response.Code != http.StatusOK || moderation == nil || moderation.Model != "omni-moderation-latest" || moderation.Policy == nil || moderation.Policy.Input == nil || moderation.Policy.Input.Mode != "block" || moderation.Policy.Output == nil || moderation.Policy.Output.Mode != "score" {
+		t.Fatalf("status=%d moderation=%+v body=%s", response.Code, moderation, response.Body.String())
 	}
 }
 

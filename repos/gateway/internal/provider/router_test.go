@@ -1812,6 +1812,44 @@ func TestResponsesCustomToolsRequireDeclaredAndAdapterCapability(t *testing.T) {
 	}
 }
 
+func TestResponsesCustomHistoryRequiresAdapterCapability(t *testing.T) {
+	request := openai.ResponseRequest{Model: "model", Input: []any{map[string]any{"type": "custom_tool_call", "call_id": "call_1", "name": "dsl", "input": "run"}, map[string]any{"type": "custom_tool_call_output", "call_id": "call_1", "output": "ok"}}}
+	if required := requiredResponseCapabilities(request, false); strings.Join(required, ",") != "responses,tools,custom_tools" {
+		t.Fatalf("required=%v", required)
+	}
+	undeclared := &modelCaptureProvider{content: "undeclared"}
+	supported := &modelCaptureProvider{content: "supported"}
+	router := Router{health: newEndpointHealthTracker(), endpoints: []Endpoint{
+		{Name: "undeclared", Type: "openai-compatible", Priority: 1, Capabilities: []string{"responses", "tools"}, Provider: responseCustomToolCaptureClient{undeclared}},
+		{Name: "supported", Type: "openai-compatible", Priority: 2, Capabilities: []string{"responses", "tools", "custom_tools"}, Provider: responseCustomToolCaptureClient{supported}},
+	}}
+	if _, err := router.Responses(t.Context(), modules.RequestContext{Request: openai.ChatCompletionRequest{Model: "model"}, ResponseRequest: &request}); err != nil {
+		t.Fatal(err)
+	}
+	if undeclared.seenModel != "" || supported.seenModel != "model" {
+		t.Fatalf("custom history routed incorrectly: undeclared=%q supported=%q", undeclared.seenModel, supported.seenModel)
+	}
+}
+
+func TestResponsesFunctionHistoryRequiresToolsCapability(t *testing.T) {
+	request := openai.ResponseRequest{Model: "model", Input: []any{map[string]any{"type": "function_call", "call_id": "call_1", "name": "lookup", "arguments": "{}"}, map[string]any{"type": "function_call_output", "call_id": "call_1", "output": "ok"}}}
+	if required := requiredResponseCapabilities(request, false); strings.Join(required, ",") != "responses,tools" {
+		t.Fatalf("required=%v", required)
+	}
+	undeclared := &modelCaptureProvider{content: "undeclared"}
+	supported := &modelCaptureProvider{content: "supported"}
+	router := Router{health: newEndpointHealthTracker(), endpoints: []Endpoint{
+		{Name: "undeclared", Type: "openai-compatible", Priority: 1, Capabilities: []string{"responses"}, Provider: undeclared},
+		{Name: "supported", Type: "openai-compatible", Priority: 2, Capabilities: []string{"responses", "tools"}, Provider: supported},
+	}}
+	if _, err := router.Responses(t.Context(), modules.RequestContext{Request: openai.ChatCompletionRequest{Model: "model"}, ResponseRequest: &request}); err != nil {
+		t.Fatal(err)
+	}
+	if undeclared.seenModel != "" || supported.seenModel != "model" {
+		t.Fatalf("function history routed incorrectly: undeclared=%q supported=%q", undeclared.seenModel, supported.seenModel)
+	}
+}
+
 func TestResponsesImageGenerationRequiresDeclaredAndAdapterCapability(t *testing.T) {
 	required := requiredResponseCapabilities(openai.ResponseRequest{Tools: []openai.ResponseTool{{Type: "image_generation"}}}, false)
 	if strings.Join(required, ",") != "responses,tools,response_image_generation" {

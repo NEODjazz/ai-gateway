@@ -65,6 +65,20 @@ Route выбирает endpoint только при наличии capabilities,
 Provider API key в static config можно передать полем `api_key` или переменной
 `PROVIDER_API_KEY_<NORMALIZED_ENDPOINT_NAME>`. Managed credentials шифруются в
 control-plane snapshot и никогда не возвращаются read API.
+Для локального `ollama` credential не требуется. Удалённый Ollama endpoint
+получает настроенный `api_key` или managed credential в `Authorization: Bearer`
+для chat, streaming, embeddings и completions. Redirects не выполняются.
+`base_url` принимает корень сервера, `/api` или `/v1`; адаптер приводит
+последние два варианта к общему корню, поскольку native и совместимые операции
+используют разные пути. Discovery применяет ту же нормализацию и считает ответ
+без поля `models` ошибкой, сохраняя допустимый пустой список `models: []`.
+Discovery других провайдеров также отклоняет успешный HTTP-ответ без обязательного
+массива моделей (`models` для Cohere, `data` для совместимого каталога).
+Cohere discovery проходит все страницы `next_page_token` перед публикацией списка;
+повторный токен или ошибка последующей страницы отклоняют весь результат.
+Для Azure OpenAI `base_url` с окончанием `/openai` в GA/preview-режиме использует
+`/openai/v1` и для inference, и для discovery; versioned deployment URL сохраняет
+маршрут `/openai/deployments/{deployment}`.
 
 ### Managed control plane
 
@@ -132,10 +146,32 @@ Provider form загружает этот профиль и показывает
 
 Для `azure-openai` режим `auth_type=entra` использует статический bearer token
 из привязанного write-only credential. Без credential gateway сначала проверяет
-AKS workload identity через `AZURE_TENANT_ID`, `AZURE_CLIENT_ID` и абсолютный
+service principal через `AZURE_TENANT_ID`, `AZURE_CLIENT_ID` и
+`AZURE_CLIENT_SECRET`, затем AKS workload identity через первые два поля и абсолютный
 `AZURE_FEDERATED_TOKEN_FILE`, затем локальные `IDENTITY_ENDPOINT` и
-`IDENTITY_HEADER` App Service/Container Apps, затем Azure VM IMDS. Projected token
-обменивается на scope `https://cognitiveservices.azure.com/.default` через
+`IDENTITY_HEADER` App Service/Container Apps, затем Azure VM IMDS. Клиентский
+секрет и projected token обмениваются на короткоживущий access token; повторное получение
+выполняется до истечения срока. `AZURE_CLIENT_SECRET` и
+`AZURE_FEDERATED_TOKEN_FILE` нельзя задавать одновременно: неоднозначная или
+неполная конфигурация отклоняется без fallback на IMDS.
+В Helm chart service principal включается только явной ссылкой на существующий
+Kubernetes Secret; значение секрета не указывается в chart values:
+
+```yaml
+gateway:
+  azureIdentity:
+    tenantId: <tenant-id>
+    clientId: <client-id>
+    clientSecretSecretName: azure-service-principal
+    clientSecretSecretKey: AZURE_CLIENT_SECRET
+```
+
+Для этого способа provider должен иметь `auth_type=entra` без привязанного
+статического credential. Выбранный для endpoint cloud и `azure_audience`
+определяют token scope и authority.
+
+По умолчанию для Azure OpenAI resource endpoint в public cloud используется scope
+`https://cognitiveservices.azure.com/.default` через
 public-cloud Entra authority. Для endpoint с suffix `.openai.azure.us` или
 `.cognitiveservices.azure.us` gateway автоматически использует authority
 `https://login.microsoftonline.us` и resource
@@ -146,6 +182,34 @@ identity. Для endpoint с suffix `.openai.azure.cn` или
 `https://cognitiveservices.azure.cn/`. Выбор sovereign cloud выполняется только
 по полному host suffix; другие и похожие внешние домены остаются на public-cloud
 defaults.
+Foundry resource и project endpoints с host suffix `.services.ai.azure.com`
+используют Entra scope `https://ai.azure.com/.default`; project URL
+`/api/projects/{project}` автоматически дополняется `/openai/v1`.
+Для Azure endpoint за собственным hostname можно задать `azure_cloud=public`,
+`usgov` или `china` при `auth_type=entra`; без настройки cloud определяется по URL.
+Если endpoint требует конкретный Entra token audience, задайте
+`azure_audience=cognitive` или `azure_audience=foundry` при `auth_type=entra`.
+Без этого поля audience по-прежнему определяется по URL. Foundry audience в
+Azure China не поддерживается.
+Для Foundry project в Government выбираются authority `login.microsoftonline.us`
+и audience `https://ai.azure.us/`. `azure_cloud=china` для Foundry project
+отклоняется, поскольку этот контракт не поддерживается.
+Для project endpoint `api_version` должен быть пустым; неверная конфигурация
+отклоняется до provider execution. Это правило и запрет `azure_cloud=china`
+действуют также для project URL за reverse proxy с префиксом пути.
+Azure provider URL с `.`/`..` в сегментах пути, двойным разделителем или
+кодированным разделителем отклоняется до выполнения, чтобы proxy и gateway
+не могли по-разному определить границу проекта и deployment.
+Для Azure OpenAI provider с датированной `api_version` можно указать
+resource-root URL и в стартовом конфиге, и в control plane. Каждый model deployment получает собственный путь
+`/openai/deployments/{upstream_model}`; если `upstream_model` не указан,
+используется единственное имя из `models`. Для нескольких имен без явного
+`upstream_model` конфигурация отклоняется как неоднозначная. В стартовом конфиге
+`model_aliases` задаёт upstream deployment: несколько публичных имён допустимы,
+если все они указывают на одно и то же имя deployment. Явно заданный
+deployment URL сохраняется. Пустая версия использует `/openai/v1`.
+Для датированных версий Responses и связанные resource operations используют
+resource-level `/openai/responses`, а Chat и Embeddings остаются под deployment path.
 `AZURE_CLIENT_ID` также выбирает
 user-assigned managed identity. Разрешены только loopback и link-local identity
 endpoints; redirects и некорректные/просроченные ответы отклоняются. Временный
@@ -212,6 +276,8 @@ secret. Это не клиентские Bearer-токены; auth management и
 | `VECTOR_STORE_FILE_QUOTA` | `10000` | Максимальное число файлов в одном vector store; допустимо от 1 до 100000 |
 | `VECTOR_STORE_BYTE_QUOTA` | `1073741824` | Атомарная квота суммарного размера активных файлов одного vector store; допустимо до 1 TiB |
 | `ASSISTANT_OWNER_QUOTA` | `1000` | Максимальное число assistant definitions для пары credential/user; допустимо от 1 до 100000 |
+| `CONVERSATION_OWNER_QUOTA` | `10000` | Максимальное число durable conversations для пары credential/user; допустимо от 1 до 1000000 |
+| `CONVERSATION_ITEM_QUOTA` | `4096` | Максимальное число input/output items в одной conversation; допустимо от 1 до 100000 |
 | `ASSISTANT_THREAD_OWNER_QUOTA` | `10000` | Максимальное число assistant threads для пары credential/user; допустимо от 1 до 1000000 |
 | `ASSISTANT_MESSAGE_THREAD_QUOTA` | `100000` | Максимальное число сообщений в одном assistant thread; допустимо от 1 до 1000000 |
 | `ASSISTANT_RUN_OWNER_QUOTA` | `10000` | Максимальное число сохраненных assistant runs для пары credential/user; допустимо от 1 до 100000 |

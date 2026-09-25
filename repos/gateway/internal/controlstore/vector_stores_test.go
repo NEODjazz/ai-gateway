@@ -95,25 +95,35 @@ func TestPostgresVectorStoreFileLifecycleIsolationAndQuotaIntegration(t *testing
 	if _, err = pool.Exec(ctx, `UPDATE gateway_files SET expires_at=now()-interval '1 second' WHERE owner_key=$1 AND id='file_vector_expired'`, owner); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = store.AttachVectorStoreFile(ctx, owner, "vs_files", "file_vector_expired", nil, 2, 100); !errors.Is(err, vectorstate.ErrFileNotFound) {
+	if _, err = store.AttachVectorStoreFile(ctx, owner, "vs_files", "file_vector_expired", nil, vectorstate.AutoChunkingStrategy(), 2, 100); !errors.Is(err, vectorstate.ErrFileNotFound) {
 		t.Fatalf("expired file error=%v", err)
 	}
-	if _, err = store.AttachVectorStoreFile(ctx, owner, "vs_files", "missing", nil, 2, 100); !errors.Is(err, vectorstate.ErrFileNotFound) {
+	if _, err = store.AttachVectorStoreFile(ctx, owner, "vs_files", "missing", nil, vectorstate.AutoChunkingStrategy(), 2, 100); !errors.Is(err, vectorstate.ErrFileNotFound) {
 		t.Fatalf("missing file error=%v", err)
 	}
-	if _, err = store.AttachVectorStoreFile(ctx, owner, "vs_files", "file_vector_a", map[string]any{"nested": map[string]any{"bad": true}}, 2, 100); !errors.Is(err, vectorstate.ErrInvalid) {
+	if _, err = store.AttachVectorStoreFile(ctx, owner, "vs_files", "file_vector_a", map[string]any{"nested": map[string]any{"bad": true}}, vectorstate.AutoChunkingStrategy(), 2, 100); !errors.Is(err, vectorstate.ErrInvalid) {
 		t.Fatalf("nested attributes error=%v", err)
 	}
+	if _, err = store.AttachVectorStoreFile(ctx, owner, "vs_files", "file_vector_a", nil, vectorstate.ChunkingStrategy{Type: "static", MaxChunkSizeTokens: 800, ChunkOverlapTokens: 401}, 2, 100); !errors.Is(err, vectorstate.ErrInvalid) {
+		t.Fatalf("invalid chunking error=%v", err)
+	}
 	for _, id := range []string{"file_vector_a", "file_vector_b"} {
-		attached, attachErr := store.AttachVectorStoreFile(ctx, owner, "vs_files", id, map[string]any{"region": "eu", "priority": float64(2), "active": true}, 2, 100)
+		strategy := vectorstate.AutoChunkingStrategy()
+		if id == "file_vector_a" {
+			strategy = vectorstate.ChunkingStrategy{Type: "static", MaxChunkSizeTokens: 800, ChunkOverlapTokens: 200}
+		}
+		attached, attachErr := store.AttachVectorStoreFile(ctx, owner, "vs_files", id, map[string]any{"region": "eu", "priority": float64(2), "active": true}, strategy, 2, 100)
 		if attachErr != nil || attached.Status != "completed" || attached.Bytes != 1 || attached.Attributes["region"] != "eu" || attached.Attributes["priority"] != float64(2) || attached.Attributes["active"] != true {
 			t.Fatalf("attached=%+v err=%v", attached, attachErr)
 		}
+		if attached.ChunkingStrategy != strategy {
+			t.Fatalf("chunking=%+v want=%+v", attached.ChunkingStrategy, strategy)
+		}
 	}
-	if _, err = store.AttachVectorStoreFile(ctx, owner, "vs_files", "file_vector_a", nil, 2, 100); !errors.Is(err, vectorstate.ErrConflict) {
+	if _, err = store.AttachVectorStoreFile(ctx, owner, "vs_files", "file_vector_a", nil, vectorstate.AutoChunkingStrategy(), 2, 100); !errors.Is(err, vectorstate.ErrConflict) {
 		t.Fatalf("duplicate error=%v", err)
 	}
-	if _, err = store.AttachVectorStoreFile(ctx, owner, "vs_files", "file_vector_c", nil, 2, 100); !errors.Is(err, vectorstate.ErrFileQuotaExceeded) {
+	if _, err = store.AttachVectorStoreFile(ctx, owner, "vs_files", "file_vector_c", nil, vectorstate.AutoChunkingStrategy(), 2, 100); !errors.Is(err, vectorstate.ErrFileQuotaExceeded) {
 		t.Fatalf("quota error=%v", err)
 	}
 	if _, err = store.GetVectorStoreFile(ctx, owner+"/other", "vs_files", "file_vector_a"); !errors.Is(err, vectorstate.ErrFileNotFound) {
@@ -174,7 +184,7 @@ func TestPostgresVectorStoreFileLifecycleIsolationAndQuotaIntegration(t *testing
 		go func() {
 			defer workers.Done()
 			<-start
-			_, attachErr := store.AttachVectorStoreFile(ctx, owner, "vs_files_concurrent", fileID, nil, 1, 100)
+			_, attachErr := store.AttachVectorStoreFile(ctx, owner, "vs_files_concurrent", fileID, nil, vectorstate.AutoChunkingStrategy(), 1, 100)
 			results <- attachErr
 		}()
 	}
@@ -206,7 +216,7 @@ func TestPostgresVectorStoreFileLifecycleIsolationAndQuotaIntegration(t *testing
 		go func() {
 			defer workers.Done()
 			<-start
-			_, attachErr := store.AttachVectorStoreFile(ctx, owner, "vs_bytes_concurrent", fileID, nil, 2, 1)
+			_, attachErr := store.AttachVectorStoreFile(ctx, owner, "vs_bytes_concurrent", fileID, nil, vectorstate.AutoChunkingStrategy(), 2, 1)
 			results <- attachErr
 		}()
 	}
@@ -316,8 +326,8 @@ func TestPostgresVectorStoreFileBatchAtomicIntegration(t *testing.T) {
 		}
 	}
 	created, err := store.CreateVectorStoreFileBatch(ctx, vectorstate.FileBatch{ID: "vsfb_integration", VectorStoreID: "vs_batch", OwnerKey: owner}, []vectorstate.FileBatchEntry{
-		{FileID: "file_batch_a", Attributes: map[string]any{"region": "eu"}},
-		{FileID: "file_batch_b", Attributes: map[string]any{"priority": float64(2)}},
+		{FileID: "file_batch_a", Attributes: map[string]any{"region": "eu"}, ChunkingStrategy: vectorstate.AutoChunkingStrategy()},
+		{FileID: "file_batch_b", Attributes: map[string]any{"priority": float64(2)}, ChunkingStrategy: vectorstate.ChunkingStrategy{Type: "static", MaxChunkSizeTokens: 800, ChunkOverlapTokens: 200}},
 	}, 3, 10)
 	if err != nil || created.Status != "completed" || created.Total != 2 || created.Completed != 2 {
 		t.Fatalf("created=%+v err=%v", created, err)
@@ -333,7 +343,13 @@ func TestPostgresVectorStoreFileBatchAtomicIntegration(t *testing.T) {
 	if err != nil || len(second) != 1 || next != "" || first[0].FileID == second[0].FileID {
 		t.Fatalf("second=%+v next=%q err=%v", second, next, err)
 	}
-	_, err = store.CreateVectorStoreFileBatch(ctx, vectorstate.FileBatch{ID: "vsfb_failed", VectorStoreID: "vs_batch", OwnerKey: owner}, []vectorstate.FileBatchEntry{{FileID: "file_batch_c"}, {FileID: "missing"}}, 4, 10)
+	files := append(first, second...)
+	for _, file := range files {
+		if file.FileID == "file_batch_b" && (file.ChunkingStrategy.Type != "static" || file.ChunkingStrategy.MaxChunkSizeTokens != 800 || file.ChunkingStrategy.ChunkOverlapTokens != 200) {
+			t.Fatalf("static batch chunking was not persisted: %+v", file.ChunkingStrategy)
+		}
+	}
+	_, err = store.CreateVectorStoreFileBatch(ctx, vectorstate.FileBatch{ID: "vsfb_failed", VectorStoreID: "vs_batch", OwnerKey: owner}, []vectorstate.FileBatchEntry{{FileID: "file_batch_c", ChunkingStrategy: vectorstate.AutoChunkingStrategy()}, {FileID: "missing", ChunkingStrategy: vectorstate.AutoChunkingStrategy()}}, 4, 10)
 	if !errors.Is(err, vectorstate.ErrFileNotFound) {
 		t.Fatalf("missing file error=%v", err)
 	}
@@ -366,7 +382,9 @@ func prepareVectorStoreTable(t *testing.T, ctx context.Context, dsn string) *pgx
 		_, err = pool.Exec(ctx, `CREATE TABLE IF NOT EXISTS gateway_vector_store_files (
 			vector_store_id TEXT NOT NULL REFERENCES gateway_vector_stores(id) ON DELETE CASCADE,
 			file_id TEXT NOT NULL REFERENCES gateway_files(id) ON DELETE CASCADE,
-			owner_key TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'completed', attributes JSONB NOT NULL DEFAULT '{}'::jsonb, created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+			owner_key TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'completed', attributes JSONB NOT NULL DEFAULT '{}'::jsonb,
+			chunking_type TEXT NOT NULL DEFAULT 'auto', max_chunk_size_tokens INTEGER, chunk_overlap_tokens INTEGER,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 			PRIMARY KEY (vector_store_id,file_id))`)
 	}
 	if err == nil {

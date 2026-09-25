@@ -26,9 +26,16 @@ func rejectParameters(adapter string, checks ...parameterCheck) error {
 	return nil
 }
 
+func rejectChatModeration(adapter string, request openai.ChatCompletionRequest) error {
+	return rejectParameters(adapter, parameterCheck{"moderation", request.Moderation != nil})
+}
+
 var errUnsupportedServiceTier = errors.New("service_tier is not supported by this adapter")
 
 func (Anthropic) ValidateChatParameters(request openai.ChatCompletionRequest) error {
+	if err := rejectChatModeration("anthropic", request); err != nil {
+		return err
+	}
 	if err := validateChatReasoningContent("anthropic", request.Messages, false); err != nil {
 		return err
 	}
@@ -111,6 +118,8 @@ func (Anthropic) ValidateResponseParameters(request openai.ResponseRequest) erro
 	_, verbositySupplied := openai.ResponseTextVerbosity(request.Text)
 	return rejectParameters("anthropic",
 		parameterCheck{"background", request.Background},
+		parameterCheck{"context_management", len(request.ContextManagement) > 0},
+		parameterCheck{"moderation", request.Moderation != nil},
 		parameterCheck{"input", hasOpaqueResponseContext(request.Input)},
 		parameterCheck{"include", len(request.Include) > 0}, parameterCheck{"store", request.Store != nil}, parameterCheck{"reasoning", request.Reasoning != nil}, parameterCheck{"metadata", len(request.Metadata) > 0}, parameterCheck{"truncation", request.Truncation != nil}, parameterCheck{"top_logprobs", request.TopLogprobs != nil},
 		parameterCheck{"safety_identifier", request.SafetyIdentifier != ""},
@@ -129,11 +138,62 @@ func (Anthropic) ValidateResponseParameters(request openai.ResponseRequest) erro
 }
 
 func (Ollama) ValidateResponseParameters(request openai.ResponseRequest) error {
+	if err := validateOllamaResponseTools(request.Tools); err != nil {
+		return err
+	}
 	_, verbositySupplied := openai.ResponseTextVerbosity(request.Text)
-	return rejectParameters("ollama", parameterCheck{"background", request.Background}, parameterCheck{"user", request.User != ""}, parameterCheck{"safety_identifier", request.SafetyIdentifier != ""}, parameterCheck{"prompt_cache_key", request.PromptCacheKey != ""}, parameterCheck{"prompt_cache_options", request.PromptCacheOptions != nil}, parameterCheck{"prompt_cache_retention", request.PromptCacheRetention != ""}, parameterCheck{"stream_options", request.StreamOptions != nil}, parameterCheck{"text.verbosity", verbositySupplied}, parameterCheck{"service_tier", request.ServiceTier != ""}, parameterCheck{"frequency_penalty", request.FrequencyPenalty != nil}, parameterCheck{"presence_penalty", request.PresencePenalty != nil}, parameterCheck{"max_tool_calls", request.MaxToolCalls != nil})
+	contextSupplied, modeSupplied, summarySupplied, generateSummarySupplied := false, false, false, false
+	if request.Reasoning != nil {
+		contextSupplied = request.Reasoning.Context != nil
+		modeSupplied = request.Reasoning.Mode != nil
+		summarySupplied = request.Reasoning.Summary != nil
+		generateSummarySupplied = request.Reasoning.GenerateSummary != nil
+	}
+	if err := rejectParameters("ollama",
+		parameterCheck{"background", request.Background},
+		parameterCheck{"context_management", len(request.ContextManagement) > 0},
+		parameterCheck{"moderation", request.Moderation != nil},
+		parameterCheck{"previous_response_id", request.PreviousResponse != ""},
+		parameterCheck{"conversation", request.Conversation != nil},
+		parameterCheck{"truncation", request.Truncation != nil},
+		parameterCheck{"store", request.Store != nil && *request.Store},
+		parameterCheck{"include", len(request.Include) > 0},
+		parameterCheck{"metadata", len(request.Metadata) > 0},
+		parameterCheck{"top_logprobs", request.TopLogprobs != nil},
+		parameterCheck{"tool_choice", !ollamaToolChoiceSupported(request.ToolChoice)},
+		parameterCheck{"parallel_tool_calls", request.ParallelToolCalls != nil},
+		parameterCheck{"reasoning.context", contextSupplied},
+		parameterCheck{"reasoning.mode", modeSupplied},
+		parameterCheck{"reasoning.summary", summarySupplied},
+		parameterCheck{"reasoning.generate_summary", generateSummarySupplied},
+		parameterCheck{"user", request.User != ""},
+		parameterCheck{"safety_identifier", request.SafetyIdentifier != ""},
+		parameterCheck{"prompt_cache_key", request.PromptCacheKey != ""},
+		parameterCheck{"prompt_cache_options", request.PromptCacheOptions != nil},
+		parameterCheck{"prompt_cache_retention", request.PromptCacheRetention != ""},
+		parameterCheck{"stream_options", request.StreamOptions != nil},
+		parameterCheck{"text.verbosity", verbositySupplied},
+		parameterCheck{"service_tier", request.ServiceTier != ""},
+		parameterCheck{"frequency_penalty", request.FrequencyPenalty != nil},
+		parameterCheck{"presence_penalty", request.PresencePenalty != nil},
+		parameterCheck{"max_tool_calls", request.MaxToolCalls != nil},
+	); err != nil {
+		return err
+	}
+	_, err := normalizeOllamaResponseText(request.Text)
+	return err
 }
 
 func (Ollama) ValidateChatParameters(request openai.ChatCompletionRequest) error {
+	if _, err := openai.ChatImageAttachments(request.Messages); err != nil {
+		return &Error{Class: FailureClientRequest, Provider: "ollama", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_image", Param: "messages", Err: err}
+	}
+	if err := validateOllamaChatResponseFormat(request.ResponseFormat); err != nil {
+		return err
+	}
+	if err := rejectChatModeration("ollama", request); err != nil {
+		return err
+	}
 	if err := validateChatReasoningContent("ollama", request.Messages, true); err != nil {
 		return err
 	}
@@ -146,6 +206,9 @@ func (Ollama) ValidateChatParameters(request openai.ChatCompletionRequest) error
 	if err := validateChatPromptCacheBreakpoints("ollama", request, false); err != nil {
 		return err
 	}
+	if err := validateOllamaChatTools(request.Tools); err != nil {
+		return err
+	}
 	if err := rejectToolCallMetadata("ollama", request.Messages); err != nil {
 		return err
 	}
@@ -153,6 +216,9 @@ func (Ollama) ValidateChatParameters(request openai.ChatCompletionRequest) error
 		return err
 	}
 	if err := rejectChatMessageAudio("ollama", request.Messages); err != nil {
+		return err
+	}
+	if err := validateOllamaChatMessages(request.Messages); err != nil {
 		return err
 	}
 	options := request.ChatGenerationOptions
@@ -170,16 +236,95 @@ func (Ollama) ValidateChatParameters(request openai.ChatCompletionRequest) error
 	options.Logprobs = nil
 	options.TopLogprobs = nil
 	switch options.ReasoningEffort {
-	case "none", "low", "medium", "high", "max":
+	case "none", "minimal", "low", "medium", "high", "xhigh", "max", "default":
 		options.ReasoningEffort = ""
 	}
 	if err := rejectGenerationOptions("ollama", options); err != nil {
 		return err
 	}
 	return rejectParameters("ollama",
-		parameterCheck{"tool_choice", request.ToolChoice != nil},
+		parameterCheck{"tool_choice", !ollamaToolChoiceSupported(request.ToolChoice)},
 		parameterCheck{"parallel_tool_calls", request.ParallelToolCalls != nil},
 	)
+}
+
+func validateOllamaChatMessages(messages []openai.Message) error {
+	unsupported := func(param string) error {
+		return &Error{Class: FailureClientRequest, Provider: "ollama", StatusCode: http.StatusBadRequest, UpstreamCode: "unsupported_parameter", Param: param, Err: fmt.Errorf("parameter %s is not supported by Ollama Chat", param)}
+	}
+	for _, message := range messages {
+		if message.Name != "" {
+			return unsupported("messages.name")
+		}
+		if len(message.Annotations) > 0 {
+			return unsupported("messages.annotations")
+		}
+		if len(message.Reasoning) > 0 {
+			return unsupported("messages.reasoning")
+		}
+		switch content := message.Content.(type) {
+		case nil, string:
+		case []any:
+			for _, item := range content {
+				part, ok := item.(map[string]any)
+				if !ok {
+					return unsupported("messages.content")
+				}
+				switch part["type"] {
+				case "text":
+					if _, ok := part["text"].(string); !ok || len(part) != 2 {
+						return unsupported("messages.content")
+					}
+				case "image_url":
+					image, ok := part["image_url"].(map[string]any)
+					if message.Role != "user" || !ok || len(part) != 2 || len(image) < 1 || len(image) > 2 {
+						return unsupported("messages.content")
+					}
+					if _, ok := image["url"].(string); !ok {
+						return unsupported("messages.content")
+					}
+					for field := range image {
+						if field != "url" && field != "detail" {
+							return unsupported("messages.content.image_url")
+						}
+					}
+					if detail, present := image["detail"]; present && detail != "auto" {
+						return unsupported("messages.content.image_url.detail")
+					}
+				default:
+					return unsupported("messages.content")
+				}
+			}
+		default:
+			return unsupported("messages.content")
+		}
+	}
+	return nil
+}
+
+func validateOllamaChatResponseFormat(format *openai.ResponseFormat) error {
+	if format == nil {
+		return nil
+	}
+	invalid := func(detail string) error {
+		return &Error{Class: FailureClientRequest, Provider: "ollama", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_parameter", Param: "response_format", Err: errors.New(detail)}
+	}
+	switch format.Type {
+	case "text", "json_object":
+		if format.JSONSchema != nil {
+			return invalid("response_format.json_schema requires type=json_schema")
+		}
+	case "json_schema":
+		if format.JSONSchema == nil || format.JSONSchema.Schema == nil {
+			return invalid("response_format.json_schema.schema is required")
+		}
+		if strict := format.JSONSchema.Strict; strict != nil && !*strict {
+			return invalid("response_format.json_schema.strict=false is not supported")
+		}
+	default:
+		return invalid("response_format.type must be text, json_object, or json_schema")
+	}
+	return nil
 }
 
 func (Ollama) ValidateEmbeddingParameters(request openai.EmbeddingRequest) error {
@@ -300,6 +445,11 @@ func (Ollama) ValidateCompletionParameters(request openai.CompletionRequest) err
 	}
 	return rejectParameters("ollama",
 		parameterCheck{"prompt", prompt.Kind != openai.CompletionPromptText},
+		parameterCheck{"best_of", request.BestOf != nil},
+		parameterCheck{"echo", request.Echo != nil},
+		parameterCheck{"logit_bias", request.LogitBias != nil},
+		parameterCheck{"n", request.N != nil},
+		parameterCheck{"user", request.User != ""},
 		parameterCheck{"metadata", request.Metadata != nil},
 		parameterCheck{"min_tokens", request.MinTokens != nil},
 		parameterCheck{"prompt_cache_key", request.PromptCacheKey != ""},
@@ -312,6 +462,12 @@ func rejectGenerationOptions(adapter string, options openai.ChatGenerationOption
 		parameterCheck{"store", options.Store != nil},
 		parameterCheck{"modalities", options.Modalities != nil},
 		parameterCheck{"audio", options.Audio != nil},
+		parameterCheck{"moderation", options.Moderation != nil},
+		parameterCheck{"clear_thinking", options.ClearThinking != nil},
+		parameterCheck{"citation_options", options.CitationOptions != ""},
+		parameterCheck{"thinking", options.Thinking != nil},
+		parameterCheck{"include_reasoning", options.IncludeReasoning != nil},
+		parameterCheck{"reasoning_format", options.ReasoningFormat != ""},
 		parameterCheck{"reasoning_effort", options.ReasoningEffort != ""},
 		parameterCheck{"safe_prompt", options.SafePrompt != nil},
 		parameterCheck{"n", options.N != nil},
@@ -339,6 +495,9 @@ func rejectGenerationOptions(adapter string, options openai.ChatGenerationOption
 }
 
 func (Demo) ValidateChatParameters(request openai.ChatCompletionRequest) error {
+	if err := rejectChatModeration("demo", request); err != nil {
+		return err
+	}
 	if err := validateChatReasoningContent("demo", request.Messages, false); err != nil {
 		return err
 	}
@@ -391,7 +550,13 @@ func (p OpenAICompatible) ValidateChatParameters(request openai.ChatCompletionRe
 		return &Error{Class: FailureClientRequest, Provider: providerName, StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: fmt.Errorf("%s", message)}
 	}
 	return rejectParameters(providerName,
+		parameterCheck{"web_search_options", request.WebSearchOptions != nil && !p.SupportsWebSearch()},
 		parameterCheck{"store", request.Store != nil && *request.Store},
+		parameterCheck{"clear_thinking", request.ClearThinking != nil && providerName != "cerebras"},
+		parameterCheck{"citation_options", request.CitationOptions != "" && providerName != "groq"},
+		parameterCheck{"thinking", request.Thinking != nil && providerName != "deepseek"},
+		parameterCheck{"include_reasoning", request.IncludeReasoning != nil && providerName != "groq"},
+		parameterCheck{"reasoning_format", request.ReasoningFormat != "" && providerName != "groq"},
 		parameterCheck{"safe_prompt", request.SafePrompt != nil && !p.supportsSafePrompt},
 		parameterCheck{"prompt_mode", request.PromptMode != "" && !p.supportsPromptMode},
 		parameterCheck{"service_tier", !supportedCompatibleServiceTier(providerName, request.ServiceTier)},
@@ -404,7 +569,7 @@ func supportedCompatibleServiceTier(providerName, value string) bool {
 	}
 	switch providerName {
 	case "openai":
-		return value == "auto" || value == "default" || value == "flex" || value == "priority"
+		return value == "auto" || value == "default" || value == "flex" || value == "priority" || value == "fast" || value == "ultrafast"
 	case "xai":
 		return value == "default" || value == "priority"
 	case "cerebras":
@@ -471,6 +636,13 @@ func (p OpenAICompatible) ValidateResponseParameters(request openai.ResponseRequ
 		return &Error{Class: FailureClientRequest, Provider: p.providerName(), StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: fmt.Errorf("%s", message)}
 	}
 	providerName := p.providerName()
+	if !p.SupportsResponseWebSearch() {
+		for _, tool := range request.Tools {
+			if openai.IsResponseWebSearchTool(tool.Type) {
+				return rejectParameters(providerName, parameterCheck{"tools", true})
+			}
+		}
+	}
 	return rejectParameters(providerName, parameterCheck{"service_tier", !supportedCompatibleServiceTier(providerName, request.ServiceTier)})
 }
 
@@ -506,7 +678,7 @@ func rejectChatMessageAudio(adapter string, messages []openai.Message) error {
 func (Demo) ValidateResponseParameters(request openai.ResponseRequest) error {
 	_, verbositySupplied := openai.ResponseTextVerbosity(request.Text)
 	return rejectParameters("demo",
-		parameterCheck{"background", request.Background}, parameterCheck{"include", len(request.Include) > 0}, parameterCheck{"store", request.Store != nil},
+		parameterCheck{"background", request.Background}, parameterCheck{"context_management", len(request.ContextManagement) > 0}, parameterCheck{"moderation", request.Moderation != nil}, parameterCheck{"include", len(request.Include) > 0}, parameterCheck{"store", request.Store != nil},
 		parameterCheck{"reasoning", request.Reasoning != nil}, parameterCheck{"metadata", len(request.Metadata) > 0}, parameterCheck{"truncation", request.Truncation != nil},
 		parameterCheck{"top_logprobs", request.TopLogprobs != nil}, parameterCheck{"instructions", request.Instructions != ""}, parameterCheck{"tools", len(request.Tools) > 0},
 		parameterCheck{"tool_choice", request.ToolChoice != nil}, parameterCheck{"parallel_tool_calls", request.ParallelToolCalls != nil}, parameterCheck{"text", request.Text != nil && !verbositySupplied},

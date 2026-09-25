@@ -48,6 +48,7 @@ type backgroundResponseJob struct {
 	Provider        string            `json:"provider,omitempty"`
 	Model           string            `json:"model"`
 	Metadata        map[string]string `json:"metadata,omitempty"`
+	ConversationID  string            `json:"conversation_id,omitempty"`
 	Agent           bool              `json:"agent,omitempty"`
 }
 
@@ -84,6 +85,9 @@ func newBackgroundResponseJob(req modules.RequestContext) backgroundResponseJob 
 	if request != nil {
 		job.Provider = request.Provider
 		job.Model = request.Model
+	}
+	if req.ConversationTurn != nil {
+		job.ConversationID = req.ConversationTurn.Conversation.ID
 	}
 	return job
 }
@@ -158,6 +162,7 @@ func (r Router) compensateBackgroundResponse(ctx context.Context, req modules.Re
 	}
 	binding := responseOwnership{Endpoint: endpoint.Name, Model: model, Deployment: responseDeploymentIdentity(endpoint), Resource: "response"}
 	_ = r.ownership.remove(ctx, req, responseID, binding)
+	_ = r.releaseConversation(ctx, &req)
 }
 
 func (r Router) compensateBackgroundInteraction(ctx context.Context, req modules.RequestContext, responseID, model string, agent bool, endpoint Endpoint) {
@@ -203,6 +208,7 @@ func (r Router) processBackgroundResponse(ctx context.Context, claimed asyncstat
 		return r.retryBackgroundResponse(ctx, claimed, errors.New("invalid persisted background response job"))
 	}
 	req := job.requestContext()
+	r.restoreBackgroundConversation(&req, job.ConversationID)
 	response, err := r.RetrieveResponse(ctx, req, claimed.ResourceID)
 	if err != nil {
 		return r.retryBackgroundResponse(ctx, claimed, err)
@@ -221,6 +227,13 @@ func (r Router) processBackgroundResponse(ctx context.Context, claimed asyncstat
 	}
 	req.ResponsesResponse = &response
 	if err := r.modules.RunPostResponse(ctx, &req); err != nil && !errors.Is(err, modules.ErrContentRejected) {
+		return r.retryBackgroundResponse(ctx, claimed, err)
+	}
+	if response.Status == "failed" || response.Status == "cancelled" {
+		if err := r.releaseConversation(ctx, &req); err != nil {
+			return r.retryBackgroundResponse(ctx, claimed, err)
+		}
+	} else if err := r.completeConversation(ctx, &req, &response); err != nil {
 		return r.retryBackgroundResponse(ctx, claimed, err)
 	}
 	return r.asyncJobs.CompleteAsyncJob(ctx, claimed.Kind, claimed.ResourceID, claimed.LeaseGeneration)

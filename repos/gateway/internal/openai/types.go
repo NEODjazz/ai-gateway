@@ -34,6 +34,21 @@ type ChatCompletionRequest struct {
 	// is validated at the native request boundary.
 	GeminiGoogleMaps        bool          `json:"-"`
 	GeminiRetrievalLocation *GeminiLatLng `json:"-"`
+	// GeminiAudioTimestamp enables Vertex audio timestamp understanding for
+	// requests that contain validated audio input.
+	GeminiAudioTimestamp *bool `json:"-"`
+	// GeminiMediaResolution controls the native input-media token resolution.
+	GeminiMediaResolution string `json:"-"`
+	// GeminiFileSearch contains validated provider-managed retrieval stores.
+	GeminiFileSearch *GeminiFileSearchConfig `json:"-"`
+	// GeminiComputerUse contains validated client-executed computer controls.
+	GeminiComputerUse *GeminiComputerUseConfig `json:"-"`
+	// GeminiMCPServerIDs are authenticated gateway registry references.
+	GeminiMCPServerIDs []string `json:"-"`
+	// GeminiMCPServers are resolved only after connector authorization.
+	GeminiMCPServers []GeminiMCPServer `json:"-"`
+	// GeminiMCPConnectorIDs are canonical authorized registry identities.
+	GeminiMCPConnectorIDs []string `json:"-"`
 	// AnthropicSkills contains validated native Messages skill references.
 	AnthropicSkills      []AnthropicSkillReference `json:"-"`
 	AnthropicContainerID string                    `json:"-"`
@@ -443,6 +458,7 @@ type JSONSchemaFormat struct {
 }
 
 type ChatCompletionResponse struct {
+	UsageReported bool `json:"-"`
 	// NativeContainer preserves a validated provider container descriptor for
 	// protocol adapters that expose managed execution state.
 	NativeContainer         json.RawMessage   `json:"-"`
@@ -484,6 +500,7 @@ type CompletionRequest struct {
 }
 
 type CompletionResponse struct {
+	UsageReported     bool               `json:"-"`
 	ID                string             `json:"id"`
 	Object            string             `json:"object"`
 	Created           int64              `json:"created"`
@@ -565,6 +582,7 @@ func (u *Usage) UnmarshalJSON(data []byte) error {
 type CompletionTokenDetails struct {
 	AcceptedPredictionTokens int `json:"accepted_prediction_tokens,omitempty"`
 	AudioTokens              int `json:"audio_tokens,omitempty"`
+	CachedTokens             int `json:"cached_tokens,omitempty"`
 	ReasoningTokens          int `json:"reasoning_tokens,omitempty"`
 	RejectedPredictionTokens int `json:"rejected_prediction_tokens,omitempty"`
 	TextTokens               int `json:"text_tokens,omitempty"`
@@ -713,8 +731,12 @@ func EmbeddingInputText(value any) string {
 
 type ResponseRequest struct {
 	// NativeInputTokens reserves provider-native context omitted from the public Responses wire shape.
-	NativeInputTokens    int                    `json:"-"`
+	NativeInputTokens int `json:"-"`
+	// RunToolNames attributes output-only function calls from a verified internal run snapshot.
+	RunToolNames         []string               `json:"-"`
 	Metadata             map[string]string      `json:"metadata,omitempty"`
+	ContextManagement    []ResponseContextEntry `json:"context_management,omitempty"`
+	Moderation           *ProviderModeration    `json:"moderation,omitempty"`
 	TopLogprobs          *int                   `json:"top_logprobs,omitempty"`
 	Truncation           *string                `json:"truncation,omitempty"`
 	Reasoning            *ResponseReasoning     `json:"reasoning,omitempty"`
@@ -729,6 +751,7 @@ type ResponseRequest struct {
 	ParallelToolCalls    *bool                  `json:"parallel_tool_calls,omitempty"`
 	Text                 any                    `json:"text,omitempty"`
 	PreviousResponse     string                 `json:"previous_response_id,omitempty"`
+	Conversation         *ResponseConversation  `json:"conversation,omitempty"`
 	User                 string                 `json:"user,omitempty"`
 	SafetyIdentifier     string                 `json:"safety_identifier,omitempty"`
 	PromptCacheKey       string                 `json:"prompt_cache_key,omitempty"`
@@ -745,6 +768,45 @@ type ResponseRequest struct {
 	FrequencyPenalty     *float64               `json:"frequency_penalty,omitempty"`
 	PresencePenalty      *float64               `json:"presence_penalty,omitempty"`
 	MaxToolCalls         *int                   `json:"max_tool_calls,omitempty"`
+}
+
+type ResponseConversation struct {
+	ID string `json:"id"`
+}
+
+func (c *ResponseConversation) UnmarshalJSON(data []byte) error {
+	var id string
+	if len(bytes.TrimSpace(data)) > 0 && bytes.TrimSpace(data)[0] == '"' && json.Unmarshal(data, &id) == nil {
+		c.ID = id
+		return nil
+	}
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(data, &object); err != nil || object == nil || len(object) != 1 {
+		if err == nil {
+			err = errors.New("conversation must be a string or object containing only id")
+		}
+		return err
+	}
+	return json.Unmarshal(object["id"], &c.ID)
+}
+
+type ResponseContextEntry struct {
+	Type             string `json:"type"`
+	CompactThreshold *int   `json:"compact_threshold,omitempty"`
+}
+
+type ProviderModeration struct {
+	Model  string                    `json:"model"`
+	Policy *ProviderModerationPolicy `json:"policy,omitempty"`
+}
+
+type ProviderModerationPolicy struct {
+	Input  *ProviderModerationRule `json:"input,omitempty"`
+	Output *ProviderModerationRule `json:"output,omitempty"`
+}
+
+type ProviderModerationRule struct {
+	Mode string `json:"mode"`
 }
 
 type ResponseInputTokenCountRequest struct {
@@ -780,6 +842,7 @@ type ResponseTool struct {
 	Name              string                     `json:"name,omitempty"`
 	Description       string                     `json:"description,omitempty"`
 	Parameters        any                        `json:"parameters,omitempty"`
+	OutputSchema      map[string]any             `json:"output_schema,omitempty"`
 	Strict            *bool                      `json:"strict,omitempty"`
 	ServerLabel       string                     `json:"server_label,omitempty"`
 	ServerURL         string                     `json:"server_url,omitempty"`
@@ -843,18 +906,78 @@ type FileSearchHybridSearch struct {
 
 type ResponseResponse struct {
 	Metadata map[string]string `json:"metadata,omitempty"`
-	// InputTokensReported distinguishes an explicit upstream zero from absent usage.
-	InputTokensReported bool                       `json:"-"`
-	Error               *ResponseError             `json:"error,omitempty"`
-	IncompleteDetails   *ResponseIncompleteDetails `json:"incomplete_details,omitempty"`
-	ID                  string                     `json:"id"`
-	Object              string                     `json:"object"`
-	CreatedAt           int64                      `json:"created_at,omitempty"`
-	Status              string                     `json:"status,omitempty"`
-	Model               string                     `json:"model"`
-	Output              []ResponseOutputItem       `json:"output,omitempty"`
-	OutputText          string                     `json:"output_text,omitempty"`
-	Usage               ResponseUsage              `json:"usage,omitempty"`
+	// Usage presence flags distinguish explicit upstream zeros from absent counts.
+	InputTokensReported  bool                       `json:"-"`
+	OutputTokensReported bool                       `json:"-"`
+	TotalTokensReported  bool                       `json:"-"`
+	Error                *ResponseError             `json:"error,omitempty"`
+	IncompleteDetails    *ResponseIncompleteDetails `json:"incomplete_details,omitempty"`
+	ID                   string                     `json:"id"`
+	Object               string                     `json:"object"`
+	CreatedAt            int64                      `json:"created_at,omitempty"`
+	CompletedAt          int64                      `json:"completed_at,omitempty"`
+	Status               string                     `json:"status,omitempty"`
+	Model                string                     `json:"model"`
+	Background           *bool                      `json:"background,omitempty"`
+	Store                *bool                      `json:"store,omitempty"`
+	PreviousResponseID   *string                    `json:"previous_response_id,omitempty"`
+	ServiceTier          string                     `json:"service_tier,omitempty"`
+	MaxOutputTokens      *int                       `json:"max_output_tokens,omitempty"`
+	MaxToolCalls         *int                       `json:"max_tool_calls,omitempty"`
+	ParallelToolCalls    *bool                      `json:"parallel_tool_calls,omitempty"`
+	Temperature          *float64                   `json:"temperature,omitempty"`
+	TopP                 *float64                   `json:"top_p,omitempty"`
+	TopLogprobs          *int                       `json:"top_logprobs,omitempty"`
+	FrequencyPenalty     *float64                   `json:"frequency_penalty,omitempty"`
+	PresencePenalty      *float64                   `json:"presence_penalty,omitempty"`
+	Truncation           *string                    `json:"truncation,omitempty"`
+	Reasoning            *ResponseReasoning         `json:"reasoning,omitempty"`
+	Text                 any                        `json:"text,omitempty"`
+	Tools                []ResponseTool             `json:"tools,omitempty"`
+	ToolChoice           any                        `json:"tool_choice,omitempty"`
+	User                 string                     `json:"user,omitempty"`
+	SafetyIdentifier     string                     `json:"safety_identifier,omitempty"`
+	PromptCacheKey       string                     `json:"prompt_cache_key,omitempty"`
+	Citations            []string                   `json:"citations,omitempty"`
+	Conversation         *ResponseConversation      `json:"conversation,omitempty"`
+	Output               []ResponseOutputItem       `json:"output,omitempty"`
+	OutputText           string                     `json:"output_text,omitempty"`
+	Usage                ResponseUsage              `json:"usage,omitempty"`
+	Instructions         any                        `json:"instructions,omitempty"`
+	Prompt               *ResponsePrompt            `json:"prompt,omitempty"`
+	Moderation           *ResponseModeration        `json:"moderation,omitempty"`
+	ContextManagement    []ResponseContextEntry     `json:"context_management,omitempty"`
+
+	PromptCacheOptions     *PromptCacheOptions             `json:"prompt_cache_options,omitempty"`
+	PromptCacheRetention   string                          `json:"prompt_cache_retention,omitempty"`
+	PromptCacheDiagnostics *ResponsePromptCacheDiagnostics `json:"prompt_cache_diagnostics,omitempty"`
+}
+
+type ResponsePrompt struct {
+	ID        string         `json:"id"`
+	Variables map[string]any `json:"variables,omitempty"`
+	Version   *string        `json:"version,omitempty"`
+}
+
+type ResponseModeration struct {
+	Input  *ResponseModerationResult `json:"input,omitempty"`
+	Output *ResponseModerationResult `json:"output,omitempty"`
+}
+
+type ResponseModerationResult struct {
+	Type                      string              `json:"type"`
+	Model                     string              `json:"model"`
+	Flagged                   bool                `json:"flagged"`
+	Categories                map[string]*bool    `json:"categories"`
+	CategoryScores            map[string]float64  `json:"category_scores"`
+	CategoryAppliedInputTypes map[string][]string `json:"category_applied_input_types"`
+}
+
+type ResponsePromptCacheDiagnostics struct {
+	Type                     string `json:"type"`
+	Reason                   string `json:"reason,omitempty"`
+	CacheMissedTokens        *int   `json:"cache_missed_tokens,omitempty"`
+	ComparisonReusableTokens *int   `json:"comparison_reusable_tokens,omitempty"`
 }
 
 type ResponseInputItemList struct {
@@ -887,12 +1010,23 @@ type CompactedResponse struct {
 }
 
 type ResponseError struct {
-	Code    string `json:"code"`
+	Code         string                `json:"code"`
+	Message      string                `json:"message"`
+	Misalignment *ResponseMisalignment `json:"misalignment,omitempty"`
+}
+
+type ResponseMisalignment struct {
+	DetailedExplanation string                     `json:"detailed_explanation,omitempty"`
+	ErrorType           string                     `json:"error_type,omitempty"`
+	Steer               *ResponseMisalignmentSteer `json:"steer,omitempty"`
+}
+
+type ResponseMisalignmentSteer struct {
 	Message string `json:"message"`
 }
 
 type ResponseIncompleteDetails struct {
-	Reason string `json:"reason"`
+	Reason string `json:"reason,omitempty"`
 }
 
 type ResponseOutputItem struct {
@@ -937,12 +1071,20 @@ type ResponseOutputContent struct {
 }
 
 type ResponseUsage struct {
-	ProviderCostUSDTicks *int64                  `json:"-"`
-	OutputTokensDetails  *CompletionTokenDetails `json:"output_tokens_details,omitempty"`
-	InputTokens          int                     `json:"input_tokens,omitempty"`
-	OutputTokens         int                     `json:"output_tokens,omitempty"`
-	TotalTokens          int                     `json:"total_tokens,omitempty"`
-	InputTokensDetails   *InputTokenDetails      `json:"input_tokens_details,omitempty"`
+	ProviderCostUSDTicks       *int64                              `json:"-"`
+	NumSourcesUsed             *int                                `json:"num_sources_used,omitempty"`
+	NumServerSideToolsUsed     *int                                `json:"num_server_side_tools_used,omitempty"`
+	ServerSideToolUsageDetails *ResponseServerSideToolUsageDetails `json:"server_side_tool_usage_details,omitempty"`
+	OutputTokensDetails        *CompletionTokenDetails             `json:"output_tokens_details,omitempty"`
+	InputTokens                int                                 `json:"input_tokens,omitempty"`
+	OutputTokens               int                                 `json:"output_tokens,omitempty"`
+	TotalTokens                int                                 `json:"total_tokens,omitempty"`
+	InputTokensDetails         *InputTokenDetails                  `json:"input_tokens_details,omitempty"`
+}
+
+type ResponseServerSideToolUsageDetails struct {
+	XPostsFetched *int `json:"x_posts_fetched,omitempty"`
+	XUsersFetched *int `json:"x_users_fetched,omitempty"`
 }
 
 func (u *ResponseUsage) UnmarshalJSON(data []byte) error {
@@ -951,7 +1093,9 @@ func (u *ResponseUsage) UnmarshalJSON(data []byte) error {
 		responseUsage
 		ProviderCostUSDTicks *int64 `json:"cost_in_usd_ticks"`
 	}
-	if err := json.Unmarshal(data, &wire); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&wire); err != nil {
 		return err
 	}
 	*u = ResponseUsage(wire.responseUsage)
@@ -965,6 +1109,7 @@ type InputTokenDetails struct {
 	CacheCreationTokens int `json:"cache_creation_tokens,omitempty"`
 	AudioTokens         int `json:"audio_tokens,omitempty"`
 	ImageTokens         int `json:"image_tokens,omitempty"`
+	ReasoningTokens     int `json:"reasoning_tokens,omitempty"`
 	TextTokens          int `json:"text_tokens,omitempty"`
 }
 

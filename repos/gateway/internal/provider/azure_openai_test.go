@@ -3,15 +3,27 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"ai-gateway-gateway/internal/config"
+	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/openai"
 	"golang.org/x/net/websocket"
 )
+
+type azureRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f azureRoundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return f(request)
+}
 
 func TestAzureOpenAIRealtimeUsesNativeURLAndAuthentication(t *testing.T) {
 	for _, test := range []struct {
@@ -19,7 +31,11 @@ func TestAzureOpenAIRealtimeUsesNativeURLAndAuthentication(t *testing.T) {
 		wantPath, wantQuery, wantAPIKey, wantBearer      string
 	}{
 		{name: "GA API key", basePath: "/openai/deployments/legacy", credential: "resource-key", authType: "api_key", wantPath: "/openai/v1/realtime", wantQuery: "model=deployment-a", wantAPIKey: "resource-key"},
+		{name: "v1 preview API key", basePath: "/openai/v1", credential: "resource-key", apiVersion: "preview", authType: "api_key", wantPath: "/openai/v1/realtime", wantQuery: "model=deployment-a", wantAPIKey: "resource-key"},
 		{name: "preview Entra", basePath: "/openai/deployments/legacy", credential: "entra-token", apiVersion: "2025-04-01-preview", authType: "entra", wantPath: "/openai/realtime", wantQuery: "api-version=2025-04-01-preview&deployment=deployment-a", wantBearer: "Bearer entra-token"},
+		{name: "prefixed GA API key", basePath: "/tenant-a/openai/v1", credential: "resource-key", authType: "api_key", wantPath: "/tenant-a/openai/v1/realtime", wantQuery: "model=deployment-a", wantAPIKey: "resource-key"},
+		{name: "prefixed v1 preview Entra", basePath: "/tenant-a/openai/v1", credential: "entra-token", apiVersion: "preview", authType: "entra", wantPath: "/tenant-a/openai/v1/realtime", wantQuery: "model=deployment-a", wantBearer: "Bearer entra-token"},
+		{name: "prefixed preview Entra", basePath: "/tenant-a/openai/deployments/legacy", credential: "entra-token", apiVersion: "2025-04-01-preview", authType: "entra", wantPath: "/tenant-a/openai/realtime", wantQuery: "api-version=2025-04-01-preview&deployment=deployment-a", wantBearer: "Bearer entra-token"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			serverErr := make(chan error, 1)
@@ -61,10 +77,701 @@ func TestAzureOpenAIRealtimeUsesNativeURLAndAuthentication(t *testing.T) {
 	}
 }
 
+func TestManagedAzureRealtimeRoutesWithAuthenticationAndQuota(t *testing.T) {
+	for _, test := range []struct {
+		name, authType, apiVersion, wantPath, wantQuery string
+	}{
+		{name: "GA API key", authType: "api_key", wantPath: "/openai/v1/realtime", wantQuery: "model=upstream-model"},
+		{name: "v1 preview API key", authType: "api_key", apiVersion: "preview", wantPath: "/openai/v1/realtime", wantQuery: "model=upstream-model"},
+		{name: "preview Entra", authType: "entra", apiVersion: "2025-04-01-preview", wantPath: "/openai/realtime", wantQuery: "api-version=2025-04-01-preview&deployment=upstream-model"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			upstreamCheck := make(chan error, 1)
+			server := httptest.NewServer(websocket.Handler(func(connection *websocket.Conn) {
+				request := connection.Request()
+				if request.URL.Path != test.wantPath || request.URL.RawQuery != test.wantQuery {
+					upstreamCheck <- fmt.Errorf("unexpected realtime URL: %s", request.URL.String())
+					return
+				}
+				if test.authType == "entra" && (request.Header.Get("Authorization") != "Bearer managed-secret" || request.Header.Get("api-key") != "") ||
+					test.authType == "api_key" && (request.Header.Get("api-key") != "managed-secret" || request.Header.Get("Authorization") != "") {
+					upstreamCheck <- fmt.Errorf("unexpected realtime authentication headers: %v", request.Header)
+					return
+				}
+				upstreamCheck <- nil
+			}))
+			t.Cleanup(server.Close)
+
+			router := New(Config{CredentialEncryptionKey: []byte("azure-realtime-test-key"), DeploymentQuotaStore: NewMemoryDeploymentQuotaStore()}).(*Router)
+			if _, err := router.CreateProvider(ManagedProvider{ID: "azure", Type: "azure-openai", BaseURL: server.URL, APIVersion: test.apiVersion, AuthType: test.authType, Enabled: true}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := router.CreateCredential(CredentialInput{ID: "azure-key", ProviderID: "azure", Secret: "managed-secret"}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := router.CreateModelDeployment(ModelDeployment{ID: "azure-realtime", ProviderID: "azure", CredentialID: "azure-key", Models: []string{"public-model"}, UpstreamModel: "upstream-model", Capabilities: []string{"realtime"}, RateLimitTPM: 4, Enabled: true}); err != nil {
+				t.Fatal(err)
+			}
+			connection, attempt, err := router.OpenRealtime(t.Context(), modules.RequestContext{RequestID: "execution"}, "public-model")
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = connection.Close() })
+			if err := <-upstreamCheck; err != nil {
+				t.Fatal(err)
+			}
+			if attempt.Request.Model != "upstream-model" || attempt.Metadata["provider.endpoint.name"] != "azure-realtime" {
+				t.Fatalf("unexpected routed attempt: %+v", attempt)
+			}
+			reserver, ok := connection.(RealtimeTokenReserver)
+			if !ok {
+				t.Fatal("managed Azure realtime connection has no token reservation")
+			}
+			if err := reserver.ReserveRealtimeTokens(t.Context(), 4); err != nil {
+				t.Fatal(err)
+			}
+			var quotaErr *DeploymentQuotaError
+			if err := reserver.ReserveRealtimeTokens(t.Context(), 1); !errors.As(err, &quotaErr) {
+				t.Fatalf("deployment TPM was not enforced: %v", err)
+			}
+		})
+	}
+}
+
+func TestAzureFoundryProjectDoesNotAdvertiseResourceRealtime(t *testing.T) {
+	router := New(Config{CredentialEncryptionKey: []byte("foundry-realtime-test-key")}).(*Router)
+	if _, err := router.CreateProvider(ManagedProvider{ID: "foundry", Type: "azure-openai", BaseURL: "https://resource.services.ai.azure.com/api/projects/project-a", AuthType: "entra", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := router.CreateModelDeployment(ModelDeployment{ID: "foundry-realtime", ProviderID: "foundry", Models: []string{"model"}, Capabilities: []string{"realtime"}, Enabled: true})
+	if !errors.Is(err, ErrUnsupportedProviderCapability) {
+		t.Fatalf("project Realtime capability accepted: %v", err)
+	}
+	client := NewAzureOpenAI("https://resource.services.ai.azure.com/api/projects/project-a", "token", false, "", "entra")
+	if _, err := client.OpenRealtime(t.Context(), "model"); err == nil {
+		t.Fatal("project URL was silently rewritten to resource Realtime URL")
+	}
+}
+
 func TestAzureOpenAIRealtimeFailsClosedWithoutAPIKey(t *testing.T) {
 	client := NewAzureOpenAI("https://resource.openai.azure.com", "", false, "", "api_key")
 	if _, err := client.OpenRealtime(t.Context(), "deployment-a"); err == nil {
 		t.Fatal("missing Azure Realtime API key was accepted")
+	}
+}
+
+func TestAzureOpenAIHTTPFailsClosedWithoutAPIKey(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+	client := NewAzureOpenAI(server.URL, " ", false, "", "api_key")
+	if _, err := client.ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "deployment", Messages: []openai.Message{{Role: "user", Content: "hello"}}}); err == nil {
+		t.Fatal("Azure Chat sent without an API key")
+	}
+	if _, err := client.Responses(t.Context(), openai.ResponseRequest{Model: "deployment", Input: "hello"}); err == nil {
+		t.Fatal("Azure Responses sent without an API key")
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("unauthenticated requests reached upstream: %d", calls.Load())
+	}
+}
+
+func TestAzureWebSearchCapabilitiesFollowEndpointContract(t *testing.T) {
+	for _, test := range []struct {
+		name, baseURL string
+		responses     bool
+	}{
+		{name: "resource root", baseURL: "https://resource.openai.azure.com"},
+		{name: "versioned deployment", baseURL: "https://resource.openai.azure.com/openai/deployments/model"},
+		{name: "Foundry project", baseURL: "https://resource.services.ai.azure.com/api/projects/project-a", responses: true},
+		{name: "prefixed Foundry project", baseURL: "https://proxy.example.test/tenant/api/projects/project-a/openai/v1", responses: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			client := NewAzureOpenAI(test.baseURL, "credential", false, "", "api_key")
+			endpoint := Endpoint{Type: "azure-openai", Provider: client, Capabilities: []string{"chat", "responses", "web_search"}}
+			if client.SupportsWebSearch() || endpoint.supportsCapabilities("chat", "web_search") {
+				t.Fatal("Azure Chat incorrectly advertised web search")
+			}
+			if client.SupportsResponseWebSearch() != test.responses || endpoint.supportsCapabilities("responses", "web_search") != test.responses {
+				t.Fatalf("Responses web search support does not match endpoint: client=%t endpoint=%t", client.SupportsResponseWebSearch(), endpoint.supportsCapabilities("responses", "web_search"))
+			}
+		})
+	}
+	compatible := NewOpenAICompatible("https://provider.example", "", false)
+	if !compatible.SupportsWebSearch() || !compatible.SupportsResponseWebSearch() {
+		t.Fatal("generic compatible adapter lost declared web search support")
+	}
+}
+
+func TestAzureUnsupportedWebSearchFailsBeforeUpstream(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		http.Error(w, "unexpected upstream call", http.StatusInternalServerError)
+	}))
+	t.Cleanup(server.Close)
+	for _, test := range []struct {
+		name, path string
+	}{
+		{name: "resource"},
+		{name: "Foundry project", path: "/api/projects/project-a"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			client := NewAzureOpenAI(server.URL+test.path, "credential", true, "", "api_key")
+			chat := openai.ChatCompletionRequest{Model: "m", Messages: []openai.Message{{Role: "user", Content: "news"}}, ChatGenerationOptions: openai.ChatGenerationOptions{WebSearchOptions: &openai.ChatWebSearchOptions{}}}
+			for _, run := range []func() error{
+				func() error { _, err := client.ChatCompletions(t.Context(), chat); return err },
+				func() error { _, err := client.StreamChatCompletions(t.Context(), chat, nil); return err },
+			} {
+				var failure *Error
+				if err := run(); !errors.As(err, &failure) || failure.Param != "web_search_options" {
+					t.Fatalf("unsupported Chat web search was accepted: %v", err)
+				}
+			}
+			if test.path == "" {
+				request := openai.ResponseRequest{Model: "m", Input: "news", Tools: []openai.ResponseTool{{Type: "web_search"}}}
+				for _, run := range []func() error{
+					func() error { _, err := client.Responses(t.Context(), request); return err },
+					func() error { _, err := client.StreamResponses(t.Context(), request, nil); return err },
+				} {
+					var failure *Error
+					if err := run(); !errors.As(err, &failure) || failure.Param != "tools" {
+						t.Fatalf("unsupported Responses web search was accepted: %v", err)
+					}
+				}
+			}
+		})
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("unsupported web search reached Azure %d times", calls.Load())
+	}
+}
+
+func TestAzureFoundryResponsesWebSearchUsesProjectAuthentication(t *testing.T) {
+	for _, authType := range []string{"api_key", "entra"} {
+		t.Run(authType, func(t *testing.T) {
+			wantAPIKey, wantBearer := "credential", ""
+			if authType == "entra" {
+				wantAPIKey, wantBearer = "", "Bearer credential"
+			}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/api/projects/project-a/openai/v1/responses" || r.Header.Get("api-key") != wantAPIKey || r.Header.Get("Authorization") != wantBearer {
+					t.Errorf("unexpected Foundry request path or authentication: %s", r.URL.Path)
+					http.Error(w, "invalid request", http.StatusBadRequest)
+					return
+				}
+				var request openai.ResponseRequest
+				if err := json.NewDecoder(r.Body).Decode(&request); err != nil || len(request.Tools) != 1 || request.Tools[0].Type != "web_search" {
+					t.Errorf("web search tool was not forwarded: %+v err=%v", request.Tools, err)
+				}
+				_, _ = fmt.Fprint(w, `{"id":"response-a","object":"response","status":"completed","model":"m","output":[{"id":"message-a","type":"message","role":"assistant","content":[{"type":"output_text","text":"answer"}]}],"usage":{"input_tokens":3,"output_tokens":1,"total_tokens":4}}`)
+			}))
+			t.Cleanup(server.Close)
+			client := NewAzureOpenAI(server.URL+"/api/projects/project-a", "credential", false, "", authType)
+			response, err := client.Responses(t.Context(), openai.ResponseRequest{Model: "m", Input: "news", Tools: []openai.ResponseTool{{Type: "web_search"}}})
+			if err != nil || response.Usage.TotalTokens != 4 {
+				t.Fatalf("Foundry Responses web search failed: response=%+v err=%v", response, err)
+			}
+		})
+	}
+}
+
+func TestManagedAzureWebSearchCapabilityIsResponsesOnly(t *testing.T) {
+	for _, test := range []struct {
+		name, baseURL string
+		capabilities  []string
+		accepted      bool
+	}{
+		{name: "resource Responses", baseURL: "https://resource.openai.azure.com", capabilities: []string{"responses", "web_search"}},
+		{name: "Foundry Chat", baseURL: "https://resource.services.ai.azure.com/api/projects/project-a", capabilities: []string{"chat", "web_search"}},
+		{name: "Foundry Responses", baseURL: "https://resource.services.ai.azure.com/api/projects/project-a", capabilities: []string{"responses", "web_search"}, accepted: true},
+		{name: "Foundry Chat and Responses", baseURL: "https://resource.services.ai.azure.com/api/projects/project-a", capabilities: []string{"chat", "responses", "web_search"}, accepted: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			router := New(Config{CredentialEncryptionKey: []byte("azure-web-search-test-key")}).(*Router)
+			if _, err := router.CreateProvider(ManagedProvider{ID: "azure", Type: "azure-openai", BaseURL: test.baseURL, AuthType: "api_key", Enabled: true}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := router.CreateCredential(CredentialInput{ID: "credential", ProviderID: "azure", Secret: "test-secret"}); err != nil {
+				t.Fatal(err)
+			}
+			_, err := router.CreateModelDeployment(ModelDeployment{ID: "deployment", ProviderID: "azure", CredentialID: "credential", Models: []string{"m"}, Capabilities: test.capabilities, Enabled: true})
+			if test.accepted && err != nil || !test.accepted && !errors.Is(err, ErrUnsupportedProviderCapability) {
+				t.Fatalf("deployment acceptance=%t err=%v", test.accepted, err)
+			}
+		})
+	}
+}
+
+func TestAzureOpenAIHTTPRejectsInvalidEntraTokenBeforeUpstream(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+	for _, tc := range []struct{ name, token string }{
+		{name: "blank", token: " "},
+		{name: "surrounding spaces", token: " token "},
+		{name: "internal space", token: "token value"},
+		{name: "newline", token: "token\nvalue"},
+		{name: "oversized", token: strings.Repeat("t", 16<<10+1)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := NewAzureOpenAI(server.URL, tc.token, false, "", "entra")
+			_, err := client.ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "deployment", Messages: []openai.Message{{Role: "user", Content: "hello"}}})
+			if err == nil {
+				t.Fatal("invalid Entra token was accepted")
+			}
+		})
+	}
+	if got := calls.Load(); got != 0 {
+		t.Fatalf("invalid Entra token reached upstream %d times", got)
+	}
+}
+
+func TestAzureManagedIdentityRejectsInvalidTokenBeforeInference(t *testing.T) {
+	for _, name := range []string{"AZURE_TENANT_ID", "AZURE_CLIENT_ID", "AZURE_CLIENT_SECRET", "AZURE_FEDERATED_TOKEN_FILE"} {
+		t.Setenv(name, "")
+	}
+	identity := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprintf(w, `{"access_token":"bad token","expires_on":%d,"token_type":"Bearer"}`, time.Now().Add(time.Hour).Unix())
+	}))
+	t.Cleanup(identity.Close)
+	t.Setenv("IDENTITY_ENDPOINT", identity.URL)
+	t.Setenv("IDENTITY_HEADER", "test-header")
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+	for _, path := range []string{"/openai/v1", "/api/projects/project-a/openai/v1"} {
+		t.Run(path, func(t *testing.T) {
+			client := NewAzureOpenAI(server.URL+path, "", false, "", "entra")
+			_, err := client.ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "deployment", Messages: []openai.Message{{Role: "user", Content: "hello"}}})
+			if err == nil {
+				t.Fatal("invalid managed-identity token was accepted")
+			}
+		})
+	}
+	if got := calls.Load(); got != 0 {
+		t.Fatalf("invalid managed-identity token reached inference %d times", got)
+	}
+}
+
+func TestAzureChatRequiresExactUsage(t *testing.T) {
+	for _, tc := range []struct {
+		name, usage string
+		wantError   bool
+	}{
+		{"missing", "", true},
+		{"completion missing", `,"usage":{"prompt_tokens":3,"total_tokens":3}`, true},
+		{"total missing", `,"usage":{"prompt_tokens":3,"completion_tokens":2}`, true},
+		{"inconsistent", `,"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":6}`, true},
+		{"reported zero", `,"usage":{"prompt_tokens":0,"completion_tokens":0,"total_tokens":0}`, false},
+		{"reported counts", `,"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}`, false},
+	} {
+		for _, stream := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/stream=%t", tc.name, stream), func(t *testing.T) {
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.Header.Get("api-key") != "test-key" {
+						t.Errorf("missing Azure API key")
+					}
+					if stream {
+						w.Header().Set("Content-Type", "text/event-stream")
+						_, _ = fmt.Fprint(w, `data: {"id":"chat-1","model":"deployment","choices":[{"index":0,"delta":{"content":"hello"},"finish_reason":"stop"}],"usage":null}`+"\n\n")
+						_, _ = fmt.Fprint(w, `data: {"id":"chat-1","model":"deployment","choices":[]`+tc.usage+`}`+"\n\n")
+						_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+					} else {
+						_, _ = fmt.Fprint(w, `{"id":"chat-1","model":"deployment","choices":[{"index":0,"message":{"role":"assistant","content":"hello"},"finish_reason":"stop"}]`+tc.usage+`}`)
+					}
+				}))
+				t.Cleanup(server.Close)
+				client := NewAzureOpenAI(server.URL, "test-key", stream, "", "api_key")
+				request := openai.ChatCompletionRequest{Model: "deployment", Messages: []openai.Message{{Role: "user", Content: "hello"}}, Stream: stream}
+				var response openai.ChatCompletionResponse
+				var err error
+				deliveredUsage := false
+				if stream {
+					response, err = client.StreamChatCompletions(t.Context(), request, func(payload string) error {
+						if strings.Contains(payload, `"usage":{`) {
+							deliveredUsage = true
+						}
+						return nil
+					})
+				} else {
+					response, err = client.ChatCompletions(t.Context(), request)
+				}
+				if tc.wantError {
+					if err == nil || !strings.Contains(err.Error(), "usage") {
+						t.Fatalf("invalid Azure usage accepted: response=%+v err=%v", response, err)
+					}
+					if deliveredUsage {
+						t.Fatal("invalid Azure usage chunk was forwarded")
+					}
+				} else if err != nil || !response.UsageReported {
+					t.Fatalf("reported Azure usage rejected: response=%+v err=%v", response, err)
+				} else if stream && !deliveredUsage {
+					t.Fatal("valid Azure usage chunk was not forwarded")
+				}
+			})
+		}
+	}
+}
+
+func TestAzureFoundryEntraChatRequiresExactUsage(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/projects/project-a/openai/v1/chat/completions" ||
+			r.Header.Get("Authorization") != "Bearer project-token" || r.Header.Get("api-key") != "" {
+			t.Errorf("unexpected Foundry request: path=%s headers=%v", r.URL.Path, r.Header)
+		}
+		_, _ = fmt.Fprint(w, `{"id":"chat-1","model":"deployment","choices":[]}`)
+	}))
+	t.Cleanup(server.Close)
+	client := NewAzureOpenAI(server.URL+"/api/projects/project-a", "project-token", false, "", "entra")
+	_, err := client.ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "deployment", Messages: []openai.Message{{Role: "user", Content: "hello"}}})
+	if err == nil || !strings.Contains(err.Error(), "usage") {
+		t.Fatalf("Foundry Entra Chat accepted missing usage: %v", err)
+	}
+}
+
+func TestAzureFoundryEntraChatWithholdsInvalidStreamUsage(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/projects/project-a/openai/v1/chat/completions" ||
+			r.Header.Get("Authorization") != "Bearer project-token" || r.Header.Get("api-key") != "" {
+			t.Errorf("unexpected Foundry Chat request: path=%s headers=%v", r.URL.Path, r.Header)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, `data: {"id":"chat-1","model":"deployment","choices":[{"index":0,"delta":{"content":"hello"},"finish_reason":"stop"}]}`+"\n\n")
+		_, _ = fmt.Fprint(w, `data: {"id":"chat-1","model":"deployment","choices":[],"usage":{"prompt_tokens":3,"total_tokens":3}}`+"\n\n")
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	t.Cleanup(server.Close)
+	client := NewAzureOpenAI(server.URL+"/api/projects/project-a", "project-token", true, "", "entra")
+	var forwarded []string
+	_, err := client.StreamChatCompletions(t.Context(), openai.ChatCompletionRequest{
+		Model: "deployment", Messages: []openai.Message{{Role: "user", Content: "hello"}}, Stream: true,
+	}, func(payload string) error {
+		forwarded = append(forwarded, payload)
+		return nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "usage") || len(forwarded) != 1 || strings.Contains(forwarded[0], `"usage":`) {
+		t.Fatalf("invalid Foundry Chat usage was forwarded: err=%v forwarded=%v", err, forwarded)
+	}
+}
+
+func TestAzureResponsesRequireExactUsage(t *testing.T) {
+	for _, tc := range []struct {
+		name, status, usage string
+		wantError           bool
+	}{
+		{"missing", "completed", "", true},
+		{"missing status and usage", "", "", true},
+		{"input missing", "completed", `,"usage":{"output_tokens":2,"total_tokens":2}`, true},
+		{"output missing", "completed", `,"usage":{"input_tokens":3,"total_tokens":3}`, true},
+		{"total missing", "completed", `,"usage":{"input_tokens":3,"output_tokens":2}`, true},
+		{"inconsistent", "completed", `,"usage":{"input_tokens":3,"output_tokens":2,"total_tokens":6}`, true},
+		{"reported zero", "completed", `,"usage":{"input_tokens":0,"output_tokens":0,"total_tokens":0}`, false},
+		{"reported counts", "completed", `,"usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}`, false},
+		{"queued background", "queued", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Header.Get("api-key") != "test-key" {
+					t.Errorf("missing Azure API key")
+				}
+				_, _ = fmt.Fprint(w, `{"id":"resp-test","object":"response","model":"deployment","status":"`+tc.status+`","output":[]`+tc.usage+`}`)
+			}))
+			t.Cleanup(server.Close)
+			client := NewAzureOpenAI(server.URL, "test-key", false, "", "api_key")
+			request := openai.ResponseRequest{Model: "deployment", Input: "hello"}
+			if tc.status == "queued" {
+				store := true
+				request.Background = true
+				request.Store = &store
+			}
+			response, err := client.Responses(t.Context(), request)
+			if tc.wantError {
+				if err == nil || !strings.Contains(err.Error(), "usage") {
+					t.Fatalf("invalid Azure Responses usage accepted: response=%+v err=%v", response, err)
+				}
+			} else if err != nil {
+				t.Fatalf("valid Azure Responses rejected: %v", err)
+			}
+		})
+	}
+}
+
+func TestAzureResponsesAcceptDefaultAutomaticToolChoiceWithoutTools(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("api-key") != "test-key" {
+			t.Error("missing Azure API key")
+		}
+		var request map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+		}
+		if _, sent := request["tool_choice"]; sent {
+			t.Error("tool_choice was added to a request that omitted tools")
+		}
+		_, _ = fmt.Fprint(w, `{"id":"resp-test","object":"response","model":"deployment","status":"completed","tools":[],"tool_choice":"auto","output":[],"usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}`)
+	}))
+	t.Cleanup(server.Close)
+	client := NewAzureOpenAI(server.URL, "test-key", false, "", "api_key")
+	response, err := client.Responses(t.Context(), openai.ResponseRequest{Model: "deployment", Input: "Summarize the release notes."})
+	if err != nil || response.Usage.TotalTokens != 5 || response.ToolChoice != "auto" {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
+func TestAzureResponsesPreserveEchoedFunctionOutputSchema(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("api-key") != "test-key" {
+			t.Error("missing Azure API key")
+		}
+		_, _ = fmt.Fprint(w, `{"id":"resp-test","object":"response","model":"deployment","status":"completed","tools":[{"type":"function","name":"lookup","parameters":{"type":"object"},"output_schema":{"type":"object","properties":{"found":{"type":"boolean"}}}}],"tool_choice":"auto","output":[],"usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}`)
+	}))
+	t.Cleanup(server.Close)
+	client := NewAzureOpenAI(server.URL, "test-key", false, "", "api_key")
+	response, err := client.Responses(t.Context(), openai.ResponseRequest{Model: "deployment", Input: "lookup"})
+	if err != nil || response.Usage.TotalTokens != 5 || len(response.Tools) != 1 || response.Tools[0].OutputSchema["type"] != "object" {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
+func TestAzureFoundryStreamResponsesRequireTerminalUsage(t *testing.T) {
+	for _, tc := range []struct {
+		name, usage string
+		wantError   bool
+	}{
+		{"missing", "", true},
+		{"output missing", `,"usage":{"input_tokens":3,"total_tokens":3}`, true},
+		{"inconsistent", `,"usage":{"input_tokens":3,"output_tokens":2,"total_tokens":6}`, true},
+		{"reported zero", `,"usage":{"input_tokens":0,"output_tokens":0,"total_tokens":0}`, false},
+		{"reported counts", `,"usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/api/projects/project-a/openai/v1/responses" || r.Header.Get("Authorization") != "Bearer project-token" || r.Header.Get("api-key") != "" {
+					t.Errorf("unexpected Foundry request: path=%s headers=%v", r.URL.Path, r.Header)
+				}
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = fmt.Fprint(w, `data: {"type":"response.output_text.delta","delta":"hello"}`+"\n\n")
+				_, _ = fmt.Fprint(w, `data: {"type":"response.completed","response":{"id":"resp-test","object":"response","model":"deployment","status":"completed","output":[]`+tc.usage+`}}`+"\n\n")
+			}))
+			t.Cleanup(server.Close)
+			client := NewAzureOpenAI(server.URL+"/api/projects/project-a", "project-token", true, "", "entra")
+			var events []string
+			response, err := client.StreamResponses(t.Context(), openai.ResponseRequest{Model: "deployment", Input: "hello"}, func(event, _ string) error {
+				events = append(events, event)
+				return nil
+			})
+			if tc.wantError {
+				if err == nil || !strings.Contains(err.Error(), "usage") {
+					t.Fatalf("invalid Foundry terminal usage accepted: response=%+v err=%v", response, err)
+				}
+				if len(events) != 1 || events[0] != "response.output_text.delta" {
+					t.Fatalf("invalid terminal success forwarded: %v", events)
+				}
+			} else if err != nil || len(events) != 2 {
+				t.Fatalf("valid Foundry stream rejected: events=%v err=%v", events, err)
+			}
+		})
+	}
+}
+
+func TestAzureEmbeddingsRequireExactUsage(t *testing.T) {
+	for _, tc := range []struct {
+		name, usage string
+		wantError   bool
+	}{
+		{"missing", "", true},
+		{"null", `,"usage":null`, true},
+		{"prompt missing", `,"usage":{"total_tokens":3}`, true},
+		{"total missing", `,"usage":{"prompt_tokens":3}`, true},
+		{"inconsistent", `,"usage":{"prompt_tokens":3,"total_tokens":4}`, true},
+		{"reported zero", `,"usage":{"prompt_tokens":0,"total_tokens":0}`, false},
+		{"reported count", `,"usage":{"prompt_tokens":3,"total_tokens":3}`, false},
+	} {
+		for _, foundry := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/foundry=%t", tc.name, foundry), func(t *testing.T) {
+				basePath := ""
+				authType, credential := "api_key", "resource-key"
+				wantPath := "/openai/v1/embeddings"
+				if foundry {
+					basePath = "/api/projects/project-a"
+					authType, credential = "entra", "project-token"
+					wantPath = "/api/projects/project-a/openai/v1/embeddings"
+				}
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.URL.Path != wantPath {
+						t.Errorf("unexpected Azure embeddings path: %s", r.URL.Path)
+					}
+					if foundry && (r.Header.Get("Authorization") != "Bearer project-token" || r.Header.Get("api-key") != "") ||
+						!foundry && (r.Header.Get("api-key") != "resource-key" || r.Header.Get("Authorization") != "") {
+						t.Errorf("unexpected Azure embeddings authentication")
+					}
+					_, _ = fmt.Fprint(w, `{"object":"list","model":"deployment","data":[{"object":"embedding","index":0,"embedding":[0.1,0.2]}]`+tc.usage+`}`)
+				}))
+				t.Cleanup(server.Close)
+				client := NewAzureOpenAI(server.URL+basePath, credential, false, "", authType)
+				response, err := client.Embeddings(t.Context(), openai.EmbeddingRequest{Model: "deployment", Input: "hello"})
+				if tc.wantError {
+					if err == nil || !strings.Contains(err.Error(), "usage") {
+						t.Fatalf("invalid Azure embeddings usage accepted: response=%+v err=%v", response, err)
+					}
+				} else if err != nil || !response.UsageReported {
+					t.Fatalf("valid Azure embeddings usage rejected: response=%+v err=%v", response, err)
+				}
+			})
+		}
+	}
+}
+
+func TestAzureCompletionsRequireExactUsage(t *testing.T) {
+	for _, tc := range []struct {
+		name, usage string
+		wantError   bool
+	}{
+		{"missing", "", true},
+		{"prompt missing", `,"usage":{"completion_tokens":2,"total_tokens":2}`, true},
+		{"completion missing", `,"usage":{"prompt_tokens":3,"total_tokens":3}`, true},
+		{"total missing", `,"usage":{"prompt_tokens":3,"completion_tokens":2}`, true},
+		{"inconsistent", `,"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":6}`, true},
+		{"reported zero", `,"usage":{"prompt_tokens":0,"completion_tokens":0,"total_tokens":0}`, false},
+		{"reported counts", `,"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}`, false},
+	} {
+		for _, stream := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/stream=%t", tc.name, stream), func(t *testing.T) {
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.URL.Path != "/openai/v1/completions" || r.Header.Get("api-key") != "test-key" {
+						t.Errorf("unexpected Azure Completions path or auth")
+					}
+					var body map[string]any
+					if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+						t.Error(err)
+					}
+					if stream {
+						options, _ := body["stream_options"].(map[string]any)
+						if options["include_usage"] != true {
+							t.Errorf("Azure Completions did not request stream usage: %v", body)
+						}
+						w.Header().Set("Content-Type", "text/event-stream")
+						_, _ = fmt.Fprint(w, `data: {"id":"cmpl-1","object":"text_completion","created":1,"model":"deployment","choices":[{"index":0,"text":"ok","finish_reason":"stop"}],"usage":null}`+"\n\n")
+						_, _ = fmt.Fprint(w, `data: {"id":"cmpl-1","object":"text_completion","created":1,"model":"deployment","choices":[]`+tc.usage+`}`+"\n\n")
+						_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+					} else {
+						_, _ = fmt.Fprint(w, `{"id":"cmpl-1","object":"text_completion","created":1,"model":"deployment","choices":[{"index":0,"text":"ok","finish_reason":"stop"}]`+tc.usage+`}`)
+					}
+				}))
+				t.Cleanup(server.Close)
+				client := NewAzureOpenAI(server.URL, "test-key", stream, "", "api_key")
+				request := openai.CompletionRequest{Model: "deployment", Prompt: "hello", Stream: stream}
+				var response openai.CompletionResponse
+				var err error
+				deliveredUsage := false
+				if stream {
+					response, err = client.StreamCompletions(t.Context(), request, func(payload string) error {
+						if strings.Contains(payload, `"usage":{`) {
+							deliveredUsage = true
+						}
+						return nil
+					})
+				} else {
+					response, err = client.Completions(t.Context(), request)
+				}
+				if tc.wantError {
+					if err == nil || !strings.Contains(err.Error(), "usage") {
+						t.Fatalf("invalid Azure Completions usage accepted: response=%+v err=%v", response, err)
+					}
+					if deliveredUsage {
+						t.Fatal("invalid Azure Completions usage chunk was forwarded")
+					}
+				} else if err != nil || !response.UsageReported {
+					t.Fatalf("valid Azure Completions usage rejected: response=%+v err=%v", response, err)
+				} else if stream && !deliveredUsage {
+					t.Fatal("valid Azure Completions usage chunk was not forwarded")
+				}
+			})
+		}
+	}
+}
+
+func TestAzureVersionedEntraStreamCompletionsUsage(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/openai/deployments/deployment-a/completions" ||
+			r.URL.Query().Get("api-version") != "2025-04-01-preview" ||
+			r.Header.Get("Authorization") != "Bearer entra-token" || r.Header.Get("api-key") != "" {
+			t.Errorf("unexpected Azure versioned Completions request: %s headers=%v", r.URL, r.Header)
+		}
+		var body struct {
+			StreamOptions struct {
+				IncludeUsage bool `json:"include_usage"`
+			} `json:"stream_options"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || !body.StreamOptions.IncludeUsage {
+			t.Errorf("Azure versioned Completions did not request usage: %+v err=%v", body, err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, `data: {"id":"cmpl-1","object":"text_completion","created":1,"model":"deployment-a","choices":[{"index":0,"text":"ok","finish_reason":"stop"}]}`+"\n\n")
+		_, _ = fmt.Fprint(w, `data: {"id":"cmpl-1","object":"text_completion","created":1,"model":"deployment-a","choices":[],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}`+"\n\n")
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	t.Cleanup(server.Close)
+	client := NewAzureOpenAI(server.URL+"/openai/deployments/deployment-a", "entra-token", true, "2025-04-01-preview", "entra")
+	response, err := client.StreamCompletions(t.Context(), openai.CompletionRequest{Model: "deployment-a", Prompt: "hello", Stream: true}, nil)
+	if err != nil || !response.UsageReported || response.Usage.TotalTokens != 5 {
+		t.Fatalf("Azure versioned Entra usage lost: response=%+v err=%v", response, err)
+	}
+}
+
+func TestAzureFoundryEntraStreamCompletionsWithholdsInvalidUsage(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/projects/project-a/openai/v1/completions" ||
+			r.Header.Get("Authorization") != "Bearer project-token" || r.Header.Get("api-key") != "" {
+			t.Errorf("unexpected Foundry Completions request: path=%s headers=%v", r.URL.Path, r.Header)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, `data: {"id":"cmpl-1","object":"text_completion","created":1,"model":"deployment","choices":[{"index":0,"text":"ok","finish_reason":"stop"}]}`+"\n\n")
+		_, _ = fmt.Fprint(w, `data: {"id":"cmpl-1","object":"text_completion","created":1,"model":"deployment","choices":[],"usage":{"prompt_tokens":3,"total_tokens":3}}`+"\n\n")
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	t.Cleanup(server.Close)
+	client := NewAzureOpenAI(server.URL+"/api/projects/project-a", "project-token", true, "", "entra")
+	var forwarded []string
+	_, err := client.StreamCompletions(t.Context(), openai.CompletionRequest{Model: "deployment", Prompt: "hello", Stream: true}, func(payload string) error {
+		forwarded = append(forwarded, payload)
+		return nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "usage") || len(forwarded) != 1 || strings.Contains(forwarded[0], `"usage":{`) {
+		t.Fatalf("invalid Foundry Completions usage was forwarded: err=%v forwarded=%v", err, forwarded)
+	}
+}
+
+func TestAzureDiscoveryFailsClosedWithoutAPIKey(t *testing.T) {
+	for _, path := range []string{"", "/api/projects/project-a"} {
+		t.Run(path, func(t *testing.T) {
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				w.WriteHeader(http.StatusOK)
+			}))
+			t.Cleanup(server.Close)
+			router := New(Config{CredentialEncryptionKey: []byte("azure-discovery-key-test")}).(*Router)
+			if _, err := router.CreateProvider(ManagedProvider{ID: "azure", Type: "azure-openai", BaseURL: server.URL + path, AuthType: "api_key", Enabled: true}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := router.DiscoverProviderModels(t.Context(), "azure", ""); !errors.Is(err, ErrProviderProbeFailed) {
+				t.Fatalf("missing API key accepted by discovery: %v", err)
+			}
+			if calls.Load() != 0 {
+				t.Fatalf("unauthenticated discovery reached upstream: %d", calls.Load())
+			}
+		})
 	}
 }
 
@@ -101,6 +808,37 @@ func TestAzureOpenAIRealtimeUsesAmbientManagedIdentity(t *testing.T) {
 	}
 }
 
+func TestAzureOpenAIInferenceUsesClientSecretIdentity(t *testing.T) {
+	mux := http.NewServeMux()
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	mux.HandleFunc("/tenant-id/oauth2/v2.0/token", func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Error(err)
+		}
+		if r.Form.Get("client_secret") != "private-value" || r.Form.Get("scope") != azureOpenAIScope {
+			t.Errorf("invalid service principal request: scope=%q", r.Form.Get("scope"))
+		}
+		_, _ = fmt.Fprint(w, `{"access_token":"client-secret-token","expires_in":3600,"token_type":"Bearer"}`)
+	})
+	mux.HandleFunc("/openai/v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer client-secret-token" || r.Header.Get("api-key") != "" {
+			t.Errorf("invalid Azure inference authentication")
+		}
+		_ = json.NewEncoder(w).Encode(openai.ChatCompletionResponse{ID: "chat-azure", Model: "deployment"})
+	})
+	t.Setenv("AZURE_TENANT_ID", "tenant-id")
+	t.Setenv("AZURE_CLIENT_ID", "client-id")
+	t.Setenv("AZURE_CLIENT_SECRET", "private-value")
+	t.Setenv("AZURE_FEDERATED_TOKEN_FILE", "")
+	client := NewAzureOpenAI(server.URL, "", false, "", "entra")
+	transport := client.client.Transport.(azureOpenAITransport)
+	transport.tokenSource.authorityBaseURL = server.URL
+	if _, err := client.ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "deployment", Messages: []openai.Message{{Role: "user", Content: "hello"}}}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestAzureOpenAIResourceRootUsesV1AndAPIKey(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/openai/v1/chat/completions" || r.URL.RawQuery != "" {
@@ -118,6 +856,112 @@ func TestAzureOpenAIResourceRootUsesV1AndAPIKey(t *testing.T) {
 	}
 }
 
+func TestAzureFoundryProjectUsesV1AndEntraBearer(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/projects/project-a/openai/v1/chat/completions" || r.URL.RawQuery != "" {
+			t.Fatalf("unexpected URL: %s", r.URL.String())
+		}
+		if r.Header.Get("Authorization") != "Bearer project-token" || r.Header.Get("api-key") != "" {
+			t.Fatalf("unexpected auth headers: %v", r.Header)
+		}
+		_ = json.NewEncoder(w).Encode(openai.ChatCompletionResponse{ID: "chat-foundry", Model: "deployment"})
+	}))
+	t.Cleanup(server.Close)
+	client := NewAzureOpenAI(server.URL+"/api/projects/project-a", "project-token", false, "", "entra")
+	if _, err := client.ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "deployment", Messages: []openai.Message{{Role: "user", Content: "hello"}}}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAzureFoundryProjectBehindPathPrefix(t *testing.T) {
+	for _, test := range []struct {
+		path string
+		want string
+		ok   bool
+	}{
+		{"/tenant/api/projects/project-a", "/tenant/api/projects/project-a", true},
+		{"/tenant/api/projects/project-a/openai/v1", "/tenant/api/projects/project-a", true},
+		{"/tenant/api/projects/project-a/other", "", false},
+		{"/tenant/api/projects/", "", false},
+	} {
+		got, ok := azureFoundryProjectPath(test.path)
+		if got != test.want || ok != test.ok {
+			t.Errorf("project path %q = %q, %t; want %q, %t", test.path, got, ok, test.want, test.ok)
+		}
+	}
+	if _, err := normalizeManagedProvider(ManagedProvider{ID: "foundry", Type: "azure-openai", BaseURL: "https://proxy.example.test/tenant/api/projects/project-a", APIVersion: "2025-04-01-preview", AuthType: "entra"}); err == nil {
+		t.Fatal("versioned Foundry project URL behind path prefix was accepted")
+	}
+	if azureRealtimeSupportedBaseURL("https://proxy.example.test/tenant/api/projects/project-a/openai/v1") {
+		t.Fatal("Foundry project behind path prefix advertised resource Realtime")
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/tenant/api/projects/project-a/openai/v1/chat/completions" || r.Header.Get("Authorization") != "Bearer project-token" || r.Header.Get("api-key") != "" {
+			t.Errorf("unexpected Foundry request: %s headers=%v", r.URL, r.Header)
+			http.Error(w, "invalid request", http.StatusBadRequest)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(openai.ChatCompletionResponse{ID: "chat-foundry", Model: "deployment"})
+	}))
+	t.Cleanup(server.Close)
+	client := NewAzureOpenAI(server.URL+"/tenant/api/projects/project-a", "project-token", false, "", "entra")
+	if _, err := client.ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "deployment", Messages: []openai.Message{{Role: "user", Content: "hello"}}}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAzureFoundryProjectManagedIdentityEndToEnd(t *testing.T) {
+	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	var tokenCalls atomic.Int32
+	identity := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tokenCalls.Add(1)
+		if r.Header.Get("Metadata") != "true" || r.URL.Query().Get("resource") != azureFoundryResource {
+			t.Errorf("managed identity request: headers=%v query=%v", r.Header, r.URL.Query())
+		}
+		_, _ = fmt.Fprintf(w, `{"access_token":"project-identity-token","expires_on":%d,"token_type":"Bearer"}`, now.Add(time.Hour).Unix())
+	}))
+	t.Cleanup(identity.Close)
+	var inferenceCalls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		inferenceCalls.Add(1)
+		if r.URL.Path != "/api/projects/project-a/openai/v1/chat/completions" || r.URL.RawQuery != "" || r.Header.Get("Authorization") != "Bearer project-identity-token" || r.Header.Get("api-key") != "" {
+			t.Errorf("Foundry inference request: %s headers=%v", r.URL.String(), r.Header)
+			http.Error(w, "invalid request", http.StatusBadRequest)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(openai.ChatCompletionResponse{ID: "chat-foundry", Model: "deployment"})
+	}))
+	t.Cleanup(upstream.Close)
+	upstreamURL, err := url.Parse(upstream.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := NewAzureOpenAI("https://resource.services.ai.azure.com/api/projects/project-a", "", false, "", "entra")
+	transport := client.client.Transport.(azureOpenAITransport)
+	transport.tokenSource.now = func() time.Time { return now }
+	transport.tokenSource.getenv = awsTestEnvironment(nil)
+	transport.tokenSource.imdsURL = identity.URL
+	transport.base = azureRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if request.URL.Host != "resource.services.ai.azure.com" || request.URL.Scheme != "https" {
+			t.Errorf("unexpected provider origin: %s", request.URL.String())
+		}
+		cloned := request.Clone(request.Context())
+		cloned.URL.Scheme, cloned.URL.Host, cloned.Host = upstreamURL.Scheme, upstreamURL.Host, upstreamURL.Host
+		return http.DefaultTransport.RoundTrip(cloned)
+	})
+	client.client.Transport = transport
+	request := openai.ChatCompletionRequest{Model: "deployment", Messages: []openai.Message{{Role: "user", Content: "hello"}}}
+	for range 2 {
+		if _, err := client.ChatCompletions(t.Context(), request); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if tokenCalls.Load() != 1 || inferenceCalls.Load() != 2 {
+		t.Fatalf("token requests=%d inference requests=%d", tokenCalls.Load(), inferenceCalls.Load())
+	}
+}
+
 func TestAzureOpenAIVersionedDeploymentUsesEntraBearer(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/openai/deployments/deployment-a/embeddings" || r.URL.Query().Get("api-version") != "2025-04-01-preview" {
@@ -132,6 +976,184 @@ func TestAzureOpenAIVersionedDeploymentUsesEntraBearer(t *testing.T) {
 	client := NewAzureOpenAI(server.URL+"/openai/deployments/deployment-a", "entra-token", false, "2025-04-01-preview", "entra")
 	if _, err := client.Embeddings(context.Background(), openai.EmbeddingRequest{Model: "deployment-a", Input: "hello"}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestManagedAzureVersionedRootUsesDeploymentRoute(t *testing.T) {
+	for _, test := range []struct {
+		name, authType, basePath, wantPath string
+	}{
+		{name: "API key", authType: "api_key", wantPath: "/openai/deployments/upstream-deployment/chat/completions"},
+		{name: "Entra", authType: "entra", wantPath: "/openai/deployments/upstream-deployment/chat/completions"},
+		{name: "reverse proxy prefix", authType: "entra", basePath: "/tenant-a/openai/v1", wantPath: "/tenant-a/openai/deployments/upstream-deployment/chat/completions"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != test.wantPath || r.URL.Query().Get("api-version") != "2024-10-21" {
+					t.Errorf("unexpected Azure URL: %s", r.URL.String())
+					http.NotFound(w, r)
+					return
+				}
+				if test.authType == "entra" && (r.Header.Get("Authorization") != "Bearer managed-secret" || r.Header.Get("api-key") != "") ||
+					test.authType == "api_key" && (r.Header.Get("api-key") != "managed-secret" || r.Header.Get("Authorization") != "") {
+					t.Errorf("unexpected Azure authentication headers: %v", r.Header)
+				}
+				var request openai.ChatCompletionRequest
+				if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request.Model != "upstream-deployment" {
+					t.Errorf("unexpected upstream model: %q err=%v", request.Model, err)
+				}
+				_ = json.NewEncoder(w).Encode(openai.ChatCompletionResponse{
+					ID: "chat-azure", Model: "upstream-deployment", Choices: []openai.Choice{{Index: 0, Message: openai.Message{Role: "assistant", Content: "hello"}, FinishReason: "stop"}},
+					Usage: openai.Usage{PromptTokens: 2, CompletionTokens: 1, TotalTokens: 3},
+				})
+			}))
+			t.Cleanup(server.Close)
+			router := New(Config{CredentialEncryptionKey: []byte("azure-versioned-root-test-key")}).(*Router)
+			if _, err := router.CreateProvider(ManagedProvider{ID: "azure", Type: "azure-openai", BaseURL: server.URL + test.basePath, APIVersion: "2024-10-21", AuthType: test.authType, Enabled: true}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := router.CreateCredential(CredentialInput{ID: "azure-credential", ProviderID: "azure", Secret: "managed-secret"}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := router.CreateModelDeployment(ModelDeployment{ID: "azure-deployment", ProviderID: "azure", CredentialID: "azure-credential", Models: []string{"public-model"}, UpstreamModel: "upstream-deployment", Capabilities: []string{"chat"}, Enabled: true}); err != nil {
+				t.Fatal(err)
+			}
+			response, err := router.ChatCompletions(t.Context(), modules.RequestContext{Request: openai.ChatCompletionRequest{Provider: "azure-deployment", Model: "public-model", Messages: []openai.Message{{Role: "user", Content: "hello"}}}})
+			if err != nil || response.Usage.TotalTokens != 3 {
+				t.Fatalf("Azure routed response=%+v err=%v", response, err)
+			}
+		})
+	}
+}
+
+func TestConfiguredAzureVersionedRootUsesDeploymentRoute(t *testing.T) {
+	for _, test := range []struct {
+		name, authType, basePath, wantPath, model string
+		models                                    []string
+		aliases                                   map[string]string
+	}{
+		{name: "API key", authType: "api_key", wantPath: "/openai/deployments/upstream-deployment/chat/completions", model: "public-model", models: []string{"public-model"}, aliases: map[string]string{"public-model": "upstream-deployment"}},
+		{name: "Entra with reverse proxy", authType: "entra", basePath: "/tenant-a/openai/v1", wantPath: "/tenant-a/openai/deployments/upstream-deployment/chat/completions", model: "public-model", models: []string{"public-model"}, aliases: map[string]string{"public-model": "upstream-deployment"}},
+		{name: "shared deployment aliases", authType: "api_key", wantPath: "/openai/deployments/upstream-deployment/chat/completions", model: "public-two", models: []string{"public-one", "public-two"}, aliases: map[string]string{"public-one": "upstream-deployment", "public-two": "upstream-deployment"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != test.wantPath || r.URL.Query().Get("api-version") != "2024-10-21" {
+					t.Errorf("unexpected Azure URL: %s", r.URL.String())
+					http.NotFound(w, r)
+					return
+				}
+				if test.authType == "entra" && (r.Header.Get("Authorization") != "Bearer configured-secret" || r.Header.Get("api-key") != "") ||
+					test.authType == "api_key" && (r.Header.Get("api-key") != "configured-secret" || r.Header.Get("Authorization") != "") {
+					t.Errorf("unexpected Azure authentication headers: %v", r.Header)
+				}
+				var request openai.ChatCompletionRequest
+				if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request.Model != "upstream-deployment" {
+					t.Errorf("unexpected upstream model: %q err=%v", request.Model, err)
+				}
+				_ = json.NewEncoder(w).Encode(openai.ChatCompletionResponse{
+					ID: "chat-azure", Model: "upstream-deployment", Choices: []openai.Choice{{Index: 0, Message: openai.Message{Role: "assistant", Content: "hello"}, FinishReason: "stop"}},
+					Usage: openai.Usage{PromptTokens: 2, CompletionTokens: 1, TotalTokens: 3},
+				})
+			}))
+			t.Cleanup(server.Close)
+			router, err := NewWithError(Config{Endpoints: []config.ProviderEndpointConfig{{
+				Name: "azure-static", Type: "azure-openai", BaseURL: server.URL + test.basePath,
+				APIKey: "configured-secret", APIVersion: "2024-10-21", AuthType: test.authType,
+				Models: test.models, ModelAliases: test.aliases, Capabilities: []string{"chat"},
+			}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			response, err := router.ChatCompletions(t.Context(), modules.RequestContext{Request: openai.ChatCompletionRequest{Provider: "azure-static", Model: test.model, Messages: []openai.Message{{Role: "user", Content: "hello"}}}})
+			if err != nil || response.Usage.TotalTokens != 3 {
+				t.Fatalf("configured Azure response=%+v err=%v", response, err)
+			}
+		})
+	}
+}
+
+func TestConfiguredAzureVersionedRootRejectsAmbiguousModels(t *testing.T) {
+	_, err := NewWithError(Config{Endpoints: []config.ProviderEndpointConfig{{
+		Name: "azure-static", Type: "azure-openai", BaseURL: "https://resource.openai.azure.com", APIVersion: "2024-10-21",
+		Models: []string{"public-one", "public-two"}, Capabilities: []string{"chat"},
+	}}})
+	if !errors.Is(err, ErrInvalidDeployment) {
+		t.Fatalf("ambiguous versioned Azure route was accepted: %v", err)
+	}
+}
+
+func TestAzureManagedDeploymentBaseURL(t *testing.T) {
+	for _, test := range []struct {
+		name, baseURL, apiVersion, upstream, want string
+		models                                    []string
+		invalid                                   bool
+	}{
+		{name: "resource root", baseURL: "https://resource.openai.azure.com", apiVersion: "2024-10-21", models: []string{"deployment-a"}, want: "https://resource.openai.azure.com/openai/deployments/deployment-a"},
+		{name: "reverse proxy prefix", baseURL: "https://proxy.example.test/tenant-a/openai/v1", apiVersion: "2024-10-21", upstream: "deployment-a", models: []string{"public"}, want: "https://proxy.example.test/tenant-a/openai/deployments/deployment-a"},
+		{name: "explicit deployment", baseURL: "https://resource.openai.azure.com/openai/deployments/deployment-a", apiVersion: "2024-10-21", models: []string{"public", "other"}, want: "https://resource.openai.azure.com/openai/deployments/deployment-a"},
+		{name: "GA v1", baseURL: "https://resource.openai.azure.com", models: []string{"public", "other"}, want: "https://resource.openai.azure.com"},
+		{name: "v1 preview", baseURL: "https://resource.openai.azure.com", apiVersion: "preview", models: []string{"public", "other"}, want: "https://resource.openai.azure.com"},
+		{name: "ambiguous model", baseURL: "https://resource.openai.azure.com", apiVersion: "2024-10-21", models: []string{"one", "two"}, invalid: true},
+		{name: "unsafe deployment segment", baseURL: "https://resource.openai.azure.com", apiVersion: "2024-10-21", upstream: "name/other", models: []string{"public"}, invalid: true},
+		{name: "dot deployment segment", baseURL: "https://resource.openai.azure.com", apiVersion: "2024-10-21", upstream: "..", models: []string{"public"}, invalid: true},
+		{name: "unsafe explicit deployment", baseURL: "https://resource.openai.azure.com/openai/deployments/name/other", apiVersion: "2024-10-21", models: []string{"public"}, invalid: true},
+		{name: "encoded explicit deployment", baseURL: "https://resource.openai.azure.com/openai/deployments/name%2fother", apiVersion: "2024-10-21", models: []string{"public"}, invalid: true},
+		{name: "incomplete explicit path", baseURL: "https://resource.openai.azure.com/openai/deployments", apiVersion: "2024-10-21", models: []string{"public"}, invalid: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := azureManagedDeploymentBaseURL(test.baseURL, test.apiVersion, ModelDeployment{Models: test.models, UpstreamModel: test.upstream})
+			if test.invalid {
+				if !errors.Is(err, ErrInvalidDeployment) {
+					t.Fatalf("expected invalid deployment, got URL=%q err=%v", got, err)
+				}
+				return
+			}
+			if err != nil || got != test.want {
+				t.Fatalf("URL=%q, want %q, err=%v", got, test.want, err)
+			}
+		})
+	}
+}
+
+func TestAzureVersionedResponseRoutesUseResourcePath(t *testing.T) {
+	for _, test := range []struct {
+		name, basePath, method, suffix, wantPath string
+	}{
+		{name: "create", basePath: "/openai/deployments/deployment-a", method: http.MethodPost, suffix: "responses", wantPath: "/openai/responses"},
+		{name: "retrieve", basePath: "/openai/deployments/deployment-a", method: http.MethodGet, suffix: "responses/resp_123", wantPath: "/openai/responses/resp_123"},
+		{name: "cancel", basePath: "/openai/deployments/deployment-a", method: http.MethodPost, suffix: "responses/resp_123/cancel", wantPath: "/openai/responses/resp_123/cancel"},
+		{name: "input items", basePath: "/tenant-a/openai/deployments/deployment-a", method: http.MethodGet, suffix: "responses/resp_123/input_items", wantPath: "/tenant-a/openai/responses/resp_123/input_items"},
+		{name: "count tokens", basePath: "/openai/deployments/deployment-a", method: http.MethodPost, suffix: "responses/input_tokens", wantPath: "/openai/responses/input_tokens"},
+		{name: "chat stays deployment scoped", basePath: "/openai/deployments/deployment-a", method: http.MethodPost, suffix: "chat/completions", wantPath: "/openai/deployments/deployment-a/chat/completions"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != test.method || r.URL.Path != test.wantPath || r.URL.Query().Get("api-version") != "2025-04-01-preview" {
+					t.Errorf("unexpected Azure request: %s %s", r.Method, r.URL.String())
+					http.NotFound(w, r)
+					return
+				}
+				if r.Header.Get("api-key") != "resource-key" || r.Header.Get("Authorization") != "" {
+					t.Errorf("unexpected Azure authentication headers: %v", r.Header)
+				}
+				w.WriteHeader(http.StatusNoContent)
+			}))
+			t.Cleanup(server.Close)
+			client := NewAzureOpenAI(server.URL+test.basePath, "resource-key", false, "2025-04-01-preview", "api_key")
+			request, err := http.NewRequestWithContext(t.Context(), test.method, providerURL(client.baseURL, test.suffix), http.NoBody)
+			if err != nil {
+				t.Fatal(err)
+			}
+			response, err := client.client.Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = response.Body.Close() })
+			if response.StatusCode != http.StatusNoContent {
+				t.Fatalf("unexpected Azure status: %d", response.StatusCode)
+			}
+		})
 	}
 }
 
@@ -251,15 +1273,132 @@ func TestManagedAzureOpenAIDiscoveryUsesNativeVersionAndAuth(t *testing.T) {
 	}
 }
 
+func TestAzureOpenAIBasePathSharesGAModelAndInferenceRoutes(t *testing.T) {
+	var modelCalls, chatCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("api-key") != "resource-key" || r.Header.Get("Authorization") != "" || r.URL.RawQuery != "" {
+			t.Errorf("unexpected Azure headers or query: %s headers=%v", r.URL, r.Header)
+		}
+		switch r.URL.Path {
+		case "/openai/v1/models":
+			modelCalls.Add(1)
+			_, _ = w.Write([]byte(`{"data":[{"id":"deployment-a"}]}`))
+		case "/openai/v1/chat/completions":
+			chatCalls.Add(1)
+			_, _ = w.Write([]byte(`{"id":"chat-azure","object":"chat.completion","model":"deployment-a","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	router := New(Config{CredentialEncryptionKey: []byte("azure-ga-discovery-test-key")}).(*Router)
+	if _, err := router.CreateProvider(ManagedProvider{ID: "azure", Type: "azure-openai", BaseURL: server.URL + "/openai", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := router.CreateCredential(CredentialInput{ID: "azure-key", ProviderID: "azure", Secret: "resource-key"}); err != nil {
+		t.Fatal(err)
+	}
+	models, err := router.DiscoverProviderModels(t.Context(), "azure", "azure-key")
+	if err != nil || len(models) != 1 || models[0].ID != "deployment-a" {
+		t.Fatalf("models=%v err=%v", models, err)
+	}
+	client := NewAzureOpenAI(server.URL+"/openai", "resource-key", false, "", "api_key")
+	if _, err := client.ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "deployment-a", Messages: []openai.Message{{Role: "user", Content: "hello"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if modelCalls.Load() != 1 || chatCalls.Load() != 1 {
+		t.Fatalf("model calls=%d chat calls=%d", modelCalls.Load(), chatCalls.Load())
+	}
+}
+
+func TestAzureOpenAIBasePathDiscoveryKeepsVersionedRoute(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		basePath   string
+		apiVersion string
+		wantPath   string
+	}{
+		{name: "GA root", basePath: "/tenant/openai", wantPath: "/tenant/openai/v1/models"},
+		{name: "v1 preview root", basePath: "/tenant/openai", apiVersion: "preview", wantPath: "/tenant/openai/v1/models"},
+		{name: "versioned root", basePath: "/tenant/openai", apiVersion: "2024-10-21", wantPath: "/tenant/openai/models"},
+		{name: "GA deployment", basePath: "/tenant/openai/deployments/legacy", wantPath: "/tenant/openai/v1/models"},
+		{name: "v1 preview deployment", basePath: "/tenant/openai/deployments/legacy", apiVersion: "preview", wantPath: "/tenant/openai/v1/models"},
+		{name: "versioned deployment", basePath: "/tenant/openai/deployments/legacy", apiVersion: "2024-10-21", wantPath: "/tenant/openai/models"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			endpoint, err := azureOpenAIDiscoveryURL(ManagedProvider{BaseURL: "https://proxy.example.test" + test.basePath, APIVersion: test.apiVersion})
+			if err != nil {
+				t.Fatal(err)
+			}
+			parsed, err := url.Parse(endpoint)
+			if err != nil || parsed.Path != test.wantPath {
+				t.Fatalf("discovery endpoint=%q err=%v", endpoint, err)
+			}
+		})
+	}
+}
+
+func TestAzureDeploymentBaseDiscoveryUsesV1AndCredential(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/tenant/openai/v1/models" || r.URL.RawQuery != "" || r.Header.Get("api-key") != "resource-key" || r.Header.Get("Authorization") != "" {
+			t.Errorf("unexpected discovery request: %s headers=%v", r.URL, r.Header)
+			http.Error(w, "invalid discovery route", http.StatusBadRequest)
+			return
+		}
+		_, _ = w.Write([]byte(`{"data":[{"id":"deployment-a"}]}`))
+	}))
+	t.Cleanup(server.Close)
+	router := New(Config{CredentialEncryptionKey: []byte("azure-deployment-discovery-key")}).(*Router)
+	if _, err := router.CreateProvider(ManagedProvider{ID: "azure", Type: "azure-openai", BaseURL: server.URL + "/tenant/openai/deployments/legacy", AuthType: "api_key", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := router.CreateCredential(CredentialInput{ID: "azure-key", ProviderID: "azure", Secret: "resource-key"}); err != nil {
+		t.Fatal(err)
+	}
+	models, err := router.DiscoverProviderModels(t.Context(), "azure", "azure-key")
+	if err != nil || len(models) != 1 || models[0].ID != "deployment-a" {
+		t.Fatalf("models=%+v err=%v", models, err)
+	}
+}
+
+func TestAzureOpenAIBasePathPreviewKeepsV1InferenceRoute(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/tenant/openai/v1/chat/completions" || r.URL.RawQuery != "api-version=preview" || r.Header.Get("api-key") != "resource-key" {
+			t.Errorf("unexpected preview request: %s headers=%v", r.URL, r.Header)
+			http.Error(w, "invalid route", http.StatusBadRequest)
+			return
+		}
+		_, _ = w.Write([]byte(`{"id":"chat-azure","object":"chat.completion","model":"deployment-a","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+	}))
+	t.Cleanup(server.Close)
+	client := NewAzureOpenAI(server.URL+"/tenant/openai", "resource-key", false, "preview", "api_key")
+	if _, err := client.ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "deployment-a", Messages: []openai.Message{{Role: "user", Content: "hello"}}}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestManagedAzureOpenAIRejectsInvalidNativeSettings(t *testing.T) {
 	for _, input := range []ManagedProvider{
 		{ID: "azure", Type: "azure-openai", BaseURL: "https://example.test", APIVersion: "2025-13-01"},
 		{ID: "azure", Type: "azure-openai", BaseURL: "https://example.test", AuthType: "basic"},
 		{ID: "azure", Type: "azure-openai", BaseURL: "https://example.test?secret=value"},
+		{ID: "azure", Type: "azure-openai", BaseURL: "https://example.test?"},
+		{ID: "azure", Type: "azure-openai", BaseURL: "https://example.test#"},
+		{ID: "foundry", Type: "azure-openai", BaseURL: "https://resource.services.ai.azure.com/api/projects/project-a?", AuthType: "entra"},
+		{ID: "azure", Type: "azure-openai", BaseURL: "https://proxy.example.test/tenant/../openai/v1"},
+		{ID: "azure", Type: "azure-openai", BaseURL: "https://proxy.example.test/tenant%2fother/openai/v1"},
 		{ID: "azure", Type: "azure-openai", BaseURL: "https://example.test#fragment"},
+		{ID: "foundry", Type: "azure-openai", BaseURL: "https://resource.services.ai.azure.com/api/projects/project-a", APIVersion: "2025-04-01-preview", AuthType: "entra"},
+		{ID: "foundry", Type: "azure-openai", BaseURL: "https://resource.services.ai.azure.com/api/projects/project-a/openai/v1", APIVersion: "2025-04-01-preview", AuthType: "entra"},
 	} {
 		if _, err := normalizeManagedProvider(input); err == nil {
 			t.Fatalf("invalid managed provider accepted: %+v", input)
 		}
+	}
+}
+
+func TestNormalizeAzureOpenAIBaseURLClearsEmptyQuery(t *testing.T) {
+	if got := normalizeAzureOpenAIBaseURL("https://resource.openai.azure.com?"); got != "https://resource.openai.azure.com/openai/v1" {
+		t.Fatalf("normalized URL retained empty query: %q", got)
 	}
 }

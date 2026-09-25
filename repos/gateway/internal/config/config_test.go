@@ -51,16 +51,70 @@ func TestValidateProviderAdmissionRejectsUnsafeRerankPath(t *testing.T) {
 	}
 }
 
+func TestValidateOllamaBaseURL(t *testing.T) {
+	for _, baseURL := range []string{
+		"https://ollama.example.test/tenant?token=secret",
+		"https://ollama.example.test/tenant#fragment",
+		"https://ollama.example.test/tenant?",
+	} {
+		endpoint := ProviderEndpointConfig{Name: "ollama", Type: "ollama", BaseURL: baseURL}
+		if err := validateProviderAdmission([]ProviderEndpointConfig{endpoint}); err == nil {
+			t.Errorf("Ollama base URL %q accepted", baseURL)
+		}
+	}
+	for _, baseURL := range []string{
+		"https://ollama.example.test/tenant",
+		"https://ollama.example.test/tenant/api",
+		"https://ollama.example.test/tenant/v1",
+	} {
+		endpoint := ProviderEndpointConfig{Name: "ollama", Type: "ollama", BaseURL: baseURL}
+		if err := validateProviderAdmission([]ProviderEndpointConfig{endpoint}); err != nil {
+			t.Errorf("valid Ollama base URL %q rejected: %v", baseURL, err)
+		}
+	}
+}
+
 func TestValidateAzureOpenAIConfiguration(t *testing.T) {
 	valid := ProviderEndpointConfig{Name: "azure", Type: "azure-openai", APIVersion: "2025-04-01-preview", AuthType: "entra"}
 	if err := validateProviderAdmission([]ProviderEndpointConfig{valid}); err != nil {
 		t.Fatalf("valid Azure configuration rejected: %v", err)
 	}
+	if err := validateProviderAdmission([]ProviderEndpointConfig{{Name: "foundry", Type: "azure-openai", BaseURL: "https://resource.services.ai.azure.com/api/projects/project-a", AuthType: "entra"}}); err != nil {
+		t.Fatalf("valid Foundry project configuration rejected: %v", err)
+	}
+	if err := validateProviderAdmission([]ProviderEndpointConfig{{Name: "foundry-gov", Type: "azure-openai", BaseURL: "https://proxy.example.test/api/projects/project-a", AuthType: "entra", AzureCloud: "usgov"}}); err != nil {
+		t.Fatalf("valid sovereign Foundry proxy rejected: %v", err)
+	}
+	if err := validateProviderAdmission([]ProviderEndpointConfig{{Name: "foundry-prefixed", Type: "azure-openai", BaseURL: "https://proxy.example.test/tenant/api/projects/project-a/openai/v1", AuthType: "entra", AzureCloud: "usgov"}}); err != nil {
+		t.Fatalf("valid prefixed Foundry proxy rejected: %v", err)
+	}
+	if err := validateProviderAdmission([]ProviderEndpointConfig{{Name: "foundry-resource", Type: "azure-openai", BaseURL: "https://resource.services.ai.azure.com/openai/v1", AuthType: "entra", AzureAudience: "cognitive"}}); err != nil {
+		t.Fatalf("valid explicit Cognitive Services audience rejected: %v", err)
+	}
 	for _, endpoint := range []ProviderEndpointConfig{
 		{Name: "azure", Type: "azure-openai", APIVersion: "2025-13-01"},
 		{Name: "azure", Type: "azure-openai", AuthType: "basic"},
 		{Name: "azure", Type: "azure-openai", BaseURL: "https://example.test?secret=value"},
+		{Name: "azure", Type: "azure-openai", BaseURL: "https://example.test?"},
+		{Name: "azure", Type: "azure-openai", BaseURL: "https://example.test#"},
+		{Name: "foundry", Type: "azure-openai", BaseURL: "https://resource.services.ai.azure.com/api/projects/project-a?", AuthType: "entra"},
+		{Name: "azure", Type: "azure-openai", BaseURL: "https://proxy.example.test/tenant/../openai/v1"},
+		{Name: "azure", Type: "azure-openai", BaseURL: "https://proxy.example.test/tenant%2fother/openai/v1"},
+		{Name: "foundry", Type: "azure-openai", BaseURL: "https://resource.services.ai.azure.com/api/projects/project-a", APIVersion: "2025-04-01-preview", AuthType: "entra"},
+		{Name: "foundry", Type: "azure-openai", BaseURL: "https://resource.services.ai.azure.com/api/projects/project-a/openai/v1", APIVersion: "2025-04-01-preview", AuthType: "entra"},
+		{Name: "foundry", Type: "azure-openai", BaseURL: "https://proxy.example.test/tenant/api/projects/project-a", APIVersion: "2025-04-01-preview", AuthType: "entra"},
+		{Name: "foundry", Type: "azure-openai", BaseURL: "https://proxy.example.test/tenant/api/projects/project-a/openai/v1", APIVersion: "2025-04-01-preview", AuthType: "entra"},
 		{Name: "other", Type: "openai-compatible", APIVersion: "2025-04-01-preview"},
+		{Name: "azure", Type: "azure-openai", AuthType: "entra", AzureCloud: "unknown"},
+		{Name: "azure", Type: "azure-openai", AuthType: "api_key", AzureCloud: "usgov"},
+		{Name: "foundry", Type: "azure-openai", BaseURL: "https://proxy.example.test/api/projects/project-a", AuthType: "entra", AzureCloud: "china"},
+		{Name: "foundry", Type: "azure-openai", BaseURL: "https://proxy.example.test/tenant/api/projects/project-a", AuthType: "entra", AzureCloud: "china"},
+		{Name: "other", Type: "openai-compatible", AzureCloud: "usgov"},
+		{Name: "azure", Type: "azure-openai", AuthType: "entra", AzureAudience: "unknown"},
+		{Name: "azure", Type: "azure-openai", AuthType: "api_key", AzureAudience: "foundry"},
+		{Name: "azure", Type: "azure-openai", BaseURL: "https://resource.openai.azure.cn", AuthType: "entra", AzureAudience: "foundry"},
+		{Name: "azure", Type: "azure-openai", BaseURL: "https://proxy.example.test", AuthType: "entra", AzureCloud: "china", AzureAudience: "foundry"},
+		{Name: "other", Type: "openai-compatible", AzureAudience: "cognitive"},
 	} {
 		if err := validateProviderAdmission([]ProviderEndpointConfig{endpoint}); err == nil {
 			t.Fatalf("invalid Azure configuration accepted: %+v", endpoint)
@@ -168,6 +222,8 @@ func TestLoadRoutingAndCacheConfiguration(t *testing.T) {
 	t.Setenv("ASSISTANT_RUN_OWNER_QUOTA", "125")
 	t.Setenv("ASSISTANT_RUN_STEP_QUOTA", "250")
 	t.Setenv("ASSISTANT_RUN_RETENTION_SECONDS", "7200")
+	t.Setenv("CONVERSATION_OWNER_QUOTA", "2500")
+	t.Setenv("CONVERSATION_ITEM_QUOTA", "5000")
 	t.Setenv("A2A_TASK_OWNER_QUOTA", "75")
 	t.Setenv("A2A_TASK_TTL_SECONDS", "3600")
 	t.Setenv("A2A_SUBSCRIPTION_LIMIT", "12")
@@ -189,6 +245,9 @@ func TestLoadRoutingAndCacheConfiguration(t *testing.T) {
 	}
 	if cfg.Assistants.OwnerQuota != 125 || cfg.Assistants.ThreadOwnerQuota != 1250 || cfg.Assistants.MessageThreadQuota != 12500 || cfg.Assistants.RunOwnerQuota != 125 || cfg.Assistants.RunStepQuota != 250 || cfg.Assistants.RunRetention != 2*time.Hour {
 		t.Fatalf("unexpected assistant config: %+v", cfg.Assistants)
+	}
+	if cfg.Conversations.OwnerQuota != 2500 || cfg.Conversations.ItemQuota != 5000 {
+		t.Fatalf("unexpected conversation config: %+v", cfg.Conversations)
 	}
 	if cfg.A2ATasks.OwnerQuota != 75 || cfg.A2ATasks.TTL != time.Hour || cfg.A2ATasks.SubscriptionLimit != 12 || cfg.A2ATasks.SubscriptionDuration != 45*time.Second || cfg.A2ATasks.SubscriptionPoll != 250*time.Millisecond {
 		t.Fatalf("unexpected A2A task config: %+v", cfg.A2ATasks)
@@ -278,6 +337,16 @@ func TestLoadRejectsUnsafeAssistantQuota(t *testing.T) {
 		t.Setenv("ASSISTANT_RUN_STEP_QUOTA", quota)
 		if cfg := Load(); cfg.InitErr == nil {
 			t.Fatalf("unsafe assistant run step quota accepted: %s", quota)
+		}
+	}
+}
+
+func TestLoadRejectsUnsafeConversationQuota(t *testing.T) {
+	for _, test := range []struct{ owner, items string }{{"0", "1"}, {"1000001", "1"}, {"1", "0"}, {"1", "100001"}} {
+		t.Setenv("CONVERSATION_OWNER_QUOTA", test.owner)
+		t.Setenv("CONVERSATION_ITEM_QUOTA", test.items)
+		if cfg := Load(); cfg.InitErr == nil {
+			t.Fatalf("unsafe conversation quota accepted: owner=%s items=%s", test.owner, test.items)
 		}
 	}
 }

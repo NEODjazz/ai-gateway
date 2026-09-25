@@ -8,6 +8,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -200,6 +201,52 @@ func responseRequestToolIdentifiers(request openai.ResponseRequest) ([]string, b
 	identifiers, valid := responseToolIdentifiers(request.Tools)
 	if !valid {
 		return nil, false
+	}
+	customNames, hasCustom, message := openai.InspectResponseCustomToolHistory(request.Input)
+	if message != "" {
+		return nil, false
+	}
+	functionNames, hasFunction, message := openai.InspectResponseFunctionToolHistory(request.Input)
+	if message != "" {
+		return nil, false
+	}
+	for _, history := range []struct {
+		names   []string
+		hasTool bool
+		kind    string
+	}{{customNames, hasCustom, "custom"}, {functionNames, hasFunction, "function"}} {
+		for _, name := range history.names {
+			if !slices.Contains(identifiers, name) {
+				identifiers = append(identifiers, name)
+			}
+		}
+		if history.kind == "function" && history.hasTool {
+			for _, name := range request.RunToolNames {
+				if !validFileToken(name, 64) {
+					return nil, false
+				}
+				if !slices.Contains(identifiers, name) {
+					identifiers = append(identifiers, name)
+				}
+			}
+		}
+		if history.hasTool && len(history.names) == 0 {
+			declared := history.kind == "function" && len(request.RunToolNames) > 0
+			for _, tool := range request.Tools {
+				if tool.Type == history.kind {
+					declared = true
+					break
+				}
+			}
+			if !declared {
+				if request.PreviousResponse == "" {
+					return nil, false
+				}
+				if !slices.Contains(identifiers, "*") {
+					identifiers = append(identifiers, "*")
+				}
+			}
+		}
 	}
 	computerOutputs, message := openai.InspectResponseComputerCallOutputs(request.Input)
 	if message != "" {

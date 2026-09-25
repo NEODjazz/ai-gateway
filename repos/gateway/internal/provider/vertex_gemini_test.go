@@ -66,6 +66,54 @@ func TestVertexGeminiUsesPublisherModelPathAndWorkloadIdentity(t *testing.T) {
 	}
 }
 
+func TestVertexGeminiSendsAudioTimestampGenerationConfig(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/metadata/token" {
+			w.Header().Set("Metadata-Flavor", "Google")
+			_, _ = fmt.Fprint(w, `{"access_token":"workload-token","expires_in":3600,"token_type":"Bearer"}`)
+			return
+		}
+		if r.URL.Path != "/v1/projects/project-1/locations/us-central1/publishers/google/models/gemini-test:generateContent" {
+			t.Errorf("unexpected request: %s", r.URL.String())
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		var body struct {
+			GenerationConfig struct {
+				AudioTimestamp *bool `json:"audioTimestamp"`
+			} `json:"generationConfig"`
+			Contents []struct {
+				Parts []struct {
+					InlineData *struct {
+						MIMEType string `json:"mimeType"`
+					} `json:"inlineData"`
+				} `json:"parts"`
+			} `json:"contents"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body.GenerationConfig.AudioTimestamp == nil || !*body.GenerationConfig.AudioTimestamp || len(body.Contents) != 1 || len(body.Contents[0].Parts) != 1 || body.Contents[0].Parts[0].InlineData == nil || body.Contents[0].Parts[0].InlineData.MIMEType != "audio/wav" {
+			t.Errorf("invalid audio timestamp request: %+v", body)
+		}
+		_, _ = fmt.Fprint(w, `{"responseId":"vertex-audio","candidates":[{"index":0,"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":1,"totalTokenCount":3}}`)
+	}))
+	defer server.Close()
+	enabled := true
+	client := NewVertexGemini(server.URL+"/v1/projects/project-1/locations/us-central1/publishers/google", false)
+	client.gemini.tokenSource.metadataURL = server.URL + "/metadata/token"
+	response, err := client.ChatCompletions(t.Context(), openai.ChatCompletionRequest{
+		Model: "gemini-test",
+		Messages: []openai.Message{{Role: "user", Content: []any{
+			map[string]any{"type": "input_audio", "input_audio": map[string]any{"data": "UklGRgAAAABXQVZF", "format": "wav"}},
+		}}},
+		GeminiAudioTimestamp: &enabled,
+	})
+	if err != nil || response.ID != "vertex-audio" {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
 func TestVertexGeminiStreamsFromPublisherModelPath(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/metadata/token" {

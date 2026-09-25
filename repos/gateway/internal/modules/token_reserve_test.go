@@ -32,6 +32,17 @@ func TestBillingPreservesExplicitZeroMessagesOutputReserve(t *testing.T) {
 	}
 }
 
+func TestBillingReservesOnlyInputForResponsePrewarm(t *testing.T) {
+	enabled := true
+	limit := 100_000
+	response := openai.ResponseRequest{Input: "prepare prompt", MaxOutputTokens: &limit, PromptCacheOptions: &openai.PromptCacheOptions{Prewarm: &enabled}}
+	req := RequestContext{ResponseRequest: &response}
+	reserved := billingRequest(&req)
+	if reserved.APIType != "responses" || reserved.OutputTokens != 0 || reserved.TotalTokens != reserved.InputTokens || reserved.InputTokens != openai.ResponseInputTokens(response) {
+		t.Fatalf("prewarm output reserve changed: %+v", reserved)
+	}
+}
+
 func TestBillingReservesOnlyCachedContentInput(t *testing.T) {
 	req := RequestContext{
 		Metadata: map[string]string{"gateway.api_type": "cached_content"},

@@ -16,9 +16,11 @@ type mirrorCaptureClient struct {
 	chat          chan openai.ChatCompletionRequest
 	err           error
 	waitForCancel bool
+	calls         atomic.Int32
 }
 
 func (c *mirrorCaptureClient) ChatCompletions(ctx context.Context, request openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
+	c.calls.Add(1)
 	if c.chat != nil {
 		c.chat <- request
 	}
@@ -27,6 +29,38 @@ func (c *mirrorCaptureClient) ChatCompletions(ctx context.Context, request opena
 		return openai.ChatCompletionResponse{}, ctx.Err()
 	}
 	return openai.ChatCompletionResponse{Choices: []openai.Choice{{Message: openai.Message{Role: "assistant", Content: "primary"}}}}, c.err
+}
+
+func TestProviderModeratedChatBypassesCacheAndShadow(t *testing.T) {
+	primary := &mirrorCaptureClient{}
+	shadow := &mirrorCaptureClient{chat: make(chan openai.ChatCompletionRequest, 1)}
+	catalog, _ := modelcatalog.Parse("")
+	router := Router{catalog: modelcatalog.NewRegistry(catalog, nil, time.Second), health: newEndpointHealthTracker(), modules: modules.NewPipeline(nil), cache: newResponseCache(time.Minute, 1<<20, nil), endpoints: []Endpoint{{Name: "primary", Models: []string{"m"}, Provider: primary}, {Name: "shadow", Models: []string{"m"}, Shadow: true, MirrorPercentage: 100, MirrorTimeout: time.Second, Provider: shadow}}}
+	request := modules.RequestContext{RequestID: "moderated-1", CredentialID: "credential", Request: openai.ChatCompletionRequest{ChatGenerationOptions: openai.ChatGenerationOptions{Moderation: &openai.ProviderModeration{Model: "moderation"}}, Model: "m"}}
+	if !chatReplaySafe(openai.ChatCompletionRequest{}) || chatReplaySafe(request.Request) {
+		t.Fatal("chat replay policy does not isolate provider moderation")
+	}
+	if providerCacheKey("chat", request) != "" {
+		t.Fatal("provider moderation received an exact cache key")
+	}
+	if _, _, eligible := semanticRequest(request, Endpoint{Name: "primary"}); eligible {
+		t.Fatal("provider moderation was eligible for semantic cache")
+	}
+	if _, err := router.ChatCompletions(t.Context(), request); err != nil {
+		t.Fatal(err)
+	}
+	request.RequestID = "moderated-2"
+	if _, err := router.ChatCompletions(t.Context(), request); err != nil {
+		t.Fatal(err)
+	}
+	if primary.calls.Load() != 2 {
+		t.Fatalf("moderated requests were cached: upstream calls=%d", primary.calls.Load())
+	}
+	select {
+	case mirrored := <-shadow.chat:
+		t.Fatalf("moderated request was mirrored: %+v", mirrored)
+	case <-time.After(50 * time.Millisecond):
+	}
 }
 func (c *mirrorCaptureClient) Responses(context.Context, openai.ResponseRequest) (openai.ResponseResponse, error) {
 	return openai.ResponseResponse{}, c.err

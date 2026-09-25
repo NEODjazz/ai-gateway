@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -21,7 +22,10 @@ type ProviderProbe struct {
 }
 
 type DiscoveredModel struct {
-	ID string `json:"id"`
+	ID           string   `json:"id"`
+	Capabilities []string `json:"capabilities,omitempty"`
+	ModelName    string   `json:"model_name,omitempty"`
+	Publisher    string   `json:"model_publisher,omitempty"`
 }
 
 type ProviderDiscoveryController interface {
@@ -33,7 +37,7 @@ var ErrProviderProbeFailed = errors.New("provider connection test failed")
 
 func (r *Router) TestProvider(ctx context.Context, providerID, credentialID string) (ProviderProbe, error) {
 	started := time.Now()
-	models, err := r.DiscoverProviderModels(ctx, providerID, credentialID)
+	models, err := r.discoverProviderModels(ctx, providerID, credentialID, false)
 	probe := ProviderProbe{ProviderID: strings.TrimSpace(providerID), Status: "available", LatencyMS: time.Since(started).Milliseconds(), ModelCount: len(models)}
 	if err != nil {
 		probe.Status = "unavailable"
@@ -43,6 +47,10 @@ func (r *Router) TestProvider(ctx context.Context, providerID, credentialID stri
 }
 
 func (r *Router) DiscoverProviderModels(ctx context.Context, providerID, credentialID string) ([]DiscoveredModel, error) {
+	return r.discoverProviderModels(ctx, providerID, credentialID, true)
+}
+
+func (r *Router) discoverProviderModels(ctx context.Context, providerID, credentialID string, inspectCapabilities bool) ([]DiscoveredModel, error) {
 	if err := r.refreshControlPlane(ctx); err != nil {
 		return nil, err
 	}
@@ -63,11 +71,24 @@ func (r *Router) DiscoverProviderModels(ctx context.Context, providerID, credent
 	if err != nil {
 		return nil, err
 	}
+	if managed.Type == "azure-openai" && normalizeAzureAuthType(managed.AuthType) == "api_key" && strings.TrimSpace(secret) == "" {
+		return nil, ErrProviderProbeFailed
+	}
+	if managed.Type == "azure-openai" {
+		if parsed, parseErr := url.Parse(managed.BaseURL); parseErr == nil {
+			if projectPath, project := azureFoundryProjectPath(parsed.Path); project {
+				return discoverAzureFoundryProjectModels(ctx, managed, secret, projectPath)
+			}
+		}
+	}
 	if managed.Type == "gemini" {
 		return discoverGeminiModels(ctx, managed.BaseURL, secret, managed.AuthType)
 	}
 	if managed.Type == "anthropic" {
 		return discoverAnthropicModels(ctx, managed.BaseURL, secret)
+	}
+	if managed.Type == "cohere" {
+		return discoverCohereModels(ctx, managed, secret)
 	}
 	if managed.Type == "xai" {
 		return discoverXAIModels(ctx, managed.BaseURL, secret)
@@ -87,7 +108,7 @@ func (r *Router) DiscoverProviderModels(ctx context.Context, providerID, credent
 			return nil, ErrProviderProbeFailed
 		}
 	} else if managed.Type == "azure-openai" && normalizeAzureAuthType(managed.AuthType) == "entra" {
-		token, tokenErr := newAzureTokenSource(secret, managed.BaseURL).Token(ctx)
+		token, tokenErr := newAzureTokenSourceWithPolicy(secret, managed.BaseURL, managed.AzureCloud, managed.AzureAudience).Token(ctx)
 		if tokenErr != nil {
 			return nil, ErrProviderProbeFailed
 		}
@@ -123,14 +144,190 @@ func (r *Router) DiscoverProviderModels(ctx context.Context, providerID, credent
 	if err != nil {
 		return nil, ErrProviderProbeFailed
 	}
+	if managed.Type == "ollama" && inspectCapabilities {
+		discoverOllamaCapabilities(ctx, client, endpoint, secret, models)
+	}
 	return models, nil
+}
+
+// Ollama's model list does not include capabilities. Metadata failures leave a
+// model's capabilities unknown rather than advertising unsupported operations.
+func discoverOllamaCapabilities(ctx context.Context, client *http.Client, tagsURL, secret string, models []DiscoveredModel) {
+	const maxInspectedModels = 128
+	endpoint, err := url.Parse(tagsURL)
+	if err != nil {
+		return
+	}
+	endpoint.Path = strings.TrimSuffix(endpoint.Path, "/tags") + "/show"
+	inspectionCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	for index := range models {
+		if index >= maxInspectedModels || inspectionCtx.Err() != nil {
+			return
+		}
+		body, err := json.Marshal(struct {
+			Model string `json:"model"`
+		}{Model: models[index].ID})
+		if err != nil {
+			continue
+		}
+		request, err := http.NewRequestWithContext(inspectionCtx, http.MethodPost, endpoint.String(), bytes.NewReader(body))
+		if err != nil {
+			continue
+		}
+		request.Header.Set("Accept", "application/json")
+		request.Header.Set("Content-Type", "application/json")
+		if secret != "" {
+			request.Header.Set("Authorization", "Bearer "+secret)
+		}
+		response, err := client.Do(request)
+		if err != nil {
+			continue
+		}
+		payload, readErr := io.ReadAll(io.LimitReader(response.Body, (256<<10)+1))
+		closeErr := response.Body.Close()
+		if response.StatusCode < 200 || response.StatusCode >= 300 || readErr != nil || closeErr != nil || len(payload) > 256<<10 {
+			continue
+		}
+		var details struct {
+			Capabilities *[]string `json:"capabilities"`
+		}
+		if json.Unmarshal(payload, &details) != nil || details.Capabilities == nil {
+			continue
+		}
+		models[index].Capabilities = ollamaGatewayCapabilities(*details.Capabilities)
+	}
+}
+
+func ollamaGatewayCapabilities(native []string) []string {
+	available := make(map[string]bool, len(native))
+	for _, capability := range native {
+		available[capability] = true
+	}
+	capabilities := make([]string, 0, 7)
+	if available["completion"] {
+		capabilities = append(capabilities, "chat", "completions", "responses", "stream")
+		if available["tools"] {
+			capabilities = append(capabilities, "tools")
+		}
+		if available["vision"] {
+			capabilities = append(capabilities, "vision")
+		}
+	}
+	if available["embedding"] {
+		capabilities = append(capabilities, "embeddings")
+	}
+	return capabilities
+}
+
+func discoverAzureFoundryProjectModels(ctx context.Context, managed ManagedProvider, secret, projectPath string) ([]DiscoveredModel, error) {
+	endpoint, err := url.Parse(managed.BaseURL)
+	if err != nil {
+		return nil, ErrProviderProbeFailed
+	}
+	endpoint.Path = projectPath + "/deployments"
+	endpoint.RawQuery = "api-version=v1&deploymentType=ModelDeployment"
+	endpoint.Fragment = ""
+	client := newProviderHTTPClient(10 * time.Second)
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	tokenSource := newAzureTokenSourceWithPolicy(secret, managed.BaseURL, managed.AzureCloud, managed.AzureAudience)
+	seenURLs := make(map[string]bool)
+	seenModels := make(map[string]bool)
+	models := make([]DiscoveredModel, 0)
+	for page := 0; page < 64; page++ {
+		if seenURLs[endpoint.String()] {
+			return nil, ErrProviderProbeFailed
+		}
+		seenURLs[endpoint.String()] = true
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
+		if err != nil {
+			return nil, ErrProviderProbeFailed
+		}
+		request.Header.Set("Accept", "application/json")
+		if normalizeAzureAuthType(managed.AuthType) == "entra" {
+			token, tokenErr := tokenSource.Token(ctx)
+			if tokenErr != nil {
+				return nil, ErrProviderProbeFailed
+			}
+			request.Header.Set("Authorization", "Bearer "+token)
+		} else if secret != "" {
+			request.Header.Set("api-key", secret)
+		}
+		response, err := client.Do(request)
+		if err != nil {
+			return nil, ErrProviderProbeFailed
+		}
+		payload, readErr := io.ReadAll(io.LimitReader(response.Body, (2<<20)+1))
+		closeErr := response.Body.Close()
+		if response.StatusCode < 200 || response.StatusCode >= 300 || readErr != nil || closeErr != nil || len(payload) > 2<<20 {
+			return nil, ErrProviderProbeFailed
+		}
+		var body struct {
+			Value *[]struct {
+				Name           string `json:"name"`
+				Type           string `json:"type"`
+				ModelName      string `json:"modelName"`
+				ModelPublisher string `json:"modelPublisher"`
+			} `json:"value"`
+			NextLink string `json:"nextLink"`
+		}
+		if json.Unmarshal(payload, &body) != nil || body.Value == nil {
+			return nil, ErrProviderProbeFailed
+		}
+		for _, item := range *body.Value {
+			if item.Type == "" {
+				return nil, ErrProviderProbeFailed
+			}
+			if item.Type != "ModelDeployment" {
+				continue
+			}
+			name := strings.TrimSpace(item.Name)
+			modelName := strings.TrimSpace(item.ModelName)
+			publisher := strings.TrimSpace(item.ModelPublisher)
+			if name == "" || len(name) > 256 || len(modelName) > 256 || len(publisher) > 256 {
+				return nil, ErrProviderProbeFailed
+			}
+			if !seenModels[name] {
+				models = append(models, DiscoveredModel{ID: name, ModelName: modelName, Publisher: publisher})
+				seenModels[name] = true
+			}
+		}
+		if len(models) > 10000 {
+			return nil, ErrProviderProbeFailed
+		}
+		if body.NextLink == "" {
+			sort.Slice(models, func(i, j int) bool { return models[i].ID < models[j].ID })
+			return models, nil
+		}
+		if len(body.NextLink) > 4096 {
+			return nil, ErrProviderProbeFailed
+		}
+		next, parseErr := url.Parse(body.NextLink)
+		if parseErr != nil {
+			return nil, ErrProviderProbeFailed
+		}
+		next = endpoint.ResolveReference(next)
+		if next.Scheme != endpoint.Scheme || !strings.EqualFold(next.Host, endpoint.Host) || next.User != nil || next.Path != projectPath+"/deployments" || next.Fragment != "" {
+			return nil, ErrProviderProbeFailed
+		}
+		query := next.Query()
+		query.Set("api-version", "v1")
+		query.Set("deploymentType", "ModelDeployment")
+		next.RawQuery = query.Encode()
+		endpoint = next
+	}
+	return nil, ErrProviderProbeFailed
 }
 
 func discoveryURL(managed ManagedProvider) (string, error) {
 	if managed.Type == "azure-openai" {
 		return azureOpenAIDiscoveryURL(managed)
 	}
-	base, err := url.Parse(managed.BaseURL)
+	baseURL := managed.BaseURL
+	if managed.Type == "ollama" {
+		baseURL = normalizeOllamaBaseURL(baseURL)
+	}
+	base, err := url.Parse(baseURL)
 	if err != nil {
 		return "", err
 	}
@@ -168,6 +365,9 @@ func azureOpenAIDiscoveryURL(managed ManagedProvider) (string, error) {
 		}
 		path = strings.TrimRight(normalized.Path, "/")
 	}
+	if (managed.APIVersion == "" || managed.APIVersion == "preview") && strings.HasSuffix(path, "/openai") {
+		path += "/v1"
+	}
 	base.Path = path + "/models"
 	query := url.Values{}
 	if managed.APIVersion != "" {
@@ -191,7 +391,7 @@ func parseDiscoveredModels(providerType string, payload []byte) ([]DiscoveredMod
 	ids := []string{}
 	if providerType == "ollama" {
 		var body struct {
-			Models []struct {
+			Models *[]struct {
 				Name  string `json:"name"`
 				Model string `json:"model"`
 			} `json:"models"`
@@ -199,7 +399,10 @@ func parseDiscoveredModels(providerType string, payload []byte) ([]DiscoveredMod
 		if err := json.Unmarshal(payload, &body); err != nil {
 			return nil, err
 		}
-		for _, item := range body.Models {
+		if body.Models == nil {
+			return nil, errors.New("Ollama discovery response omitted models")
+		}
+		for _, item := range *body.Models {
 			id := item.Name
 			if id == "" {
 				id = item.Model
@@ -208,7 +411,7 @@ func parseDiscoveredModels(providerType string, payload []byte) ([]DiscoveredMod
 		}
 	} else if providerType == "cohere" {
 		var body struct {
-			Models []struct {
+			Models *[]struct {
 				Name       string   `json:"name"`
 				Deprecated bool     `json:"is_deprecated"`
 				Endpoints  []string `json:"endpoints"`
@@ -217,7 +420,10 @@ func parseDiscoveredModels(providerType string, payload []byte) ([]DiscoveredMod
 		if err := json.Unmarshal(payload, &body); err != nil {
 			return nil, err
 		}
-		for _, item := range body.Models {
+		if body.Models == nil {
+			return nil, errors.New("Cohere discovery response omitted models")
+		}
+		for _, item := range *body.Models {
 			if item.Deprecated || (!containsString(item.Endpoints, "chat") && !containsString(item.Endpoints, "rerank") && !containsString(item.Endpoints, "embed")) {
 				continue
 			}
@@ -240,14 +446,17 @@ func parseDiscoveredModels(providerType string, payload []byte) ([]DiscoveredMod
 		}
 	} else {
 		var body struct {
-			Data []struct {
+			Data *[]struct {
 				ID string `json:"id"`
 			} `json:"data"`
 		}
 		if err := json.Unmarshal(payload, &body); err != nil {
 			return nil, err
 		}
-		for _, item := range body.Data {
+		if body.Data == nil {
+			return nil, errors.New("provider discovery response omitted data")
+		}
+		for _, item := range *body.Data {
 			ids = append(ids, item.ID)
 		}
 	}

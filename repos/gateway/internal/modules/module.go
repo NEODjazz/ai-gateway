@@ -7,6 +7,7 @@ import (
 	"log"
 	"time"
 
+	"ai-gateway-gateway/internal/conversationstate"
 	"ai-gateway-gateway/internal/openai"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -44,6 +45,8 @@ type RequestContext struct {
 	Request                    openai.ChatCompletionRequest       `json:"request"`
 	CompletionRequest          *openai.CompletionRequest          `json:"completion_request,omitempty"`
 	ResponseRequest            *openai.ResponseRequest            `json:"response_request,omitempty"`
+	ConversationTurn           *conversationstate.Turn            `json:"-"`
+	ConversationInputItems     []conversationstate.Item           `json:"-"`
 	EmbeddingRequest           *openai.EmbeddingRequest           `json:"embedding_request,omitempty"`
 	RerankRequest              *openai.RerankRequest              `json:"rerank_request,omitempty"`
 	ModerationRequest          *openai.ModerationRequest          `json:"moderation_request,omitempty"`

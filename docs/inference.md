@@ -11,6 +11,10 @@ Gateway реализует OpenAI-compatible endpoints:
 | `POST /v1/chat/completions` | Chat, tools, structured output и vision |
 | `POST /v1/completions` | Native text completion для строковых и token-ID prompts; JSON и SSE |
 | `POST /v1/responses` | Responses, continuity, function tools и MCP passthrough |
+| `POST /v1/conversations` | Создание owner-isolated durable conversation с начальными items |
+| `GET/POST/DELETE /v1/conversations/{conversation_id}` | Чтение, обновление metadata и удаление conversation |
+| `POST/GET /v1/conversations/{conversation_id}/items` | Добавление и cursor pagination conversation items |
+| `GET/DELETE /v1/conversations/{conversation_id}/items/{item_id}` | Чтение и удаление отдельного item |
 | `POST /v1/responses/input_tokens` | Native-подсчет полного Responses input без generation billing lifecycle |
 | `POST /v1/responses/compact` | Native compaction с авторизацией модели и учетом фактического usage |
 | `POST /v1/interactions` | Синхронное, incremental SSE или durable background взаимодействие через Responses policy/routing с отдельной billing attribution |
@@ -34,6 +38,12 @@ Gateway реализует OpenAI-compatible endpoints:
 [OpenAPI](../repos/gateway/api/openapi.yaml). Все endpoints требуют Bearer
 credential и применяют тот же model/tool policy, что `/v1/models` и Playground.
 
+`/v1/responses/input_tokens` требует точного upstream token-count API.
+Azure OpenAI и Foundry project deployments возвращают `unsupported_operation`
+до upstream-вызова, поскольку их текущий Responses contract не публикует этот
+метод; gateway не выдаёт локальную оценку за точный подсчёт. Другие совместимые
+deployments продолжают использовать upstream endpoint.
+
 Files API доступен только при настроенном PostgreSQL control-plane store. Файлы
 изолированы по паре credential/user, ограничены `FILE_MAX_BYTES`, а суммарная
 квота `FILE_OWNER_QUOTA_BYTES` проверяется атомарно даже при конкурентных
@@ -50,11 +60,20 @@ JSON decoder применяет закрытый контракт request types,
 job storage и deployment capability `background_responses`. Распознаваемые параметры перечислены ниже; adapter policy может
 отклонить поле до выполнения запроса.
 
+Background Responses можно выполнять внутри owner-isolated conversation. Gateway
+сохраняет текущие input items в отдельном pending-состоянии PostgreSQL, не помещая
+prompt в payload очереди. Durable turn блокирует параллельные изменения conversation
+до terminal settlement. Успешный результат атомарно переносит pending input и output
+в историю; failed или cancelled result удаляет pending input и освобождает turn.
+Повторная обработка того же execution ID идемпотентна. Admission резервирует до
+1024 output items, совпадающих с общей границей Responses output cardinality,
+поэтому terminal commit не может зависнуть на item quota.
+
 | Endpoint | Поля контракта верхнего уровня |
 | --- | --- |
 | `/v1/chat/completions` | `metadata`, `store`, `provider`, `model`, `messages`, `tools`, `tool_choice`, `parallel_tool_calls`, `response_format`, `stream`, `stream_options`, `max_tokens`, `max_completion_tokens`, `temperature`, `top_p`, `stop`, `seed`, `modalities`, `audio`, `reasoning_effort`, `safe_prompt`, `n`, `safety_identifier`, `prompt_cache_key`, `prompt_cache_options`, `prompt_cache_retention`, `prompt_mode`, `prediction`, `service_tier`, `user`, `verbosity`, `web_search_options`, `web_fetch_options`, `logprobs`, `top_logprobs`, `frequency_penalty`, `presence_penalty`, `min_p`, `top_k`, `top_a`, `repetition_penalty`, `logit_bias`; assistant messages may contain signed `reasoning` blocks or bounded `reasoning_content` when the selected adapter supports that history format |
 | `/v1/completions` | `provider`, `model`, `prompt`, `metadata`, `best_of`, `echo`, `frequency_penalty`, `logit_bias`, `logprobs`, `max_tokens`, `min_tokens`, `n`, `presence_penalty`, `prompt_cache_key`, `seed`, `stop`, `stream`, `suffix`, `temperature`, `top_p`, `user` |
-| `/v1/responses` | `metadata`, `top_logprobs`, `truncation`, `reasoning`, `store`, `include`, `provider`, `model`, `input`, `instructions`, `tools`, `tool_choice`, `parallel_tool_calls`, `text`, `previous_response_id`, `user`, `safety_identifier`, `prompt_cache_key`, `service_tier`, `background`, `stream`, `max_output_tokens`, `max_tokens`, `temperature`, `top_p`, `frequency_penalty`, `presence_penalty`, `max_tool_calls` |
+| `/v1/responses` | `metadata`, `top_logprobs`, `truncation`, `reasoning`, `store`, `include`, `provider`, `model`, `input`, `instructions`, `tools`, `tool_choice`, `parallel_tool_calls`, `text`, `previous_response_id`, `conversation`, `user`, `safety_identifier`, `prompt_cache_key`, `service_tier`, `background`, `stream`, `max_output_tokens`, `max_tokens`, `temperature`, `top_p`, `frequency_penalty`, `presence_penalty`, `max_tool_calls` |
 | `/v1/responses/input_tokens` | `provider`, `model`, `input`, `instructions`, `tools`, `tool_choice`, `parallel_tool_calls`, `text`, `previous_response_id`, `reasoning`, `truncation` |
 | `/v1/responses/compact` | `provider`, `model`, `input`, `instructions` |
 | `/v1/embeddings` | `provider`, `model`, `input`, `metadata`, `input_type`, `encoding_format`, `dimensions`, `output_dtype`, `user` |
@@ -457,7 +476,7 @@ Native Gemini deployment с capability `audio_speech` вызывает Interacti
 декодированный audio ограничены независимо; billing фиксирует точное число
 Unicode-символов исходного текста.
 
-`POST /guardrails/apply_guardrail` выполняет enabled DLP/AV policy без model inference. Обычный virtual key может вызвать только policy, которая совпала с его durable attachment; admin role может проверять любую enabled policy. Если указан `model`, gateway также применяет model, access-group и tag grants. Каждый вызов учитывается в RPM/TPM и требует доступного durable audit до scanner call; итоговый audit содержит только policy, outcome и статусы checks. Текст ограничен 64 KiB, не возвращается клиенту, не записывается в audit или guardrail monitor и не открывает generation billing lifecycle. Отказ policy registry, audit или scanner приводит к fail-closed `503`.
+`POST /guardrails/apply_guardrail` выполняет enabled DLP/AV/anonymizer policy без model inference. Обычный virtual key может вызвать только policy, которая совпала с его durable attachment; admin role может проверять любую enabled policy. Если указан `model`, gateway также применяет model, access-group и tag grants. Каждый вызов учитывается в RPM/TPM и требует доступного durable audit до scanner call; итоговый audit содержит только policy, outcome и статусы checks. Текст ограничен 64 KiB, не записывается в audit или guardrail monitor и не открывает generation billing lifecycle. При включенной анонимизации ответ содержит число замен и `anonymized_text` только после хотя бы одной замены; исходный текст не возвращается. Policy может включать только anonymizer, а отсутствие любого включенного модуля приводит к fail-closed `503`.
 
 Vision принимает только inline `data:image/{jpeg,png,gif,webp};base64,...`.
 Remote URLs запрещены. AV должен быть включён; media type проверяется по
@@ -471,18 +490,62 @@ signature. Лимиты: 8 изображений, 8 MiB каждое, 16 MiB de
 | `openai`, `openai-compatible`, `openrouter` | OpenAI wire format, including bounded compatible `reasoning_content` passthrough |
 | `azure-openai` | Native Azure OpenAI HTTP and Realtime WebSocket URLs, API version, API key, static Entra token, public/US Government/China cloud identity selection, AKS workload federation or refreshable ambient managed identity |
 | `anthropic` | Преобразование chat/tools/vision в native Messages API |
-| `ollama` | Native chat/stream/embeddings и provider completions JSON/SSE для строкового prompt; native `top_k`, `min_p`, log probabilities и reasoning history/output |
+| `ollama` | Native chat/stream/embeddings и provider completions JSON/SSE для строкового prompt; native `top_k`, `min_p`, log probabilities и reasoning history/output; optional bearer credential for remote inference. Completions требуют точного usage для billing и отклоняют `best_of`, `echo`, `logit_bias`, `n` и `user`, которые upstream не применяет |
 | `gemini` | Native GenerateContent chat/stream, tools, inline vision, structured output, text embeddings, audio transcription/translation and schema-constrained OCR; Interactions text-to-speech; API key or GCP workload identity |
 | `mistral` | Native Chat JSON/SSE and embeddings wire contract; FIM completions; Bearer API key |
 | `voyage` | Native text embeddings and rerank; Bearer API key |
 | `bedrock` | Native Converse chat/tools and JSON Schema output; bearer mode for compatible private endpoints or AWS SigV4 with explicit credentials, environment keys, bounded shared credentials profiles, regional web-identity STS, ECS/EKS container roles and EC2 IMDSv2 instance roles |
 | `groq` | Chat/stream, tools, structured output, vision, user attribution and service tiers |
-| `deepseek` | Chat/stream and Responses with provider-specific validation and reasoning history passthrough |
-| `cerebras` | Chat/stream with bearer authentication, model discovery, function tools, JSON Schema output, reasoning/logprobs/service-tier validation and normalized reasoning content; unsupported fields fail before upstream execution |
+| `deepseek` | Chat/stream and Responses with provider-specific validation, reasoning history passthrough, explicit Chat thinking-mode control and validated reasoning effort; omission keeps the gateway's non-thinking Chat default; `top_p` is rejected when Chat thinking is disabled because the provider ignores it; Responses uses the provider's thinking-enabled default, rejects ineffective `temperature` and clamped `top_p` in that mode, accepts `reasoning.effort=none` to disable thinking and `minimal` for provider-compatible low effort, supports the `apply_patch` custom tool with paired call history, and rejects unsupported message roles, image placement, input items, nested content parts and reasoning fields before execution; image input is accepted only for `deepseek-flash` and its two legacy Flash aliases |
+| `cerebras` | Chat/stream with bearer authentication, model discovery, function tools, JSON Schema output, reasoning/logprobs/service-tier validation, normalized reasoning content and model-scoped `clear_thinking` for `zai-glm-4.7`; unsupported fields fail before upstream execution |
 | `nvidia-nim` | Chat/stream, native Messages/stream and count-tokens, legacy Completions, Responses create/stream/retrieve/cancel, Embeddings and native text Rerank with optional bearer authentication and model discovery; Rerank supports 512 passages, `NONE`/`END` truncation and exact provider token settlement; stored response lifecycle uses the original deployment ownership binding, Chat and Messages use isolated cache scopes, and model-dependent multimodal input is enabled per deployment |
 | `together` | Chat/stream with bounded native reasoning aliases, exact model-specific reasoning-effort policy, normalized selected-token log probabilities and validated min-p, top-k, repetition-penalty and token-bias controls, legacy Completions, Embeddings, native Rerank, Image Generation, duration-accounted Audio Transcription/Translation, bounded Text-to-Speech and model discovery with bearer authentication; Rerank requires exact provider usage, image output uses unit accounting, audio uses exact duration or character settlement, tools, structured output and vision are capability-gated, and unsupported Responses, top-logprob alternatives or silently ignored parameters fail before upstream execution |
-| `xai` | Chat/stream, Responses and Embeddings with bearer authentication, merged text/embedding model discovery, structured output, vision, web search, response compaction and owned retrieve/input-items/delete lifecycle; priority tier, bounded reasoning/logprobs validation, float/base64 vectors and exact embedding token usage |
+| `xai` | Chat/stream, Responses and Embeddings with bearer authentication, merged text/embedding model discovery, structured output, vision, web search, response compaction and owned retrieve/input-items/delete lifecycle; priority tier, bounded reasoning/logprobs, Responses execution controls, lifecycle, isolation, prompt-cache diagnostics, moderation results, compaction settings and deanonymized instruction metadata, effective generation settings and strict echoed tool configuration with response preservation, float/base64 vectors, exact embedding token usage and validated server-side tool item counters |
 | `demo` | Локальный deterministic fallback для разработки |
+
+Azure OpenAI resource endpoints не объявляют `web_search` для Chat или
+Responses. Foundry project endpoints допускают `web_search` только в Responses;
+`web_search_options` в Chat отклоняется до upstream-вызова. При настройке
+managed deployment capability `web_search` разрешён для Foundry project с
+`responses`, но Chat-запросы с веб-поиском не выбирают этот deployment.
+
+For native Ollama Chat, `reasoning_effort=default` leaves `think` unset so the
+selected model uses its own default. The managed capability profile lists this
+value alongside the explicit supported levels. The compatibility aliases
+`minimal` and `xhigh` map to native `think=low` and `think=max` respectively.
+Native Ollama Chat validates image attachments before upstream execution; malformed
+images fail as client errors instead of being omitted from the native message.
+Chat content accepts text and user image URL parts with automatic image detail;
+unsupported part types, explicit image detail levels, message names, annotations
+and reasoning blocks fail before provider execution instead of being dropped.
+Function tools sent through native Ollama Chat accept only the schema fields its
+tool contract can preserve; unsupported keywords such as `additionalProperties`
+and `const`, and the function `strict` control, fail before upstream execution.
+Chat response formats are limited to text, JSON object, or a supplied JSON Schema;
+unmappable formats and `strict=false` fail before provider execution.
+Native Chat preserves `prompt_eval_cached_count` as cached input-token detail
+while `prompt_eval_count` remains the full input-token total for quota and
+billing. Negative cached counts or counts above the input total fail closed.
+Native Chat streaming rejects an upstream model change between chunks before
+forwarding content from the changed model to the client.
+Native Ollama Embeddings sends `truncate=false`; inputs that exceed the selected
+model's context window must fail upstream instead of producing an embedding for
+silently shortened text.
+
+For Azure Foundry project URLs under `/api/projects/{project}`, managed identity
+uses the Foundry audience even when the endpoint has a custom hostname. Known
+Azure Government hostnames select the corresponding sovereign audience. When a
+sovereign endpoint uses a custom hostname, set `azure_cloud=usgov` or `china`
+with `auth_type=entra`; Foundry project URLs support `usgov` but not `china`.
+Project URLs behind a reverse-proxy path prefix retain that prefix for discovery
+and inference, and use the same Foundry audience selection.
+Without a bound token, Entra authentication also accepts an environment-backed
+service principal (`AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`).
+Its client-credentials exchange uses the selected cloud authority and audience;
+client secret and federated token file configuration are mutually exclusive.
+Set `azure_audience=cognitive` or `foundry` when the configured endpoint requires
+an explicit Entra token audience; omission preserves URL-based selection. The
+Foundry audience is unavailable in Azure China.
 
 OpenAI-compatible adapter один раз повторяет запрос с
 `max_completion_tokens`, только когда upstream явно отверг legacy
@@ -591,8 +654,8 @@ adapter используют те же проверки, включая streamin
 | --- | --- |
 | Anthropic chat | `seed`; `stop` неверного типа или более четырёх последовательностей |
 | Anthropic Responses | `previous_response_id`, `safety_identifier` |
-| Ollama Responses | `safety_identifier` |
-| Ollama native chat | `tool_choice`, `parallel_tool_calls` |
+| Ollama Responses | `previous_response_id`, provider-side `conversation`, `store=true`, `truncation`, `include`, `metadata`, `top_logprobs`, `tool_choice` кроме `auto` и `none`, `parallel_tool_calls`, `reasoning.context`, `reasoning.mode`, `reasoning.summary`, `reasoning.generate_summary`, `safety_identifier` |
+| Ollama native chat | `tool_choice` кроме `auto` и `none`, `parallel_tool_calls` |
 | Ollama embeddings | token-ID input; `user`; `encoding_format`, отличный от `float` |
 | Gemini embeddings | token-ID input; `user`; `encoding_format`, отличный от `float` |
 | Native adapters without a tier contract | `service_tier`; Anthropic Chat accepts only `auto` and `standard_only` |
@@ -600,6 +663,31 @@ adapter используют те же проверки, включая streamin
 | Anthropic, Ollama и demo Responses | `prompt_cache_key` |
 | Anthropic, Ollama, Gemini и demo Chat | `verbosity` |
 | Anthropic, Ollama и demo Responses | `text.verbosity` |
+
+Для Ollama Responses `text.format.type=json_object` преобразуется в
+`json_schema` с корневым типом `object`, который native Responses endpoint
+действительно применяет. Дополнительные поля внутри `json_object` отклоняются
+до обращения к upstream; исходный объект запроса не меняется. `json_schema`
+требует объект `schema`; неизвестные типы формата и поля, которые native
+endpoint игнорирует (включая `strict`), возвращают явную ошибку.
+`tool_choice=none` исполняется без отправки tools в Ollama, поэтому модель
+не получает доступ к объявленным функциям в этом вызове.
+Для Responses gateway сверяет function calls в JSON и каждом SSE-событии с
+фактически отправленными tools до выдачи вызова клиенту.
+Function tools в Ollama Responses отклоняют `tools[].strict` и поля схемы,
+которые native adapter не может сохранить. В Chat и Responses значения `type`,
+`items`, `required`, `$defs`, `description`, `enum` и `anyOf` проверяются до
+HTTP-вызова; корневая схема параметров должна иметь `type: object`.
+`tool_choice=auto` сохраняет объявленные tools и использует обычное поведение
+Ollama без дополнительного upstream-параметра.
+Для native Chat действует то же правило; `tool_choice=auto` передаёт объявленные
+tools без дополнительного параметра upstream. Ответ с вызовом функции, не
+объявленной в эффективном наборе tools, отклоняется до выдачи этого вызова клиенту.
+Успешные Ollama Responses должны содержать явные `input_tokens`,
+`output_tokens` и согласованный `total_tokens`. Для SSE эти поля обязательны
+в терминальном событии до отправки его клиенту. Отсутствующий usage завершает
+попытку ошибкой вместо учета только оценочных входных токенов; явно переданные
+нули допускаются.
 
 Остальные верхнеуровневые поля действующего OpenAI-compatible контракта
 передаются соответствующим upstream wire request. Это не подтверждает поддержку
@@ -621,6 +709,8 @@ post-response billing. Это событие не создаёт дополни�
 остаётся существующий estimated fallback; точный учет не выводится из отсутствующих
 данных. Отрицательные token counts, переполнение и `total_tokens` меньше суммы
 prompt/completion отклоняются до cache, billing и доставки SSE-события клиенту.
+Общий размер upstream Chat SSE ограничен 32 MiB, включая комментарии и
+незавершённые события; превышение завершает запрос ошибкой.
 
 Клиент Chat SSE получает финальный usage chunk только при
 `stream_options.include_usage=true`. Этот параметр разрешён только вместе со
@@ -642,6 +732,11 @@ search tool с лимитом пять поисков и передаёт approx
 adapters возвращают `unsupported_parameter`. Маршрутизация требует явно заявленную
 deployment/model capability `web_search`. Exact и semantic response cache
 отключены, поскольку результат зависит от внешнего состояния веба.
+
+Responses принимает current и versioned `web_search`/`web_search_preview`
+контракты как одну capability. До provider call billing резервирует одинаковый
+консервативный лимит поисков для каждого варианта; `max_tool_calls` сужает этот
+лимит, а commit заменяет оценку фактическим числом `web_search_call` outputs.
 
 Chat assistant messages preserve nullable `refusal` in compatible request
 history, JSON responses, live SSE accumulation and synthetic SSE. Refusal text
@@ -699,8 +794,9 @@ Provider audio deltas проверяются как strict base64 до пере�
 `response.done.usage` заменяет резерв при billing commit и сохраняет cached,
 text и audio token details. WebSocket event ограничен 20 MiB плюс 64 KiB JSON
 overhead, pending responses — 16, conversation items — 1024, а сессия — 30 минут.
-Azure deployment с пустым `api_version` подключается к native GA
-`/openai/v1/realtime?model=...`; versioned deployment использует preview
+Azure deployment с пустым `api_version` или значением `preview` подключается к
+v1 `/openai/v1/realtime?model=...`; deployment с датированной версией использует
+legacy preview
 `/openai/realtime?api-version=...&deployment=...`. Handshake передаёт только
 настроенный `api-key` либо Entra bearer token, включая ambient managed identity.
 Отсутствующий API key закрывает запрос до WebSocket dial.
@@ -1263,6 +1359,34 @@ the conservative TPM estimate, require `video_input`, and bypass exact and
 semantic response caches.
 
 
+### Native Gemini file search
+
+`tools[].fileSearch` performs retrieval against provider-managed stores. The request
+accepts one to 20 unique `fileSearchStores/...` names, an optional bounded metadata
+filter, and optional `topK` from 1 to 100. File search cannot be combined with other
+tools. Routing requires `gemini_file_search`; authorization requires `file_search`
+and `gemini_file_search:<store-name>` for every requested store. The tool definition
+is included in the TPM and budget reserve, native token counting preserves it, and
+exact and semantic response caches are bypassed. Returned retrieval grounding is
+bounded and validated before citations and raw native metadata are exposed.
+
+### Native Gemini computer use
+
+`tools[].computerUse` enables client-executed browser, mobile, or desktop action
+loops. Configuration validates the environment, excluded predefined functions,
+prompt-injection detection flag and safety-policy overrides. Routing requires
+`gemini_computer_use`. Authorization requires `computer_use`, an environment grant
+(`gemini_computer_use:<environment>`) and a dedicated grant for every disabled safety
+policy. Tool configuration enters token reserve and native token counting, while exact
+and semantic response caches are bypassed. Function-call arguments, including provider
+safety decisions, remain in the native GenerateContent continuation contract.
+
+### Native Gemini MCP servers
+
+Native GenerateContent requests may select up to eight configured MCP servers with `tools[].mcpServers[].name`. The name is a gateway registry ID; client-supplied URLs and headers are rejected. Resolution happens after authentication, and every server must be enabled, use Streamable HTTP, explicitly allow native provider execution, and pass the effective connector ACL.
+
+The registry opt-in controls whether the configured HTTPS URL and encrypted bearer credential may be sent to the selected model provider. These requests require the `gemini_mcp` deployment capability, bypass exact and semantic response caches, and preserve the resolved server configuration for native token counting. Provider-reported prompt and tool-input tokens enter normal billing; the provider API does not expose a separate MCP-call counter, so the gateway does not synthesize one.
+
 ### Native GenerateContent token counting
 
 POST `/v1beta/models/{model}:countTokens` accepts either `contents` or
@@ -1348,8 +1472,10 @@ Task-specific embedding options, multimodal input and asynchronous batches remai
 separate gaps. [Native embedding protocol](https://ai.google.dev/api/embeddings).
 
 OpenAI-compatible and Ollama embeddings also preserve provider-reported zero
-usage. Only absent usage falls back to the pipeline estimate. OpenAI-compatible
-usage objects must include nonnegative prompt_tokens and total_tokens, with total
+usage. Absent usage falls back to the pipeline estimate only for generic
+OpenAI-compatible deployments; native Ollama embeddings require the upstream
+`prompt_eval_count` for exact billing and reject missing or null usage.
+OpenAI-compatible usage objects must include nonnegative prompt_tokens and total_tokens, with total
 at least prompt and no completion tokens; malformed objects now return an error.
 Ollama rejects negative prompt_eval_count. This is a stricter upstream response
 validation rule; the public request/response schema is unchanged. Regression tests
@@ -1401,10 +1527,19 @@ opening SSE and do not retry the lookup through the JSON fallback path. The erro
 response does not expose the storage error text.
 
 This deliberately changes the previous behavior that routed despite a lookup
-failure. Successful lookups still re-evaluate endpoint/model capabilities; a
-missing or expired binding retains existing cache-miss behavior. First requests
-without previous_response_id do not need a lookup. Failure to persist a new binding
+failure. Successful lookups still re-evaluate endpoint/model capabilities. On a
+missing or expired affinity binding, an owner-scoped persistent response record
+pins continuation and comparison requests only when its model and deployment
+identity still match an available candidate. Without such a record, the existing
+cache-miss behavior applies. An ownership read failure also fails closed. First
+requests without previous_response_id do not need a lookup. Failure to persist a new binding
 retains the existing logged best-effort behavior and is a separate durability gap.
+The write uses a five-second bounded context independent of client cancellation,
+so a completed provider response can still record its deployment after the
+client disconnects.
+Persistent response ownership uses the same bounded cancellation-independent
+write after provider completion, including JSON and streaming responses. A
+storage failure still prevents a successful stored-response result.
 Regression tests cover JSON and streaming lookup failures, no provider execution,
 no provider-module execution, and preservation of the existing pinned non-streaming
 fallback tests.
@@ -1576,6 +1711,23 @@ by an index, not total response bytes, text accumulation, or background lifecycl
 Regression tests cover malformed values, numbers beyond machine integer range,
 the first rejected index, the highest accepted index, and omitted indices.
 
+Complete JSON and terminal SSE response snapshots also require every output item
+to carry its non-empty `type`. Their `content` and reasoning `summary` arrays are
+limited to 128 parts, matching the stream content-index bound. Structurally
+incomplete or oversized snapshots fail before delivery. An explicit snapshot
+replaces the previously assembled output slice before JSON decoding, preventing
+omitted fields from inheriting stale placeholder values.
+
+Explicit nested configuration snapshots are replaced from a zero value as well.
+Reasoning, tools, text, tool choice, prompt-cache data, moderation, diagnostics,
+context management, error details, incomplete details and prompt references
+cannot retain fields that a later provider snapshot omitted.
+
+Real provider `content` and reasoning `summary` parts must carry their required
+non-empty `type`. Empty internal slots created while assembling sparse SSE
+content indices remain permitted until an actual part occupies the slot; an
+explicit JSON or terminal snapshot cannot use those placeholders.
+
 ### Native Responses refusal assembly
 
 Native SSE accumulation resolves the event name from JSON `type` when the SSE
@@ -1627,17 +1779,25 @@ contracts, and is separate from the native Responses SSE wire budget.
 ### Responses usage range validation
 
 The OpenAI-compatible Responses JSON and native SSE decoders reject negative
-input, output, total, cached, cache-write, and cache-creation token counters.
+input, output, total, input/output cached, cache-write, and cache-creation token counters.
 They also reject input/output values whose sum exceeds the platform integer
 range, using subtraction before any addition. SSE validation happens before the
 containing response event is forwarded; JSON validation happens before the
 adapter returns a successful result to provider post-response modules.
 
+The `usage` object and its token-detail and server-side-tool-detail objects are
+decoded against an explicit field allowlist. Unknown counters are rejected
+instead of being silently discarded, so a provider schema change cannot produce
+an apparently successful response with incomplete billing data. The internal
+provider cost counter and the documented provider-specific source and tool
+counters remain accepted.
+
 This preserves the existing treatment of absent or partial usage, and does not
 assert that every provider's total equals the input/output sum. Usage estimation
 and missing-versus-explicit-zero handling are separate concerns. Regression tests
-cover both decoders, invalid cache detail counters, overflowing sums, exact integer
-boundaries, and compatible missing/partial usage.
+cover both decoders, unknown counters at every usage level, invalid cache detail
+counters, overflowing sums, exact integer boundaries, and compatible
+missing/partial usage.
 
 ### Reported zero versus missing Responses input usage
 
@@ -1666,6 +1826,117 @@ existing small-range index validation. Events must still contain a single JSON
 value; trailing documents or junk are rejected before forwarding. Regression tests
 compare JSON and SSE counters at precision boundaries and preserve trailing-data
 rejection and integer-valued index representations.
+
+### Responses server-side compaction
+
+Responses accepts one optional `context_management` entry with
+`type="compaction"` and an optional positive `compact_threshold`. Compatible
+JSON and SSE adapters preserve the native object. The gateway validates the
+shape before routing and exposes support in the provider parameter profile;
+native adapters that cannot preserve the setting return an explicit
+`unsupported_parameter` error.
+
+Because compaction can emit opaque state and depends on the provider's current
+context, these requests bypass gateway response caches and are not
+copied to shadow deployments. Provider-reported terminal usage remains the
+authoritative billing settlement.
+
+`POST /v1/responses/compact` принимает только ответ upstream с явными
+`input_tokens`, `output_tokens` и согласованным `total_tokens`. Отсутствующий
+или противоречивый usage завершает вызов ошибкой до успешного billing settlement;
+явный ноль допустим.
+
+### Responses provider moderation
+
+Responses accepts an optional provider-side `moderation` object with a required
+model and optional input/output policy modes. Each mode is validated as `score`
+or `block`. Compatible JSON and SSE adapters preserve this object, while native
+adapters that cannot represent it return `unsupported_parameter`.
+
+Provider moderation supplements the gateway's effective content policy; it
+does not disable or replace gateway DLP, AV or output checks. These requests
+bypass gateway response caches and shadow execution because the provider's
+moderation policy can change independently. Terminal provider usage remains
+authoritative for billing.
+
+### Responses misalignment details
+
+Failed compatible Responses preserve the provider's optional structured
+`error.misalignment` detail, including its public explanation, classification
+and continuation instruction. JSON and terminal SSE snapshots use the same
+strict shape and bounded strings. Unknown nested fields, empty required error
+identity, invalid whitespace in identifiers and empty continuation instructions
+fail before the response object is returned or a terminal SSE event is delivered.
+
+The classification remains forward compatible: providers may add values beyond
+the currently documented categories. These diagnostic fields do not affect
+routing, retries, policy decisions or billing settlement.
+
+### Responses incomplete reasons
+
+Compatible JSON and terminal SSE responses preserve the documented optional
+`incomplete_details.reason` values: `max_output_tokens`, `max_messages`,
+`content_filter` and `steered`. An empty details object and JSON `null` remain
+valid when the provider has no reason to report. Unknown reasons, fields and
+non-string values fail before the response is returned or the terminal event is
+delivered, preventing clients from acting on a silently weakened lifecycle
+status.
+
+### Responses envelope validation
+
+Compatible JSON and SSE snapshots reject malformed response IDs, non-Response
+object discriminators, whitespace-padded or oversized model IDs and unknown
+lifecycle states before delivery. The accepted lifecycle values are
+`completed`, `failed`, `in_progress`, `cancelled`, `queued` and `incomplete`.
+Legacy compatible providers may omit these echoed identity fields; when present,
+they must satisfy the public contract. Terminal SSE events continue to require a
+matching terminal state and a response object.
+
+The optional response `conversation.id` is validated before JSON or terminal
+SSE delivery with the same `conv_` resource namespace and 128-byte bound used
+at request admission. Empty, malformed, oversized and structurally extended
+references fail closed, so clients cannot continue a response under an invalid
+owner-scoped conversation reference.
+
+Response metadata is subject to the same shared limit as request metadata: at
+most 16 entries, 64 Unicode characters per key and 512 per value. Compatible
+JSON and terminal SSE responses reject larger maps before delivery instead of
+exposing data outside the documented lifecycle contract.
+
+### Responses prompt reference echo
+
+Compatible JSON and terminal SSE responses preserve the optional prompt-template
+reference selected by the provider: its ID, version and bounded variables.
+Variables accept strings or the documented text, image and file input objects;
+unknown fields, invalid discriminators, malformed explicit cache breakpoints and
+oversized values fail before delivery. Text variables participate in the same
+response deanonymization pass as instructions and generated text, while media
+variables remain structured references.
+
+This support is response-only. Public request decoding does not accept prompt
+templates because their server-side expanded content is unavailable to the
+gateway's TPM and budget-reserve calculation. Enabling execution requires a
+provider count/preflight contract or a configured conservative reserve.
+
+### Responses assigned service tier
+
+The provider-assigned `service_tier` echoed in compatible JSON and terminal SSE
+responses is validated with the same shared tier matrix used at request
+admission. Unknown values fail before client delivery and successful billing
+post-processing, preventing an unrecognized execution class from being reported
+as a valid settled result. Omission remains valid when a provider does not report
+an assigned tier.
+
+### Responses prompt-cache prewarming
+
+Responses accepts `prompt_cache_options.prewarm=true` on compatible adapters to
+prepare provider prompt caches without generating output. Chat requests reject
+this Responses-only control. Prewarm requests reserve their estimated input
+tokens with zero output tokens, then settle from exact terminal provider usage.
+
+Prewarming always executes against the selected provider, so it bypasses the
+gateway response cache and shadow execution. `prewarm=false` is preserved as an
+explicit provider setting and follows the normal response path.
 
 ### Responses cache outcome policy
 
@@ -1729,6 +2000,71 @@ excluding refusals and tool arguments. This also applies to decoded JSON
 Responses. A final response output snapshot replaces previously assembled text,
 including when the snapshot contains an empty output array. Top-level text is
 still accepted as a fallback when no nonempty structured text is available.
+
+Known output content unions are validated before delivery: message content accepts
+only `output_text` and `refusal`, while reasoning summaries accept only
+`summary_text`. Unsupported discriminators fail the provider response instead of
+being partially decoded and silently discarded. This validation applies equally
+to JSON results and terminal SSE snapshots.
+
+Function and custom-tool output items require a bounded non-blank `call_id` and a
+tool name containing 1–64 letters, digits, underscores or hyphens. Completed
+function arguments must decode to a JSON object and use the same size limit as
+chat function arguments. Streaming `output_item.added` snapshots may contain
+partial arguments; the completed value is validated at the terminal boundary.
+
+Incoming Responses `custom_tool_call` history requires a valid name and call ID.
+Its tool name is checked against credential and access-group grants even when no
+new tool definition is sent. Custom calls and outputs require a deployment with
+`custom_tools`. An output without an attributable call or declared custom tool
+needs `previous_response_id` and wildcard tool grants; otherwise it is rejected
+before execution. Scoped credentials can repeat the tool declaration.
+The same name authorization applies to `function_call` history, and function
+calls or outputs require the deployment's `tools` capability. Output-only
+function continuations follow the same previous-response and grant rule. Durable
+assistant runs attribute pending call IDs to function names from their verified
+run snapshot, so scoped grants remain valid without changing provider input.
+
+The output union also keeps branch-specific fields isolated. Only `message` items
+may contain `content` or an optional `assistant` role, and only `reasoning` items
+may contain `summary`. A provider cannot inject text through a reasoning or tool
+item and have it included in the derived `output_text`.
+
+Response content annotations are limited to 128 object-or-null entries. Token
+log probabilities have bounded token and byte data, accept only finite
+non-positive values, and allow at most 20 alternatives per token. JSON snapshots
+and SSE content or text events use the same validation before client delivery.
+
+Output item IDs are limited to 1–256 letters, digits, underscores or hyphens.
+The same validation runs on `item_id` in every native streaming event before the
+event is forwarded, preventing malformed identifiers from entering accumulated
+state or reaching clients.
+
+Known output item families validate their lifecycle status against the provider
+contract. Message, reasoning and client-owned calls use the basic lifecycle;
+search, code execution, image generation, MCP and patch items additionally accept
+only their documented intermediate or failure states. Omitted statuses and
+unknown future item families remain compatible.
+
+Native Responses streams validate every explicit `response_id` before forwarding
+its event. Once a response ID is established, later event fields and response
+snapshots must retain it. A malformed or changed identifier terminates the stream
+before the conflicting event can reach the client or final accounting.
+
+When a native SSE frame supplies both an `event:` field and a JSON `type`, they
+must match. A payload-only or header-only event remains accepted, while a missing,
+empty, non-string or contradictory type fails before the frame is forwarded.
+
+Optional native `sequence_number` values must be non-negative integers and must
+increase across the stream. Providers that omit the field remain compatible;
+once present, duplicate or reordered values stop processing before the offending
+frame reaches the client.
+
+Non-empty output item IDs are unique within a response. Tool-producing output
+items also use unique `call_id` values, while matching call-output items may retain
+their referenced call ID. JSON and terminal snapshots are checked as a whole;
+incremental events are checked against previously accumulated output before the
+conflicting frame is forwarded.
 
 Regression tests cover interleaved messages and parts, text completion events,
 empty and populated terminal snapshots, invalid content indices and JSON text
@@ -1800,21 +2136,22 @@ empty string remains present. This change preserves returned context; it does no
 add a response-storage or background-job lifecycle API.
 
 The Responses request contract now accepts optional `include` string arrays.
-OpenAI-compatible and Ollama Responses adapters forward them in both JSON and
+OpenAI-compatible Responses adapters forward them in both JSON and
 streaming requests; supported values remain an upstream capability. This enables
 clients to request `reasoning.encrypted_content` where the upstream supports it.
-Anthropic and Demo reject nonempty `include` with `unsupported_parameter` instead
+Anthropic, Ollama and Demo reject nonempty `include` with `unsupported_parameter` instead
 of silently dropping the option. Empty or omitted arrays preserve prior behavior.
-Local HTTP regression tests check the actual upstream payload in all four
+Local HTTP regression tests check the actual upstream payload in both
 forwarding paths and adapter rejection. The public OpenAPI schema includes the
 new optional request field.
 
-Responses also accepts optional boolean `store`. OpenAI-compatible and Ollama
-forward explicit `true` and `false` in JSON and SSE requests; an absent or null
-value leaves the upstream default in effect. Anthropic and Demo reject either
+Responses also accepts optional boolean `store`. OpenAI-compatible adapters
+forward explicit `true` and `false` in JSON and SSE requests; Ollama accepts
+`false` but rejects `true` because its Responses endpoint has no stored-resource
+lifecycle. An absent or null value leaves the upstream default in effect. Anthropic and Demo reject either
 explicit value with `unsupported_parameter` because these adapters cannot express
 the requested Responses storage control. This is an additive request-schema
-change, covered by local HTTP payload tests for both values and default behavior.
+change, covered by local HTTP payload tests for supported values and default behavior.
 
 `store` controls upstream response storage. An explicit `true` also enables the
 gateway ownership binding required by `GET /v1/responses/{id}`. Gateway logging
@@ -1877,25 +2214,38 @@ test verifies grouping and block order for text before, between and after result
 ### Responses reasoning request options
 
 The optional `reasoning` object accepts `effort`, `summary`, `generate_summary`,
-`context` and `mode` string fields. OpenAI-compatible and Ollama Responses adapters
-forward supplied fields in both JSON and streaming requests. Upstream/model
+`context` and `mode` string fields. OpenAI-compatible Responses adapters forward
+all supplied fields; Ollama forwards `effort` but rejects `summary`,
+`generate_summary`, `context` and `mode` in JSON and streaming requests. Upstream/model
 support determines valid values; the gateway does not translate them into a
-different provider's thinking controls. Anthropic and Demo return
+different provider's thinking controls. For Ollama, `effort=default` is sent as
+an omitted effort so the selected model keeps its own default. Anthropic and Demo return
 `unsupported_parameter` for a supplied object. Omission preserves prior defaults.
 
 This adds an optional typed request object and its OpenAPI schema. HTTP regression
-tests verify all five fields on the wire for both adapters and modes, alongside
+tests verify supported fields on the wire for each adapter and mode, alongside
 unsupported-adapter rejection. Fields follow the
 [Responses create contract](https://developers.openai.com/api/reference/cli/resources/responses/methods/create).
 
-Responses usage now retains optional `output_tokens_details.reasoning_tokens`,
-using the existing completion-token detail type. Negative values are rejected
-before forwarding a native SSE event or returning decoded JSON. This detail is
-not added to `output_tokens` or `total_tokens`; those reported counters remain
-unchanged. Tests cover positive/zero details, negative rejection and unchanged
-totals for JSON and native streaming. The OpenAPI response schema includes the
-optional detail object. As with existing token detail types, zero-valued members
-may be omitted when serialized while retaining the detail object.
+Responses usage now retains optional `output_tokens_details.reasoning_tokens` and
+`output_tokens_details.cached_tokens`, using the existing completion-token detail
+type, plus compatible `input_tokens_details.reasoning_tokens`. Negative values
+are rejected before forwarding a native SSE event or returning decoded JSON.
+The provider-assigned `service_tier` is retained in JSON and terminal SSE
+responses so callers can verify the tier that actually served the request.
+Compatible Responses also retains nonnegative provider-reported
+`num_sources_used` and `num_server_side_tools_used`, including explicit zeroes.
+These observability counters remain separate from token totals and local tool
+billing dimensions.
+Provider-reported top-level `citations` are retained as at most 1024 bounded
+HTTP(S) source URLs in JSON and terminal SSE responses. Invalid citations fail
+before the terminal response is delivered.
+This detail is not added to `output_tokens` or `total_tokens`; those reported
+counters remain unchanged. Tests cover positive/zero details, negative rejection
+and unchanged totals for JSON and native streaming. The OpenAPI response schema
+includes the optional detail object. As with existing token detail types,
+zero-valued members may be omitted when serialized while retaining the detail
+object.
 
 ### Responses annotations
 
@@ -1915,11 +2265,11 @@ The public response schema includes the annotation array. Event fields follow th
 ### Responses context truncation
 
 Responses accepts optional `truncation` (`auto` or `disabled`) and forwards the
-explicit value through OpenAI-compatible and Ollama native Responses requests,
+explicit value through OpenAI-compatible Responses requests,
 including streaming. Omission leaves the upstream default unchanged. The upstream
 implements context truncation; the gateway validates the enum and still reserves
 tokens against the complete input context before execution. Anthropic conversion
-and the demo adapter reject explicit truncation with `400 unsupported_parameter`
+and the Ollama and demo adapters reject explicit truncation with `400 unsupported_parameter`
 and `param=truncation` rather than discarding the requested behavior.
 
 ### Responses assistant message phase
@@ -1942,11 +2292,11 @@ Clients can request this data with `include: ["message.output_text.logprobs"]`
 when supported by the upstream model. These diagnostic values do not alter usage
 totals or billing.
 
-Responses also forwards optional integer `top_logprobs` to OpenAI-compatible and
-Ollama native Responses endpoints in both JSON and streaming mode, preserving
+Responses also forwards optional integer `top_logprobs` to OpenAI-compatible
+Responses endpoints in both JSON and streaming mode, preserving
 explicit zero. The gateway validates the 0–20 range before running request
 modules or routing; the upstream validates model compatibility. Omission leaves the upstream default unchanged. Anthropic
-conversion and demo reject supplied values with `400 unsupported_parameter` and
+conversion, Ollama and demo reject supplied values with `400 unsupported_parameter` and
 `param=top_logprobs`, including zero.
 
 Anthropic Responses conversion rejects non-null `phase` on input items with
@@ -1991,11 +2341,11 @@ This changes the upstream wire field for clients using the legacy alias while
 preserving their configured token limit.
 
 Responses accepts string-valued `metadata` and forwards it through native
-OpenAI-compatible and Ollama JSON/SSE requests. Upstream response metadata is
+OpenAI-compatible JSON/SSE requests. Upstream response metadata is
 retained in JSON, assembled SSE and synthetic SSE snapshots. An explicit metadata
 snapshot replaces earlier metadata rather than merging stale keys. The upstream
 may apply additional metadata restrictions. The gateway enforces at most 16
-entries, 64 Unicode code points per key and 512 per value before execution. Anthropic conversion and demo reject nonempty metadata
+entries, 64 Unicode code points per key and 512 per value before execution. Anthropic conversion, Ollama and demo reject nonempty metadata
 with `400 unsupported_parameter`; it is not silently mapped to unrelated native
 metadata semantics. Gateway authorization and billing identities are not derived
 from this client-supplied object.
@@ -2036,7 +2386,7 @@ requested provider prefix-cache boundary.
 Chat and Responses usage preserve provider-reported modality and predicted-output
 breakdowns: input/prompt `audio_tokens`, `image_tokens`, `text_tokens`, and output
 `accepted_prediction_tokens`, `rejected_prediction_tokens`, `audio_tokens`,
-`reasoning_tokens`, `text_tokens`. Negative detail counts are rejected before a
+`cached_tokens`, `reasoning_tokens`, `text_tokens`. Negative detail counts are rejected before a
 JSON response or SSE event is delivered. Billing continues to settle from the
 provider's aggregate input/output counts, which already include rejected predicted
 tokens, so detail fields are observability data and are not added a second time.
@@ -2110,14 +2460,15 @@ Records are bounded to 4 KiB, use an explicit TTL and require a configured share
 SessionStore; absence, corrupt data and storage failures do not permit an upstream
 lookup. Backend error details are not returned to callers.
 
-Ownership persistence now requires atomic create-or-equal storage. Redis executes
-comparison and insertion in one Lua operation. An identical retry succeeds without
+Ownership persistence now requires atomic create-or-equal storage. PostgreSQL
+uses a conditional upsert when the control-plane database is configured; Redis
+uses a Lua operation otherwise. An identical retry succeeds without
 refreshing TTL; a different model/deployment binding for the same scoped response
 ID returns an ownership conflict and preserves the original record. The ownership
 store no longer accepts a backend providing only unconditional Set.
 
 Creation now persists this binding for an explicit `store=true` request. Such a
-request requires a configured Redis-backed ownership store and an authenticated
+request requires a configured shared ownership store and an authenticated
 gateway credential before provider execution. It bypasses exact response caching
 and shadow mirroring so a stored resource cannot be substituted or duplicated.
 After a successful provider call, post-response accounting completes before the
@@ -2164,13 +2515,48 @@ objects so newly introduced provider fields are not silently discarded. Listing
 does not open a generation billing lifecycle.
 
 `DELETE /v1/responses/{id}` removes the upstream resource before deleting its
-ownership binding. Redis compare-and-delete prevents a stale cleanup from removing
-a different immutable record. If Redis cleanup fails after upstream success, the
+ownership binding. Atomic compare-and-delete prevents a stale cleanup from removing
+a different immutable record. If storage cleanup fails after upstream success, the
 gateway returns `503 response_ownership_unavailable` and retains the binding; a
 retry treats upstream 404 as the desired deleted state and retries atomic cleanup.
 Once cleanup succeeds, later requests return `404 response_not_found` without an
 upstream call. Deletion does not open a generation billing lifecycle.
-Provider type `azure-openai` добавляет `/openai/v1` к resource-root URL и сохраняет явно настроенный path, включая `/openai/deployments/{deployment}` для versioned data plane. Непустой `api_version` передается ровно один раз как query parameter `api-version` во всех versioned HTTP operations. Realtime независимо строит native GA или preview WebSocket URL и не смешивает параметры этих контрактов. `auth_type=api_key` использует header `api-key`; `auth_type=entra` использует статический bearer token из write-only credential vault либо, при отсутствии credential, AKS projected-token federation, App Service/Container Apps managed identity или VM IMDS. Provider endpoints с официальным Azure US Government suffix автоматически используют `login.microsoftonline.us` и `cognitiveservices.azure.us`; Azure China suffix выбирает `login.chinacloudapi.cn` и `cognitiveservices.azure.cn`. Остальные endpoints используют public-cloud authority и audience. Временные tokens обновляются до истечения срока, параллельные refresh объединяются. Redirects запрещены, чтобы credential не мог перейти на другой origin. Discovery использует тот же authentication contract; для versioned deployment path оно выполняется через resource-level `/openai/models`.
+Provider type `azure-openai` добавляет `/openai/v1` к resource-root URL при пустом `api_version`. При датированной `api_version` resource-root URL преобразуется в `/openai/deployments/{upstream_model}` как для стартового конфига, так и для managed deployments. Стартовый конфиг может связать несколько публичных имён с одним upstream deployment через `model_aliases`; неоднозначное соответствие отклоняется. Явно настроенный deployment path сохраняется. Датированные Responses operations используют resource-level `/openai/responses`. Версия передается один раз как query parameter `api-version` во всех versioned HTTP operations. Realtime независимо строит native GA или preview WebSocket URL и не смешивает параметры этих контрактов. `auth_type=api_key` использует header `api-key`; `auth_type=entra` использует статический bearer token из write-only credential vault либо, при отсутствии credential, AKS projected-token federation, App Service/Container Apps managed identity или VM IMDS. Provider endpoints с официальным Azure US Government suffix автоматически используют `login.microsoftonline.us` и `cognitiveservices.azure.us`; Azure China suffix выбирает `login.chinacloudapi.cn` и `cognitiveservices.azure.cn`. Остальные endpoints используют public-cloud authority и audience. Временные tokens обновляются до истечения срока, параллельные refresh объединяются. Redirects запрещены, чтобы credential не мог перейти на другой origin. Discovery использует тот же authentication contract: для legacy deployment URL с пустой версией или `preview` оно выполняется через resource-level `/openai/v1/models`, а с датированной версией — через `/openai/models`.
+
+Azure OpenAI и Foundry base URLs не принимают query или fragment, включая
+завершающие пустые `?` и `#`; это проверяется и в стартовом конфиге, и при
+создании managed provider.
+
+В режиме `auth_type=api_key` пустой или состоящий из пробелов credential
+отклоняется до HTTP inference и model discovery для Azure OpenAI и Foundry.
+В режиме `auth_type=entra` отсутствие статического токена по-прежнему включает
+настроенную workload identity.
+Успешный Azure Chat JSON и поток SSE должны содержать полный usage с
+`prompt_tokens`, `completion_tokens` и согласованный `total_tokens`.
+Отсутствие полного provider usage завершает попытку ошибкой вместо успешного
+учета только оценочного prompt; явно переданные нули допускаются.
+В SSE chunk с неполным или несогласованным usage отклоняется до передачи
+клиенту; промежуточные chunks с `usage: null` остаются допустимыми.
+Завершённые Azure Responses JSON/SSE также требуют явных `input_tokens`,
+`output_tokens` и согласованного `total_tokens`; терминальное SSE-событие с
+неполным usage не отправляется клиенту. Фоновые ответы со статусом `queued`
+могут возвращаться до появления финального usage.
+Azure embeddings требуют provider-reported `prompt_tokens` и `total_tokens` с
+одинаковым значением; отсутствие usage не заменяется оценкой для успешного
+billing. Это правило действует для resource и Foundry project endpoints при
+API-key и Entra authentication.
+Azure legacy Completions JSON/SSE требуют явных `prompt_tokens`,
+`completion_tokens` и согласованного `total_tokens`. Для SSE adapter запрашивает
+финальный usage chunk через `stream_options.include_usage`; поток без него не
+получает успешный billing settlement. Azure и Ollama отклоняют неполный или
+несогласованный usage chunk до передачи клиенту; промежуточный `usage: null`
+допустим.
+
+Для Foundry project endpoint `/api/projects/{project}` inference использует
+`/openai/v1`, а discovery читает project deployments через
+`/api/projects/{project}/deployments?api-version=v1`. Пагинация ограничена;
+`nextLink` принимается только для того же origin и project path, чтобы
+credential не передавался в другой проект или на другой сервер.
 
 ## Vector stores
 
@@ -2189,11 +2575,14 @@ overflow-safe aggregate byte limit configured by `VECTOR_STORE_FILE_QUOTA` and
 `VECTOR_STORE_BYTE_QUOTA`. Each attachment can persist up to 16 string, finite
 number, or boolean attributes. Keys are limited to 64 characters and string
 values to 512 characters.
-The optional `chunking_strategy` accepts `{"type":"auto"}`, which is also
-returned for every attachment. A structurally valid static token strategy is
-rejected with `422 vector_store_chunking_unsupported` before storage because
-this runtime does not bind a provider tokenizer during file ingestion. Invalid
-token ranges or overlap greater than half the chunk size return `400`.
+The optional `chunking_strategy` accepts `{"type":"auto"}` or a static
+strategy with `max_chunk_size_tokens` from 100 to 4096 and
+`chunk_overlap_tokens` no greater than half the chunk size. The selected policy
+is persisted per attachment and is applied consistently by parsed-content
+retrieval and synchronous vector search. Static boundaries use the gateway's
+conservative context-token estimator, so they are stable across deployments but
+may leave more unused space than a provider-specific tokenizer. Invalid token
+ranges or overlap greater than half the chunk size return `400`.
 Expired source files do not consume either limit.
 `POST /v1/vector_stores/{id}/files/{file_id}` atomically replaces the complete
 attribute map for an owned attachment; an empty object clears it.

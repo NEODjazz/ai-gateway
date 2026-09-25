@@ -13,26 +13,28 @@ import (
 	"time"
 	"unicode"
 
+	"ai-gateway-gateway/internal/azureurl"
 	"ai-gateway-gateway/internal/modelcatalog"
 )
 
 type Config struct {
-	HTTP         HTTPConfig
-	Cache        CacheConfig
-	Redis        RedisConfig
-	Modules      ModuleConfig
-	Provider     ProviderConfig
-	Catalog      modelcatalog.Catalog
-	Telemetry    TelemetryConfig
-	Management   ManagementConfig
-	APIDocs      APIDocsConfig
-	AdminUI      AdminUIConfig
-	Guardrails   GuardrailMonitorConfig
-	Files        FileConfig
-	VectorStores VectorStoreConfig
-	Assistants   AssistantConfig
-	A2ATasks     A2ATaskConfig
-	InitErr      error
+	HTTP          HTTPConfig
+	Cache         CacheConfig
+	Redis         RedisConfig
+	Modules       ModuleConfig
+	Provider      ProviderConfig
+	Catalog       modelcatalog.Catalog
+	Telemetry     TelemetryConfig
+	Management    ManagementConfig
+	APIDocs       APIDocsConfig
+	AdminUI       AdminUIConfig
+	Guardrails    GuardrailMonitorConfig
+	Files         FileConfig
+	VectorStores  VectorStoreConfig
+	Assistants    AssistantConfig
+	Conversations ConversationConfig
+	A2ATasks      A2ATaskConfig
+	InitErr       error
 }
 
 type FileConfig struct {
@@ -53,6 +55,11 @@ type AssistantConfig struct {
 	RunOwnerQuota      int
 	RunStepQuota       int
 	RunRetention       time.Duration
+}
+
+type ConversationConfig struct {
+	OwnerQuota int
+	ItemQuota  int
 }
 
 type A2ATaskConfig struct {
@@ -195,6 +202,8 @@ type ProviderEndpointConfig struct {
 	RerankPath            string            `json:"rerank_path,omitempty"`
 	APIVersion            string            `json:"api_version,omitempty"`
 	AuthType              string            `json:"auth_type,omitempty"`
+	AzureCloud            string            `json:"azure_cloud,omitempty"`
+	AzureAudience         string            `json:"azure_audience,omitempty"`
 	Region                string            `json:"region,omitempty"`
 }
 
@@ -219,6 +228,8 @@ func Load() Config {
 	assistantRunOwnerQuota := envInt("ASSISTANT_RUN_OWNER_QUOTA", 10000)
 	assistantRunStepQuota := envInt("ASSISTANT_RUN_STEP_QUOTA", 10000)
 	assistantRunRetentionSeconds := envInt("ASSISTANT_RUN_RETENTION_SECONDS", 2_592_000)
+	conversationOwnerQuota := envInt("CONVERSATION_OWNER_QUOTA", 10000)
+	conversationItemQuota := envInt("CONVERSATION_ITEM_QUOTA", 4096)
 	a2aTaskOwnerQuota := envInt("A2A_TASK_OWNER_QUOTA", 1000)
 	a2aTaskTTLSeconds := envInt("A2A_TASK_TTL_SECONDS", 2_592_000)
 	a2aSubscriptionLimit := envInt("A2A_SUBSCRIPTION_LIMIT", 256)
@@ -229,6 +240,7 @@ func Load() Config {
 	var fileErr error
 	var vectorStoreErr error
 	var assistantErr error
+	var conversationErr error
 	var a2aTaskErr error
 	controlPlaneDSN := strings.TrimSpace(os.Getenv("PROVIDER_CONTROL_PLANE_POSTGRES_DSN"))
 	credentialKey := os.Getenv("PROVIDER_CREDENTIAL_ENCRYPTION_KEY")
@@ -280,6 +292,12 @@ func Load() Config {
 	}
 	if assistantRunRetentionSeconds < 60 || assistantRunRetentionSeconds > 31_536_000 {
 		assistantErr = errors.Join(assistantErr, errors.New("assistant run retention must be between 60 and 31536000 seconds"))
+	}
+	if conversationOwnerQuota < 1 || conversationOwnerQuota > 1000000 {
+		conversationErr = errors.New("conversation owner quota must be between 1 and 1000000")
+	}
+	if conversationItemQuota < 1 || conversationItemQuota > 100000 {
+		conversationErr = errors.Join(conversationErr, errors.New("conversation item quota must be between 1 and 100000"))
 	}
 	if a2aTaskOwnerQuota < 1 || a2aTaskOwnerQuota > 100000 {
 		a2aTaskErr = errors.New("A2A task owner quota must be between 1 and 100000")
@@ -365,12 +383,13 @@ func Load() Config {
 			RunStepQuota: assistantRunStepQuota,
 			RunRetention: time.Duration(assistantRunRetentionSeconds) * time.Second,
 		},
+		Conversations: ConversationConfig{OwnerQuota: conversationOwnerQuota, ItemQuota: conversationItemQuota},
 		A2ATasks: A2ATaskConfig{
 			OwnerQuota: a2aTaskOwnerQuota, TTL: time.Duration(a2aTaskTTLSeconds) * time.Second,
 			SubscriptionLimit: a2aSubscriptionLimit, SubscriptionDuration: time.Duration(a2aSubscriptionDurationSeconds) * time.Second,
 			SubscriptionPoll: time.Duration(a2aSubscriptionPollMilliseconds) * time.Millisecond,
 		},
-		InitErr: errors.Join(catalogErr, semanticErr, providerAdmissionErr, controlPlaneErr, guardrailMonitorErr, fileErr, vectorStoreErr, assistantErr, a2aTaskErr),
+		InitErr: errors.Join(catalogErr, semanticErr, providerAdmissionErr, controlPlaneErr, guardrailMonitorErr, fileErr, vectorStoreErr, assistantErr, conversationErr, a2aTaskErr),
 		Modules: ModuleConfig{
 			Auth: FeatureConfig{
 				Required: envBool("AUTH_REQUIRED", true),
@@ -422,9 +441,16 @@ func validateProviderAdmission(endpoints []ProviderEndpointConfig) error {
 		if endpoint.RerankPath != "" && (!strings.HasPrefix(endpoint.RerankPath, "/") || strings.ContainsAny(endpoint.RerankPath, "?#") || strings.Contains(endpoint.RerankPath, "..")) {
 			result = errors.Join(result, fmt.Errorf("provider %q rerank_path must be an absolute path without query, fragment, or traversal", name))
 		}
-		if endpoint.Type == "azure-openai" {
-			if parsed, err := url.Parse(endpoint.BaseURL); err != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		if endpoint.Type == "ollama" {
+			if parsed, err := url.Parse(endpoint.BaseURL); err != nil || parsed.RawQuery != "" || parsed.ForceQuery || strings.Contains(endpoint.BaseURL, "#") {
 				result = errors.Join(result, fmt.Errorf("provider %q base_url must not contain query or fragment", name))
+			}
+		}
+		if endpoint.Type == "azure-openai" {
+			if parsed, err := url.Parse(endpoint.BaseURL); err != nil || parsed.RawQuery != "" || parsed.ForceQuery || strings.Contains(endpoint.BaseURL, "#") || !azureurl.ValidPath(parsed) {
+				result = errors.Join(result, fmt.Errorf("provider %q base_url has invalid query, fragment, or path", name))
+			} else if azureFoundryProjectPath(parsed.Path) && endpoint.APIVersion != "" {
+				result = errors.Join(result, fmt.Errorf("provider %q Foundry project endpoint must not set api_version", name))
 			}
 			if !validAzureAPIVersion(endpoint.APIVersion) {
 				result = errors.Join(result, fmt.Errorf("provider %q has invalid api_version", name))
@@ -432,6 +458,18 @@ func validateProviderAdmission(endpoints []ProviderEndpointConfig) error {
 			authType := strings.ToLower(strings.TrimSpace(endpoint.AuthType))
 			if authType != "" && authType != "api_key" && authType != "entra" {
 				result = errors.Join(result, fmt.Errorf("provider %q auth_type must be api_key or entra", name))
+			}
+			if endpoint.AzureCloud != "" && (authType != "entra" || !validAzureCloud(endpoint.AzureCloud)) {
+				result = errors.Join(result, fmt.Errorf("provider %q azure_cloud requires Entra authentication and a supported cloud", name))
+			}
+			if endpoint.AzureAudience != "" && (authType != "entra" || !validAzureAudience(endpoint.AzureAudience)) {
+				result = errors.Join(result, fmt.Errorf("provider %q azure_audience requires Entra authentication and cognitive or foundry", name))
+			}
+			if parsed, err := url.Parse(endpoint.BaseURL); err == nil && azureFoundryProjectPath(parsed.Path) && endpoint.AzureCloud == "china" {
+				result = errors.Join(result, fmt.Errorf("provider %q Foundry project does not support azure_cloud=china", name))
+			}
+			if endpoint.AzureAudience == "foundry" && (endpoint.AzureCloud == "china" || strings.HasSuffix(strings.ToLower(endpointBaseHost(endpoint.BaseURL)), ".azure.cn")) {
+				result = errors.Join(result, fmt.Errorf("provider %q azure_audience=foundry is unsupported in Azure China", name))
 			}
 		} else if endpoint.Type == "gemini" {
 			authType := strings.ToLower(strings.TrimSpace(endpoint.AuthType))
@@ -475,11 +513,22 @@ func validateProviderAdmission(endpoints []ProviderEndpointConfig) error {
 		} else if endpoint.APIVersion != "" || endpoint.AuthType != "" || endpoint.Region != "" {
 			result = errors.Join(result, fmt.Errorf("provider %q api_version, auth_type or region is unsupported for this type", name))
 		}
+		if endpoint.Type != "azure-openai" && endpoint.AzureCloud != "" {
+			result = errors.Join(result, fmt.Errorf("provider %q azure_cloud is only supported for Azure OpenAI", name))
+		}
+		if endpoint.Type != "azure-openai" && endpoint.AzureAudience != "" {
+			result = errors.Join(result, fmt.Errorf("provider %q azure_audience is only supported for Azure OpenAI", name))
+		}
 		if endpoint.QueueCapacity > 0 && endpoint.QueueTimeoutMS <= 0 {
 			result = errors.Join(result, fmt.Errorf("provider %q queue requires queue_timeout_ms", name))
 		}
 	}
 	return result
+}
+
+func azureFoundryProjectPath(path string) bool {
+	_, ok := azureurl.ProjectPath(path)
+	return ok
 }
 
 func validVertexGeminiURL(value string) bool {
@@ -544,6 +593,22 @@ func validAzureAPIVersion(value string) bool {
 	}
 	_, err := time.Parse("2006-01-02", date)
 	return err == nil
+}
+
+func validAzureCloud(value string) bool {
+	return value == "public" || value == "usgov" || value == "china"
+}
+
+func validAzureAudience(value string) bool {
+	return value == "cognitive" || value == "foundry"
+}
+
+func endpointBaseHost(baseURL string) string {
+	parsed, err := url.Parse(baseURL)
+	if err != nil {
+		return ""
+	}
+	return parsed.Hostname()
 }
 
 func loadGuardrailPolicies() map[string]GuardrailPolicyConfig {

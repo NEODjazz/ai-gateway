@@ -18,16 +18,19 @@ import (
 )
 
 const (
-	azureIMDSTokenURL        = "http://169.254.169.254/metadata/identity/oauth2/token"
-	azureAuthorityURL        = "https://login.microsoftonline.com"
-	azureOpenAIResource      = "https://cognitiveservices.azure.com/"
-	azureOpenAIScope         = azureOpenAIResource + ".default"
-	azureGovernmentAuthority = "https://login.microsoftonline.us"
-	azureGovernmentResource  = "https://cognitiveservices.azure.us/"
-	azureChinaAuthority      = "https://login.chinacloudapi.cn"
-	azureChinaResource       = "https://cognitiveservices.azure.cn/"
-	azureTokenMaxBytes       = 32 << 10
-	azureAssertionMaxBytes   = 64 << 10
+	azureIMDSTokenURL              = "http://169.254.169.254/metadata/identity/oauth2/token"
+	azureAuthorityURL              = "https://login.microsoftonline.com"
+	azureOpenAIResource            = "https://cognitiveservices.azure.com/"
+	azureOpenAIScope               = azureOpenAIResource + ".default"
+	azureFoundryResource           = "https://ai.azure.com/"
+	azureGovernmentAuthority       = "https://login.microsoftonline.us"
+	azureGovernmentResource        = "https://cognitiveservices.azure.us/"
+	azureGovernmentFoundryResource = "https://ai.azure.us/"
+	azureChinaAuthority            = "https://login.chinacloudapi.cn"
+	azureChinaResource             = "https://cognitiveservices.azure.cn/"
+	azureTokenMaxBytes             = 32 << 10
+	azureAssertionMaxBytes         = 64 << 10
+	azureClientSecretMaxBytes      = 8 << 10
 )
 
 type azureTokenSource struct {
@@ -63,15 +66,78 @@ func newAzureTokenSource(explicit string, providerBaseURL ...string) *azureToken
 	return &azureTokenSource{explicit: explicit, client: client, getenv: os.Getenv, now: time.Now, imdsURL: azureIMDSTokenURL, authorityBaseURL: authority, resource: resource, scope: resource + ".default"}
 }
 
+func newAzureTokenSourceWithCloud(explicit, providerBaseURL, cloud string) *azureTokenSource {
+	source := newAzureTokenSource(explicit, providerBaseURL)
+	if cloud == "" {
+		return source
+	}
+	project := source.resource == azureFoundryResource || source.resource == azureGovernmentFoundryResource
+	switch cloud {
+	case "public":
+		source.authorityBaseURL = azureAuthorityURL
+		if project {
+			source.resource = azureFoundryResource
+		} else {
+			source.resource = azureOpenAIResource
+		}
+	case "usgov":
+		source.authorityBaseURL = azureGovernmentAuthority
+		if project {
+			source.resource = azureGovernmentFoundryResource
+		} else {
+			source.resource = azureGovernmentResource
+		}
+	case "china":
+		source.authorityBaseURL = azureChinaAuthority
+		source.resource = azureChinaResource
+	}
+	source.scope = source.resource + ".default"
+	return source
+}
+
+func newAzureTokenSourceWithPolicy(explicit, providerBaseURL, cloud, audience string) *azureTokenSource {
+	source := newAzureTokenSourceWithCloud(explicit, providerBaseURL, cloud)
+	if audience != "cognitive" && audience != "foundry" {
+		return source
+	}
+	switch source.authorityBaseURL {
+	case azureGovernmentAuthority:
+		if audience == "foundry" {
+			source.resource = azureGovernmentFoundryResource
+		} else {
+			source.resource = azureGovernmentResource
+		}
+	case azureChinaAuthority:
+		source.resource = azureChinaResource
+	default:
+		if audience == "foundry" {
+			source.resource = azureFoundryResource
+		} else {
+			source.resource = azureOpenAIResource
+		}
+	}
+	source.scope = source.resource + ".default"
+	return source
+}
+
 func azureIdentityEndpoints(providerBaseURL ...string) (string, string) {
 	if len(providerBaseURL) > 0 {
 		if parsed, err := url.Parse(providerBaseURL[0]); err == nil {
 			host := strings.ToLower(parsed.Hostname())
+			if strings.HasSuffix(host, ".services.ai.azure.com") {
+				return azureAuthorityURL, azureFoundryResource
+			}
+			if strings.HasSuffix(host, ".services.ai.azure.us") {
+				return azureGovernmentAuthority, azureGovernmentFoundryResource
+			}
 			if strings.HasSuffix(host, ".openai.azure.us") || strings.HasSuffix(host, ".cognitiveservices.azure.us") {
 				return azureGovernmentAuthority, azureGovernmentResource
 			}
 			if strings.HasSuffix(host, ".openai.azure.cn") || strings.HasSuffix(host, ".cognitiveservices.azure.cn") {
 				return azureChinaAuthority, azureChinaResource
+			}
+			if _, project := azureFoundryProjectPath(parsed.Path); project {
+				return azureAuthorityURL, azureFoundryResource
 			}
 		}
 	}
@@ -80,6 +146,9 @@ func azureIdentityEndpoints(providerBaseURL ...string) (string, string) {
 
 func (s *azureTokenSource) Token(ctx context.Context) (string, error) {
 	if s.explicit != "" {
+		if !validAzureBearerToken(s.explicit) {
+			return "", errors.New("invalid explicit Azure Entra token")
+		}
 		return s.explicit, nil
 	}
 	for {
@@ -115,10 +184,13 @@ func (s *azureTokenSource) Token(ctx context.Context) (string, error) {
 		done := s.refreshCompleted
 		s.mu.Unlock()
 		token, expiration, err := s.load(ctx)
+		now = s.now()
 		s.mu.Lock()
 		if err == nil {
 			s.token, s.expiresAt = token, expiration
 			s.refreshAt = azureTokenRefreshAt(now, expiration)
+			s.lastErr, s.retryAt = nil, time.Time{}
+		} else if ctx.Err() != nil {
 			s.lastErr, s.retryAt = nil, time.Time{}
 		} else {
 			s.lastErr, s.retryAt = err, now.Add(time.Second)
@@ -133,6 +205,19 @@ func (s *azureTokenSource) Token(ctx context.Context) (string, error) {
 	}
 }
 
+func (s *azureTokenSource) invalidate(token string) {
+	if s.explicit != "" || token == "" {
+		return
+	}
+	s.mu.Lock()
+	if s.token == token {
+		s.token = ""
+		s.refreshAt = time.Time{}
+		s.expiresAt = time.Time{}
+	}
+	s.mu.Unlock()
+}
+
 func azureTokenRefreshAt(now, expiration time.Time) time.Time {
 	advance := expiration.Sub(now) / 2
 	if advance > 5*time.Minute {
@@ -144,7 +229,14 @@ func azureTokenRefreshAt(now, expiration time.Time) time.Time {
 func (s *azureTokenSource) load(ctx context.Context) (string, time.Time, error) {
 	tenantID := strings.TrimSpace(s.getenv("AZURE_TENANT_ID"))
 	clientID := strings.TrimSpace(s.getenv("AZURE_CLIENT_ID"))
+	clientSecret := s.getenv("AZURE_CLIENT_SECRET")
 	tokenFile := strings.TrimSpace(s.getenv("AZURE_FEDERATED_TOKEN_FILE"))
+	if clientSecret != "" {
+		if tenantID == "" || clientID == "" || tokenFile != "" {
+			return "", time.Time{}, errors.New("invalid Azure client secret configuration")
+		}
+		return s.loadClientSecret(ctx, tenantID, clientID, clientSecret)
+	}
 	if tenantID != "" || tokenFile != "" {
 		if tenantID == "" || clientID == "" || tokenFile == "" {
 			return "", time.Time{}, errors.New("incomplete Azure federated workload identity configuration")
@@ -196,16 +288,16 @@ func (s *azureTokenSource) fetchToken(request *http.Request, useExpiresIn bool) 
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return "", time.Time{}, fmt.Errorf("Azure managed identity endpoint returned status %d", response.StatusCode)
+		return "", time.Time{}, fmt.Errorf("Azure token endpoint returned status %d", response.StatusCode)
 	}
 	data, err := io.ReadAll(io.LimitReader(response.Body, azureTokenMaxBytes+1))
 	if err != nil || len(data) > azureTokenMaxBytes {
-		return "", time.Time{}, errors.New("Azure managed identity response is invalid")
+		return "", time.Time{}, errors.New("Azure token response is invalid")
 	}
 	var value azureTokenResponse
 	decoder := json.NewDecoder(strings.NewReader(string(data)))
 	if decoder.Decode(&value) != nil || decoder.Decode(&struct{}{}) != io.EOF {
-		return "", time.Time{}, errors.New("Azure managed identity response is invalid")
+		return "", time.Time{}, errors.New("Azure token response is invalid")
 	}
 	expiration, err := azureTokenExpiration(value.ExpiresOn)
 	if useExpiresIn {
@@ -217,10 +309,14 @@ func (s *azureTokenSource) fetchToken(request *http.Request, useExpiresIn bool) 
 			err = nil
 		}
 	}
-	if err != nil || value.AccessToken == "" || len(value.AccessToken) > 16<<10 || strings.ContainsAny(value.AccessToken, "\r\n") || !strings.EqualFold(value.TokenType, "Bearer") || !expiration.After(s.now()) {
-		return "", time.Time{}, errors.New("Azure managed identity response is invalid")
+	if err != nil || !validAzureBearerToken(value.AccessToken) || !strings.EqualFold(value.TokenType, "Bearer") || !expiration.After(s.now()) {
+		return "", time.Time{}, errors.New("Azure token response is invalid")
 	}
 	return value.AccessToken, expiration, nil
+}
+
+func validAzureBearerToken(value string) bool {
+	return value != "" && len(value) <= 16<<10 && !strings.ContainsAny(value, " \t\r\n\x00")
 }
 
 func (s *azureTokenSource) loadFederated(ctx context.Context, tenantID, clientID, tokenFile string) (string, time.Time, error) {
@@ -246,6 +342,25 @@ func (s *azureTokenSource) loadFederated(ctx context.Context, tenantID, clientID
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
 	if err != nil {
 		return "", time.Time{}, errors.New("invalid Azure federated token request")
+	}
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	return s.fetchToken(request, true)
+}
+
+func (s *azureTokenSource) loadClientSecret(ctx context.Context, tenantID, clientID, clientSecret string) (string, time.Time, error) {
+	if !validAzureIdentifier(tenantID) || !validAzureIdentifier(clientID) || len(clientSecret) > azureClientSecretMaxBytes || strings.TrimSpace(clientSecret) == "" || strings.ContainsAny(clientSecret, "\x00\r\n") {
+		return "", time.Time{}, errors.New("invalid Azure client secret configuration")
+	}
+	form := url.Values{
+		"client_id":     {clientID},
+		"client_secret": {clientSecret},
+		"scope":         {s.scope},
+		"grant_type":    {"client_credentials"},
+	}
+	endpoint := strings.TrimRight(s.authorityBaseURL, "/") + "/" + url.PathEscape(tenantID) + "/oauth2/v2.0/token"
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
+	if err != nil {
+		return "", time.Time{}, errors.New("invalid Azure client secret token request")
 	}
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	return s.fetchToken(request, true)

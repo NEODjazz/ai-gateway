@@ -1,11 +1,15 @@
 package gateway
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	"ai-gateway-gateway/internal/modules"
+	"ai-gateway-gateway/internal/openai"
 )
 
 func TestMCPRegistryValidatesSafeMetadata(t *testing.T) {
@@ -23,6 +27,28 @@ func TestMCPRegistryValidatesSafeMetadata(t *testing.T) {
 		if _, err := registry.PutServer("unsafe", MCPServer{Label: "Unsafe", ServerURL: unsafe, Transport: "sse"}); err == nil {
 			t.Fatalf("unsafe URL accepted: %s", unsafe)
 		}
+	}
+}
+
+func TestGeminiMCPResolutionRequiresExplicitOptIn(t *testing.T) {
+	registry := NewMCPRegistry()
+	server := MCPServer{Label: "Weather", ServerURL: "https://mcp.example.test/v1", Transport: "streamable-http", Tools: []string{"mcp:weather@https://mcp.example.test/v1"}, Enabled: true}
+	if _, err := registry.PutServer("weather", server, "secret"); err != nil {
+		t.Fatal(err)
+	}
+	request := modules.RequestContext{Request: openai.ChatCompletionRequest{GeminiMCPServerIDs: []string{"weather"}}}
+	if err := (Handler{mcp: registry}).resolveGeminiMCPServers(&request); !errors.Is(err, errGeminiMCPInvalid) {
+		t.Fatalf("server without opt-in resolved: %v", err)
+	}
+	server.AllowProviderExecution = true
+	if _, err := registry.PutServer("weather", server); err != nil {
+		t.Fatal(err)
+	}
+	if err := (Handler{mcp: registry}).resolveGeminiMCPServers(&request); err != nil {
+		t.Fatal(err)
+	}
+	if len(request.Request.GeminiMCPServers) != 1 || request.Request.GeminiMCPServers[0].StreamableHTTPTransport.Headers["Authorization"] != "Bearer secret" || request.Request.GeminiMCPConnectorIDs[0] != "mcp:weather@https://mcp.example.test/v1" {
+		t.Fatalf("unexpected resolution: %+v", request.Request)
 	}
 }
 

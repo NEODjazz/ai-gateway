@@ -3,11 +3,14 @@ package provider
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -18,6 +21,21 @@ type Ollama struct {
 	baseURL        string
 	upstreamStream bool
 	client         *http.Client
+}
+
+type ollamaBearerTransport struct {
+	base  http.RoundTripper
+	token string
+}
+
+func (t ollamaBearerTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	cloned := request.Clone(request.Context())
+	cloned.Header.Set("Authorization", "Bearer "+t.token)
+	base := t.base
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	return base.RoundTrip(cloned)
 }
 
 type ollamaChatRequest struct {
@@ -70,17 +88,18 @@ type ollamaRequestFunctionCall struct {
 }
 
 type ollamaChatResponse struct {
-	Model              string                `json:"model"`
-	Message            ollamaResponseMessage `json:"message"`
-	Done               bool                  `json:"done"`
-	PromptEvalCount    int                   `json:"prompt_eval_count"`
-	EvalCount          int                   `json:"eval_count"`
-	DoneReason         string                `json:"done_reason"`
-	TotalDuration      int64                 `json:"total_duration"`
-	LoadDuration       int64                 `json:"load_duration"`
-	PromptEvalDuration int64                 `json:"prompt_eval_duration"`
-	EvalDuration       int64                 `json:"eval_duration"`
-	Logprobs           []ollamaLogprob       `json:"logprobs"`
+	Model                 string                `json:"model"`
+	Message               ollamaResponseMessage `json:"message"`
+	Done                  bool                  `json:"done"`
+	PromptEvalCount       *int                  `json:"prompt_eval_count,omitempty"`
+	PromptEvalCachedCount *int                  `json:"prompt_eval_cached_count,omitempty"`
+	EvalCount             *int                  `json:"eval_count,omitempty"`
+	DoneReason            string                `json:"done_reason"`
+	TotalDuration         int64                 `json:"total_duration"`
+	LoadDuration          int64                 `json:"load_duration"`
+	PromptEvalDuration    int64                 `json:"prompt_eval_duration"`
+	EvalDuration          int64                 `json:"eval_duration"`
+	Logprobs              []ollamaLogprob       `json:"logprobs"`
 }
 
 type ollamaTokenLogprob struct {
@@ -98,6 +117,8 @@ type ollamaEmbeddingRequest struct {
 	Model      string `json:"model"`
 	Input      any    `json:"input"`
 	Dimensions *int   `json:"dimensions,omitempty"`
+	// Ollama otherwise silently truncates inputs that exceed the model context.
+	Truncate bool `json:"truncate"`
 }
 
 type ollamaEmbeddingResponse struct {
@@ -107,11 +128,37 @@ type ollamaEmbeddingResponse struct {
 }
 
 func NewOllama(baseURL string, upstreamStream bool) Ollama {
-	return Ollama{
-		baseURL:        strings.TrimRight(baseURL, "/"),
-		upstreamStream: upstreamStream,
-		client:         newProviderHTTPClient(180 * time.Second),
+	return newOllamaWithToken(baseURL, "", upstreamStream)
+}
+
+func newOllamaWithToken(baseURL, token string, upstreamStream bool) Ollama {
+	client := newProviderHTTPClient(180 * time.Second)
+	if token != "" {
+		client.Transport = ollamaBearerTransport{base: client.Transport, token: token}
 	}
+	return Ollama{
+		baseURL:        normalizeOllamaBaseURL(baseURL),
+		upstreamStream: upstreamStream,
+		client:         client,
+	}
+}
+
+func normalizeOllamaBaseURL(value string) string {
+	value = strings.TrimRight(strings.TrimSpace(value), "/")
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return value
+	}
+	path := strings.TrimRight(parsed.Path, "/")
+	if strings.HasSuffix(path, "/api") {
+		parsed.Path = strings.TrimSuffix(path, "/api")
+	} else if strings.HasSuffix(path, "/v1") {
+		parsed.Path = strings.TrimSuffix(path, "/v1")
+	} else {
+		return value
+	}
+	parsed.RawPath = ""
+	return strings.TrimRight(parsed.String(), "/")
 }
 
 func (Ollama) SupportsVision() bool { return true }
@@ -131,17 +178,22 @@ func (p Ollama) StreamCompletions(ctx context.Context, request openai.Completion
 }
 
 func (p Ollama) completionAdapter() OpenAICompatible {
-	return OpenAICompatible{baseURL: p.baseURL, upstreamStream: p.upstreamStream, completionStreamUsage: true, client: p.client}
+	return OpenAICompatible{baseURL: p.baseURL, upstreamStream: p.upstreamStream, errorProvider: "ollama", exactCompletionUsage: true, completionStreamUsage: true, client: p.client}
 }
 
 func (p Ollama) ChatCompletions(ctx context.Context, request openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
 	if err := p.ValidateChatParameters(request); err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
+	messages, err := ollamaMessages(request.Messages)
+	if err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
+	tools := ollamaChatTools(request)
 	body, err := json.Marshal(ollamaChatRequest{
 		Model:    request.Model,
-		Messages: ollamaMessages(request.Messages),
-		Tools:    request.Tools,
+		Messages: messages,
+		Tools:    tools,
 		Format:   ollamaResponseFormat(request.ResponseFormat),
 		Options:  ollamaRequestOptions(request),
 		Stream:   request.Stream && p.upstreamStream,
@@ -169,18 +221,28 @@ func (p Ollama) ChatCompletions(ctx context.Context, request openai.ChatCompleti
 	}
 
 	var ollamaResp ollamaChatResponse
-	if err := json.NewDecoder(resp.Body).Decode(&ollamaResp); err != nil {
+	if err := decodeOllamaChatResponse(resp.Body, &ollamaResp); err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
+	if !ollamaResp.Done {
+		return openai.ChatCompletionResponse{}, errors.New("Ollama chat response is not complete")
+	}
+	if ollamaResp.Message.Role != "" && ollamaResp.Message.Role != "assistant" {
+		return openai.ChatCompletionResponse{}, errors.New("invalid Ollama chat response role")
+	}
 	message := ollamaResp.Message.openAI()
+	message.Role = "assistant"
 	if err := openai.ValidateChatReasoningContent(message.Role, message.ReasoningContent); err != nil {
 		return openai.ChatCompletionResponse{}, fmt.Errorf("invalid Ollama chat reasoning content: %w", err)
 	}
 	normalizeOllamaToolCalls(&message)
+	if err := validateOllamaResponseToolCalls(message.ToolCalls, tools, nil); err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
 
-	finishReason := ollamaResp.DoneReason
-	if finishReason == "" {
-		finishReason = "stop"
+	finishReason, err := ollamaFinishReason(ollamaResp.DoneReason, len(message.ToolCalls) > 0)
+	if err != nil {
+		return openai.ChatCompletionResponse{}, err
 	}
 	logprobs, logprobText, err := ollamaChoiceLogprobs(ollamaResp.Logprobs)
 	if err != nil || len(ollamaResp.Logprobs) > 0 && logprobText != openai.ContentText(message.Content) {
@@ -189,13 +251,17 @@ func (p Ollama) ChatCompletions(ctx context.Context, request openai.ChatCompleti
 	if request.Logprobs != nil && *request.Logprobs && len(ollamaResp.Logprobs) == 0 && openai.ContentText(message.Content) != "" {
 		return openai.ChatCompletionResponse{}, errors.New("Ollama chat response omitted requested logprobs")
 	}
+	usage, err := ollamaChatUsage(ollamaResp.PromptEvalCount, ollamaResp.PromptEvalCachedCount, ollamaResp.EvalCount)
+	if err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
 	var choiceLogprobs *openai.ChoiceLogprobs
 	if len(ollamaResp.Logprobs) > 0 {
 		choiceLogprobs = &logprobs
 	}
 
 	return openai.ChatCompletionResponse{
-		ID:     "chatcmpl-ollama",
+		ID:     "chatcmpl-" + rand.Text(),
 		Object: "chat.completion",
 		Model:  ollamaResp.Model,
 		Choices: []openai.Choice{
@@ -206,11 +272,7 @@ func (p Ollama) ChatCompletions(ctx context.Context, request openai.ChatCompleti
 				Logprobs:     choiceLogprobs,
 			},
 		},
-		Usage: openai.Usage{
-			PromptTokens:     ollamaResp.PromptEvalCount,
-			CompletionTokens: ollamaResp.EvalCount,
-			TotalTokens:      ollamaResp.PromptEvalCount + ollamaResp.EvalCount,
-		},
+		Usage: usage,
 	}, nil
 }
 
@@ -239,13 +301,10 @@ func (p Ollama) Embeddings(ctx context.Context, request openai.EmbeddingRequest)
 	if err := decodeEmbeddingResponse(resp.Body, &upstream); err != nil {
 		return openai.EmbeddingResponse{}, err
 	}
-	tokens := 0
-	if upstream.PromptEvalCount != nil {
-		tokens = *upstream.PromptEvalCount
-		if tokens < 0 {
-			return openai.EmbeddingResponse{}, errors.New("invalid Ollama embedding usage")
-		}
+	if upstream.PromptEvalCount == nil || *upstream.PromptEvalCount < 0 {
+		return openai.EmbeddingResponse{}, errors.New("invalid Ollama embedding usage")
 	}
+	tokens := *upstream.PromptEvalCount
 	data := make([]openai.Embedding, len(upstream.Embeddings))
 	for index, vector := range upstream.Embeddings {
 		data[index] = openai.Embedding{Object: "embedding", Embedding: vector, Index: index}
@@ -255,7 +314,7 @@ func (p Ollama) Embeddings(ctx context.Context, request openai.EmbeddingRequest)
 	}
 	return openai.EmbeddingResponse{
 		Object: "list", Data: data, Model: upstream.Model,
-		UsageReported: upstream.PromptEvalCount != nil,
+		UsageReported: true,
 		Usage:         openai.Usage{PromptTokens: tokens, TotalTokens: tokens},
 	}, nil
 }
@@ -267,11 +326,16 @@ func (p Ollama) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 	if !p.upstreamStream {
 		return openai.ChatCompletionResponse{}, ErrStreamingUnsupported
 	}
+	messages, err := ollamaMessages(request.Messages)
+	if err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
+	tools := ollamaChatTools(request)
 
 	body, err := json.Marshal(ollamaChatRequest{
 		Model:    request.Model,
-		Messages: ollamaMessages(request.Messages),
-		Tools:    request.Tools,
+		Messages: messages,
+		Tools:    tools,
 		Format:   ollamaResponseFormat(request.ResponseFormat),
 		Options:  ollamaRequestOptions(request),
 		Stream:   true,
@@ -299,7 +363,7 @@ func (p Ollama) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 	}
 
 	response := openai.ChatCompletionResponse{
-		ID:     "chatcmpl-ollama",
+		ID:     "chatcmpl-" + rand.Text(),
 		Object: "chat.completion",
 		Model:  request.Model,
 		Choices: []openai.Choice{
@@ -310,8 +374,9 @@ func (p Ollama) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 		},
 	}
 
-	decoder := json.NewDecoder(resp.Body)
+	decoder := json.NewDecoder(&responseStreamReader{source: resp.Body, remaining: maxResponseStreamBytes})
 	sentRole := false
+	upstreamModel := ""
 	for {
 		var chunk ollamaChatResponse
 		if err := decoder.Decode(&chunk); err != nil {
@@ -320,14 +385,35 @@ func (p Ollama) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 			}
 			return openai.ChatCompletionResponse{}, err
 		}
+		var terminalUsage openai.Usage
+		if chunk.Done {
+			var usageErr error
+			terminalUsage, usageErr = ollamaChatUsage(chunk.PromptEvalCount, chunk.PromptEvalCachedCount, chunk.EvalCount)
+			if usageErr != nil {
+				return openai.ChatCompletionResponse{}, usageErr
+			}
+			if _, reasonErr := ollamaFinishReason(chunk.DoneReason, false); reasonErr != nil {
+				return openai.ChatCompletionResponse{}, reasonErr
+			}
+		}
 		if chunk.Model != "" {
+			if upstreamModel != "" && chunk.Model != upstreamModel {
+				return openai.ChatCompletionResponse{}, errors.New("Ollama chat stream model changed")
+			}
+			upstreamModel = chunk.Model
 			response.Model = chunk.Model
+		}
+		if chunk.Message.Role != "" && chunk.Message.Role != "assistant" {
+			return openai.ChatCompletionResponse{}, errors.New("invalid Ollama chat response role")
 		}
 		message := chunk.Message.openAI()
 		if message.Role != "" {
 			response.Choices[0].Message.Role = message.Role
 		}
 		normalizeOllamaToolCalls(&message)
+		if err := validateOllamaResponseToolCalls(message.ToolCalls, tools, response.Choices[0].Message.ToolCalls); err != nil {
+			return openai.ChatCompletionResponse{}, err
+		}
 		reasoningContent := message.ReasoningContent
 		if reasoningContent != "" {
 			current := response.Choices[0].Message.ReasoningContent
@@ -384,38 +470,85 @@ func (p Ollama) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 		for _, call := range message.ToolCalls {
 			toolIndex := len(response.Choices[0].Message.ToolCalls)
 			response.Choices[0].Message.ToolCalls = append(response.Choices[0].Message.ToolCalls, call)
-			if err := write(openAIChatToolCallChunkPayload(response.ID, response.Model, toolIndex, call)); err != nil {
+			role := ""
+			if !sentRole {
+				role = "assistant"
+				sentRole = true
+			}
+			if err := write(openAIChatToolCallChunkPayload(response.ID, response.Model, toolIndex, call, role)); err != nil {
 				return openai.ChatCompletionResponse{}, err
 			}
 		}
 		if chunk.Done {
-			finishReason := chunk.DoneReason
-			if finishReason == "" {
-				finishReason = "stop"
+			finishReason, reasonErr := ollamaFinishReason(chunk.DoneReason, len(response.Choices[0].Message.ToolCalls) > 0)
+			if reasonErr != nil {
+				return openai.ChatCompletionResponse{}, reasonErr
 			}
 			response.Choices[0].FinishReason = finishReason
-			response.Usage = openai.Usage{
-				PromptTokens:     chunk.PromptEvalCount,
-				CompletionTokens: chunk.EvalCount,
-				TotalTokens:      chunk.PromptEvalCount + chunk.EvalCount,
+			response.Usage = terminalUsage
+			role := ""
+			if !sentRole {
+				role = "assistant"
 			}
-			if err := write(openAIChatCompletionChunkPayload(response.ID, response.Model, 0, "", "", &finishReason)); err != nil {
+			if err := write(openAIChatCompletionChunkPayload(response.ID, response.Model, 0, role, "", &finishReason)); err != nil {
 				return openai.ChatCompletionResponse{}, err
 			}
+			return response, nil
 		}
 	}
-	if response.Choices[0].FinishReason == "" {
-		response.Choices[0].FinishReason = "stop"
+	return openai.ChatCompletionResponse{}, errors.New("Ollama chat stream ended without a terminal chunk")
+}
+
+func ollamaChatUsage(promptTokens, cachedTokens, completionTokens *int) (openai.Usage, error) {
+	if promptTokens == nil || completionTokens == nil || *promptTokens < 0 || *completionTokens < 0 || *promptTokens > math.MaxInt-*completionTokens || cachedTokens != nil && (*cachedTokens < 0 || *cachedTokens > *promptTokens) {
+		return openai.Usage{}, errors.New("invalid Ollama chat usage")
 	}
-	return response, nil
+	usage := openai.Usage{
+		PromptTokens: *promptTokens, CompletionTokens: *completionTokens,
+		TotalTokens: *promptTokens + *completionTokens,
+	}
+	if cachedTokens != nil {
+		usage.PromptTokensDetails = &openai.PromptTokenDetails{CachedTokens: *cachedTokens}
+	}
+	return usage, nil
+}
+
+func ollamaFinishReason(reason string, hasToolCalls bool) (string, error) {
+	if reason != "" && reason != "stop" && reason != "length" {
+		return "", errors.New("invalid Ollama chat finish reason")
+	}
+	if hasToolCalls && (reason == "" || reason == "stop") {
+		return "tool_calls", nil
+	}
+	if reason == "" {
+		return "stop", nil
+	}
+	return reason, nil
+}
+
+func decodeOllamaChatResponse(reader io.Reader, response *ollamaChatResponse) error {
+	payload, err := io.ReadAll(io.LimitReader(reader, maxChatCompletionResponseBytes+1))
+	if err != nil {
+		return err
+	}
+	if len(payload) > maxChatCompletionResponseBytes {
+		return errors.New("Ollama chat response exceeds limit")
+	}
+	return json.Unmarshal(payload, response)
 }
 
 func ollamaThink(reasoningEffort string) any {
 	switch reasoningEffort {
 	case "none":
 		return false
+	case "minimal":
+		return "low"
+	case "xhigh":
+		return "max"
 	case "low", "medium", "high", "max":
 		return reasoningEffort
+	case "default":
+		return nil
 	default:
 		return nil
 	}
@@ -479,7 +612,7 @@ func ollamaOpenAITokenLogprob(item ollamaTokenLogprob) (openai.TokenLogprob, err
 	return openai.TokenLogprob{Token: item.Token, Logprob: item.Logprob, Bytes: bytes, TopLogprobs: []openai.TopLogprob{}}, nil
 }
 
-func ollamaMessages(messages []openai.Message) []ollamaRequestMessage {
+func ollamaMessages(messages []openai.Message) ([]ollamaRequestMessage, error) {
 	converted := make([]ollamaRequestMessage, len(messages))
 	for index, message := range messages {
 		converted[index] = ollamaRequestMessage{
@@ -488,13 +621,13 @@ func ollamaMessages(messages []openai.Message) []ollamaRequestMessage {
 		}
 		attachments, err := openai.ChatImageAttachments([]openai.Message{message})
 		if err != nil {
-			continue
+			return nil, err
 		}
 		for _, attachment := range attachments {
 			converted[index].Images = append(converted[index].Images, attachment.Data)
 		}
 	}
-	return converted
+	return converted, nil
 }
 
 func (message ollamaResponseMessage) openAI() openai.Message {
@@ -524,10 +657,56 @@ func normalizeOllamaToolCalls(message *openai.Message) {
 		return
 	}
 	for index := range message.ToolCalls {
+		if message.ToolCalls[index].ID == "" {
+			message.ToolCalls[index].ID = "call_" + rand.Text()
+		}
 		if message.ToolCalls[index].Type == "" {
 			message.ToolCalls[index].Type = "function"
 		}
 	}
+}
+
+func ollamaToolChoiceSupported(choice any) bool {
+	if choice == nil {
+		return true
+	}
+	value, ok := choice.(string)
+	return ok && (value == "auto" || value == "none")
+}
+
+func ollamaChatTools(request openai.ChatCompletionRequest) []openai.Tool {
+	if choice, ok := request.ToolChoice.(string); ok && choice == "none" {
+		return nil
+	}
+	return request.Tools
+}
+
+func validateOllamaResponseToolCalls(calls []openai.ToolCall, tools []openai.Tool, previous []openai.ToolCall) error {
+	if len(calls)+len(previous) > maxChatStreamToolCalls {
+		return errors.New("invalid Ollama tool call count")
+	}
+	seen := make(map[string]bool, len(calls)+len(previous))
+	for _, call := range previous {
+		seen[call.ID] = true
+	}
+	for _, call := range calls {
+		declared := false
+		for _, tool := range tools {
+			if tool.Type == "function" && tool.Function.Name == call.Function.Name {
+				declared = true
+				break
+			}
+		}
+		if !declared || call.ID == "" || seen[call.ID] || call.Type != "function" || call.Index != nil || call.ExtraContent != nil || len(call.Function.Arguments) > openai.MaxChatFunctionArgumentsChars {
+			return errors.New("invalid Ollama tool call")
+		}
+		var arguments map[string]any
+		if json.Unmarshal([]byte(call.Function.Arguments), &arguments) != nil || arguments == nil {
+			return errors.New("invalid Ollama tool call")
+		}
+		seen[call.ID] = true
+	}
+	return nil
 }
 
 func ollamaRequestOptions(request openai.ChatCompletionRequest) ollamaOptions {
@@ -554,15 +733,110 @@ func ollamaResponseFormat(format *openai.ResponseFormat) any {
 	return nil
 }
 
+func normalizeOllamaResponseText(value any) (any, error) {
+	if value == nil {
+		return nil, nil
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return value, nil
+	}
+	var text map[string]json.RawMessage
+	if json.Unmarshal(encoded, &text) != nil {
+		return value, nil
+	}
+	formatJSON, supplied := text["format"]
+	if !supplied || len(formatJSON) == 0 || string(formatJSON) == "null" {
+		return value, nil
+	}
+	var format map[string]json.RawMessage
+	if json.Unmarshal(formatJSON, &format) != nil || format == nil {
+		return value, nil
+	}
+	var formatType string
+	if json.Unmarshal(format["type"], &formatType) != nil {
+		return nil, &Error{Class: FailureClientRequest, Provider: "ollama", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "text.format.type", Err: errors.New("text format type is required")}
+	}
+	switch formatType {
+	case "text", "json_object":
+		if len(format) != 1 {
+			return nil, &Error{Class: FailureClientRequest, Provider: "ollama", StatusCode: http.StatusBadRequest, UpstreamCode: "unsupported_parameter", Param: "text.format", Err: errors.New("this text format does not accept additional controls")}
+		}
+		if formatType == "text" {
+			return value, nil
+		}
+		text["format"] = json.RawMessage(`{"type":"json_schema","name":"response","schema":{"type":"object"}}`)
+		return text, nil
+	case "json_schema":
+		var schema map[string]json.RawMessage
+		if json.Unmarshal(format["schema"], &schema) != nil || schema == nil {
+			return nil, &Error{Class: FailureClientRequest, Provider: "ollama", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "text.format.schema", Err: errors.New("json_schema requires an object schema")}
+		}
+		for field := range format {
+			if field != "type" && field != "name" && field != "schema" {
+				return nil, &Error{Class: FailureClientRequest, Provider: "ollama", StatusCode: http.StatusBadRequest, UpstreamCode: "unsupported_parameter", Param: "text.format." + field, Err: fmt.Errorf("text format field %s is not supported", field)}
+			}
+		}
+		return value, nil
+	default:
+		return nil, &Error{Class: FailureClientRequest, Provider: "ollama", StatusCode: http.StatusBadRequest, UpstreamCode: "unsupported_parameter", Param: "text.format.type", Err: fmt.Errorf("text format type %q is not supported", formatType)}
+	}
+}
+
+func ollamaResponseReasoning(reasoning *openai.ResponseReasoning) *openai.ResponseReasoning {
+	if reasoning == nil || reasoning.Effort == nil || *reasoning.Effort != "default" {
+		return reasoning
+	}
+	// Ollama uses its model default when effort is omitted.
+	copy := *reasoning
+	copy.Effort = nil
+	return &copy
+}
+
+func ollamaResponseToolChoiceNone(choice any) bool {
+	value, ok := choice.(string)
+	return ok && value == "none"
+}
+
+func ollamaResponseTools(request openai.ResponseRequest) []openai.ResponseTool {
+	if ollamaResponseToolChoiceNone(request.ToolChoice) {
+		return nil
+	}
+	return request.Tools
+}
+
+func validateOllamaResponseOutputTools(response openai.ResponseResponse, tools []openai.ResponseTool) error {
+	for _, item := range response.Output {
+		if item.Type != "function_call" && item.Type != "custom_tool_call" {
+			continue
+		}
+		declared := false
+		for _, tool := range tools {
+			if item.Name == tool.Name && (item.Type == "function_call" && tool.Type == "function" || item.Type == "custom_tool_call" && tool.Type == "custom") {
+				declared = true
+				break
+			}
+		}
+		if !declared {
+			return errors.New("invalid Ollama response tool call")
+		}
+	}
+	return nil
+}
+
 func (p Ollama) Responses(ctx context.Context, request openai.ResponseRequest) (openai.ResponseResponse, error) {
 	if err := p.ValidateResponseParameters(request); err != nil {
 		return openai.ResponseResponse{}, err
 	}
+	text, err := normalizeOllamaResponseText(request.Text)
+	if err != nil {
+		return openai.ResponseResponse{}, err
+	}
 	body, err := json.Marshal(openAICompatibleResponseRequest{
-		Include: request.Include, Store: request.Store, Reasoning: request.Reasoning, Truncation: request.Truncation, TopLogprobs: request.TopLogprobs, Metadata: request.Metadata,
+		Include: request.Include, Store: request.Store, Reasoning: ollamaResponseReasoning(request.Reasoning), Truncation: request.Truncation, TopLogprobs: request.TopLogprobs, Metadata: request.Metadata,
 		Model: request.Model, Input: request.Input, Instructions: request.Instructions,
-		Tools: request.Tools, ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls,
-		Text: request.Text, PreviousResponse: request.PreviousResponse, Stream: false,
+		Tools: ollamaResponseTools(request), ParallelToolCalls: request.ParallelToolCalls,
+		Text: text, PreviousResponse: request.PreviousResponse, Stream: false,
 		MaxOutputTokens: responseOutputTokenLimit(request),
 		Temperature:     request.Temperature, TopP: request.TopP,
 	})
@@ -586,11 +860,16 @@ func (p Ollama) Responses(ctx context.Context, request openai.ResponseRequest) (
 		return openai.ResponseResponse{}, responseStatusError("ollama", resp)
 	}
 
-	var response openai.ResponseResponse
-	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+	response, err := decodeResponseJSON(resp.Body)
+	if err != nil {
 		return openai.ResponseResponse{}, err
 	}
-	response.OutputText = responseText(response)
+	if err := validateOllamaResponseOutputTools(response, ollamaResponseTools(request)); err != nil {
+		return openai.ResponseResponse{}, err
+	}
+	if err := validateExactResponseUsage(response, "Ollama"); err != nil {
+		return openai.ResponseResponse{}, err
+	}
 	return response, nil
 }
 
@@ -601,12 +880,16 @@ func (p Ollama) StreamResponses(ctx context.Context, request openai.ResponseRequ
 	if !p.upstreamStream {
 		return openai.ResponseResponse{}, ErrStreamingUnsupported
 	}
+	text, err := normalizeOllamaResponseText(request.Text)
+	if err != nil {
+		return openai.ResponseResponse{}, err
+	}
 
 	body, err := json.Marshal(openAICompatibleResponseRequest{
-		Include: request.Include, Store: request.Store, Reasoning: request.Reasoning, Truncation: request.Truncation, TopLogprobs: request.TopLogprobs, Metadata: request.Metadata,
+		Include: request.Include, Store: request.Store, Reasoning: ollamaResponseReasoning(request.Reasoning), Truncation: request.Truncation, TopLogprobs: request.TopLogprobs, Metadata: request.Metadata,
 		Model: request.Model, Input: request.Input, Instructions: request.Instructions,
-		Tools: request.Tools, ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls,
-		Text: request.Text, PreviousResponse: request.PreviousResponse, Stream: true,
+		Tools: ollamaResponseTools(request), ParallelToolCalls: request.ParallelToolCalls,
+		Text: text, PreviousResponse: request.PreviousResponse, Stream: true,
 		MaxOutputTokens: responseOutputTokenLimit(request),
 		Temperature:     request.Temperature, TopP: request.TopP,
 	})
@@ -630,7 +913,26 @@ func (p Ollama) StreamResponses(ctx context.Context, request openai.ResponseRequ
 		return openai.ResponseResponse{}, responseStatusError("ollama", resp)
 	}
 
-	return streamResponseData(resp.Body, request.Model, write)
+	response, err := streamResponseDataValidated(resp.Body, request.Model, func(event, payload string) error {
+		if event == "response.completed" || event == "response.incomplete" {
+			if err := validateExactResponseTerminalUsage(payload, "Ollama"); err != nil {
+				return err
+			}
+		}
+		if write != nil {
+			return write(event, payload)
+		}
+		return nil
+	}, func(response openai.ResponseResponse) error {
+		return validateOllamaResponseOutputTools(response, ollamaResponseTools(request))
+	})
+	if err != nil {
+		return openai.ResponseResponse{}, err
+	}
+	if err := validateExactResponseUsage(response, "Ollama"); err != nil {
+		return openai.ResponseResponse{}, err
+	}
+	return response, nil
 }
 
 func responseText(response openai.ResponseResponse) string {

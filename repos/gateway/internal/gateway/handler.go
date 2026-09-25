@@ -18,6 +18,7 @@ import (
 	"ai-gateway-gateway/internal/batchstate"
 	"ai-gateway-gateway/internal/cachedstate"
 	"ai-gateway-gateway/internal/containerstate"
+	"ai-gateway-gateway/internal/conversationstate"
 	"ai-gateway-gateway/internal/filestate"
 	"ai-gateway-gateway/internal/finetunestate"
 	"ai-gateway-gateway/internal/mcpclient"
@@ -34,61 +35,63 @@ import (
 )
 
 type Handler struct {
-	pipeline          modules.Pipeline
-	resourceBilling   modules.Pipeline
-	provider          provider.Provider
-	rateLimits        RateLimitStore
-	metrics           *Metrics
-	ready             func(context.Context) error
-	management        ManagementClient
-	directory         IdentityDirectoryClient
-	organizations     OrganizationDirectoryClient
-	dlp               modules.Module
-	av                modules.Module
-	anonymizer        modules.Module
-	guardrails        *GuardrailMonitor
-	cacheConfig       CacheRuntimeConfig
-	logging           *LoggingRegistry
-	agents            *AgentRegistry
-	a2aTasks          a2astate.Store
-	a2aTaskConfig     A2ATaskRuntimeConfig
-	assistants        assistantstate.Store
-	assistantThreads  assistantstate.ThreadStore
-	assistantRuns     assistantstate.RunStore
-	assistantConfig   AssistantRuntimeConfig
-	a2aSubscriptions  chan struct{}
-	a2aHTTPClient     httpDoer
-	a2aPushJobs       asyncstate.Store
-	a2aPushConfigs    a2astate.AtomicOutboxStore
-	a2aPushVault      *a2aPushVault
-	mcp               *MCPRegistry
-	mcpRuntime        MCPRuntimeFactory
-	mcpRuntimeCache   *mcpRuntimeCache
-	mcpCalls          mcpstate.Store
-	files             filestate.Store
-	fileConfig        FileRuntimeConfig
-	batches           batchstate.Store
-	fineTuning        finetunestate.Store
-	fineTuningJobs    asyncstate.Store
-	videos            videostate.Store
-	containers        containerstate.Store
-	cachedContents    cachedstate.Store
-	videoJobs         asyncstate.Store
-	batchJobs         asyncstate.Store
-	skills            skillstate.Store
-	vectorStores      vectorstate.Store
-	ragIngest         ragstate.Store
-	vectorStoreConfig VectorStoreRuntimeConfig
-	access            *AccessRegistry
-	budgets           BudgetManagementClient
-	usage             UsageManagementClient
-	requestLogs       RequestLogClient
-	models            *modelcatalog.Registry
-	audit             AuditClient
-	apiDocs           apiDocsConfig
-	adminUI           bool
-	browserSSO        *BrowserSSO
-	adminState        *AdminStateRuntime
+	pipeline           modules.Pipeline
+	resourceBilling    modules.Pipeline
+	provider           provider.Provider
+	rateLimits         RateLimitStore
+	metrics            *Metrics
+	ready              func(context.Context) error
+	management         ManagementClient
+	directory          IdentityDirectoryClient
+	organizations      OrganizationDirectoryClient
+	dlp                modules.Module
+	av                 modules.Module
+	anonymizer         modules.Module
+	guardrails         *GuardrailMonitor
+	cacheConfig        CacheRuntimeConfig
+	logging            *LoggingRegistry
+	agents             *AgentRegistry
+	a2aTasks           a2astate.Store
+	a2aTaskConfig      A2ATaskRuntimeConfig
+	assistants         assistantstate.Store
+	assistantThreads   assistantstate.ThreadStore
+	assistantRuns      assistantstate.RunStore
+	assistantConfig    AssistantRuntimeConfig
+	a2aSubscriptions   chan struct{}
+	a2aHTTPClient      httpDoer
+	a2aPushJobs        asyncstate.Store
+	a2aPushConfigs     a2astate.AtomicOutboxStore
+	a2aPushVault       *a2aPushVault
+	mcp                *MCPRegistry
+	mcpRuntime         MCPRuntimeFactory
+	mcpRuntimeCache    *mcpRuntimeCache
+	mcpCalls           mcpstate.Store
+	files              filestate.Store
+	fileConfig         FileRuntimeConfig
+	batches            batchstate.Store
+	fineTuning         finetunestate.Store
+	fineTuningJobs     asyncstate.Store
+	videos             videostate.Store
+	containers         containerstate.Store
+	cachedContents     cachedstate.Store
+	conversations      conversationstate.Store
+	conversationConfig ConversationRuntimeConfig
+	videoJobs          asyncstate.Store
+	batchJobs          asyncstate.Store
+	skills             skillstate.Store
+	vectorStores       vectorstate.Store
+	ragIngest          ragstate.Store
+	vectorStoreConfig  VectorStoreRuntimeConfig
+	access             *AccessRegistry
+	budgets            BudgetManagementClient
+	usage              UsageManagementClient
+	requestLogs        RequestLogClient
+	models             *modelcatalog.Registry
+	audit              AuditClient
+	apiDocs            apiDocsConfig
+	adminUI            bool
+	browserSSO         *BrowserSSO
+	adminState         *AdminStateRuntime
 }
 
 func (h Handler) WithBatchStore(store batchstate.Store, jobs asyncstate.Store) Handler {
@@ -255,6 +258,12 @@ func (h Handler) serveChatAs(w http.ResponseWriter, r *http.Request, request ope
 	h.serveChatAdapted(w, r, request, apiType, nil)
 }
 
+type chatResponseAdapter struct {
+	transform func(openai.ChatCompletionResponse) (any, error)
+	decorate  func(*openai.ChatCompletionResponse)
+	stream    func(string) ([]string, error)
+}
+
 func validateChatRequest(request openai.ChatCompletionRequest) string {
 	if err := openai.ValidateLegacyFunctionRequest(request); err != nil {
 		return err.Error()
@@ -325,6 +334,10 @@ func responseAttachmentError(input any) (string, error) {
 }
 
 func (h Handler) serveChatAdapted(w http.ResponseWriter, r *http.Request, request openai.ChatCompletionRequest, apiType string, transform func(openai.ChatCompletionResponse) (any, error)) {
+	h.serveChatWithAdapter(w, r, request, apiType, chatResponseAdapter{transform: transform})
+}
+
+func (h Handler) serveChatWithAdapter(w http.ResponseWriter, r *http.Request, request openai.ChatCompletionRequest, apiType string, adapter chatResponseAdapter) {
 	if message := validateChatRequest(request); message != "" {
 		writeError(w, http.StatusBadRequest, "invalid_request", message)
 		return
@@ -395,6 +408,11 @@ func (h Handler) serveChatAdapted(w http.ResponseWriter, r *http.Request, reques
 		return
 	}
 	request = reqCtx.Request
+	if err := h.resolveGeminiMCPServers(&reqCtx); err != nil {
+		writeGeminiMCPError(w, err)
+		return
+	}
+	request = reqCtx.Request
 	if err := openai.ValidateLegacyFunctionRequest(request); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
@@ -410,6 +428,9 @@ func (h Handler) serveChatAdapted(w http.ResponseWriter, r *http.Request, reques
 	if request.GeminiGoogleMaps {
 		toolIdentifiers = append(toolIdentifiers, "google_maps")
 	}
+	toolIdentifiers = append(toolIdentifiers, openai.GeminiFileSearchToolIdentifiers(request.GeminiFileSearch)...)
+	toolIdentifiers = append(toolIdentifiers, openai.GeminiComputerUseToolIdentifiers(request.GeminiComputerUse)...)
+	toolIdentifiers = append(toolIdentifiers, request.GeminiMCPConnectorIDs...)
 	if request.AnthropicCodeExecution {
 		toolIdentifiers = append(toolIdentifiers, "code_execution")
 	}
@@ -432,20 +453,33 @@ func (h Handler) serveChatAdapted(w http.ResponseWriter, r *http.Request, reques
 		includeUsage := request.StreamOptions != nil && request.StreamOptions.IncludeUsage
 		usageDelivered := false
 		writeStreamPayload := func(payload string) error {
-			payload, hasUsage, deliver, err := transformChatStreamPayload(payload, request.StreamOptions, includeUsage)
-			if err != nil {
-				return err
+			payloads := []string{payload}
+			if adapter.stream != nil {
+				var err error
+				payloads, err = adapter.stream(payload)
+				if err != nil {
+					return err
+				}
 			}
-			usageDelivered = usageDelivered || hasUsage && deliver
-			if !deliver {
-				return nil
+			for _, item := range payloads {
+				transformed, hasUsage, deliver, err := transformChatStreamPayload(item, request.StreamOptions, includeUsage)
+				if err != nil {
+					return err
+				}
+				usageDelivered = usageDelivered || hasUsage && deliver
+				if !deliver {
+					continue
+				}
+				if !streamStarted {
+					writeStreamHeaders(w)
+					w.WriteHeader(http.StatusOK)
+					streamStarted = true
+				}
+				if err := writeSSEPayload(w, transformed); err != nil {
+					return err
+				}
 			}
-			if !streamStarted {
-				writeStreamHeaders(w)
-				w.WriteHeader(http.StatusOK)
-				streamStarted = true
-			}
-			return writeSSEPayload(w, payload)
+			return nil
 		}
 		if response, streamed, err := h.provider.StreamChatCompletions(r.Context(), reqCtx, writeStreamPayload); streamed {
 			if err != nil {
@@ -483,6 +517,9 @@ func (h Handler) serveChatAdapted(w http.ResponseWriter, r *http.Request, reques
 		writeSkillExecutionError(w, err)
 		return
 	}
+	if adapter.decorate != nil {
+		adapter.decorate(&response)
+	}
 	if sink, ok := w.(interface {
 		chatResult(openai.ChatCompletionResponse, bool)
 	}); ok {
@@ -494,8 +531,8 @@ func (h Handler) serveChatAdapted(w http.ResponseWriter, r *http.Request, reques
 		writeChatCompletionStream(w, response, request.StreamOptions)
 		return
 	}
-	if transform != nil {
-		adapted, err := transform(response)
+	if adapter.transform != nil {
+		adapted, err := adapter.transform(response)
 		if err != nil {
 			writeProviderFailure(w, err)
 			return
@@ -736,11 +773,30 @@ func (h Handler) serveResponsesAs(w http.ResponseWriter, r *http.Request, reques
 		return
 	}
 	reqCtx.APIKey = ""
+	if request.Conversation != nil {
+		conversationProvider, ok := h.provider.(provider.ConversationProvider)
+		if !ok {
+			writeProviderFailure(w, provider.ErrConversationStorageUnavailable)
+			return
+		}
+		prepared, err := conversationProvider.PrepareConversation(r.Context(), reqCtx)
+		if err != nil {
+			writeProviderFailure(w, err)
+			return
+		}
+		reqCtx = prepared
+		defer func() {
+			releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
+			defer cancel()
+			conversationProvider.ReleaseConversation(releaseCtx, &reqCtx)
+		}()
+	}
 	if reqCtx.ResponseRequest == nil {
 		writeError(w, http.StatusBadGateway, "module_failed", "module removed inference request")
 		return
 	}
 	request = *reqCtx.ResponseRequest
+	reqCtx.Request.Messages = responseMessages(request)
 	if message := request.ValidateEnvelope(); message != "" {
 		writeError(w, http.StatusBadGateway, "module_failed", "module produced an invalid inference request: "+message)
 		return
@@ -922,6 +978,10 @@ func (h Handler) CompactResponse(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", message)
 		return
 	}
+	if kind, err := responseAttachmentError(request.Input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_"+kind, err.Error())
+		return
+	}
 	responseRequest := openai.ResponseRequest{Provider: request.Provider, Model: request.Model, Input: request.Input, Instructions: request.Instructions}
 	reqCtx := modules.RequestContext{
 		APIKey: bearerToken(r.Header.Get("Authorization")), RequestID: executionID(w), SessionID: sessionID(r),
@@ -929,12 +989,32 @@ func (h Handler) CompactResponse(w http.ResponseWriter, r *http.Request) {
 		Request:         openai.ChatCompletionRequest{Provider: request.Provider, Model: request.Model, Messages: responseMessages(responseRequest)},
 		Metadata:        map[string]string{"gateway.api_type": "responses_compact"},
 	}
-	if err := h.pipeline.Run(r.Context(), &reqCtx); err != nil {
-		if errors.Is(err, modules.ErrUnauthorized) {
+	var pipelineErr error
+	computerOutputs, _ := openai.InspectResponseComputerCallOutputs(request.Input)
+	if responseComputerOutputsHaveFiles(computerOutputs) {
+		pipelineErr = h.pipeline.RunAuthentication(r.Context(), &reqCtx)
+		if pipelineErr == nil {
+			reqCtx.APIKey = ""
+			if err := h.resolveResponseComputerScreenshots(r.Context(), reqCtx, reqCtx.ResponseRequest); err != nil {
+				if errors.Is(err, errResponseComputerFileStorageUnavailable) {
+					writeError(w, http.StatusServiceUnavailable, "file_storage_unavailable", err.Error())
+				} else {
+					writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+				}
+				return
+			}
+			reqCtx.Request.Messages = responseMessages(*reqCtx.ResponseRequest)
+			pipelineErr = h.pipeline.RunAfterAuthentication(r.Context(), &reqCtx)
+		}
+	} else {
+		pipelineErr = h.pipeline.Run(r.Context(), &reqCtx)
+	}
+	if pipelineErr != nil {
+		if errors.Is(pipelineErr, modules.ErrUnauthorized) {
 			writeError(w, http.StatusUnauthorized, "unauthorized", "invalid api key")
 			return
 		}
-		writeError(w, http.StatusBadGateway, "module_failed", err.Error())
+		writeError(w, http.StatusBadGateway, "module_failed", pipelineErr.Error())
 		return
 	}
 	reqCtx.APIKey = ""
@@ -950,7 +1030,17 @@ func (h Handler) CompactResponse(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "module_failed", "module produced an invalid response compaction request: "+message)
 		return
 	}
-	if !h.prepareAccessGroups(w, &reqCtx) || !h.authorizeAccess(w, r.Context(), reqCtx, request.Model, estimateResponseCompactTokens(request)) {
+	if kind, err := responseAttachmentError(request.Input); err != nil {
+		writeError(w, http.StatusBadGateway, "module_failed", "module produced invalid "+kind+" input: "+err.Error())
+		return
+	}
+	if !h.prepareAccessGroups(w, &reqCtx) {
+		return
+	}
+	toolIdentifiers, validTools := responseRequestToolIdentifiers(*reqCtx.ResponseRequest)
+	if !h.authorizeTools(w, reqCtx, toolIdentifiers, validTools) ||
+		!h.authorizeResponseToolResources(w, r.Context(), &reqCtx, reqCtx.ResponseRequest) ||
+		!h.authorizeAccess(w, r.Context(), reqCtx, request.Model, estimateResponseCompactTokens(request)) {
 		return
 	}
 	if !h.prepareModelFallbacks(w, r.Context(), &reqCtx, request.Model) {
@@ -986,6 +1076,13 @@ func validateResponseCompactRequest(request openai.ResponseCompactRequest) strin
 		return "input is required"
 	default:
 		return "input must be a string or a non-empty array"
+	}
+	responseRequest := openai.ResponseRequest{Provider: request.Provider, Model: request.Model, Input: request.Input, Instructions: request.Instructions}
+	if message := responseRequest.ValidateEnvelope(); message != "" {
+		return message
+	}
+	if message := responseRequest.Validate(); message != "" {
+		return message
 	}
 	return ""
 }
@@ -2042,6 +2139,18 @@ func decodeInferenceRequest(w http.ResponseWriter, r *http.Request, target any) 
 }
 
 func writeProviderFailure(w http.ResponseWriter, err error) {
+	if errors.Is(err, provider.ErrConversationNotFound) {
+		writeError(w, http.StatusNotFound, "conversation_not_found", "conversation not found")
+		return
+	}
+	if errors.Is(err, provider.ErrConversationConflict) {
+		writeError(w, http.StatusConflict, "conversation_conflict", "conversation has another active request")
+		return
+	}
+	if errors.Is(err, provider.ErrConversationStorageUnavailable) {
+		writeError(w, http.StatusServiceUnavailable, "conversation_storage_unavailable", "conversation storage is unavailable")
+		return
+	}
 	if errors.Is(err, provider.ErrCachedContentPolicyChanged) {
 		writeError(w, http.StatusConflict, "cached_content_policy_changed", "cached content effective policy has changed")
 		return
@@ -2282,19 +2391,23 @@ func writeChatCompletionStream(w http.ResponseWriter, response openai.ChatComple
 		for index := range calls {
 			calls[index].Index = &index
 		}
+		delta := map[string]any{
+			"role":          choice.Message.Role,
+			"content":       openai.ContentText(choice.Message.Content),
+			"refusal":       choice.Message.Refusal,
+			"audio":         choice.Message.Audio,
+			"function_call": choice.Message.FunctionCall,
+			"tool_calls":    calls,
+		}
+		if len(choice.Message.Annotations) > 0 {
+			delta["annotations"] = choice.Message.Annotations
+		}
 		content := envelope()
 		content["choices"] = []map[string]any{
 			{
-				"index":    choice.Index,
-				"logprobs": choice.Logprobs,
-				"delta": map[string]any{
-					"role":          choice.Message.Role,
-					"content":       openai.ContentText(choice.Message.Content),
-					"refusal":       choice.Message.Refusal,
-					"audio":         choice.Message.Audio,
-					"function_call": choice.Message.FunctionCall,
-					"tool_calls":    calls,
-				},
+				"index":         choice.Index,
+				"logprobs":      choice.Logprobs,
+				"delta":         delta,
 				"finish_reason": nil,
 			},
 		}

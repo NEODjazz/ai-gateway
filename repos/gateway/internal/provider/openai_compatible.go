@@ -41,7 +41,7 @@ type openAICompatibleChatRequest struct {
 	Seed                *int64                         `json:"seed,omitempty"`
 	RandomSeed          *int64                         `json:"random_seed,omitempty"`
 	UserID              string                         `json:"user_id,omitempty"`
-	Thinking            *deepSeekThinking              `json:"thinking,omitempty"`
+	NativeThinking      *deepSeekThinking              `json:"thinking,omitempty"`
 }
 
 type deepSeekThinking struct {
@@ -82,6 +82,8 @@ func (r openAICompatibleChatRequest) MarshalJSON() ([]byte, error) {
 
 type openAICompatibleResponseRequest struct {
 	Metadata             map[string]string             `json:"metadata,omitempty"`
+	ContextManagement    []openai.ResponseContextEntry `json:"context_management,omitempty"`
+	Moderation           *openai.ProviderModeration    `json:"moderation,omitempty"`
 	TopLogprobs          *int                          `json:"top_logprobs,omitempty"`
 	Truncation           *string                       `json:"truncation,omitempty"`
 	Reasoning            *openai.ResponseReasoning     `json:"reasoning,omitempty"`
@@ -176,6 +178,10 @@ type OpenAICompatible struct {
 	baseURL               string
 	apiKey                string
 	errorProvider         string
+	exactChatUsage        bool
+	exactResponseUsage    bool
+	exactEmbeddingUsage   bool
+	exactCompletionUsage  bool
 	upstreamStream        bool
 	rerankPath            string
 	completionStreamUsage bool
@@ -226,7 +232,13 @@ func (p OpenAICompatible) mapChatParameters(request *openAICompatibleChatRequest
 		}
 		request.UserID = request.User
 		request.User = ""
-		request.Thinking = &deepSeekThinking{Type: "disabled"}
+		thinkingType := "disabled"
+		if request.Thinking != nil {
+			thinkingType = request.Thinking.Type
+		} else if request.ReasoningEffort != "" && request.ReasoningEffort != "none" {
+			thinkingType = "enabled"
+		}
+		request.NativeThinking = &deepSeekThinking{Type: thinkingType}
 	case "nvidia-nim":
 		if request.MaxCompletionTokens != nil {
 			request.MaxTokens = request.MaxCompletionTokens
@@ -410,10 +422,31 @@ func (p OpenAICompatible) completion(ctx context.Context, request openai.Complet
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return openai.CompletionResponse{}, responseStatusError(p.providerName(), resp)
 	}
+	var response openai.CompletionResponse
 	if stream {
-		return streamCompletionData(resp.Body, request, write)
+		forward := write
+		if p.exactCompletionUsage {
+			forward = func(payload string) error {
+				if err := validateExactPromptCompletionUsageChunk(payload, p.providerName()+" Completions"); err != nil {
+					return err
+				}
+				if write != nil {
+					return write(payload)
+				}
+				return nil
+			}
+		}
+		response, err = streamCompletionData(resp.Body, request, forward)
+	} else {
+		response, err = decodeCompletionResponse(resp.Body)
 	}
-	return decodeCompletionResponse(resp.Body)
+	if err != nil {
+		return openai.CompletionResponse{}, err
+	}
+	if p.exactCompletionUsage && (!response.UsageReported || response.Usage.TotalTokens != response.Usage.PromptTokens+response.Usage.CompletionTokens) {
+		return openai.CompletionResponse{}, fmt.Errorf("%s Completions requires exact prompt, completion and total token usage", p.providerName())
+	}
+	return response, nil
 }
 
 func streamCompletionData(body io.Reader, request openai.CompletionRequest, write CompletionStreamWriter) (openai.CompletionResponse, error) {
@@ -470,6 +503,11 @@ func streamCompletionData(body io.Reader, request openai.CompletionRequest, writ
 				return err
 			}
 			response.Usage = *chunk.Usage
+			reported, err := completeChatUsageFields([]byte(payload))
+			if err != nil {
+				return err
+			}
+			response.UsageReported = reported
 		}
 		for _, choice := range chunk.Choices {
 			if choice.Index < 0 || choice.Index >= 128 {
@@ -580,6 +618,9 @@ func (p OpenAICompatible) chatCompletions(ctx context.Context, request openai.Ch
 		if err == nil {
 			err = validateCompletionUsage(response.Usage)
 		}
+		if err == nil && p.exactChatUsage {
+			err = validateExactChatUsage(response)
+		}
 		if err == nil {
 			err = validateRequestedChatChoices(request, response)
 		}
@@ -602,6 +643,11 @@ func (p OpenAICompatible) chatCompletions(ctx context.Context, request openai.Ch
 	if err := validateCompletionUsage(response.Usage); err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
+	if p.exactChatUsage {
+		if err := validateExactChatUsage(response); err != nil {
+			return openai.ChatCompletionResponse{}, err
+		}
+	}
 	if err := validateRequestedChatChoices(request, response); err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
@@ -620,6 +666,9 @@ func validateChatCompletionEnvelope(response openai.ChatCompletionResponse) erro
 	}
 	if message := openai.ValidateMetadata(response.Metadata); message != "" {
 		return fmt.Errorf("provider returned invalid chat completion metadata: %s", message)
+	}
+	if !openai.ValidReportedServiceTier(response.ServiceTier) {
+		return errors.New("provider returned invalid chat completion service tier")
 	}
 	for _, choice := range response.Choices {
 		if err := openai.ValidateLegacyFunctionResponse(choice.Message.FunctionCall); err != nil {
@@ -651,7 +700,60 @@ func decodeChatCompletionResponse(reader io.Reader, target *openai.ChatCompletio
 	if len(payload) > maxChatCompletionResponseBytes {
 		return errors.New("chat completion response exceeds limit")
 	}
-	return json.Unmarshal(payload, target)
+	if err := json.Unmarshal(payload, target); err != nil {
+		return err
+	}
+	reported, err := completeChatUsageFields(payload)
+	if err != nil {
+		return err
+	}
+	target.UsageReported = reported
+	return nil
+}
+
+func completeChatUsageFields(payload []byte) (bool, error) {
+	var wire struct {
+		Usage *struct {
+			PromptTokens     *int `json:"prompt_tokens"`
+			CompletionTokens *int `json:"completion_tokens"`
+			TotalTokens      *int `json:"total_tokens"`
+		} `json:"usage"`
+	}
+	if err := json.Unmarshal(payload, &wire); err != nil {
+		return false, err
+	}
+	return wire.Usage != nil && wire.Usage.PromptTokens != nil && wire.Usage.CompletionTokens != nil && wire.Usage.TotalTokens != nil, nil
+}
+
+func validateExactChatUsage(response openai.ChatCompletionResponse) error {
+	if !response.UsageReported || response.Usage.TotalTokens != response.Usage.PromptTokens+response.Usage.CompletionTokens {
+		return errors.New("Azure Chat requires exact prompt, completion and total token usage")
+	}
+	return nil
+}
+
+func validateExactPromptCompletionUsageChunk(payload, operation string) error {
+	var chunk struct {
+		Usage json.RawMessage `json:"usage"`
+	}
+	if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
+		return err
+	}
+	if len(chunk.Usage) == 0 || bytes.Equal(bytes.TrimSpace(chunk.Usage), []byte("null")) {
+		return nil
+	}
+	var usage openai.Usage
+	if err := json.Unmarshal(chunk.Usage, &usage); err != nil {
+		return err
+	}
+	reported, err := completeChatUsageFields([]byte(payload))
+	if err != nil {
+		return err
+	}
+	if !reported || usage.TotalTokens != usage.PromptTokens+usage.CompletionTokens {
+		return fmt.Errorf("%s requires exact prompt, completion and total token usage", operation)
+	}
+	return nil
 }
 
 func validateRequestedChatChoices(request openai.ChatCompletionRequest, response openai.ChatCompletionResponse) error {
@@ -727,6 +829,9 @@ func (p OpenAICompatible) Embeddings(ctx context.Context, request openai.Embeddi
 	if err := validateEmbeddingVectors(request, response.Data); err != nil {
 		return openai.EmbeddingResponse{}, err
 	}
+	if p.exactEmbeddingUsage && (!response.UsageReported || response.Usage.TotalTokens != response.Usage.PromptTokens) {
+		return openai.EmbeddingResponse{}, errors.New("Azure embeddings requires exact prompt and total token usage")
+	}
 	return response, nil
 }
 
@@ -767,7 +872,19 @@ func (p OpenAICompatible) streamChatCompletions(ctx context.Context, request ope
 	}
 	defer resp.Body.Close()
 
-	response, err := streamChatCompletionDataWithNormalizer(resp.Body, request.Model, write, normalizeStream)
+	forward := write
+	if p.exactChatUsage {
+		forward = func(payload string) error {
+			if err := validateExactPromptCompletionUsageChunk(payload, "Azure Chat"); err != nil {
+				return err
+			}
+			if write != nil {
+				return write(payload)
+			}
+			return nil
+		}
+	}
+	response, err := streamChatCompletionDataWithNormalizer(resp.Body, request.Model, forward, normalizeStream)
 	if err == nil {
 		err = validateChatCompletionEnvelope(response)
 	}
@@ -779,6 +896,9 @@ func (p OpenAICompatible) streamChatCompletions(ctx context.Context, request ope
 	}
 	if err == nil {
 		err = validateRequestedLegacyFunctionCalls(request, response)
+	}
+	if err == nil && p.exactChatUsage {
+		err = validateExactChatUsage(response)
 	}
 	return response, err
 }
@@ -843,7 +963,7 @@ func (p OpenAICompatible) Responses(ctx context.Context, request openai.Response
 		return openai.ResponseResponse{}, err
 	}
 	body, err := json.Marshal(openAICompatibleResponseRequest{
-		Include: request.Include, Store: request.Store, Reasoning: request.Reasoning, Truncation: request.Truncation, TopLogprobs: request.TopLogprobs, Metadata: request.Metadata,
+		Include: request.Include, Store: request.Store, Reasoning: request.Reasoning, Truncation: request.Truncation, TopLogprobs: request.TopLogprobs, Metadata: request.Metadata, ContextManagement: request.ContextManagement, Moderation: request.Moderation,
 		Model: request.Model, Input: request.Input, Instructions: request.Instructions,
 		Tools: request.Tools, ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls,
 		Text: request.Text, PreviousResponse: request.PreviousResponse, User: request.User, SafetyIdentifier: request.SafetyIdentifier, PromptCacheKey: request.PromptCacheKey, PromptCacheOptions: request.PromptCacheOptions, PromptCacheRetention: request.PromptCacheRetention, ServiceTier: request.ServiceTier, Background: request.Background, Stream: false, StreamOptions: request.StreamOptions,
@@ -874,7 +994,16 @@ func (p OpenAICompatible) Responses(ctx context.Context, request openai.Response
 		return openai.ResponseResponse{}, responseStatusError(p.providerName(), resp)
 	}
 
-	return decodeResponseJSON(resp.Body)
+	response, err := decodeResponseJSON(resp.Body)
+	if err != nil {
+		return openai.ResponseResponse{}, err
+	}
+	if p.exactResponseUsage {
+		if err := validateExactResponseUsage(response, "Azure"); err != nil {
+			return openai.ResponseResponse{}, err
+		}
+	}
+	return response, nil
 }
 
 func (p OpenAICompatible) StreamResponses(ctx context.Context, request openai.ResponseRequest, write ResponseStreamWriter) (openai.ResponseResponse, error) {
@@ -886,7 +1015,7 @@ func (p OpenAICompatible) StreamResponses(ctx context.Context, request openai.Re
 	}
 
 	body, err := json.Marshal(openAICompatibleResponseRequest{
-		Include: request.Include, Store: request.Store, Reasoning: request.Reasoning, Truncation: request.Truncation, TopLogprobs: request.TopLogprobs, Metadata: request.Metadata,
+		Include: request.Include, Store: request.Store, Reasoning: request.Reasoning, Truncation: request.Truncation, TopLogprobs: request.TopLogprobs, Metadata: request.Metadata, ContextManagement: request.ContextManagement, Moderation: request.Moderation,
 		Model: request.Model, Input: request.Input, Instructions: request.Instructions,
 		Tools: request.Tools, ToolChoice: request.ToolChoice, ParallelToolCalls: request.ParallelToolCalls,
 		Text: request.Text, PreviousResponse: request.PreviousResponse, User: request.User, SafetyIdentifier: request.SafetyIdentifier, PromptCacheKey: request.PromptCacheKey, PromptCacheOptions: request.PromptCacheOptions, PromptCacheRetention: request.PromptCacheRetention, ServiceTier: request.ServiceTier, Stream: true, StreamOptions: request.StreamOptions,
@@ -917,7 +1046,30 @@ func (p OpenAICompatible) StreamResponses(ctx context.Context, request openai.Re
 		return openai.ResponseResponse{}, responseStatusError(p.providerName(), resp)
 	}
 
-	return streamResponseData(resp.Body, request.Model, write)
+	forward := write
+	if p.exactResponseUsage {
+		forward = func(event, payload string) error {
+			if event == "response.completed" || event == "response.incomplete" {
+				if err := validateExactResponseTerminalUsage(payload, "Azure"); err != nil {
+					return err
+				}
+			}
+			if write != nil {
+				return write(event, payload)
+			}
+			return nil
+		}
+	}
+	response, err := streamResponseData(resp.Body, request.Model, forward)
+	if err != nil {
+		return openai.ResponseResponse{}, err
+	}
+	if p.exactResponseUsage {
+		if err := validateExactResponseUsage(response, "Azure"); err != nil {
+			return openai.ResponseResponse{}, err
+		}
+	}
+	return response, nil
 }
 
 func providerURL(baseURL string, path string) string {
@@ -977,7 +1129,7 @@ func streamChatCompletionDataWithNormalizer(body io.Reader, fallbackModel string
 		},
 	}
 	var idSeen, modelSeen, createdSeen, metadataSeen, serviceTierSeen, fingerprintSeen bool
-	err := scanSSEData(body, func(payload string) error {
+	err := scanSSEData(&responseStreamReader{source: body, remaining: maxResponseStreamBytes}, func(payload string) error {
 		if payload == "[DONE]" {
 			return io.EOF
 		}
@@ -1050,6 +1202,9 @@ func streamChatCompletionDataWithNormalizer(body io.Reader, fallbackModel string
 			metadataSeen = true
 		}
 		if chunk.ServiceTier != "" {
+			if !openai.ValidReportedServiceTier(chunk.ServiceTier) {
+				return errors.New("provider returned invalid chat completion service tier")
+			}
 			if serviceTierSeen && response.ServiceTier != chunk.ServiceTier {
 				return errors.New("provider changed chat completion service tier during stream")
 			}
@@ -1068,6 +1223,11 @@ func streamChatCompletionDataWithNormalizer(body io.Reader, fallbackModel string
 				return err
 			}
 			response.Usage = *chunk.Usage
+			reported, err := completeChatUsageFields([]byte(payload))
+			if err != nil {
+				return err
+			}
+			response.UsageReported = reported
 		}
 		for _, choice := range chunk.Choices {
 			if choice.Index < 0 || choice.Index >= maxChatStreamChoices {
@@ -1272,6 +1432,10 @@ func decodeResponseStream(body io.Reader, fallbackModel string) (openai.Response
 }
 
 func streamResponseData(body io.Reader, fallbackModel string, write ResponseStreamWriter) (openai.ResponseResponse, error) {
+	return streamResponseDataValidated(body, fallbackModel, write, nil)
+}
+
+func streamResponseDataValidated(body io.Reader, fallbackModel string, write ResponseStreamWriter, validate func(openai.ResponseResponse) error) (openai.ResponseResponse, error) {
 	response := openai.ResponseResponse{
 		Object: "response",
 		Model:  fallbackModel,
@@ -1288,6 +1452,8 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 		},
 	}
 	terminal := false
+	var lastSequenceNumber int64
+	sequenceNumberSeen := false
 	err := scanSSEEvents(&responseStreamReader{source: body, remaining: maxResponseStreamBytes}, func(event string, payload string) error {
 		if payload == "[DONE]" {
 			if !terminal {
@@ -1305,17 +1471,74 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 		if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
 			return errors.New("invalid trailing data in Responses SSE event")
 		}
-		if event == "" {
-			event = eventName(decoded)
+		if payloadType, present := decoded["type"]; present {
+			typedEvent, ok := payloadType.(string)
+			if !ok || typedEvent == "" {
+				return errors.New("Responses event contains an invalid type")
+			}
+			if event != "" && event != typedEvent {
+				return errors.New("Responses SSE event name contradicts payload type")
+			}
+			event = typedEvent
+		} else if event == "" {
+			return errors.New("Responses event is missing its type")
+		}
+		if rawSequence, present := decoded["sequence_number"]; present {
+			sequence, ok := rawSequence.(json.Number)
+			if !ok {
+				return errors.New("Responses event contains an invalid sequence_number")
+			}
+			value, err := sequence.Int64()
+			if err != nil || value < 0 {
+				return errors.New("Responses event contains an invalid sequence_number")
+			}
+			if sequenceNumberSeen && value <= lastSequenceNumber {
+				return errors.New("Responses event sequence_number is not increasing")
+			}
+			lastSequenceNumber, sequenceNumberSeen = value, true
+		}
+		if value, present := decoded["item_id"]; present {
+			itemID, ok := value.(string)
+			if !ok || !validResponseResourceID(itemID) {
+				return errors.New("Responses event contains an invalid item_id")
+			}
+		}
+		if value, present := decoded["response_id"]; present {
+			responseID, ok := value.(string)
+			if !ok || !validResponseResourceID(responseID) {
+				return errors.New("Responses event contains an invalid response_id")
+			}
+			if response.ID != "" && response.ID != responseID {
+				return errors.New("provider changed response ID during stream")
+			}
 		}
 		outputIndex, err := responseOutputIndex(decoded)
 		if err != nil {
 			return err
 		}
+		if itemID, present := decoded["item_id"].(string); present {
+			if err := validateResponseStreamOutputIdentity(response.Output, outputIndex, openai.ResponseOutputItem{ID: itemID}); err != nil {
+				return err
+			}
+		}
 		if id, ok := decoded["response_id"].(string); ok && response.ID == "" {
 			response.ID = id
 		}
 		if event == "response.function_call_arguments.delta" || event == "response.function_call_arguments.done" {
+			field := "delta"
+			if event == "response.function_call_arguments.done" {
+				field = "arguments"
+			}
+			value, err := requiredResponseEventString(decoded, field)
+			if err != nil {
+				return err
+			}
+			if event == "response.function_call_arguments.done" {
+				var arguments map[string]json.RawMessage
+				if json.Unmarshal([]byte(value), &arguments) != nil || arguments == nil {
+					return errors.New("Responses function arguments event must contain a JSON object")
+				}
+			}
 			item := ensureResponseOutputItem(&response, outputIndex)
 			item.Type = "function_call"
 			item.Role, item.Content = "", nil
@@ -1323,14 +1546,20 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 				item.ID = id
 			}
 			if event == "response.function_call_arguments.delta" {
-				if delta, ok := decoded["delta"].(string); ok {
-					item.Arguments += delta
-				}
-			} else if arguments, ok := decoded["arguments"].(string); ok {
-				item.Arguments = arguments
+				item.Arguments += value
+			} else {
+				item.Arguments = value
 			}
 		}
 		if event == "response.custom_tool_call_input.delta" || event == "response.custom_tool_call_input.done" {
+			field := "delta"
+			if event == "response.custom_tool_call_input.done" {
+				field = "input"
+			}
+			value, err := requiredResponseEventString(decoded, field)
+			if err != nil {
+				return err
+			}
 			item := ensureResponseOutputItem(&response, outputIndex)
 			item.Type = "custom_tool_call"
 			item.Role, item.Content = "", nil
@@ -1338,11 +1567,9 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 				item.ID = id
 			}
 			if event == "response.custom_tool_call_input.delta" {
-				if delta, ok := decoded["delta"].(string); ok {
-					item.Input += delta
-				}
-			} else if input, ok := decoded["input"].(string); ok {
-				item.Input = input
+				item.Input += value
+			} else {
+				item.Input = value
 			}
 		}
 		if event == "response.apply_patch_call_operation_diff.delta" || event == "response.apply_patch_call_operation_diff.done" {
@@ -1363,6 +1590,18 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 		}
 		if event == "response.refusal.delta" || event == "response.refusal.done" ||
 			event == "response.output_text.delta" || event == "response.output_text.done" {
+			field := "delta"
+			if strings.HasSuffix(event, ".done") {
+				if strings.HasPrefix(event, "response.refusal.") {
+					field = "refusal"
+				} else {
+					field = "text"
+				}
+			}
+			value, err := requiredResponseEventString(decoded, field)
+			if err != nil {
+				return err
+			}
 			contentIndex, err := boundedResponseStreamIndex(decoded, "content_index", maxResponseStreamContentParts)
 			if err != nil {
 				return err
@@ -1395,22 +1634,21 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 					}
 				}
 				if event == "response.output_text.delta" {
-					if delta, ok := decoded["delta"].(string); ok {
-						part.Text += delta
-					}
-				} else if text, ok := decoded["text"].(string); ok {
-					part.Text = text
+					part.Text += value
+				} else {
+					part.Text = value
 				}
 			case "response.refusal.delta", "response.refusal.done":
 				part.Type, part.Text = "refusal", ""
 				part.Annotations, part.Logprobs = nil, nil
 				if event == "response.refusal.delta" {
-					if delta, ok := decoded["delta"].(string); ok {
-						part.Refusal += delta
-					}
-				} else if refusal, ok := decoded["refusal"].(string); ok {
-					part.Refusal = refusal
+					part.Refusal += value
+				} else {
+					part.Refusal = value
 				}
+			}
+			if err := validateResponseOutputContent(*part); err != nil {
+				return err
 			}
 		}
 		if event == "response.content_part.added" || event == "response.content_part.done" {
@@ -1428,6 +1666,12 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 			}
 			var snapshot openai.ResponseOutputContent
 			if err := json.Unmarshal(payload, &snapshot); err != nil {
+				return err
+			}
+			if snapshot.Type != "output_text" && snapshot.Type != "refusal" {
+				return errors.New("Responses content event has an unsupported part type")
+			}
+			if err := validateResponseOutputContent(snapshot); err != nil {
 				return err
 			}
 			item := ensureResponseOutputItem(&response, outputIndex)
@@ -1481,7 +1725,11 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 			}
 			part.Annotations[annotationIndex] = encoded
 		}
-		if itemValue, ok := decoded["item"].(map[string]any); ok {
+		if event == "response.output_item.added" || event == "response.output_item.done" {
+			itemValue, ok := decoded["item"].(map[string]any)
+			if !ok {
+				return errors.New("Responses output item event is missing its item")
+			}
 			marshaled, err := json.Marshal(itemValue)
 			if err != nil {
 				return err
@@ -1490,9 +1738,24 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 			if err := json.Unmarshal(marshaled, &snapshot); err != nil {
 				return err
 			}
+			if eventItemID, present := decoded["item_id"].(string); present {
+				if snapshot.ID != "" && snapshot.ID != eventItemID {
+					return errors.New("Responses output item event contains contradictory item IDs")
+				}
+				if snapshot.ID == "" {
+					snapshot.ID = eventItemID
+				}
+			}
+			if err := validateResponseStreamOutputIdentity(response.Output, outputIndex, snapshot); err != nil {
+				return err
+			}
 			if event == "response.output_item.added" && snapshot.Type == "apply_patch_call" {
 				if message := openai.ValidateResponseApplyPatchCallPartial(snapshot); message != "" {
 					return errors.New(message)
+				}
+			} else if event == "response.output_item.added" && (snapshot.Type == "function_call" || snapshot.Type == "custom_tool_call") {
+				if err := validatePartialResponseOutputItems([]openai.ResponseOutputItem{snapshot}); err != nil {
+					return err
 				}
 			} else if err := validateResponseOutputItems([]openai.ResponseOutputItem{snapshot}); err != nil {
 				return err
@@ -1500,20 +1763,35 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 			*ensureResponseOutputItem(&response, outputIndex) = snapshot
 			response.OutputText = ""
 		}
-		if typed, ok := decoded["response"].(map[string]any); ok {
+		responseSnapshotEvent := event == "response.created" || event == "response.in_progress" ||
+			event == "response.completed" || event == "response.incomplete" || event == "response.failed"
+		if responseSnapshotEvent {
+			typed, ok := decoded["response"].(map[string]any)
+			if !ok {
+				return errors.New("Responses lifecycle event is missing its response")
+			}
 			marshaled, err := json.Marshal(typed)
 			if err != nil {
 				return err
 			}
 			// An output snapshot replaces text assembled from earlier events.
-			if _, present := typed["output"]; present {
+			_, outputPresent := typed["output"]
+			if outputPresent {
 				response.OutputText = ""
+				response.Output = nil
 			}
 			if _, present := typed["metadata"]; present {
 				response.Metadata = nil
 			}
+			if err := validateResponseConfigurationPayload(marshaled, &response); err != nil {
+				return err
+			}
+			previousResponseID := response.ID
 			if err := json.Unmarshal(marshaled, &response); err != nil {
 				return err
+			}
+			if previousResponseID != "" && response.ID != "" && previousResponseID != response.ID {
+				return errors.New("provider changed response ID during stream")
 			}
 			if err := recordResponseInputUsage(marshaled, &response); err != nil {
 				return err
@@ -1521,7 +1799,21 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 			if err := validateResponseUsage(response.Usage); err != nil {
 				return err
 			}
-			if err := validateResponseOutputItems(response.Output); err != nil {
+			if event == "response.completed" || event == "response.incomplete" || event == "response.failed" {
+				if err := validateReportedResponseTotal(response); err != nil {
+					return err
+				}
+			}
+			if err := validateResponseEnvelope(response); err != nil {
+				return err
+			}
+			if err := validateResponseControls(response); err != nil {
+				return err
+			}
+			if err := validateResponseCitations(response.Citations); err != nil {
+				return err
+			}
+			if err := validateResponseOutputItemsAllowSparse(response.Output, !outputPresent); err != nil {
 				return err
 			}
 			response.OutputText = responseText(response)
@@ -1538,6 +1830,11 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 			}
 			response.Status = status
 			terminal = true
+		}
+		if validate != nil {
+			if err := validate(response); err != nil {
+				return err
+			}
 		}
 		if write != nil {
 			if err := write(event, payload); err != nil {
@@ -1582,6 +1879,14 @@ func boundedResponseStreamIndex(decoded map[string]any, field string, limit int)
 		return 0, fmt.Errorf("invalid upstream response %s", field)
 	}
 	return int(value), nil
+}
+
+func requiredResponseEventString(decoded map[string]any, field string) (string, error) {
+	value, ok := decoded[field].(string)
+	if !ok {
+		return "", fmt.Errorf("Responses event is missing string field %s", field)
+	}
+	return value, nil
 }
 
 func ensureResponseOutputItem(response *openai.ResponseResponse, index int) *openai.ResponseOutputItem {
@@ -1642,13 +1947,6 @@ func scanSSEEvents(body io.Reader, handle func(event string, payload string) err
 		}
 	}
 	return scanner.Err()
-}
-
-func eventName(event map[string]any) string {
-	if typed, ok := event["type"].(string); ok {
-		return typed
-	}
-	return ""
 }
 
 func ensureResponseOutputTextSlot(response *openai.ResponseResponse) *openai.ResponseOutputContent {

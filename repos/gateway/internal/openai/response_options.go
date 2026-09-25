@@ -39,8 +39,62 @@ func (r ResponseRequest) ValidateEnvelope() string {
 	return ""
 }
 
+// ValidateResponseInstructions checks the string or input-item sequence echoed
+// by a provider before it can be returned to a Responses client.
+func ValidateResponseInstructions(value any) string {
+	if value == nil {
+		return ""
+	}
+	if _, ok := value.(string); ok {
+		return ""
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return "instructions must be a string or non-empty array of objects"
+	}
+	var items []json.RawMessage
+	if json.Unmarshal(encoded, &items) != nil || len(items) == 0 {
+		return "instructions must be a string or non-empty array of objects"
+	}
+	for _, item := range items {
+		var object map[string]json.RawMessage
+		if bytes.Equal(bytes.TrimSpace(item), []byte("null")) || json.Unmarshal(item, &object) != nil || object == nil {
+			return "instructions array entries must be objects"
+		}
+	}
+	return ""
+}
+
+// ValidateResponseContextManagement checks the bounded compaction settings
+// shared by Responses requests and provider response snapshots.
+func ValidateResponseContextManagement(entries []ResponseContextEntry) string {
+	if len(entries) > 1 {
+		return "context_management must contain at most one entry"
+	}
+	if entries != nil && len(entries) == 0 {
+		return "context_management must contain one entry when supplied"
+	}
+	for _, entry := range entries {
+		if entry.Type != "compaction" {
+			return "context_management type must be compaction"
+		}
+		if entry.CompactThreshold != nil && *entry.CompactThreshold <= 0 {
+			return "context_management compact_threshold must be positive"
+		}
+	}
+	return ""
+}
+
 // Validate checks provider-independent Responses generation options.
 func (r ResponseRequest) Validate() string {
+	if r.Conversation != nil {
+		if !validResponseResourceID(r.Conversation.ID, "conv_") {
+			return "conversation must contain a valid conversation ID"
+		}
+		if r.PreviousResponse != "" {
+			return "conversation and previous_response_id are mutually exclusive"
+		}
+	}
 	if r.Background && r.Stream {
 		return "background and stream cannot both be enabled"
 	}
@@ -51,6 +105,12 @@ func (r ResponseRequest) Validate() string {
 		return "background requires store=true"
 	}
 	if message := ValidateMetadata(r.Metadata); message != "" {
+		return message
+	}
+	if message := ValidateResponseContextManagement(r.ContextManagement); message != "" {
+		return message
+	}
+	if message := validateProviderModeration(r.Moderation); message != "" {
 		return message
 	}
 	if message := validateResponseIncludes(r.Include); message != "" {
@@ -68,6 +128,12 @@ func (r ResponseRequest) Validate() string {
 	if _, message := InspectResponseApplyPatchCallOutputs(r.Input); message != "" {
 		return message
 	}
+	if _, _, message := InspectResponseCustomToolHistory(r.Input); message != "" {
+		return message
+	}
+	if _, _, message := InspectResponseFunctionToolHistory(r.Input); message != "" {
+		return message
+	}
 	if message := validateResponseToolChoice(r.Tools, r.ToolChoice); message != "" {
 		return message
 	}
@@ -77,13 +143,19 @@ func (r ResponseRequest) Validate() string {
 	if utf8.RuneCountInString(r.SafetyIdentifier) > 64 {
 		return "safety_identifier must contain at most 64 characters"
 	}
+	if utf8.RuneCountInString(r.User) > 256 {
+		return "user must contain at most 256 characters"
+	}
+	if utf8.RuneCountInString(r.PromptCacheKey) > 64 {
+		return "prompt_cache_key must contain at most 64 characters"
+	}
 	if message := ValidatePromptCacheOptions(r.PromptCacheOptions); message != "" {
 		return message
 	}
 	if r.PromptCacheRetention != "" && r.PromptCacheRetention != "in_memory" && r.PromptCacheRetention != "24h" {
 		return "prompt_cache_retention must be in_memory or 24h"
 	}
-	if !validServiceTier(r.ServiceTier) {
+	if !ValidServiceTier(r.ServiceTier) {
 		return "unsupported service_tier value"
 	}
 	if message := validateResponseText(r.Text); message != "" {
@@ -117,6 +189,37 @@ func (r ResponseRequest) Validate() string {
 	}
 	if r.MaxToolCalls != nil && (*r.MaxToolCalls < 0 || *r.MaxToolCalls > 1000) {
 		return "max_tool_calls must be between 0 and 1000"
+	}
+	return ""
+}
+
+func validResponseResourceID(value, prefix string) bool {
+	if !strings.HasPrefix(value, prefix) || len(value) > 128 {
+		return false
+	}
+	for _, character := range value {
+		if character >= 'a' && character <= 'z' || character >= 'A' && character <= 'Z' || character >= '0' && character <= '9' || character == '_' || character == '-' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func validateProviderModeration(moderation *ProviderModeration) string {
+	if moderation == nil {
+		return ""
+	}
+	if strings.TrimSpace(moderation.Model) == "" || utf8.RuneCountInString(moderation.Model) > 256 {
+		return "moderation.model must contain between 1 and 256 characters"
+	}
+	if moderation.Policy == nil {
+		return ""
+	}
+	for _, rule := range []*ProviderModerationRule{moderation.Policy.Input, moderation.Policy.Output} {
+		if rule != nil && rule.Mode != "score" && rule.Mode != "block" {
+			return "moderation policy mode must be score or block"
+		}
 	}
 	return ""
 }
@@ -187,6 +290,21 @@ func validateResponseReasoning(reasoning *ResponseReasoning) string {
 	return ""
 }
 
+// ValidateResponseConfiguration validates provider-echoed Responses settings
+// with the same policy used for client requests.
+func ValidateResponseConfiguration(tools []ResponseTool, toolChoice any, reasoning *ResponseReasoning, text any) string {
+	if message := validateResponseTools(tools); message != "" {
+		return message
+	}
+	if message := validateResponseToolChoice(tools, toolChoice); message != "" {
+		return message
+	}
+	if message := validateResponseReasoning(reasoning); message != "" {
+		return message
+	}
+	return validateResponseText(text)
+}
+
 func validateResponseTools(tools []ResponseTool) string {
 	if len(tools) > 128 {
 		return "tools must contain at most 128 entries"
@@ -195,13 +313,13 @@ func validateResponseTools(tools []ResponseTool) string {
 	mcpLabels := make(map[string]struct{}, len(tools))
 	hostedTypes := make(map[string]struct{}, 4)
 	for index, tool := range tools {
+		if tool.Type != "function" && tool.OutputSchema != nil {
+			return "output_schema is supported only for function tools"
+		}
 		switch tool.Type {
 		case "function":
 			if !chatFunctionName.MatchString(tool.Name) {
 				return "function tool names must contain 1 to 64 letters, digits, underscores, or hyphens"
-			}
-			if utf8.RuneCountInString(tool.Description) > 4096 {
-				return "function tool descriptions must contain at most 4096 characters"
 			}
 			if responseToolHasHostedImageFields(tool) || tool.ServerLabel != "" || tool.ServerURL != "" || tool.ServerDescription != "" || len(tool.AllowedTools) > 0 || len(tool.AllowedCallers) > 0 || tool.RequireApproval != nil || len(tool.Headers) > 0 || len(tool.VectorStoreIDs) > 0 || tool.Container != nil || tool.Environment != nil || tool.Filters != nil || tool.MaxNumResults != nil || tool.RankingOptions != nil || tool.RewriteQuery != nil || tool.SearchContextSize != "" || tool.UserLocation != nil || tool.Format != nil {
 				return "function tools contain unsupported fields"
@@ -216,9 +334,6 @@ func validateResponseTools(tools []ResponseTool) string {
 		case "custom":
 			if !chatFunctionName.MatchString(tool.Name) {
 				return "custom tool names must contain 1 to 64 letters, digits, underscores, or hyphens"
-			}
-			if utf8.RuneCountInString(tool.Description) > 4096 {
-				return "custom tool descriptions must contain at most 4096 characters"
 			}
 			if responseToolHasHostedImageFields(tool) || tool.Parameters != nil || tool.Strict != nil || tool.ServerLabel != "" || tool.ServerURL != "" || tool.ServerDescription != "" || len(tool.AllowedTools) > 0 || len(tool.AllowedCallers) > 0 || tool.RequireApproval != nil || len(tool.Headers) > 0 || len(tool.VectorStoreIDs) > 0 || tool.Container != nil || tool.Environment != nil || tool.Filters != nil || tool.MaxNumResults != nil || tool.RankingOptions != nil || tool.RewriteQuery != nil || tool.SearchContextSize != "" || tool.UserLocation != nil {
 				return "custom tools contain unsupported fields"
@@ -711,9 +826,9 @@ func validateResponseToolChoice(tools []ResponseTool, choice any) string {
 	}
 	if value, ok := choice.(string); ok {
 		switch value {
-		case "none":
+		case "none", "auto":
 			return ""
-		case "auto", "required":
+		case "required":
 			if len(tools) > 0 {
 				return ""
 			}

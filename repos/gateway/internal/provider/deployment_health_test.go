@@ -56,7 +56,7 @@ func TestDeploymentHealthCheckUsesAzureNativeSettings(t *testing.T) {
 			t.Fatalf("unexpected authorization headers: %v", r.Header)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":"probe","object":"chat.completion","model":"gpt","choices":[]}`))
+		_, _ = w.Write([]byte(`{"id":"probe","object":"chat.completion","model":"gpt","choices":[],"usage":{"prompt_tokens":1,"completion_tokens":0,"total_tokens":1}}`))
 	}))
 	defer upstream.Close()
 

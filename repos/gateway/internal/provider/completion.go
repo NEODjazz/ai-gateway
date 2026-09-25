@@ -30,6 +30,11 @@ func decodeCompletionResponse(reader io.Reader) (openai.CompletionResponse, erro
 	if response == nil {
 		return openai.CompletionResponse{}, errors.New("completion response must be an object")
 	}
+	reported, err := completeChatUsageFields(payload)
+	if err != nil {
+		return openai.CompletionResponse{}, err
+	}
+	response.UsageReported = reported
 	if err := validateCompletionResponse(*response); err != nil {
 		return openai.CompletionResponse{}, err
 	}
@@ -102,7 +107,7 @@ func validateCompletionUsage(usage openai.Usage) error {
 }
 
 func hasNegativeCompletionTokenDetails(details *openai.CompletionTokenDetails) bool {
-	return details != nil && (details.AcceptedPredictionTokens < 0 || details.AudioTokens < 0 || details.ReasoningTokens < 0 || details.RejectedPredictionTokens < 0 || details.TextTokens < 0)
+	return details != nil && (details.AcceptedPredictionTokens < 0 || details.AudioTokens < 0 || details.CachedTokens < 0 || details.ReasoningTokens < 0 || details.RejectedPredictionTokens < 0 || details.TextTokens < 0)
 }
 
 func validateCompletionResult(response openai.CompletionResponse, request openai.CompletionRequest) error {

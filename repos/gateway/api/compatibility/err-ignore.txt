@@ -1,0 +1,10 @@
+in API POST /a2a/{agent} added `subschema #1, subschema #2, subschema #4` to the `result` response property `oneOf` list for the response status `200`
+in API POST /a2a/{agent} added `subschema #1, subschema #2, subschema #4` to the `result` response property `oneOf` list for the response status `default`
+in API POST /v1/rag/ingest added `#/components/schemas/VectorStoreAutoChunkingStrategy, #/components/schemas/VectorStoreStaticChunkingStrategy` to the `attachment/chunking_strategy` response property `oneOf` list for the response status `200`
+in API GET /v1/vector_stores/{id}/file_batches/{batch_id}/files added `#/components/schemas/VectorStoreAutoChunkingStrategy, #/components/schemas/VectorStoreStaticChunkingStrategy` to the `data/items/chunking_strategy` response property `oneOf` list for the response status `200`
+in API GET /v1/vector_stores/{id}/files added `#/components/schemas/VectorStoreAutoChunkingStrategy, #/components/schemas/VectorStoreStaticChunkingStrategy` to the `data/items/chunking_strategy` response property `oneOf` list for the response status `200`
+in API POST /v1/vector_stores/{id}/files added `#/components/schemas/VectorStoreAutoChunkingStrategy, #/components/schemas/VectorStoreStaticChunkingStrategy` to the `chunking_strategy` response property `oneOf` list for the response status `200`
+in API GET /v1/vector_stores/{id}/files/{file_id} added `#/components/schemas/VectorStoreAutoChunkingStrategy, #/components/schemas/VectorStoreStaticChunkingStrategy` to the `chunking_strategy` response property `oneOf` list for the response status `200`
+in API POST /v1/vector_stores/{id}/files/{file_id} added `#/components/schemas/VectorStoreAutoChunkingStrategy, #/components/schemas/VectorStoreStaticChunkingStrategy` to the `chunking_strategy` response property `oneOf` list for the response status `200`
+in API POST /v1beta/models/{model}:generateContent removed `subschema #2` from the `tools/items/` request property `oneOf` list
+in API POST /v1beta/models/{model}:streamGenerateContent removed `subschema #2` from the `tools/items/` request property `oneOf` list

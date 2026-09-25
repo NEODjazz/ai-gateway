@@ -604,6 +604,24 @@ func TestAnthropicRejectsUsageAboveRequestedServerToolLimit(t *testing.T) {
 	}
 }
 
+func TestAnthropicRejectsUnrequestedServerToolUsage(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		usage anthropicServerToolUsage
+	}{
+		{name: "web search", usage: anthropicServerToolUsage{WebSearchRequests: 1}},
+		{name: "web fetch", usage: anthropicServerToolUsage{WebFetchRequests: 1}},
+		{name: "code execution", usage: anthropicServerToolUsage{CodeExecutionRequests: 1}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			usage := anthropicUsage{ServerToolUse: &tc.usage}
+			if err := validateAnthropicRequestedToolUsage(usage, nil, nil, false); err == nil {
+				t.Fatalf("unrequested usage accepted: %+v", tc.usage)
+			}
+		})
+	}
+}
+
 func TestAnthropicRejectsUnsafeNativeContent(t *testing.T) {
 	for _, content := range [][]anthropicContent{
 		{{Type: "server_tool_use"}, {Type: "unknown"}},

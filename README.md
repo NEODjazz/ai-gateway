@@ -5,7 +5,7 @@
 
 ## Возможности
 
-- Chat Completions, Responses, Embeddings и Rerank API;
+- Chat Completions, Responses с durable Conversations, Embeddings и Rerank API;
 - native и synthetic SSE streaming;
 - OpenAI/Azure/OpenAI-compatible, Anthropic, Ollama, Gemini, Cohere, Mistral и Voyage adapters;
 - priority/weight/adaptive routing, retries, cooldown и cross-model fallback;

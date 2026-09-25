@@ -41,6 +41,23 @@ func TestResponseStreamContentSnapshotValidation(t *testing.T) {
 	}
 }
 
+func TestResponseContentSnapshotRejectsUnsupportedTypeBeforeDelivery(t *testing.T) {
+	for _, part := range []string{
+		`{"type":"input_text","text":"unexpected"}`,
+		`{"type":"summary_text","text":"unexpected"}`,
+		`{"type":"","text":"unexpected"}`,
+	} {
+		for _, kind := range []string{"response.content_part.added", "response.content_part.done"} {
+			wire := fmt.Sprintf("data: {\"type\":%q,\"part\":%s}\n\n", kind, part)
+			calls := 0
+			_, err := streamResponseData(strings.NewReader(wire+responseTestTerminal), "m", func(string, string) error { calls++; return nil })
+			if err == nil || calls != 0 {
+				t.Fatalf("unsupported content part delivered: kind=%s part=%s err=%v calls=%d", kind, part, err, calls)
+			}
+		}
+	}
+}
+
 func TestResponseStreamContentSnapshotReplacesDelta(t *testing.T) {
 	stream := "data: {\"type\":\"response.output_text.delta\",\"delta\":\"obsolete\"}\n\n" +
 		"data: {\"type\":\"response.content_part.done\",\"part\":{\"type\":\"refusal\",\"refusal\":\"no\"}}\n\n"

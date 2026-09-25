@@ -49,6 +49,121 @@ func TestGeminiManagedToolsRequireExplicitEndpointCapabilities(t *testing.T) {
 			t.Fatalf("explicit endpoint rejected %s", capability)
 		}
 	}
+	if supportsCatalogCapabilities(catalog, Endpoint{Name: "gemini", Type: "gemini", Provider: Gemini{}, Capabilities: []string{"chat", "audio_input", "gemini_audio_timestamp"}}, "model", "chat", "gemini_audio_timestamp") {
+		t.Fatal("public Gemini endpoint enabled Vertex-only audio timestamps")
+	}
+	vertex := Endpoint{Name: "vertex", Type: "vertex-gemini", Provider: NewVertexGemini("https://us-central1-aiplatform.googleapis.com/v1/projects/project-1/locations/us-central1/publishers/google", false), Capabilities: []string{"chat", "audio_input", "gemini_audio_timestamp"}}
+	if !supportsCatalogCapabilities(catalog, vertex, "model", "chat", "gemini_audio_timestamp") {
+		t.Fatal("explicit Vertex audio timestamp capability rejected")
+	}
+}
+
+func TestGeminiMediaResolutionRequiresExplicitNativeCapability(t *testing.T) {
+	catalog, err := modelcatalog.Parse(`{"version":"v1","models":[]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, endpoint := range []Endpoint{
+		{Name: "gemini", Type: "gemini", Provider: Gemini{}},
+		{Name: "vertex", Type: "vertex-gemini", Provider: NewVertexGemini("https://us-central1-aiplatform.googleapis.com/v1/projects/project-1/locations/us-central1/publishers/google", false)},
+	} {
+		if supportsCatalogCapabilities(catalog, endpoint, "model", "chat", "vision", "gemini_media_resolution") {
+			t.Fatalf("legacy endpoint implicitly enabled media resolution: %s", endpoint.Type)
+		}
+		endpoint.Capabilities = []string{"chat", "vision", "gemini_media_resolution"}
+		if !supportsCatalogCapabilities(catalog, endpoint, "model", "chat", "vision", "gemini_media_resolution") {
+			t.Fatalf("explicit native endpoint rejected media resolution: %s", endpoint.Type)
+		}
+	}
+}
+
+func TestGeminiMediaProcessingRequiresExplicitNativeCapability(t *testing.T) {
+	catalog, err := modelcatalog.Parse(`{"version":"v1","models":[]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, endpoint := range []Endpoint{
+		{Name: "gemini", Type: "gemini", Provider: Gemini{}},
+		{Name: "vertex", Type: "vertex-gemini", Provider: NewVertexGemini("https://us-central1-aiplatform.googleapis.com/v1/projects/project-1/locations/us-central1/publishers/google", false)},
+	} {
+		if supportsCatalogCapabilities(catalog, endpoint, "model", "chat", "video_input", "gemini_media_processing") {
+			t.Fatalf("legacy endpoint implicitly enabled media processing: %s", endpoint.Type)
+		}
+		endpoint.Capabilities = []string{"chat", "video_input", "gemini_media_processing"}
+		if !supportsCatalogCapabilities(catalog, endpoint, "model", "chat", "video_input", "gemini_media_processing") {
+			t.Fatalf("explicit native endpoint rejected media processing: %s", endpoint.Type)
+		}
+	}
+}
+
+func TestGeminiSearchTimeRangeRequiresExplicitNativeCapability(t *testing.T) {
+	catalog, err := modelcatalog.Parse(`{"version":"v1","models":[]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, endpoint := range []Endpoint{
+		{Name: "gemini", Type: "gemini", Provider: Gemini{}},
+		{Name: "vertex", Type: "vertex-gemini", Provider: NewVertexGemini("https://us-central1-aiplatform.googleapis.com/v1/projects/project-1/locations/us-central1/publishers/google", false)},
+	} {
+		if supportsCatalogCapabilities(catalog, endpoint, "model", "chat", "web_search", "gemini_search_time_range") {
+			t.Fatalf("legacy endpoint implicitly enabled search time range: %s", endpoint.Type)
+		}
+		endpoint.Capabilities = []string{"chat", "web_search", "gemini_search_time_range"}
+		if !supportsCatalogCapabilities(catalog, endpoint, "model", "chat", "web_search", "gemini_search_time_range") {
+			t.Fatalf("explicit native endpoint rejected search time range: %s", endpoint.Type)
+		}
+	}
+}
+
+func TestGeminiFileSearchRequiresExplicitNativeCapability(t *testing.T) {
+	catalog, err := modelcatalog.Parse(`{"version":"v1","models":[]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, endpoint := range []Endpoint{
+		{Name: "gemini", Type: "gemini", Provider: Gemini{}},
+		{Name: "vertex", Type: "vertex-gemini", Provider: NewVertexGemini("https://us-central1-aiplatform.googleapis.com/v1/projects/project-1/locations/us-central1/publishers/google", false)},
+	} {
+		if supportsCatalogCapabilities(catalog, endpoint, "model", "chat", "gemini_file_search") {
+			t.Fatalf("legacy endpoint implicitly enabled file search: %s", endpoint.Type)
+		}
+		endpoint.Capabilities = []string{"chat", "gemini_file_search"}
+		if !supportsCatalogCapabilities(catalog, endpoint, "model", "chat", "gemini_file_search") {
+			t.Fatalf("explicit native endpoint rejected file search: %s", endpoint.Type)
+		}
+	}
+}
+
+func TestGeminiComputerUseRequiresExplicitNativeCapability(t *testing.T) {
+	catalog, err := modelcatalog.Parse(`{"version":"v1","models":[]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, endpoint := range []Endpoint{{Name: "gemini", Type: "gemini", Provider: Gemini{}}, {Name: "vertex", Type: "vertex-gemini", Provider: NewVertexGemini("https://us-central1-aiplatform.googleapis.com/v1/projects/project-1/locations/us-central1/publishers/google", false)}} {
+		if supportsCatalogCapabilities(catalog, endpoint, "model", "chat", "gemini_computer_use") {
+			t.Fatalf("legacy endpoint implicitly enabled computer use: %s", endpoint.Type)
+		}
+		endpoint.Capabilities = []string{"chat", "gemini_computer_use"}
+		if !supportsCatalogCapabilities(catalog, endpoint, "model", "chat", "gemini_computer_use") {
+			t.Fatalf("explicit native endpoint rejected computer use: %s", endpoint.Type)
+		}
+	}
+}
+
+func TestGeminiMCPRequiresExplicitNativeCapability(t *testing.T) {
+	catalog, err := modelcatalog.Parse(`{"version":"v1","models":[]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, endpoint := range []Endpoint{{Name: "gemini", Type: "gemini", Provider: Gemini{}}, {Name: "vertex", Type: "vertex-gemini", Provider: NewVertexGemini("https://us-central1-aiplatform.googleapis.com/v1/projects/project-1/locations/us-central1/publishers/google", false)}} {
+		if supportsCatalogCapabilities(catalog, endpoint, "model", "chat", "gemini_mcp") {
+			t.Fatalf("legacy endpoint implicitly enabled MCP: %s", endpoint.Type)
+		}
+		endpoint.Capabilities = []string{"chat", "gemini_mcp"}
+		if !supportsCatalogCapabilities(catalog, endpoint, "model", "chat", "gemini_mcp") {
+			t.Fatalf("explicit native endpoint rejected MCP: %s", endpoint.Type)
+		}
+	}
 }
 
 func TestRouterSkipsNativeUnsupportedResponseProtocol(t *testing.T) {

@@ -255,6 +255,9 @@ func bedrockInvalid(param string) error {
 }
 
 func (b Bedrock) ValidateChatParameters(request openai.ChatCompletionRequest) error {
+	if err := rejectChatModeration("bedrock", request); err != nil {
+		return err
+	}
 	if err := validateChatReasoningContent("bedrock", request.Messages, false); err != nil {
 		return err
 	}
@@ -340,7 +343,8 @@ func bedrockChatRequest(request openai.ChatCompletionRequest) (bedrockRequest, e
 		parameterCheck{"parallel_tool_calls", request.ParallelToolCalls != nil},
 		parameterCheck{"seed", request.Seed != nil},
 		parameterCheck{"metadata", request.Metadata != nil}, parameterCheck{"store", request.Store != nil},
-		parameterCheck{"modalities", request.Modalities != nil}, parameterCheck{"reasoning_effort", request.ReasoningEffort != ""},
+		parameterCheck{"modalities", request.Modalities != nil}, parameterCheck{"clear_thinking", request.ClearThinking != nil}, parameterCheck{"citation_options", request.CitationOptions != ""}, parameterCheck{"thinking", request.Thinking != nil},
+		parameterCheck{"include_reasoning", request.IncludeReasoning != nil}, parameterCheck{"reasoning_format", request.ReasoningFormat != ""}, parameterCheck{"reasoning_effort", request.ReasoningEffort != ""},
 		parameterCheck{"safe_prompt", request.SafePrompt != nil}, parameterCheck{"n", request.N != nil && *request.N != 1},
 		parameterCheck{"safety_identifier", request.SafetyIdentifier != ""}, parameterCheck{"prompt_cache_key", request.PromptCacheKey != ""},
 		parameterCheck{"prompt_cache_options", request.PromptCacheOptions != nil}, parameterCheck{"prompt_cache_retention", request.PromptCacheRetention != ""},

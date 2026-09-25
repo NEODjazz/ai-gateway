@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: AI Gateway API
-  version: 0.1.416
+  version: 0.1.474
   description: |
     OpenAI-compatible inference API and administrative virtual-key API.
     Authentication, routing, guardrails, anonymization, billing, caching, and
@@ -1954,7 +1954,7 @@ paths:
       operationId: attachVectorStoreFile
       tags: [Vector stores]
       summary: Attach an owned file to an owned vector store
-      description: Atomically verifies file and vector-store ownership in PostgreSQL, enforces the configured per-store file-count and byte quotas, and refreshes last-active expiry. Auto chunking is explicit; valid static token-based chunking fails with a capability error before storage.
+      description: Atomically verifies file and vector-store ownership in PostgreSQL, enforces the configured per-store file-count and byte quotas, refreshes last-active expiry, and persists the selected auto or static chunking strategy. Static chunk sizes use the gateway's conservative token estimator and apply during content retrieval and synchronous search.
       security: [{bearerAuth: []}]
       requestBody:
         required: true
@@ -2183,7 +2183,7 @@ paths:
       operationId: queryRAG
       tags: [Inference]
       summary: Answer a Chat request with owner-scoped vector-store context
-      description: Performs bounded semantic retrieval from one vector store owned by the authenticated credential and user, optionally reranks the retrieved excerpts, and injects them as untrusted JSON reference data into a Chat Completion request. Retrieval, reranking, and generation each enforce model authorization, content policy, RPM/TPM admission, routing, and an independent billing lifecycle. All Chat Completion request parameters are accepted alongside retrieval_config and rerank. Sync and SSE streaming responses use the Chat Completions wire contract.
+      description: Performs bounded semantic retrieval from one vector store owned by the authenticated credential and user, optionally reranks the retrieved excerpts, and injects them as untrusted JSON reference data into a Chat Completion request. Retrieval, reranking, and generation each enforce model authorization, content policy, RPM/TPM admission, routing, and an independent billing lifecycle. All Chat Completion request parameters are accepted alongside retrieval_config and rerank. Sync and SSE streaming responses use the Chat Completions wire contract. Model-written [n] markers for retrieved excerpts are mapped to owner-scoped file IDs in source_citation annotations; native SSE emits annotation deltas before each completed choice, while buffered stream fallback includes them in its content delta. These annotations identify the selected excerpt and do not verify the model's claim.
       security: [{bearerAuth: []}]
       requestBody:
         required: true
@@ -2662,6 +2662,87 @@ paths:
         '429': {$ref: '#/components/responses/RateLimited'}
         '451': {$ref: '#/components/responses/ContentRejected'}
         '502': {$ref: '#/components/responses/ProviderFailed'}
+  /v1/conversations:
+    post:
+      operationId: createConversation
+      tags: [Inference]
+      summary: Create an owner-isolated durable conversation
+      description: Stores up to 20 initial items in PostgreSQL. Conversations are isolated by authenticated credential and user and have bounded item cardinality.
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/ConversationCreateRequest'}}}
+      responses:
+        '200': {description: Created conversation, content: {application/json: {schema: {$ref: '#/components/schemas/Conversation'}}}}
+        default: {description: 'Authentication, validation, quota, conflict, or storage failure', content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+  /v1/conversations/{conversation_id}:
+    parameters:
+      - {name: conversation_id, in: path, required: true, schema: {type: string, maxLength: 128, pattern: '^conv_[A-Za-z0-9_-]+$'}}
+    get:
+      operationId: getConversation
+      tags: [Inference]
+      summary: Retrieve an owned conversation
+      responses:
+        '200': {description: Conversation, content: {application/json: {schema: {$ref: '#/components/schemas/Conversation'}}}}
+        default: {description: Authentication or storage failure, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+    post:
+      operationId: updateConversation
+      tags: [Inference]
+      summary: Replace conversation metadata
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/ConversationUpdateRequest'}}}
+      responses:
+        '200': {description: Updated conversation, content: {application/json: {schema: {$ref: '#/components/schemas/Conversation'}}}}
+        default: {description: 'Authentication, validation, conflict, or storage failure', content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+    delete:
+      operationId: deleteConversation
+      tags: [Inference]
+      summary: Delete a conversation and its items
+      responses:
+        '200': {description: Conversation deletion object, content: {application/json: {schema: {$ref: '#/components/schemas/ConversationDeletion'}}}}
+        default: {description: 'Authentication, conflict, or storage failure', content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+  /v1/conversations/{conversation_id}/items:
+    parameters:
+      - {name: conversation_id, in: path, required: true, schema: {type: string, maxLength: 128, pattern: '^conv_[A-Za-z0-9_-]+$'}}
+    post:
+      operationId: createConversationItems
+      tags: [Inference]
+      summary: Add up to 20 items to an owned conversation
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/ConversationItemsCreateRequest'}}}
+      responses:
+        '200': {description: Created items, content: {application/json: {schema: {$ref: '#/components/schemas/ConversationItemList'}}}}
+        default: {description: 'Authentication, validation, quota, conflict, or storage failure', content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+    get:
+      operationId: listConversationItems
+      tags: [Inference]
+      summary: List owned conversation items
+      parameters:
+        - {name: after, in: query, schema: {type: string, maxLength: 128}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
+        - {name: order, in: query, schema: {type: string, enum: [asc, desc], default: desc}}
+      responses:
+        '200': {description: Cursor page of items, content: {application/json: {schema: {$ref: '#/components/schemas/ConversationItemList'}}}}
+        default: {description: 'Authentication, validation, or storage failure', content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+  /v1/conversations/{conversation_id}/items/{item_id}:
+    parameters:
+      - {name: conversation_id, in: path, required: true, schema: {type: string, maxLength: 128, pattern: '^conv_[A-Za-z0-9_-]+$'}}
+      - {name: item_id, in: path, required: true, schema: {type: string, maxLength: 128}}
+    get:
+      operationId: getConversationItem
+      tags: [Inference]
+      summary: Retrieve an owned conversation item
+      responses:
+        '200': {description: Conversation item, content: {application/json: {schema: {$ref: '#/components/schemas/ConversationItem'}}}}
+        default: {description: Authentication or storage failure, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+    delete:
+      operationId: deleteConversationItem
+      tags: [Inference]
+      summary: Delete an owned conversation item
+      responses:
+        '200': {description: Item deletion object, content: {application/json: {schema: {$ref: '#/components/schemas/ConversationDeletion'}}}}
+        default: {description: 'Authentication, conflict, or storage failure', content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
   /v1/responses:
     post:
       operationId: createResponse
@@ -3192,7 +3273,7 @@ paths:
       operationId: applyGuardrail
       tags: [Guardrails]
       summary: Execute an enabled guardrail policy without model inference
-      description: Authenticates the caller, enforces access groups, model policy when supplied, attached-policy authorization, RPM/TPM and durable audit. Admin credentials may execute any enabled policy. Request content is sent only to the configured scanners and is never returned or written to audit. This operation does not open a generation billing lifecycle.
+      description: Authenticates the caller, enforces access groups, model policy when supplied, attached-policy authorization, RPM/TPM and durable audit. Admin credentials may execute any enabled policy. Request content is sent only to enabled policy modules and is never written to audit; when anonymization is enabled, only the transformed text is returned. This operation does not open a generation billing lifecycle.
       requestBody:
         required: true
         content:
@@ -3201,7 +3282,7 @@ paths:
             example: {guardrail_name: strict, text: Text to inspect, model: gpt-5-mini}
       responses:
         '200':
-          description: Bounded scanner decision without request content
+          description: Bounded policy decision with optional anonymized text
           headers:
             X-Execution-ID: {$ref: '#/components/headers/XExecutionID'}
             X-Request-ID: {$ref: '#/components/headers/XRequestID'}
@@ -5304,6 +5385,13 @@ components:
       description: A2A 1.0 member-discriminated part. Supply text, structured JSON data, inline image/audio/MP4/WebM video/PDF bytes, or HTTPS media of the same types with one advertised mediaType. Binary input is signature-validated, bounded, scanner-projected, and routed only to deployments declaring the required media capability. Remote media are converted to validated inline bytes before durable storage.
       properties:
         text: {type: string}
+        mediaResolution:
+          type: object
+          additionalProperties: false
+          required: [level]
+          properties:
+            level: {type: string, enum: [MEDIA_RESOLUTION_UNSPECIFIED, MEDIA_RESOLUTION_LOW, MEDIA_RESOLUTION_MEDIUM, MEDIA_RESOLUTION_HIGH, MEDIA_RESOLUTION_ULTRA_HIGH]}
+          description: Per-part token resolution for inlineData or non-text fileData. Ultra high is available only per part. Requires the gemini_media_resolution capability.
         raw: {type: string, contentEncoding: base64}
         url: {type: string, format: uri, maxLength: 2048, pattern: '^https://', description: "Public HTTPS image, audio, MP4/WebM video, PDF, plain-text, Markdown, or CSV URL without credentials or fragment"}
         data: {description: Structured JSON value accepted with application/json mediaType}
@@ -6169,7 +6257,7 @@ components:
               - {type: boolean}
           maxProperties: 16
         chunking_strategy:
-          $ref: '#/components/schemas/VectorStoreAutoChunkingStrategy'
+          $ref: '#/components/schemas/VectorStoreChunkingStrategy'
     VectorStoreChunkingStrategy:
       oneOf:
         - $ref: '#/components/schemas/VectorStoreAutoChunkingStrategy'
@@ -6181,6 +6269,7 @@ components:
       properties:
         type: {type: string, const: auto}
     VectorStoreStaticChunkingStrategy:
+      description: Static chunking uses the gateway's conservative token estimator. chunk_overlap_tokens must not exceed half of max_chunk_size_tokens.
       type: object
       additionalProperties: false
       required: [type, static]
@@ -7009,6 +7098,16 @@ components:
                     type: object
                     additionalProperties: false
                     description: Native location grounding included in token counting context. Requires the google_maps tool grant.
+              - type: object
+                additionalProperties: false
+                required: [fileSearch]
+                properties:
+                  fileSearch: {$ref: '#/components/schemas/GeminiFileSearchConfig'}
+              - type: object
+                additionalProperties: false
+                required: [computerUse]
+                properties:
+                  computerUse: {$ref: '#/components/schemas/GeminiComputerUseConfig'}
         toolConfig:
           type: object
           additionalProperties: false
@@ -7098,6 +7197,15 @@ components:
                     type: object
                     additionalProperties: false
                     description: Native server-side Google Search grounding. Requires the web_search deployment capability, bypasses response caches, and bills actual returned search queries.
+                    properties:
+                      timeRangeFilter:
+                        type: object
+                        additionalProperties: false
+                        required: [startTime, endTime]
+                        properties:
+                          startTime: {type: string, format: date-time}
+                          endTime: {type: string, format: date-time}
+                        description: Inclusive start and exclusive end. Both RFC3339 timestamps are required and startTime must not be after endTime. Requires gemini_search_time_range.
               - type: object
                 additionalProperties: false
                 required: [codeExecution]
@@ -7106,6 +7214,21 @@ components:
                     type: object
                     additionalProperties: false
                     description: Native server-side Python execution. Requires the gemini_code_execution deployment capability and code_execution tool grant, and bypasses response caches.
+              - type: object
+                additionalProperties: false
+                required: [mcpServers]
+                properties:
+                  mcpServers:
+                    type: array
+                    minItems: 1
+                    maxItems: 8
+                    description: Registry server IDs resolved after authentication. Every server must be enabled, use Streamable HTTP, explicitly allow native provider execution, and pass connector authorization. Requests bypass response caches.
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [name]
+                      properties:
+                        name: {type: string, pattern: '^[A-Za-z0-9_.-]{1,128}$'}
               - type: object
                 additionalProperties: false
                 required: [urlContext]
@@ -7122,6 +7245,22 @@ components:
                     type: object
                     additionalProperties: false
                     description: Native location-aware grounding. Requires the google_maps deployment capability and tool grant, bills an actual grounding request when provider metadata confirms use, and bypasses response caches.
+              - type: object
+                additionalProperties: false
+                required: [fileSearch]
+                properties:
+                  fileSearch:
+                    allOf:
+                      - {$ref: '#/components/schemas/GeminiFileSearchConfig'}
+                    description: Native retrieval from provider-managed stores. Requires the gemini_file_search deployment capability, the file_search grant and a gemini_file_search:<store-name> grant for every store. It cannot be combined with another tool and bypasses response caches.
+              - type: object
+                additionalProperties: false
+                required: [computerUse]
+                properties:
+                  computerUse:
+                    allOf:
+                      - {$ref: '#/components/schemas/GeminiComputerUseConfig'}
+                    description: Generates client-executed computer actions. Requires gemini_computer_use, computer_use, an environment-specific grant, and a separate grant for every disabled safety policy. Requests bypass response caches.
         toolConfig:
           type: object
           additionalProperties: false
@@ -7157,6 +7296,11 @@ components:
             frequencyPenalty: {type: number, minimum: -2, maximum: 2}
             responseLogprobs: {type: boolean}
             logprobs: {type: integer, minimum: 0, maximum: 20, description: Requires responseLogprobs=true.}
+            audioTimestamp: {type: boolean, description: Enables timestamp-aware processing for audio input. Requires an audio part and a vertex-gemini deployment with the gemini_audio_timestamp capability.}
+            mediaResolution:
+              type: string
+              enum: [MEDIA_RESOLUTION_UNSPECIFIED, MEDIA_RESOLUTION_LOW, MEDIA_RESOLUTION_MEDIUM, MEDIA_RESOLUTION_HIGH]
+              description: Controls token resolution for image, audio, video, or PDF input. Requires matching media input and the gemini_media_resolution capability.
             responseModalities:
               type: array
               maxItems: 1
@@ -7201,6 +7345,17 @@ components:
         thought:
           type: boolean
           description: When true, text is model reasoning and is preserved separately from visible response text.
+        mediaResolution:
+          type: object
+          additionalProperties: false
+          required: [level]
+          properties:
+            level: {type: string, enum: [MEDIA_RESOLUTION_UNSPECIFIED, MEDIA_RESOLUTION_LOW, MEDIA_RESOLUTION_MEDIUM, MEDIA_RESOLUTION_HIGH, MEDIA_RESOLUTION_ULTRA_HIGH]}
+          description: Per-part token resolution for inlineData or non-text fileData. Ultra high is available only per part. Requires the gemini_media_resolution capability.
+        mediaProcessing:
+          type: string
+          enum: [MEDIA_PROCESSING_UNSPECIFIED, STATIC, AGENTIC]
+          description: Processing mode for an inlineData or fileData video part. Requires video_input and gemini_media_processing capabilities.
         inlineData:
           type: object
           additionalProperties: false
@@ -7298,6 +7453,39 @@ components:
             cachedContentTokenCount: {type: integer, minimum: 0}
             totalTokenCount: {type: integer, minimum: 0}
             serviceTier: {type: string, enum: [unspecified, standard, flex, priority]}
+    GeminiComputerUseConfig:
+      type: object
+      additionalProperties: false
+      required: [environment]
+      properties:
+        environment: {type: string, enum: [ENVIRONMENT_BROWSER, ENVIRONMENT_MOBILE, ENVIRONMENT_DESKTOP]}
+        excludedPredefinedFunctions:
+          type: array
+          maxItems: 64
+          uniqueItems: true
+          items: {type: string, pattern: '^[A-Za-z0-9_:.\-]{1,128}$'}
+        enablePromptInjectionDetection: {type: boolean}
+        disabledSafetyPolicies:
+          type: array
+          maxItems: 7
+          uniqueItems: true
+          items: {type: string, enum: [FINANCIAL_TRANSACTIONS, SENSITIVE_DATA_MODIFICATION, COMMUNICATION_TOOL, ACCOUNT_CREATION, DATA_MODIFICATION, USER_CONSENT_MANAGEMENT, LEGAL_TERMS_AND_AGREEMENTS]}
+    GeminiFileSearchConfig:
+      type: object
+      additionalProperties: false
+      required: [fileSearchStoreNames]
+      properties:
+        fileSearchStoreNames:
+          type: array
+          minItems: 1
+          maxItems: 20
+          uniqueItems: true
+          items: {type: string, pattern: '^fileSearchStores/[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$'}
+        metadataFilter:
+          type: string
+          maxLength: 2048
+          pattern: '^[^\r\n\x00]*$'
+        topK: {type: integer, minimum: 1, maximum: 100}
     GeminiLatLng:
       type: object
       additionalProperties: false
@@ -7964,7 +8152,7 @@ components:
         capabilities:
           type: array
           uniqueItems: true
-          items: {type: string, enum: [chat, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, gemini_code_execution, url_context, google_maps, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, cached_content, realtime, stream, tools, custom_tools, response_image_generation, response_computer, response_shell, response_apply_patch, structured_output, mcp, code_interpreter, file_search, vision, web_search, web_fetch, tool_search, zero_output, inference_geo, context_management, tool_result_error, document_citations, document_metadata, document_text, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
+          items: {type: string, enum: [chat, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, gemini_code_execution, gemini_audio_timestamp, gemini_media_resolution, gemini_media_processing, gemini_search_time_range, gemini_file_search, gemini_computer_use, gemini_mcp, url_context, google_maps, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, cached_content, realtime, stream, tools, custom_tools, response_image_generation, response_computer, response_shell, response_apply_patch, structured_output, mcp, code_interpreter, file_search, vision, web_search, web_fetch, tool_search, zero_output, inference_geo, context_management, tool_result_error, document_citations, document_metadata, document_text, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
         max_input_tokens: {type: integer, minimum: 0}
         max_output_tokens: {type: integer, minimum: 0}
         input_cost_per_1m: {type: number, minimum: 0}
@@ -8667,6 +8855,21 @@ components:
           items: {type: string, enum: [text, audio]}
           description: Native Gemini accepts text-only output; compatible deployment support is provider-specific.
         audio: {$ref: '#/components/schemas/ChatAudioOptions'}
+        moderation:
+          allOf:
+            - $ref: '#/components/schemas/ProviderModeration'
+          description: Provider-side input and output moderation for compatible, OpenAI, and Azure OpenAI deployments. Requests bypass gateway response caches and shadow execution.
+        clear_thinking: {type: boolean, description: "Native Cerebras history control supported only by the exact upstream model zai-glm-4.7; explicit false is preserved. Other models and adapters reject the field."}
+        citation_options: {type: string, enum: [enabled, disabled], description: "Native Groq citation inclusion control. Other adapters reject the field."}
+        thinking:
+          type: object
+          additionalProperties: false
+          required: [type]
+          description: "Native DeepSeek thinking-mode control. Omission preserves the gateway's non-thinking default; other adapters reject the field."
+          properties:
+            type: {type: string, enum: [enabled, disabled]}
+        include_reasoning: {type: boolean, description: "Native Groq reasoning-output control. Mutually exclusive with reasoning_format and rejected by other adapters."}
+        reasoning_format: {type: string, enum: [hidden, raw, parsed], description: "Native Groq reasoning-output format. Mutually exclusive with include_reasoning and rejected by other adapters."}
         reasoning_effort: {type: string, enum: [none, minimal, low, medium, high, xhigh, max, default], description: Native Gemini maps minimal through high to thinkingConfig.thinkingLevel; native Ollama maps none to think=false; available levels depend on the selected model.}
         safe_prompt: {type: boolean, description: Enables provider-managed prompt safety for native Mistral Chat deployments; rejected by other adapters.}
         n: {type: integer, minimum: 1, maximum: 128, default: 1, description: Native Gemini supports values up to 20; compatible deployment limits are provider-specific.}
@@ -8703,7 +8906,7 @@ components:
                         required: [mode]
                         properties:
                           mode: {type: string, const: explicit}
-        service_tier: {type: string, enum: [auto, default, on_demand, flex, performance, scale, priority, fast, ultrafast, standard_only], description: "Managed OpenAI accepts auto, default, flex, and priority. OpenRouter passes validated values through. Native Groq accepts auto, default, on_demand, flex, and performance; native Gemini accepts auto, default, standard_only, flex, and priority; native Anthropic accepts auto and standard_only. Other adapters reject the field."}
+        service_tier: {type: string, enum: [auto, default, on_demand, flex, performance, scale, priority, fast, ultrafast, standard_only], description: "Managed OpenAI accepts auto, default, flex, priority, fast, and ultrafast. OpenRouter passes validated values through. Native Groq accepts auto, on_demand, flex, and performance; native Gemini accepts auto, default, standard_only, flex, and priority; native Anthropic accepts auto and standard_only. Other adapters reject the field."}
         user: {type: string, description: "Legacy provider hint; never used as gateway authorization, rate-limit, or billing identity."}
         verbosity: {type: string, enum: [low, medium, high]}
         web_search_options:
@@ -8766,6 +8969,7 @@ components:
           properties:
             accepted_prediction_tokens: {type: integer, minimum: 0}
             audio_tokens: {type: integer, minimum: 0}
+            cached_tokens: {type: integer, minimum: 0}
             reasoning_tokens: {type: integer, minimum: 0}
             rejected_prediction_tokens: {type: integer, minimum: 0}
             text_tokens: {type: integer, minimum: 0}
@@ -8957,7 +9161,7 @@ components:
       properties:
         type: {type: string, const: custom}
         name: {type: string, minLength: 1, maxLength: 64, pattern: '^[A-Za-z0-9_-]+$'}
-        description: {type: string, maxLength: 4096}
+        description: {type: string}
         format:
           oneOf:
             - type: object
@@ -9296,6 +9500,93 @@ components:
             oneOf:
               - $ref: '#/components/schemas/TextContentPart'
               - $ref: '#/components/schemas/InputImageContentPart'
+    ProviderModerationRule:
+      type: object
+      additionalProperties: false
+      required: [mode]
+      properties:
+        mode: {type: string, enum: [score, block]}
+    ProviderModeration:
+      type: object
+      additionalProperties: false
+      required: [model]
+      properties:
+        model: {type: string, minLength: 1, maxLength: 256}
+        policy:
+          type: object
+          additionalProperties: false
+          properties:
+            input: {$ref: '#/components/schemas/ProviderModerationRule'}
+            output: {$ref: '#/components/schemas/ProviderModerationRule'}
+    Conversation:
+      type: object
+      required: [id, object, created_at, metadata]
+      properties:
+        id: {type: string, pattern: '^conv_[A-Za-z0-9_-]+$'}
+        object: {type: string, const: conversation}
+        created_at: {type: integer, format: int64}
+        metadata:
+          type: object
+          maxProperties: 16
+          propertyNames: {maxLength: 64}
+          additionalProperties: {type: string, maxLength: 512}
+    ConversationItem:
+      type: object
+      required: [id, type]
+      properties:
+        id: {type: string, maxLength: 128}
+        type: {type: string, minLength: 1}
+      additionalProperties: true
+    ConversationCreateRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        metadata:
+          type: object
+          maxProperties: 16
+          propertyNames: {maxLength: 64}
+          additionalProperties: {type: string, maxLength: 512}
+        items:
+          type: array
+          maxItems: 20
+          items: {$ref: '#/components/schemas/ConversationItem'}
+    ConversationUpdateRequest:
+      type: object
+      additionalProperties: false
+      required: [metadata]
+      properties:
+        metadata:
+          type: object
+          maxProperties: 16
+          propertyNames: {maxLength: 64}
+          additionalProperties: {type: string, maxLength: 512}
+    ConversationItemsCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items: {$ref: '#/components/schemas/ConversationItem'}
+    ConversationItemList:
+      type: object
+      required: [object, data, has_more]
+      properties:
+        object: {type: string, const: list}
+        data: {type: array, items: {$ref: '#/components/schemas/ConversationItem'}}
+        first_id: {type: string}
+        last_id: {type: string}
+        has_more: {type: boolean}
+    ConversationDeletion:
+      type: object
+      additionalProperties: false
+      required: [id, object, deleted]
+      properties:
+        id: {type: string}
+        object: {type: string, enum: [conversation.deleted, conversation.item.deleted]}
+        deleted: {type: boolean, const: true}
     ResponseRequest:
       description: Supply at most one non-null output limit, max_output_tokens or max_tokens.
       type: object
@@ -9307,6 +9598,22 @@ components:
           maxProperties: 16
           propertyNames: {maxLength: 64}
           additionalProperties: {type: string, maxLength: 512}
+        context_management:
+          type: array
+          description: Native server-side compaction configuration. Compatible adapters preserve it, and requests bypass gateway response caches and shadow execution.
+          minItems: 1
+          maxItems: 1
+          items:
+            type: object
+            additionalProperties: false
+            required: [type]
+            properties:
+              type: {type: string, const: compaction}
+              compact_threshold: {type: integer, minimum: 1, description: Provider token threshold at which server-side compaction may run.}
+        moderation:
+          allOf:
+            - $ref: '#/components/schemas/ProviderModeration'
+          description: Provider-side input and output moderation. Requests bypass gateway response caches and shadow execution.
         reasoning:
           type: object
           additionalProperties: false
@@ -9369,9 +9676,18 @@ components:
             format: {type: object, additionalProperties: true}
             verbosity: {type: string, enum: [low, medium, high]}
         previous_response_id: {type: string}
-        user: {type: string, description: Provider-specific end-user isolation identifier; compatible adapters forward it and native adapters reject or validate it according to their contract.}
+        conversation:
+          description: Owner-isolated durable conversation ID. Its ordered items are prepended before policy, token admission, and billing. Mutually exclusive with previous_response_id. Background turns stage their input durably and serialize later turns until terminal settlement.
+          oneOf:
+            - {type: string, maxLength: 128, pattern: '^conv_[A-Za-z0-9_-]+$'}
+            - type: object
+              additionalProperties: false
+              required: [id]
+              properties:
+                id: {type: string, maxLength: 128, pattern: '^conv_[A-Za-z0-9_-]+$'}
+        user: {type: string, maxLength: 256, description: Provider-specific end-user isolation identifier; compatible adapters forward it and native adapters reject or validate it according to their contract.}
         safety_identifier: {type: string, maxLength: 64}
-        prompt_cache_key: {type: string}
+        prompt_cache_key: {type: string, maxLength: 64}
         prompt_cache_options:
           type: object
           additionalProperties: false
@@ -9382,6 +9698,9 @@ components:
               type: string
               maxLength: 256
               description: Must reference a recent response owned by the same credential and user; the gateway pins execution to that response's deployment and rejects missing, cross-owner or conflicting references.
+            prewarm:
+              type: boolean
+              description: Prepares the provider prompt cache without generating output. Output-token reserve is zero, and the request bypasses gateway response caches and shadow execution.
         prompt_cache_retention: {type: string, enum: [in_memory, 24h], deprecated: true}
         service_tier: {type: string, enum: [auto, default, on_demand, flex, performance, scale, priority, fast, ultrafast, standard_only], description: Forwarded by compatible adapters; native adapters may reject it.}
         stream: {type: boolean, default: false}
@@ -9572,19 +9891,22 @@ components:
         input_tokens: {type: integer, minimum: 0}
     ResponseOutputContent:
       type: object
+      description: Content union. `output_text` uses `text`, `annotations`, and `logprobs`; `refusal` uses only `refusal`; `summary_text` uses only `text`.
       required: [type]
       properties:
         logprobs:
           type: array
+          maxItems: 1048576
           items: {$ref: '#/components/schemas/TokenLogprob'}
         annotations:
           type: array
+          maxItems: 128
           items:
             oneOf:
               - type: object
                 additionalProperties: true
               - type: 'null'
-        type: {type: string}
+        type: {type: string, enum: [output_text, refusal, summary_text]}
         text: {type: string}
         refusal: {type: string}
     ResponseCompactRequest:
@@ -9626,9 +9948,9 @@ components:
       type: object
       required: [type]
       properties:
-        id: {type: string}
+        id: {type: string, minLength: 1, maxLength: 256, pattern: '^[A-Za-z0-9_-]+$'}
         type: {type: string}
-        status: {type: string}
+        status: {type: string, enum: [in_progress, completed, incomplete, searching, failed, interpreting, generating, calling]}
         role: {type: string}
         name: {type: string}
         call_id: {type: string}
@@ -9680,32 +10002,48 @@ components:
           enum: [commentary, final_answer, null]
         content:
           type: array
+          maxItems: 128
           items: {$ref: '#/components/schemas/ResponseOutputContent'}
         summary:
           type: array
+          maxItems: 128
           items: {$ref: '#/components/schemas/ResponseOutputContent'}
     ResponseUsage:
       type: object
+      additionalProperties: false
       properties:
         output_tokens_details:
           type: object
+          additionalProperties: false
           properties:
             accepted_prediction_tokens: {type: integer, minimum: 0}
             audio_tokens: {type: integer, minimum: 0}
+            cached_tokens: {type: integer, minimum: 0}
             reasoning_tokens: {type: integer, minimum: 0}
             rejected_prediction_tokens: {type: integer, minimum: 0}
             text_tokens: {type: integer, minimum: 0}
         input_tokens: {type: integer, minimum: 0}
         output_tokens: {type: integer, minimum: 0}
         total_tokens: {type: integer, minimum: 0}
+        num_sources_used: {type: integer, minimum: 0, description: Provider-reported source count when available.}
+        num_server_side_tools_used: {type: integer, minimum: 0, description: Provider-reported successful server-side tool count when available.}
+        server_side_tool_usage_details:
+          type: object
+          description: Provider-reported item counts for server-side tools when available.
+          properties:
+            x_posts_fetched: {type: integer, minimum: 0}
+            x_users_fetched: {type: integer, minimum: 0}
+          additionalProperties: false
         input_tokens_details:
           type: object
+          additionalProperties: false
           properties:
             cached_tokens: {type: integer, minimum: 0}
             cache_write_tokens: {type: integer, minimum: 0}
             cache_creation_tokens: {type: integer, minimum: 0}
             audio_tokens: {type: integer, minimum: 0}
             image_tokens: {type: integer, minimum: 0}
+            reasoning_tokens: {type: integer, minimum: 0}
             text_tokens: {type: integer, minimum: 0}
     ResponseResponse:
       type: object
@@ -9713,30 +10051,193 @@ components:
       properties:
         metadata:
           type: object
-          additionalProperties: {type: string}
-        id: {type: string}
-        object: {type: string}
+          maxProperties: 16
+          propertyNames: {maxLength: 64}
+          additionalProperties: {type: string, maxLength: 512}
+        id: {type: string, minLength: 1, maxLength: 256, pattern: '^[A-Za-z0-9_-]+$'}
+        object: {type: string, const: response}
         created_at: {type: integer, format: int64}
-        status: {type: string}
+        completed_at: {type: integer, format: int64, minimum: 0}
+        status: {type: string, enum: [completed, failed, in_progress, cancelled, queued, incomplete]}
         error:
           type: object
           nullable: true
+          additionalProperties: false
           required: [code, message]
           properties:
-            code: {type: string}
-            message: {type: string}
+            code: {type: string, minLength: 1, maxLength: 128}
+            message: {type: string, minLength: 1, maxLength: 8192}
+            misalignment:
+              type: object
+              additionalProperties: false
+              properties:
+                detailed_explanation: {type: string, maxLength: 8192}
+                error_type:
+                  type: string
+                  maxLength: 128
+                  description: Classification supplied by the provider; clients must accept additional values.
+                steer:
+                  type: object
+                  additionalProperties: false
+                  required: [message]
+                  properties:
+                    message: {type: string, minLength: 1, maxLength: 8192}
         incomplete_details:
           type: object
           nullable: true
+          additionalProperties: false
           required: [reason]
           properties:
-            reason: {type: string}
-        model: {type: string}
+            reason: {type: string, enum: [max_output_tokens, max_messages, content_filter, steered]}
+        model: {type: string, minLength: 1, maxLength: 256}
+        background: {type: boolean}
+        store: {type: boolean}
+        previous_response_id: {type: string, minLength: 1, maxLength: 512}
+        service_tier: {type: string, enum: [auto, default, on_demand, flex, performance, scale, priority, fast, ultrafast, standard_only], description: Provider-assigned execution tier when reported.}
+        max_output_tokens: {type: integer, minimum: 1, description: Provider-assigned output-token limit when reported.}
+        max_tool_calls: {type: integer, minimum: 0, description: Provider-assigned tool-call limit when reported.}
+        parallel_tool_calls: {type: boolean, description: Effective parallel tool-call setting when reported.}
+        temperature: {type: number, minimum: 0, maximum: 2}
+        top_p: {type: number, minimum: 0, maximum: 1}
+        top_logprobs: {type: integer, minimum: 0, maximum: 20}
+        frequency_penalty: {type: number, minimum: -2, maximum: 2}
+        presence_penalty: {type: number, minimum: -2, maximum: 2}
+        truncation: {type: string, enum: [auto, disabled]}
+        reasoning: {$ref: '#/components/schemas/ResponseRequest/properties/reasoning'}
+        text: {$ref: '#/components/schemas/ResponseRequest/properties/text'}
+        tools: {$ref: '#/components/schemas/ResponseRequest/properties/tools'}
+        tool_choice: {$ref: '#/components/schemas/ResponseRequest/properties/tool_choice'}
+        instructions:
+          oneOf:
+            - {type: string}
+            - type: array
+              minItems: 1
+              items: {type: object, additionalProperties: true}
+        prompt: {$ref: '#/components/schemas/ResponsePrompt'}
+        moderation: {$ref: '#/components/schemas/ResponseModeration'}
+        context_management: {$ref: '#/components/schemas/ResponseRequest/properties/context_management'}
+        user: {type: string, maxLength: 256, deprecated: true}
+        safety_identifier: {type: string, maxLength: 64}
+        prompt_cache_key: {type: string, maxLength: 64}
+        prompt_cache_options: {$ref: '#/components/schemas/ResponseRequest/properties/prompt_cache_options'}
+        prompt_cache_retention: {type: string, enum: [in_memory, 24h], deprecated: true}
+        prompt_cache_diagnostics: {$ref: '#/components/schemas/ResponsePromptCacheDiagnostics'}
+        citations:
+          type: array
+          maxItems: 1024
+          description: Provider-reported source URLs encountered during tool execution.
+          items: {type: string, format: uri, maxLength: 8192}
+        conversation:
+          type: object
+          additionalProperties: false
+          required: [id]
+          properties:
+            id: {type: string, maxLength: 128, pattern: '^conv_[A-Za-z0-9_-]+$'}
         output:
           type: array
+          maxItems: 1024
           items: {$ref: '#/components/schemas/ResponseOutputItem'}
         output_text: {type: string}
         usage: {$ref: '#/components/schemas/ResponseUsage'}
+    ResponsePrompt:
+      type: object
+      additionalProperties: false
+      required: [id]
+      properties:
+        id: {type: string, minLength: 1, maxLength: 512}
+        version: {type: string, minLength: 1, maxLength: 512}
+        variables:
+          type: object
+          maxProperties: 256
+          propertyNames: {minLength: 1, maxLength: 64}
+          additionalProperties:
+            oneOf:
+              - {type: string, maxLength: 1048576}
+              - type: object
+                additionalProperties: false
+                required: [type, text]
+                properties:
+                  type: {type: string, const: input_text}
+                  text: {type: string, maxLength: 1048576}
+                  prompt_cache_breakpoint: {$ref: '#/components/schemas/ResponsePromptCacheBreakpoint'}
+              - type: object
+                additionalProperties: false
+                required: [type]
+                properties:
+                  type: {type: string, const: input_image}
+                  detail: {type: string, enum: [low, high, auto, original]}
+                  file_id: {type: string, maxLength: 512}
+                  image_url: {type: string, maxLength: 16777216}
+                  prompt_cache_breakpoint: {$ref: '#/components/schemas/ResponsePromptCacheBreakpoint'}
+              - type: object
+                additionalProperties: false
+                required: [type]
+                properties:
+                  type: {type: string, const: input_file}
+                  detail: {type: string, enum: [auto, low, high]}
+                  file_data: {type: string, maxLength: 25165824}
+                  file_id: {type: string, maxLength: 512}
+                  file_url: {type: string, maxLength: 8192}
+                  filename: {type: string, maxLength: 512}
+                  prompt_cache_breakpoint: {$ref: '#/components/schemas/ResponsePromptCacheBreakpoint'}
+    ResponsePromptCacheBreakpoint:
+      type: object
+      additionalProperties: false
+      required: [mode]
+      properties:
+        mode: {type: string, const: explicit}
+    ResponseModeration:
+      type: object
+      additionalProperties: false
+      properties:
+        input: {$ref: '#/components/schemas/ResponseModerationResult'}
+        output: {$ref: '#/components/schemas/ResponseModerationResult'}
+      anyOf:
+        - required: [input]
+        - required: [output]
+    ResponseModerationResult:
+      type: object
+      additionalProperties: false
+      required: [type, model, flagged, categories, category_scores, category_applied_input_types]
+      properties:
+        type: {type: string, const: moderation_result}
+        model: {type: string, minLength: 1, maxLength: 512}
+        flagged: {type: boolean}
+        categories:
+          type: object
+          minProperties: 1
+          maxProperties: 128
+          additionalProperties: {type: [boolean, 'null']}
+        category_scores:
+          type: object
+          minProperties: 1
+          maxProperties: 128
+          additionalProperties: {type: number, minimum: 0, maximum: 1}
+        category_applied_input_types:
+          type: object
+          minProperties: 1
+          maxProperties: 128
+          additionalProperties:
+            type: array
+            minItems: 1
+            maxItems: 2
+            uniqueItems: true
+            items: {type: string, enum: [text, image]}
+    ResponsePromptCacheDiagnostics:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [type]
+          properties:
+            type: {type: string, enum: [cache_hit, comparison_response_not_found, unavailable]}
+        - type: object
+          additionalProperties: false
+          required: [type, reason, cache_missed_tokens]
+          properties:
+            type: {type: string, const: cache_miss}
+            reason: {type: string, enum: [model_changed, prompt_cache_key_changed, service_tier_changed, tools_changed, text_format_changed, reasoning_effort_changed, verbosity_changed, context_compacted, input_changed]}
+            cache_missed_tokens: {type: integer, minimum: 0}
+            comparison_reusable_tokens: {type: integer, minimum: 0}
     ResponseInputItemList:
       type: object
       required: [object, data, has_more]
@@ -10791,7 +11292,15 @@ components:
         auth_type:
           type: string
           enum: [api_key, gcp_adc, entra, bearer, aws_sigv4]
-          description: Azure accepts api_key or entra. Azure entra uses the public, Azure US Government or Azure China authority and resource audience selected from the provider endpoint, with a bound static token or ambient AKS federated workload identity, App Service, Container Apps or VM managed identity when no credential is bound. Gemini accepts api_key or gcp_adc; vertex-gemini accepts only gcp_adc. gcp_adc obtains a short-lived bearer token from the GCE or GKE metadata server and does not require a bound credential. Bedrock accepts bearer for compatible private endpoints or aws_sigv4 for AWS IAM authentication. A Bedrock aws_sigv4 deployment without a bound credential uses environment, projected web identity, bounded shared credentials profiles, ECS/EKS container or EC2 IMDSv2 role credentials. Explicit credentials remain write-only in the credential vault.
+          description: Azure accepts api_key or entra. Azure entra uses the public, Azure US Government or Azure China authority and resource audience selected from the provider endpoint, with a bound static token or environment-backed service principal, AKS federated workload identity, App Service, Container Apps or VM managed identity when no credential is bound. Service-principal secrets and federated token files are mutually exclusive. Gemini accepts api_key or gcp_adc; vertex-gemini accepts only gcp_adc. gcp_adc obtains a short-lived bearer token from the GCE or GKE metadata server and does not require a bound credential. Bedrock accepts bearer for compatible private endpoints or aws_sigv4 for AWS IAM authentication. A Bedrock aws_sigv4 deployment without a bound credential uses environment, projected web identity, bounded shared credentials profiles, ECS/EKS container or EC2 IMDSv2 role credentials. Explicit credentials remain write-only in the credential vault.
+        azure_cloud:
+          type: string
+          enum: [public, usgov, china]
+          description: Optional cloud selection for azure-openai with auth_type=entra. Omission infers the cloud from the endpoint. Use usgov or china for a sovereign Azure endpoint behind a custom hostname. China is not supported for Foundry project URLs.
+        azure_audience:
+          type: string
+          enum: [cognitive, foundry]
+          description: Optional Entra token audience for azure-openai with auth_type=entra. Omission keeps endpoint-derived behavior. Use cognitive for the Cognitive Services resource or foundry for the Foundry resource when required by the configured endpoint. Foundry audience is not supported in Azure China.
         region:
           type: string
           maxLength: 64
@@ -10803,7 +11312,7 @@ components:
     ProviderCapabilityProfile:
       type: object
       additionalProperties: false
-      required: [type, operations, capabilities, auth_types, chat_parameters, response_parameters, interaction_parameters, embedding_parameters, rerank_parameters, completion_parameters, moderation_parameters, search_parameters, image_generation_parameters, image_edit_parameters, image_variation_parameters, audio_transcription_parameters, audio_translation_parameters, audio_speech_parameters, ocr_parameters, video_create_parameters, video_extend_parameters, fine_tuning_create_parameters, container_create_parameters, chat_model_parameters]
+      required: [type, operations, capabilities, auth_types, chat_parameters, response_parameters, interaction_parameters, embedding_parameters, rerank_parameters, completion_parameters, moderation_parameters, search_parameters, image_generation_parameters, image_edit_parameters, image_variation_parameters, audio_transcription_parameters, audio_translation_parameters, audio_speech_parameters, ocr_parameters, video_create_parameters, video_extend_parameters, fine_tuning_create_parameters, container_create_parameters, chat_model_parameters, response_model_parameters]
       properties:
         type: {type: string, enum: [demo, ollama, openai, openai-compatible, openrouter, azure-openai, anthropic, gemini, vertex-gemini, cohere, mistral, voyage, bedrock, groq, deepseek, cerebras, nvidia-nim, together, xai, opensandbox]}
         operations:
@@ -10815,7 +11324,7 @@ components:
           type: array
           uniqueItems: true
           description: Operations and optional request features preserved by the managed adapter.
-          items: {type: string, enum: [chat, completions, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, gemini_code_execution, url_context, google_maps, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, cached_content, realtime, stream, tools, custom_tools, response_image_generation, response_computer, response_shell, response_apply_patch, structured_output, mcp, code_interpreter, file_search, vision, web_search, web_fetch, tool_search, zero_output, inference_geo, context_management, tool_result_error, document_citations, document_metadata, document_text, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
+          items: {type: string, enum: [chat, completions, responses, interactions, interaction_agents, interaction_environment_reuse, gemini_safety_settings, gemini_code_execution, gemini_audio_timestamp, gemini_media_resolution, gemini_media_processing, gemini_search_time_range, gemini_file_search, gemini_computer_use, gemini_mcp, url_context, google_maps, background_responses, background_interactions, embeddings, rerank, moderation, image_generation, image_edit, image_variation, audio_transcription, audio_translation, audio_speech, ocr, search, skills, fine_tuning, video, video_remix, video_extension, container, container_files, container_network, cached_content, realtime, stream, tools, custom_tools, response_image_generation, response_computer, response_shell, response_apply_patch, structured_output, mcp, code_interpreter, file_search, vision, web_search, web_fetch, tool_search, zero_output, inference_geo, context_management, tool_result_error, document_citations, document_metadata, document_text, audio, audio_input, video_input, prompt_cache, assistant_prefill, file_input, bedrock_invoke]}
         auth_types:
           type: array
           uniqueItems: true
@@ -10863,20 +11372,36 @@ components:
           type: array
           description: Exact upstream-model overrides relative to chat_parameters. An empty array means the adapter has no published model-specific override.
           items: {$ref: '#/components/schemas/ProviderChatModelParameterPolicy'}
+        response_model_parameters:
+          type: array
+          description: Exact upstream-model overrides relative to response_parameters. An empty array means the adapter has no published model-specific override.
+          items: {$ref: '#/components/schemas/ProviderResponseModelParameterPolicy'}
     ProviderChatParameterPolicy:
       type: object
       additionalProperties: false
-      required: [supported_options, reasoning_effort, logprobs, service_tier]
+      required: [supported_options, reasoning_effort, reasoning_format, citation_options, thinking, logprobs, service_tier]
       description: Chat Completions options accepted by the runtime adapter validator. Missing option names and empty value arrays mean the parameter is rejected. Availability can still depend on the upstream model.
       properties:
         supported_options:
           type: array
           uniqueItems: true
-          items: {type: string, enum: [metadata, store, modalities, audio, safe_prompt, n, safety_identifier, prompt_cache_key, prompt_cache_options, prompt_cache_retention, prompt_mode, prediction, user, verbosity, web_search_options, web_fetch_options, logprobs, top_logprobs, frequency_penalty, presence_penalty, min_p, top_k, top_a, repetition_penalty, logit_bias, reasoning_effort, service_tier]}
+          items: {type: string, enum: [metadata, store, modalities, audio, clear_thinking, citation_options, thinking, include_reasoning, reasoning_format, safe_prompt, n, safety_identifier, prompt_cache_key, prompt_cache_options, prompt_cache_retention, prompt_mode, prediction, user, verbosity, web_search_options, web_fetch_options, logprobs, top_logprobs, frequency_penalty, presence_penalty, min_p, top_k, top_a, repetition_penalty, logit_bias, reasoning_effort, service_tier]}
         reasoning_effort:
           type: array
           uniqueItems: true
           items: {type: string, enum: [none, minimal, low, medium, high, xhigh, max, default]}
+        reasoning_format:
+          type: array
+          uniqueItems: true
+          items: {type: string, enum: [hidden, raw, parsed]}
+        citation_options:
+          type: array
+          uniqueItems: true
+          items: {type: string, enum: [enabled, disabled]}
+        thinking:
+          type: array
+          uniqueItems: true
+          items: {type: string, enum: [enabled, disabled]}
         logprobs:
           type: array
           uniqueItems: true
@@ -10888,20 +11413,30 @@ components:
     ProviderChatModelParameterPolicy:
       type: object
       additionalProperties: false
-      required: [model, supported_options, reasoning_effort]
-      description: Options accepted only for this exact upstream model. The values are derived by probing the runtime adapter validator and take precedence over the provider-wide value arrays.
+      required: [model, supported_options, reasoning_effort, reasoning_format]
+      description: Exact upstream-model differences from the provider-wide Chat policy. supported_options adds accepted controls, unsupported_options removes controls the model rejects, and value arrays take precedence over provider-wide values. The values are derived by probing the runtime adapter validator.
       properties:
         model:
           type: string
-          enum: [openai/gpt-oss-20b, openai/gpt-oss-120b, deepseek-ai/DeepSeek-V4-Pro-0813]
+          minLength: 1
+          description: Exact upstream model identifier published by the runtime adapter validator.
         supported_options:
           type: array
           uniqueItems: true
-          items: {type: string, enum: [reasoning_effort]}
+          items: {type: string, enum: [clear_thinking, include_reasoning, reasoning_format, reasoning_effort]}
+        unsupported_options:
+          type: array
+          uniqueItems: true
+          description: Provider-wide controls rejected for this exact upstream model.
+          items: {type: string}
         reasoning_effort:
           type: array
           uniqueItems: true
-          items: {type: string, enum: [low, medium, high, max]}
+          items: {type: string, enum: [none, minimal, low, medium, high, xhigh, max, default]}
+        reasoning_format:
+          type: array
+          uniqueItems: true
+          items: {type: string, enum: [hidden, raw, parsed]}
     ProviderResponseParameterPolicy:
       type: object
       additionalProperties: false
@@ -10920,6 +11455,23 @@ components:
           type: array
           uniqueItems: true
           items: {type: string, enum: [auto, default, on_demand, flex, performance, scale, priority, fast, ultrafast, standard_only]}
+    ProviderResponseModelParameterPolicy:
+      type: object
+      additionalProperties: false
+      required: [model, supported_options, reasoning_effort]
+      description: Options accepted for this exact upstream Responses model. Listed values take precedence over provider-wide reasoning_effort values.
+      properties:
+        model:
+          type: string
+          minLength: 1
+        supported_options:
+          type: array
+          uniqueItems: true
+          items: {type: string, enum: [reasoning]}
+        reasoning_effort:
+          type: array
+          uniqueItems: true
+          items: {type: string, enum: [none, minimal, low, medium, high, xhigh, max, default]}
     ProviderInteractionParameterPolicy:
       type: object
       additionalProperties: false
@@ -11359,7 +11911,7 @@ components:
     GuardrailApplyResponse:
       type: object
       additionalProperties: false
-      required: [execution_id, guardrail_name, allowed, checks, content_stored]
+      required: [execution_id, guardrail_name, allowed, checks, content_stored, replacements]
       properties:
         execution_id: {type: string, minLength: 1, maxLength: 128, description: Server-generated execution identifier; independent of the caller correlation ID.}
         guardrail_name: {type: string, minLength: 1, maxLength: 128}
@@ -11367,11 +11919,14 @@ components:
         checks:
           type: object
           additionalProperties: false
-          required: [dlp, av]
+          required: [dlp, av, anonymizer]
           properties:
             dlp: {type: string, enum: [disabled, passed, rejected]}
             av: {type: string, enum: [disabled, passed, rejected]}
+            anonymizer: {type: string, enum: [disabled, passed, unavailable]}
         content_stored: {type: boolean, const: false}
+        anonymized_text: {type: string, maxLength: 65536, description: Present only when the selected policy enables anonymization. The submitted raw text is never returned.}
+        replacements: {type: integer, minimum: 0}
     GuardrailPolicy:
       allOf:
         - {$ref: '#/components/schemas/GuardrailPolicyInput'}
@@ -11678,6 +12233,7 @@ components:
         server_url: {type: string, format: uri, pattern: '^https://[^?#]+$'}
         transport: {type: string, enum: [streamable-http, sse], description: Transport used for authenticated tool discovery and execution. SSE uses the legacy 2024-11-05 HTTP and event-stream lifecycle.}
         bearer_token: {type: string, maxLength: 32768, writeOnly: true, description: Optional static server credential. Omit to preserve the stored value; send an empty string to clear it. The value is encrypted at rest and never returned.}
+        allow_provider_execution: {type: boolean, default: false, description: Explicitly permits a native model provider to receive this Streamable HTTP URL and stored bearer credential when the request selects this registry ID.}
         tools:
           type: array
           maxItems: 256

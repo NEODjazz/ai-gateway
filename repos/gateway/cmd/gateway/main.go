@@ -44,6 +44,9 @@ func main() {
 			log.Fatal(err)
 		}
 		defer providerControlStore.Close()
+		if err := providerControlStore.ResponseSessions().Ping(appCtx); err != nil {
+			log.Fatalf("response session schema is unavailable: %v", err)
+		}
 	}
 
 	gatewayPipeline := modules.NewPipelineWithObserver([]modules.Module{
@@ -93,12 +96,17 @@ func main() {
 	providerConfig.ControlPlaneStore = controlPlaneStoreFor(providerControlStore)
 	if providerControlStore != nil {
 		providerConfig.AsyncJobs = providerControlStore
+		providerConfig.Conversations = providerControlStore
+		providerConfig.ConversationItemQuota = cfg.Conversations.ItemQuota
 	}
 	if redisStore != nil {
 		providerConfig.CacheStore = redisStore
 		providerConfig.SessionStore = redisStore
 		providerConfig.CircuitStore = redisStore
 		providerConfig.DeploymentQuotaStore = redisStore
+	}
+	if providerControlStore != nil {
+		providerConfig.SessionStore = providerControlStore.ResponseSessions()
 	}
 	llmProvider, err := provider.NewWithError(providerConfig)
 	if err != nil {
@@ -138,7 +146,10 @@ func main() {
 					return err
 				}
 			}
-			return providerControlStore.Ping(ctx)
+			if err := providerControlStore.Ping(ctx); err != nil {
+				return err
+			}
+			return providerControlStore.ResponseSessions().Ping(ctx)
 		}
 	}
 	handler := gateway.NewHandlerWithMetrics(gatewayPipeline, llmProvider, rateLimits, readiness, metrics).WithResourceBillingPipeline(providerPipeline).WithModelRegistry(modelRegistry).WithComplianceModules(dlpModule, avModule).WithAnonymizerModule(anonymizerModule).WithGuardrailMonitor(guardrailMonitor).WithCacheDiagnostics(gateway.CacheRuntimeConfig{ExactTTLSeconds: cfg.Cache.TTLSeconds, ExactMaxBytes: cfg.Cache.MaxBytes, SemanticTTLSeconds: cfg.Cache.Semantic.TTLSeconds, SemanticMaxEntries: cfg.Cache.Semantic.MaxEntries, SemanticMaxBytes: cfg.Cache.Semantic.MaxBytes}).WithLoggingRegistry(loggingRegistry).WithAgentRegistry(agentRegistry).WithMCPRegistry(mcpRegistry).WithAccessRegistry(accessRegistry).WithAdminState(adminState)
@@ -154,6 +165,7 @@ func main() {
 			WithVideoStore(providerControlStore).
 			WithContainerStore(providerControlStore).
 			WithCachedContentStore(providerControlStore).
+			WithConversationStore(providerControlStore, gateway.ConversationRuntimeConfig{OwnerQuota: cfg.Conversations.OwnerQuota, ItemQuota: cfg.Conversations.ItemQuota}).
 			WithSkillStore(providerControlStore).
 			WithRAGIngestStore(providerControlStore).
 			WithVectorStore(providerControlStore, gateway.VectorStoreRuntimeConfig{OwnerQuota: cfg.VectorStores.OwnerQuota, FileQuota: cfg.VectorStores.FileQuota, ByteQuota: cfg.VectorStores.ByteQuota})

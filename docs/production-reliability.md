@@ -1,8 +1,67 @@
 # Production reliability
 
+Anthropic usage validation rejects input, cache-read, cache-creation and output
+token totals that exceed the platform integer range before JSON conversion or
+the first streaming event. Regression tests cover each overflowing component,
+the valid maximum boundary and both Chat response paths.
+
+For Anthropic Chat and Responses SSE, the gateway also validates the combined
+usage across `message_start` and `message_delta`. Responses streaming validates
+the initial provider usage before forwarding `response.created`; overflowing
+final usage cannot produce a successful terminal response or billing settlement.
+The stream assembler uses cumulative provider counts, including input added by
+server tools and output already reported at `message_start`. Missing delta fields
+retain the prior count; decreasing counts fail before terminal settlement.
+Chat SSE applies the same rule to server-tool request counts: a partial delta
+cannot erase web-search or code-execution usage, and a lower cumulative count
+fails before billing settlement.
+Anthropic Chat also rejects reported web-search, web-fetch or code-execution
+usage when the corresponding server tool was not enabled in the request.
+
+An explicitly configured Azure Entra bearer token is rejected before HTTP
+inference when it is blank, contains whitespace or NUL, or exceeds 16 KiB.
+This applies to managed Azure OpenAI and Foundry inference as well as direct
+adapter use; an absent explicit token still selects workload identity.
+Tokens returned by Entra or managed-identity endpoints use the same length and
+whitespace validation before they are cached or sent to Azure inference.
+After a failed token refresh, the cached token is reused only if it remains
+unexpired at the end of the network call; retry timing also starts then.
+
+Responses usage validation bounds cache-read and cache-write token details by
+reported input tokens. Cache read plus either cache-write alias cannot exceed
+the input total; invalid JSON or terminal SSE usage fails before delivery.
+When a completed JSON response or terminal SSE snapshot reports all three
+token counters, `total_tokens` must equal input plus output. Intermediate SSE
+snapshots may be partial and are checked at the terminal boundary.
+
 ## Token accounting and request identity
 
 TPM and remote billing reserve use the same context estimator. For chat, it includes messages, tool calls, tool schemas, tool choice and response format. For Responses, it includes input, instructions, tools, tool choice and text format. The estimate uses serialized context bytes (approximately four bytes per token); image input uses a fixed 4096-token estimate instead of charging for base64 length. This is a reservation estimate, not a provider tokenizer or a guarantee of exact multimodal usage. Provider-reported usage settles the final charge when available; fallback usage remains marked estimated.
+
+Native Ollama Chat rejects negative or overflowing provider-reported token counts
+in JSON and terminal SSE responses before usage settlement. An invalid stream
+does not emit a successful completion event. Terminal SSE usage is validated
+before forwarding content or tool calls from that terminal chunk.
+Native Ollama Chat JSON and stream bodies are bounded to 32 MiB. Ollama Responses
+JSON uses the shared bounded decoder and validates response usage and structure
+before returning the result.
+Ollama provider base URLs reject query strings and fragments at startup and in
+managed configuration. Reverse-proxy path prefixes, including URLs ending in
+`/api` or `/v1`, remain supported.
+Native Ollama Chat streams require the provider's `done: true` terminal chunk;
+an early EOF returns an error without emitting a successful finish event.
+The final native Chat JSON or stream chunk must include both provider token
+counters. Missing or null counters fail before settlement; explicitly reported
+zero remains valid.
+Non-stream native Chat JSON must also report `done: true`; incomplete output is
+not presented as a successful response.
+Native Ollama Chat accepts only assistant or omitted roles in provider output;
+an omitted role becomes assistant, while another role fails before that chunk
+is forwarded to the client.
+Tool-only native Chat streams include the `assistant` role in their first tool
+call chunk, so clients can reconstruct the message without a text delta.
+When a native Chat stream contains no text, reasoning or tool calls, its
+terminal chunk still carries the `assistant` role alongside the finish reason.
 
 Native Messages and GenerateContent requests retain their API family in billing
 reserve, commit and failure events. The gateway sets this classification before
@@ -11,6 +70,10 @@ Messages `metadata.user_id` is bounded to 512 Unicode characters and remains
 separate from the authenticated credential, user, organization, and execution
 identities used for policy and billing. Provider-reported thinking-token details
 are accepted only when nonnegative and no greater than total output tokens.
+Compatible Responses also preserves nonnegative provider-reported cached output
+token details for JSON and terminal SSE usage without adding them to aggregate
+output or total tokens. Provider-reported Responses input reasoning details follow
+the same rule and remain separate from aggregate input and total tokens.
 
 Explicit prompt-cache breakpoints are limited to four across Chat messages and
 tools. They are part of token reservation and exact cache identity. Semantic
@@ -19,6 +82,8 @@ requires the deployment and model to declare `prompt_cache`; provider cache-read
 and cache-creation token counters remain distinct during billing settlement.
 
 `max_tokens` and `max_completion_tokens` produce identical chat reservations. The public chat API rejects supplying both. Responses uses `max_output_tokens`, with the existing `max_tokens` alias. Without an explicit output cap, reserve includes 1024 output tokens; this estimate does not impose a new upstream generation limit. Applications needing a bounded output reservation should send an explicit cap. Embeddings and rerank do not reserve output generation tokens.
+Rerank rejects provider-reported input and output token counts whose sum exceeds the integer range before post-response billing. The native Together adapter also rejects overflowing or inconsistent usage at its response boundary.
+When Chat or Embeddings needs an estimated input count, the gateway rejects a merge that would overflow total tokens before post-response billing. The provider usage remains unchanged on that failure.
 
 Text completions reserve every prompt plus `max_tokens` for every server-generated candidate and prompt. Candidate count per prompt is the larger of `n` and `best_of`; the default output allowance is 16 tokens. Token-ID prompts use their exact input length, while text prompts use the bounded context estimate. Multiplication and addition saturate at the platform integer limit. The gateway rejects requests whose prompt count multiplied by `n` exceeds 128. Provider-reported usage settles the final charge, while a response without usage retains the full candidate reserve as explicitly estimated usage.
 
@@ -2044,3 +2109,632 @@ Gateway Helm revision 507 completed successfully. Pod
 image. Live liveness and readiness returned 204, OpenAPI 0.1.401 exposed the
 expanded MIME contract, and a cluster-local unauthenticated AVI request returned
 401 at the authentication boundary without provider execution.
+
+## Native Gemini file search
+
+Native GenerateContent and countTokens accept bounded provider-managed file-search
+store configuration. Every store is authorized separately, tool schemas enter token
+reserve, provider token counts remain authoritative for settlement, and requests
+bypass response caches. Gemini and Vertex routing requires an explicit capability.
+Retrieval grounding metadata is validated and preserved, while file-search execution
+does not create a synthetic search-request charge.
+
+## Native Gemini computer use
+
+Native GenerateContent accepts bounded browser, mobile and desktop computer-use
+configuration. Deployment capability, environment grants and per-policy safety
+override grants fail closed before provider execution. Tool configuration participates
+in TPM and budget reserve, countTokens preserves it, and response caches are bypassed.
+The gateway transports action calls and safety acknowledgements; execution remains
+client-side.
+
+## Native Gemini MCP execution
+
+Remote MCP execution is registry-backed and fail closed. Requests carry only server IDs; the gateway resolves URLs and bearer credentials after authentication, requires an explicit per-server provider-execution opt-in and connector grant, and accepts Streamable HTTP only. Resolved requests bypass response caches and retain provider token accounting through native count and inference paths.
+
+## Vector-store chunking persistence
+
+Vector-store attachments persist their effective `auto` or `static` chunking
+strategy in PostgreSQL. Single-file attachment, atomic file batches, and RAG
+ingestion write the same representation. Content retrieval and synchronous
+search read that stored strategy after a restart, preventing chunk boundaries
+from changing because request-local state was lost. The database constraint
+rejects static sizes outside 100 to 4096 estimated tokens and overlap above half
+the configured chunk size.
+
+## Background Responses conversations
+
+Background Responses can use the durable Conversations API. Current input items
+are staged in a separate PostgreSQL table before the background job is exposed;
+the queue payload retains identifiers and effective policy metadata but no prompt.
+A durable active-turn marker prevents lease expiry from admitting a second request
+or CRUD mutation while provider execution is pending. Terminal success atomically
+commits staged input and provider output, while failed and cancelled responses
+remove pending input and release the turn. Completion and release are idempotent by
+the internal execution ID so worker retries cannot duplicate conversation history.
+Admission reserves the bounded maximum of 1024 provider output items against the
+conversation quota before execution, preventing an unrecoverable terminal quota
+failure from retaining the durable turn.
+
+## Direct guardrail anonymization
+
+Source `3ce760a` applies the effective policy's configured anonymizer to
+`POST /guardrails/apply_guardrail`, including policies that enable only
+anonymization. Every enabled DLP, AV or anonymizer module is required and fails
+closed when unavailable. The response reports the replacement count and includes
+masked text only when at least one replacement occurred; raw input is never echoed
+and durable audit remains metadata-only. Gateway unit tests, vet, build, the full
+Go suite and the full race suite passed.
+
+Rancher Desktop built
+`ai-gateway-gateway:guardrail-anonymization-3ce760a3` with image ID
+`sha256:a2300173ae6bc7b21aa01d292548fe871c41653785631167f9f1691b314ac260`.
+Gateway Helm revision 582 completed successfully. Pod
+`ai-gateway-gateway-75f7b78f46-l457b` became Ready with zero restarts. Live
+liveness and readiness returned 204, OpenAPI 0.1.463 was served, and a direct
+request using the configured `test` policy returned one replacement as
+`{{EMAIL_1}}` without raw content or stored content.
+
+## Managed OpenAI fast service tiers
+
+Source `1021b1e` accepts and forwards the documented `fast` and `ultrafast`
+service tiers for managed OpenAI Chat and Responses requests. The runtime-derived
+capability profile publishes both values, while unsupported tiers still fail before
+provider execution. Transport regressions cover both endpoints and exact forwarded
+values. Provider and OpenAPI tests, vet, build, the full Go suite and the full race
+suite passed.
+
+Rancher Desktop built `ai-gateway-gateway:service-tiers-1021b1e2` with image ID
+`sha256:9c36e926ca0fa3d1fe699526979dc7d3c64d553d5f638bd6609fe276a2011b79`.
+Gateway Helm revision 583 completed successfully. Pod
+`ai-gateway-gateway-c647c5b87-kmlf2` became Ready with zero restarts. Live
+liveness and readiness returned 204, OpenAPI 0.1.464 was served, and the live
+provider-capability endpoint reported `fast` and `ultrafast` for managed OpenAI
+Chat and Responses without executing model inference.
+
+## Native Groq service-tier request contract
+
+Source `4cbff5f` limits native Groq Chat requests to the documented input values
+`auto`, `on_demand`, `flex` and `performance`. The provider-reported `default`
+value remains valid in responses and in the separate Responses API request
+contract, but Chat now rejects it before provider execution. The runtime-derived
+capability profile and OpenAPI description publish the same distinction. Provider
+and OpenAPI tests, vet, build and the full race suite passed.
+
+Rancher Desktop built `ai-gateway-gateway:groq-tiers-4cbff5fb` with image ID
+`sha256:8c0b134ee567acdec84c1c44a4dae9a97077923d701117795ba7c6e99245a071`.
+Gateway Helm revision 584 completed successfully. Pod
+`ai-gateway-gateway-56c4f54c77-6957p` became Ready with zero restarts. Live
+liveness and readiness returned 204, OpenAPI 0.1.465 was served, and the live
+provider-capability endpoint reported the four Chat request tiers while retaining
+`auto`, `default` and `flex` for Responses.
+
+## Native Cerebras effective service tier
+
+Source `c49c167` normalizes Cerebras `service_tier_used` into the public
+`service_tier` response field when automatic tier selection is requested. JSON
+and SSE now expose the tier that actually processed the request; the native-only
+field is removed from streamed payloads, and unknown, malformed or conflicting
+provider values fail closed. Provider and OpenAPI tests, vet, build and the full
+race suite passed.
+
+Rancher Desktop built `ai-gateway-gateway:cerebras-tier-c49c167f` with image ID
+`sha256:c6daa89321b22863738db582c03df1ac02b65f170035372dbca9102f1b5e411b`.
+Gateway Helm revision 585 completed successfully. Pod
+`ai-gateway-gateway-84c6857d9c-ms4vc` became Ready with zero restarts. Live
+liveness and readiness returned 204, OpenAPI 0.1.466 was served, and the live
+provider-capability endpoint retained the validated Cerebras request tiers.
+
+## Provider-reported Chat service tiers
+
+Source `f9c1be4` validates provider-reported Chat service tiers before JSON
+delivery or the first SSE callback. The response allowlist covers the request
+values plus the provider-assigned `standard` and `batch` values. Unknown values
+now fail closed instead of entering usage and billing metadata. OpenAI contract,
+provider and API tests, vet, build and the full race suite passed.
+
+Rancher Desktop built `ai-gateway-gateway:reported-tiers-f9c1be4f` with image ID
+`sha256:4b1dda00c028fa1677e4d4b4ff3b953938e2a4e128ce767ee8cf18106cb6d62a`.
+Gateway Helm revision 586 completed successfully. Pod
+`ai-gateway-gateway-5c76bf8b65-7sjrj` became Ready with zero restarts. Live
+liveness and readiness returned 204 and OpenAPI 0.1.467 was served.
+
+## Runtime model-policy schema and Cerebras thinking history
+
+Source `35d033a` removes the stale closed enum from the OpenAPI model-specific
+Chat policy schema. Runtime adapters can now publish exact upstream model IDs
+without producing an admin response that violates the gateway's own schema.
+The schema keeps a non-empty model constraint and its regression test.
+
+Source `d38eaba` adds the native Cerebras `clear_thinking` request control for
+the exact upstream model `zai-glm-4.7`. Explicit `false` is preserved on the
+wire, other Cerebras models and adapters reject the field before provider
+execution, and the value participates in exact and semantic cache identity.
+The runtime capability profile advertises the option only in that model's
+override. Provider and API tests, vet, build and the full race suite passed.
+
+Rancher Desktop built `ai-gateway-gateway:cerebras-clear-d38eaba8` with image
+ID `sha256:912a358ecd541c8aed912cca1d58b4b263bec0796c8bc3e9dbf2179ce4400622`.
+Gateway Helm revision 587 completed successfully. Pod
+`ai-gateway-gateway-6fc784dffc-f85d8` became Ready with zero restarts. Live
+liveness and readiness returned 204, OpenAPI 0.1.469 was served, and the live
+Cerebras capability profile reported `clear_thinking` only for `zai-glm-4.7`.
+
+## Chat reasoning policy coverage
+
+Source `9a84d79` includes unsigned Chat `reasoning_content` in input and output
+DLP projections, masks the field before provider execution and restores its
+request-local placeholders in successful responses. Signed reasoning blocks
+remain immutable so their signatures stay valid, while their readable thinking
+text remains covered by DLP. Regression tests cover input projection, output
+projection, masking, restoration and preservation of signed blocks. Gateway
+tests, vet, build and the full race suite passed.
+
+Rancher Desktop built `ai-gateway-gateway:reasoning-policy-9a84d799` with image
+ID `sha256:fe5cb57869a63f89fe97c3142c5003662e2720ef9e75dc98fe6832c6ca35f3ea`.
+Gateway Helm revision 588 completed successfully. Pod
+`ai-gateway-gateway-86995544c4-nlsb5` became Ready with zero restarts. Live
+liveness and readiness returned 204 and OpenAPI 0.1.470 was served.
+
+## Native Groq reasoning output controls
+
+Source `43656e9` adds the mutually exclusive Chat controls
+`include_reasoning` and `reasoning_format`, validates the latter as `hidden`,
+`raw` or `parsed`, and preserves explicit false values on the native wire.
+Groq JSON and SSE reasoning strings are bounded and normalized to public
+`reasoning_content`; conflicting or malformed aliases fail closed. The controls
+participate in exact and semantic cache identity, and other adapters reject them
+before provider execution. Runtime capabilities expose the supported formats.
+OpenAI contract, adapter-isolation, capability, cache, OpenAPI, JSON and SSE
+regressions passed together with vet, build and the full race suite.
+
+Rancher Desktop built `ai-gateway-gateway:groq-reasoning-43656e9a` with image
+ID `sha256:92edabf53fc5d9d79b2cdb8641aa5c81246f2cd576972bd71827f33c87e13143`.
+Gateway Helm revision 589 completed successfully. Pod
+`ai-gateway-gateway-67ffcc555c-thqxg` became Ready with zero restarts. Live
+liveness and readiness returned 204, OpenAPI 0.1.471 was served, and the live
+Groq capability profile reported `include_reasoning` plus the three validated
+formats while every other provider profile omitted both controls.
+
+## Model-scoped Groq reasoning policy
+
+Source `4638192` replaces the provider-wide Groq reasoning claims with exact
+model policies. `openai/gpt-oss-20b` and `openai/gpt-oss-120b` accept
+`include_reasoning` plus `low`, `medium` and `high` effort. The exact
+`qwen/qwen3.8-27b` model accepts `none`, `default`, `low`, `medium` and `high`
+effort plus `hidden`, `raw` and `parsed` formats. Raw format is rejected with
+tools or a JSON response format, and all reasoning controls are rejected for
+unlisted models before provider execution. Capability, protocol, OpenAPI,
+adapter and full race regressions passed together with vet and build.
+
+Rancher Desktop built `ai-gateway-gateway:groq-model-policy-46381923` with
+image ID `sha256:00bf3e94a1e4b991a120f19f13163350d42cb51660b136a61f292f5e775e019e`.
+Gateway Helm revision 590 completed successfully. Pod
+`ai-gateway-gateway-5dfdbc5448-vl7cv` became Ready with zero restarts. Live
+liveness and readiness returned 204, OpenAPI 0.1.472 was served, the Groq
+provider-wide reasoning arrays were empty, and all three exact model policies
+matched the runtime validator.
+
+## Native Groq citation control
+
+Source `dc59c7f` adds the validated `citation_options` Chat control with the
+exact `enabled` and `disabled` values. The native Groq adapter preserves the
+value on the provider request; every other adapter rejects it before provider
+execution. The option participates in exact and semantic cache identity and is
+published by the runtime capability profile. Contract, adapter-isolation,
+capability, cache and OpenAPI regressions passed together with vet, build and
+the full race suite.
+
+Rancher Desktop built `ai-gateway-gateway:groq-citations-dc59c7f2` with image
+ID `sha256:a8196c52f3aed8a4e75ad0a0abd3ddfdda93e3644ee809c0346f7882d4cf6c0c`.
+Gateway Helm revision 591 completed successfully. Pod
+`ai-gateway-gateway-75d4d67557-fhbxf` became Ready with zero restarts. Direct
+service checks returned 204 for liveness and readiness, OpenAPI 0.1.473 was
+served, the live Groq profile reported both citation values, other inspected
+provider profiles omitted them, and the three exact Groq reasoning policies
+remained intact.
+
+## Native DeepSeek thinking controls
+
+Source `0ebec2c` exposes the native Chat `thinking.type` switch and validated
+reasoning effort while preserving the gateway's prior non-thinking default when
+both controls are omitted. Conflicting switch and effort values, temperature,
+out-of-range thinking-mode nucleus sampling, and required or named tool choices
+fail before provider execution. The controls are isolated from other adapters,
+participate in exact and semantic cache identity, and appear in the runtime
+capability profile. Contract, wire, rejection, adapter, cache, capability and
+OpenAPI regressions passed together with vet, build and the full race suite.
+
+Rancher Desktop built `ai-gateway-gateway:deepseek-thinking-0ebec2cd` with image
+ID `sha256:43f39c783d62bb9e377189ab5e910b18ad43a5e9fc96fb46ff84d7b1175a7f66`.
+Gateway Helm revision 592 completed successfully. Pod
+`ai-gateway-gateway-5ddf9c469f-2m22d` became Ready with zero restarts. Direct
+service checks returned 204 for liveness and readiness, OpenAPI 0.1.474 was
+served, the live DeepSeek profile reported both thinking values and seven
+validated effort values, and the Groq controls remained isolated.
+
+## DeepSeek inactive sampling control
+
+Source `64283f9` rejects `top_p` when native DeepSeek thinking mode is disabled,
+including the implicit non-thinking default, because that provider ignores the
+value in this mode. The request fails before provider execution. Regression
+tests for both forms passed with the full race suite, vet and build.
+
+Rancher Desktop built `ai-gateway-gateway:deepseek-top-p-64283f98` with image
+ID `sha256:233c37636eb938cfc9bac36a9cc19463b82c9c461ebbabcfa2c84339d6af072c`.
+Gateway Helm revision 593 completed successfully. Pod
+`ai-gateway-gateway-744fffc8d9-qq9js` became Ready with zero restarts, and
+direct service liveness and readiness checks both returned 204.
+
+## DeepSeek Responses thinking levels
+
+Source `5af98a6` accepts native Responses `reasoning.effort=none` to disable
+thinking and `minimal` as a provider-compatible low-effort value. Both values
+are forwarded unchanged. The runtime capability profile is derived from the
+same validator. Wire and capability regressions passed with the full race
+suite, vet and build.
+
+Rancher Desktop built `ai-gateway-gateway:deepseek-responses-5af98a6e` with
+image ID `sha256:35bc13b0dd2128f244bf70c60b0e37445ff5b36b1648167dcc7ed8387e93e058`.
+Gateway Helm revision 594 completed successfully. Pod
+`ai-gateway-gateway-885b4468d-7dp5q` became Ready with zero restarts. Direct
+service liveness and readiness returned 204, and the live DeepSeek Responses
+profile included `none`, `minimal`, `low`, `medium`, `high`, `xhigh` and `max`.
+
+## DeepSeek Responses input item types
+
+Source `6389de3` rejects Responses input item types that the native DeepSeek
+API silently ignores. The validator accepts message, function and custom tool
+call/output, reasoning and provider-restored web search history items. Invalid
+types fail before provider execution. Accepted and rejected item regressions
+passed with the full race suite, vet and build.
+
+Rancher Desktop built `ai-gateway-gateway:deepseek-input-6389de39` with image
+ID `sha256:1b41dec02b9b5c79cfcd8f78a83e3d4531096cab3577691e08e60397f1504090`.
+Gateway Helm revision 595 completed successfully. Pod
+`ai-gateway-gateway-86c8bbc88b-nt8wk` became Ready with zero restarts, and
+direct service liveness and readiness both returned 204.
+
+## DeepSeek Responses nested input content
+
+Source `b4fc28f` extends native DeepSeek Responses validation to content parts
+inside messages and tool outputs. Only provider-supported text and image parts
+are accepted, while unsupported file parts and unknown types fail before
+provider execution. Reasoning input rejects unsupported summaries and encrypted
+content and accepts plain reasoning text. Provider regressions and the full race
+suite, vet and build passed.
+
+Rancher Desktop built `ai-gateway-gateway:deepseek-parts-b4fc28f5` with image
+ID `sha256:272929d6846f0b2654480d509dc26d3c59a5e9c57535209f9e9a14a432a2a81a`.
+Gateway Helm revision 596 completed successfully. Pod
+`ai-gateway-gateway-777c9b58f9-db9km` became Ready with zero restarts, and
+direct service liveness and readiness both returned 204.
+
+## DeepSeek vision model isolation
+
+Source `44ec362` limits native DeepSeek Chat and Responses image input to
+`deepseek-flash` and the two documented legacy Flash names. Pro image requests
+fail before provider execution, including images in Responses tool outputs.
+Flash acceptance and Pro rejection regressions passed with the full race suite,
+vet and build.
+
+Rancher Desktop built `ai-gateway-gateway:deepseek-vision-44ec3628` with image
+ID `sha256:c3428edd560ffffdb8ac85f15fc60cac67f5007049996a2588b16dce926d2159`.
+Gateway Helm revision 597 completed successfully. Pod
+`ai-gateway-gateway-6878b7c47d-8rpqm` became Ready with zero restarts, and
+direct service liveness and readiness both returned 204.
+
+## DeepSeek Responses custom patch tool
+
+Source `dc84f63f` enables the `custom_tools` deployment capability for native
+DeepSeek Responses and forwards only the documented `apply_patch` custom tool.
+Other custom names and unsupported custom-tool fields fail before provider
+execution. Responses input validates the patch call name and call ID pairing.
+Wire, rejection and capability regressions passed with the full Go race suite,
+vet and build. No live provider credential was used for this contract check.
+
+Rancher Desktop built `ai-gateway-gateway:deepseek-patch-dc84f63f` with image
+ID `sha256:3283f77ca1fc8e85ce458bc6293038499715627f02216d145a762e74f5485e73`.
+Gateway Helm revision 598 completed successfully. Pod
+`ai-gateway-gateway-5845974d9-ljsfr` became Ready with zero restarts, and
+direct service liveness and readiness both returned 204.
+
+## DeepSeek Responses sampling controls
+
+Source `0d2567a8` rejects ineffective `temperature` while Responses thinking is
+enabled by default and rejects `top_p` below its effective threshold. With
+`reasoning.effort=none`, temperature remains available and `top_p` is rejected
+because the provider ignores it. The admin capability profile probes each
+conditionally supported setting in a valid reasoning mode. Sampling and
+profile regressions passed with the full Go race suite, vet and build.
+
+Rancher Desktop built `ai-gateway-gateway:deepseek-sampling-0d2567a8` with
+image ID `sha256:c5521be3dd9cfe8d4f87ceed667fa1fd5e43599a26b4536a0270181c90b4e0c9`.
+Gateway Helm revision 599 completed successfully. Pod
+`ai-gateway-gateway-65f498b759-5fdgq` became Ready with zero restarts, and
+direct service liveness and readiness both returned 204.
+
+## DeepSeek Responses message image placement
+
+Source `22bdaac5` validates message roles and permits image parts only in
+`user`/`developer` messages or tool outputs on supported Flash models.
+Unsupported roles and `system`/`assistant` image parts fail before provider
+execution. Role and placement regressions passed with the full Go race suite,
+vet and build.
+
+Rancher Desktop built `ai-gateway-gateway:deepseek-images-22bdaac5` with image
+ID `sha256:f67ae7f1b63c82fbf39a8bd92a0a73c112bd9d5c48786f3ef0dd90a3dfd74a6f`.
+Gateway Helm revision 600 completed successfully. Pod
+`ai-gateway-gateway-66f9594b69-zkpfb` became Ready with zero restarts, and
+direct service liveness and readiness both returned 204.
+
+## Responses custom tool history authorization
+
+Source `af5488e9` requires the `custom_tools` deployment capability for custom
+calls and outputs in Responses input history, even when the current request
+does not declare tools. Historical call names also pass credential and
+access-group tool grants. A custom output with no attributable call or declared
+custom tool fails before execution. Input, authorization and route regressions
+passed with the full Go race suite, vet and build.
+
+Rancher Desktop built `ai-gateway-gateway:custom-history-af5488e9` with image
+ID `sha256:9f7a4c63d8ea453cab53ec69ef89bb75be2f6dc2b5936f3fb82c47feb6de6b30`.
+Gateway Helm revision 601 completed successfully. Pod
+`ai-gateway-gateway-949ff4646-f6cvt` became Ready with zero restarts, and
+direct service liveness and readiness both returned 204.
+
+## Stateful custom-tool output continuation
+
+Source `40ce3529` permits an output-only custom-tool continuation when it names
+`previous_response_id` and credential grants allow all tools (with the same
+requirement for access-group grants when evaluated). Scoped grants still
+require a tool declaration or named historical call
+so the tool can be authorized. Continuation ACL regressions passed with the full
+Go race suite, vet and build.
+
+Rancher Desktop built `ai-gateway-gateway:custom-continuation-40ce3529` with
+image ID `sha256:5b5f10da0ac54078aea02e57e5bbbad4559d4d661fba7bd2b09fece57cb87e99`.
+Gateway Helm revision 602 completed successfully. Pod
+`ai-gateway-gateway-6d5fbd88f6-4k2lz` became Ready with zero restarts, and
+direct service liveness and readiness both returned 204.
+
+## Responses function tool history authorization
+
+Source `1974d6c0` requires the `tools` deployment capability for function calls
+and outputs in Responses input history, even without a new tool definition.
+Historical function names are checked against credential and access-group
+grants. Output-only stateful continuations use wildcard grants unless a trusted
+internal run snapshot supplies the pending function names. Durable assistant
+runs use that snapshot without changing the provider wire request. Routing,
+authorization and assistant regressions passed with the full Go race suite,
+vet and build.
+
+Rancher Desktop built `ai-gateway-gateway:function-history-1974d6c0` with image
+ID `sha256:259bae039b4cefca6ee2df74b738839af731c1a8cc321d461b2ee2289bbbdbda`.
+Gateway Helm revision 603 completed successfully. Pod
+`ai-gateway-gateway-6669cc4c89-wpbhb` became Ready with zero restarts, and
+direct service liveness and readiness both returned 204.
+
+## Groq Responses reasoning effort validation
+
+Source `fadcf1aa` applies the same model-specific `reasoning.effort` policy to
+native Groq Chat and Responses. Unsupported model/value pairs now fail before
+provider execution, while the capability profile probes a supported model so
+the available Responses setting remains visible. Regression tests, the full Go
+test and race suites, vet and build passed. No live provider credential was
+used for this contract check.
+
+Rancher Desktop built `ai-gateway-gateway:groq-reasoning-fadcf1aa` with image
+ID `sha256:9372822445db5a3ae19f0bd412d71a54d3805bd4b41cf8716e056ec3c0a85131`.
+Gateway Helm revision 604 completed successfully. Pod
+`ai-gateway-gateway-54cbb6656f-scmtz` became Ready with zero restarts, and
+direct service liveness and readiness both returned 204.
+
+## Responses model-specific capability profile
+
+Source `6490241f` publishes exact upstream-model Responses parameter overrides in
+`response_model_parameters`. For Groq, the provider-wide policy no longer
+claims that `reasoning.effort` works on every model; the two GPT-OSS models and
+Qwen expose their validated value sets separately. OpenAPI and profile
+regressions passed with the full Go test and race suites, vet and build.
+
+Rancher Desktop built `ai-gateway-gateway:response-model-profile-6490241f`
+with image ID `sha256:bb27a5ea5a6dd91c17df23d9883ab4ca08daa1d204a2a2d52881bcbf28a1de7b`.
+Gateway Helm revision 605 completed successfully. Pod
+`ai-gateway-gateway-776699cbdf-zgbtf` became Ready with zero restarts, and
+direct service liveness and readiness both returned 204.
+
+## Groq Responses hosted-tool contract validation
+
+Source `4e2a6783` rejects unsupported native Groq Responses tool types before
+provider execution. Code interpreter requests are restricted to the two GPT-OSS
+models and an automatic container with no extra options. The documented wire
+form, provider usage and pre-HTTP failures have regression coverage. The full
+Go test and race suites, vet and build passed; no live provider credential was
+used. Hosted execution remains unavailable as a managed deployment capability
+until its separate cost can be reserved and settled.
+
+Rancher Desktop built `ai-gateway-gateway:groq-tools-4e2a6783` with image ID
+`sha256:3940e117fe014fc73b41e6b2c7872ed7f2381160b8ce2c6594d46368a96320b4`.
+Gateway Helm revision 606 completed successfully. Pod
+`ai-gateway-gateway-8685749d55-789g2` became Ready with zero restarts, and
+direct service liveness and readiness both returned 204.
+
+## xAI Responses server-tool usage settlement
+
+Source `a86cefc4` uses xAI's reported server-side tool execution count for
+settled `tool_requests` when it exceeds the count visible in Responses output
+items. Visible calls remain the lower bound, and compatible providers continue
+using output-item counts. Search calls and xAI's exact reported cost remain
+separately attributed. Regression tests, the full Go test and race suites, vet
+and build passed; no live provider credential was used.
+
+Rancher Desktop built `ai-gateway-gateway:xai-tools-a86cefc4` with image ID
+`sha256:51084771ce2a71012010babdb2512552b0be1040425d612685d12b2b95f071af`.
+Gateway Helm revision 607 completed successfully. Pod
+`ai-gateway-gateway-5b6b5d476d-nmzvh` became Ready with zero restarts, and
+direct service liveness and readiness both returned 204.
+
+## xAI model-scoped reasoning effort
+
+Source `6578bff4` validates reasoning effort against the selected xAI model for
+Chat and Responses. Grok 4.5 accepts low, medium and high; Grok 4.6 and 4.7
+also accept xhigh. The multi-agent model exposes these values only through
+Responses. The provider-wide capability profile no longer advertises reasoning
+effort for every model; exact model overrides describe the validated values.
+Regression tests, the full Go test and race suites, vet and build passed; no
+live provider credential was used.
+
+Rancher Desktop built `ai-gateway-gateway:xai-reasoning-6578bff4` with image ID
+`sha256:81bb1daffd64110db28eae3bc55646597d56bc8b45664bf3297aefa81b9e0a7b`.
+Gateway Helm revision 608 completed successfully. Pod
+`ai-gateway-gateway-58b469c4cc-zg6qn` became Ready with zero restarts, and
+direct service liveness and readiness both returned 204.
+
+## xAI model-scoped log probability controls
+
+Source `40e57e84` rejects `logprobs` and `top_logprobs` for the known Grok
+4.20-and-newer model families that ignore these Chat controls. The additive
+`chat_model_parameters.unsupported_options` field exposes the exceptions to
+the provider-wide profile; clients applying model overrides should subtract
+these options. Unknown model IDs retain the existing pass-through behavior.
+Adapter and OpenAPI regression tests, the full Go test and race suites, vet and
+build passed; no live provider credential was used.
+
+Rancher Desktop built `ai-gateway-gateway:xai-logprobs-40e57e84` with image ID
+`sha256:01637b0e9e576e14d93fd2d49c412e70952525d852a710ab6ba9412d279d59d5`.
+Gateway Helm revision 609 completed successfully. Pod
+`ai-gateway-gateway-5c465f7cfc-dk84k` became Ready with zero restarts, and
+direct service liveness and readiness both returned 204.
+
+## xAI reasoning-model Chat control validation
+
+Source `34d38a28` rejects `stop`, `frequency_penalty` and `presence_penalty`
+for known Grok 4.5, 4.6 and 4.7 reasoning-model Chat requests before provider
+execution. The model-specific capability profile lists the two penalty options
+as unsupported. Unknown model IDs retain the existing pass-through policy.
+Regression tests, the full Go test and race suites, vet and build passed; no
+live provider credential was used.
+
+Rancher Desktop built `ai-gateway-gateway:xai-reasoning-controls-34d38a28`
+with image ID
+`sha256:8368e515419284a7af2c4d8c735a2460cfd3146f19e704b6eddbfa9377279b1e`.
+Gateway Helm revision 610 completed successfully. Pod
+`ai-gateway-gateway-fd494d897-qt4xj` became Ready with zero restarts, and
+direct service liveness and readiness both returned 204.
+
+## xAI Grok Build alias parameter policy
+
+Source `9a4df800` applies the published Grok 4.5 parameter policy to
+`grok-build-latest` in Chat and Responses. The alias now accepts the validated
+reasoning effort levels and rejects controls that the underlying model ignores
+or does not support. Its exact capability-profile entries match the runtime
+validator. Regression tests, the full Go test and race suites, vet and build
+passed; no live provider credential was used.
+
+Rancher Desktop built `ai-gateway-gateway:xai-build-alias-9a4df800` with image
+ID `sha256:132ae72fba028848e7d147220e7d620f43f3424d83645b80e52cd30db99b2df9`.
+Gateway Helm revision 611 completed successfully. Pod
+`ai-gateway-gateway-675bd696f6-gwppt` became Ready with zero restarts, and
+direct service liveness and readiness both returned 204.
+
+## RAG JSON source citations
+
+Source `7ead4290` maps model-written `[n]` markers in synchronous RAG Chat
+answers to `source_citation` annotations for the n-th owner-scoped retrieved
+excerpt after optional reranking. The annotation contains the owned file ID,
+filename, retrieved chunk index and Unicode-correct marker offsets; unknown
+numbers, Markdown links and code spans are ignored. A citation records the
+model's selected source, not independent verification of its claim. The
+incremental SSE response remains unchanged. Handler and parser regressions,
+the full Go test and race suites, vet and build passed; no live provider
+credential was used.
+
+Rancher Desktop built `ai-gateway-gateway:rag-citations-7ead4290` with image
+ID `sha256:79fc492d6c46fd03a1507eeeaaf9c8645982901e6b4038c7f43f7a6f549260a0`.
+Gateway Helm revision 612 completed successfully. Pod
+`ai-gateway-gateway-6bbf8dc8d9-66g76` became Ready with zero restarts, and
+direct service liveness and readiness both returned 204.
+
+## RAG SSE source citations
+
+Source `f3970479` extends owner-scoped RAG source citations to native Chat
+SSE. The gateway keeps a bounded per-request text accumulator across choices,
+including citation markers split across provider deltas, and emits an annotation
+delta after the cited text and before that choice's terminal delta. A provider
+failure before choice completion emits no synthesized citation. Buffered
+stream fallback carries the same annotations in its content delta. Regression
+tests cover native streaming, multi-choice order, fallback and failure; the
+full Go test and race suites, vet and build passed. No live provider credential
+was used.
+
+Rancher Desktop built `ai-gateway-gateway:rag-sse-citations-f3970479` with
+image ID `sha256:00cb1f635100fa203166c8e4c95b9b80f7bb161268e2fca4bb590dc48546a3e0`.
+Gateway Helm revision 613 completed successfully. Pod
+`ai-gateway-gateway-695cf6d97d-b82fv` became Ready with zero restarts, and
+direct service liveness and readiness both returned 204.
+
+## Responses tool description and Foundry project endpoint
+
+Source `53ea7a2e` removes the separate 4096-character description cap for
+Responses function and custom tools. The inference request-body limit remains
+in force. Validation regressions, the full Go test and race suites, vet and
+build passed.
+
+Source `deb8db21` routes Foundry project URLs through their `/openai/v1` path
+and selects the `https://ai.azure.com/.default` Entra scope for official
+`.services.ai.azure.com` hosts. Local HTTP regressions verify project routing,
+bearer authentication and the workload-federation token request. The full Go
+test and race suites, vet and build passed. No external Foundry credential was
+used for live inference.
+
+Rancher Desktop built `ai-gateway-gateway:foundry-deb8db21` with image ID
+`sha256:4df2677c57ed6edf4dc25627e37dcf15068db5dff11aa90ca4ff8162db23f688`.
+Gateway Helm revision 615 completed successfully with one available replica;
+the local ingress returned HTTP 204 for both `/healthz` and `/readyz`.
+
+## Foundry project discovery
+
+Source `fd94ddac` reads the project deployment inventory through
+`/api/projects/{project}/deployments?api-version=v1` rather than the resource
+model route. It follows bounded `nextLink` pages only on the same origin and
+project path, deduplicates deployment names and rejects malformed responses.
+Local HTTP regressions cover two pages and cross-origin/cross-project link
+rejection. Source `5301a10f` rejects `api_version` on Foundry project inference
+endpoints at both static and managed configuration boundaries. The full Go
+test and race suites, vet and build passed after each change.
+
+Rancher Desktop built `ai-gateway-gateway:foundry-discovery-5301a10f` with
+image ID `sha256:a1668295b40795a6823e17aac392524cbb4834fe1e224a1c951e43c592863640`.
+Gateway Helm revision 616 completed successfully with one available replica;
+the local ingress returned HTTP 204 for `/healthz` and `/readyz`. No external
+Foundry credential was used for live discovery.
+
+## Ollama bearer authentication
+
+Source `8b298edc` forwards the configured static or managed credential as an
+Ollama bearer token across native Chat JSON/SSE, Embeddings and compatible
+Completions. Local endpoints without a credential continue to send no
+Authorization header. Redirects remain disabled. Local HTTP regressions cover
+managed credential delivery, streaming, local unauthenticated calls and redirect
+rejection; the full Go test and race suites, vet and build passed. No external
+Ollama Cloud credential was used for live inference.
+
+Rancher Desktop built `ai-gateway-gateway:ollama-auth-8b298edc` with image ID
+`sha256:54b5b92d446dc6a6f5252b0c5b01adeca7e022719c8222cdddce75ca3d969b20`.
+Gateway Helm revision 617 completed successfully with one available replica;
+the local ingress returned HTTP 204 for `/healthz` and `/readyz`.
+
+## Ollama Base URL normalization
+
+Source `c0ae8abb` accepts Ollama server roots and the documented `/api` and
+`/v1` base URLs without duplicating either prefix. Native Chat, streaming and
+Embeddings use `/api`; compatible Completions uses `/v1`; managed discovery uses
+`/api/tags`. Local HTTP regressions cover authenticated inference and discovery
+with an `/api` base, plus URL normalization boundaries. The full Go test and
+race suites, vet and build passed. No external Ollama Cloud credential was used.
+
+Rancher Desktop built `ai-gateway-gateway:ollama-url-c0ae8abb` with image ID
+`sha256:04c807fbe03c42bc085a6f6511862f1b896695cd242b0bf99cee37d579f955b0`.
+Gateway Helm revision 618 completed successfully with one available replica;
+the local ingress returned HTTP 204 for `/healthz` and `/readyz`.

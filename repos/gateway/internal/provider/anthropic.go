@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"strings"
@@ -1076,6 +1077,9 @@ func validateAnthropicUsage(usage anthropicUsage) error {
 	if usage.InputTokens < 0 || usage.OutputTokens < 0 || usage.CacheReadInputTokens < 0 || usage.CacheCreationInputTokens < 0 {
 		return errors.New("invalid Anthropic usage")
 	}
+	if usage.InputTokens > math.MaxInt-usage.CacheReadInputTokens || usage.InputTokens+usage.CacheReadInputTokens > math.MaxInt-usage.CacheCreationInputTokens || usage.InputTokens+usage.CacheReadInputTokens+usage.CacheCreationInputTokens > math.MaxInt-usage.OutputTokens {
+		return errors.New("invalid Anthropic usage")
+	}
 	if details := usage.OutputTokensDetails; details != nil && (details.ThinkingTokens < 0 || details.ThinkingTokens > usage.OutputTokens) {
 		return errors.New("invalid Anthropic output token details")
 	}
@@ -1137,6 +1141,12 @@ func validateAnthropicContextManagement(requested, reported json.RawMessage) err
 }
 
 func validateAnthropicRequestedToolUsage(usage anthropicUsage, search *openai.ChatWebSearchOptions, fetch *openai.ChatWebFetchOptions, codeExecution bool) error {
+	if search == nil && anthropicSearchRequests(usage) > 0 {
+		return errors.New("Anthropic reported unrequested web search usage")
+	}
+	if fetch == nil && usage.ServerToolUse != nil && usage.ServerToolUse.WebFetchRequests > 0 {
+		return errors.New("Anthropic reported unrequested web fetch usage")
+	}
 	searchLimit := openai.WebSearchMaxUses
 	if search != nil && search.MaxUses != nil {
 		searchLimit = *search.MaxUses
@@ -1206,6 +1216,69 @@ func anthropicToResponse(response anthropicResponse, fallbackModel string) opena
 
 func anthropicInputTokens(usage anthropicUsage) int {
 	return usage.InputTokens + usage.CacheReadInputTokens + usage.CacheCreationInputTokens
+}
+
+func mergeAnthropicStreamUsage(current anthropicUsage, payload string) (anthropicUsage, error) {
+	var event struct {
+		Usage struct {
+			InputTokens              *int `json:"input_tokens"`
+			OutputTokens             *int `json:"output_tokens"`
+			CacheReadInputTokens     *int `json:"cache_read_input_tokens"`
+			CacheCreationInputTokens *int `json:"cache_creation_input_tokens"`
+			ServerToolUse            *struct {
+				WebSearchRequests     *int `json:"web_search_requests"`
+				WebFetchRequests      *int `json:"web_fetch_requests"`
+				CodeExecutionRequests *int `json:"code_execution_requests"`
+			} `json:"server_tool_use"`
+		} `json:"usage"`
+	}
+	if err := json.Unmarshal([]byte(payload), &event); err != nil {
+		return anthropicUsage{}, err
+	}
+	next := current
+	for _, field := range []struct {
+		reported *int
+		current  int
+		target   *int
+	}{
+		{event.Usage.InputTokens, current.InputTokens, &next.InputTokens},
+		{event.Usage.OutputTokens, current.OutputTokens, &next.OutputTokens},
+		{event.Usage.CacheReadInputTokens, current.CacheReadInputTokens, &next.CacheReadInputTokens},
+		{event.Usage.CacheCreationInputTokens, current.CacheCreationInputTokens, &next.CacheCreationInputTokens},
+	} {
+		if field.reported != nil {
+			if *field.reported < field.current {
+				return anthropicUsage{}, errors.New("Anthropic stream usage decreased")
+			}
+			*field.target = *field.reported
+		}
+	}
+	if event.Usage.ServerToolUse != nil {
+		tools := anthropicServerToolUsage{}
+		if current.ServerToolUse != nil {
+			tools = *current.ServerToolUse
+		}
+		for _, field := range []struct {
+			reported *int
+			target   *int
+		}{
+			{event.Usage.ServerToolUse.WebSearchRequests, &tools.WebSearchRequests},
+			{event.Usage.ServerToolUse.WebFetchRequests, &tools.WebFetchRequests},
+			{event.Usage.ServerToolUse.CodeExecutionRequests, &tools.CodeExecutionRequests},
+		} {
+			if field.reported != nil {
+				if *field.reported < *field.target {
+					return anthropicUsage{}, errors.New("Anthropic stream usage decreased")
+				}
+				*field.target = *field.reported
+			}
+		}
+		next.ServerToolUse = &tools
+	}
+	if err := validateAnthropicUsage(next); err != nil {
+		return anthropicUsage{}, err
+	}
+	return next, nil
 }
 
 func anthropicToolCalls(response anthropicResponse) []openai.ToolCall {
@@ -1361,6 +1434,7 @@ func streamAnthropicChat(body io.Reader, fallbackModel string, structured bool, 
 	textBlockOffsets := map[int]int{}
 	textBlockContents := map[int]string{}
 	var fetchURLs []string
+	var cumulativeUsage anthropicUsage
 	err := scanSSEEvents(body, func(event string, payload string) error {
 		if event == "message_stop" {
 			return io.EOF
@@ -1380,12 +1454,15 @@ func streamAnthropicChat(body io.Reader, fallbackModel string, structured bool, 
 			if err := validateAnthropicRequestedToolUsage(streamEvent.Message.Usage, webSearch, webFetch, codeExecution); err != nil {
 				return err
 			}
+			cumulativeUsage = streamEvent.Message.Usage
 			response.ID = streamEvent.Message.ID
 			response.NativeContainer = append(json.RawMessage(nil), streamEvent.Message.Container...)
 			if streamEvent.Message.Model != "" {
 				response.Model = streamEvent.Message.Model
 			}
 			response.Usage.PromptTokens = anthropicInputTokens(streamEvent.Message.Usage)
+			response.Usage.CompletionTokens = streamEvent.Message.Usage.OutputTokens
+			response.Usage.TotalTokens = response.Usage.PromptTokens + response.Usage.CompletionTokens
 			response.Usage.SearchRequests = anthropicSearchRequests(streamEvent.Message.Usage)
 			response.Usage.ToolRequests = anthropicCodeExecutionRequests(streamEvent.Message.Usage)
 			response.Usage.InferenceGeo = streamEvent.Message.Usage.InferenceGeo
@@ -1482,26 +1559,28 @@ func streamAnthropicChat(body io.Reader, fallbackModel string, structured bool, 
 			if err := validateAnthropicUsage(streamEvent.Usage); err != nil {
 				return err
 			}
-			if err := validateAnthropicRequestedToolUsage(streamEvent.Usage, webSearch, webFetch, codeExecution); err != nil {
+			cumulativeUsage, err = mergeAnthropicStreamUsage(cumulativeUsage, payload)
+			if err != nil {
 				return err
 			}
+			if err := validateAnthropicRequestedToolUsage(cumulativeUsage, webSearch, webFetch, codeExecution); err != nil {
+				return err
+			}
+			response.Usage.PromptTokens = anthropicInputTokens(cumulativeUsage)
+			response.Usage.CompletionTokens = cumulativeUsage.OutputTokens
+			response.Usage.TotalTokens = response.Usage.PromptTokens + response.Usage.CompletionTokens
+			response.Usage.PromptTokensDetails = &openai.PromptTokenDetails{CachedTokens: cumulativeUsage.CacheReadInputTokens, CacheWriteTokens: cumulativeUsage.CacheCreationInputTokens}
 			if streamEvent.Usage.InferenceGeo != "" {
 				if response.Usage.InferenceGeo != "" && response.Usage.InferenceGeo != streamEvent.Usage.InferenceGeo {
 					return errors.New("Anthropic changed inference geo during stream")
 				}
 				response.Usage.InferenceGeo = streamEvent.Usage.InferenceGeo
 			}
-			if streamEvent.Usage.OutputTokens != 0 {
-				response.Usage.CompletionTokens = streamEvent.Usage.OutputTokens
-				response.Usage.TotalTokens = response.Usage.PromptTokens + response.Usage.CompletionTokens
-			}
 			if streamEvent.Usage.OutputTokensDetails != nil {
 				response.Usage.CompletionTokensDetails = anthropicCompletionTokenDetails(streamEvent.Usage)
 			}
-			if streamEvent.Usage.ServerToolUse != nil {
-				response.Usage.SearchRequests = anthropicSearchRequests(streamEvent.Usage)
-				response.Usage.ToolRequests = anthropicCodeExecutionRequests(streamEvent.Usage)
-			}
+			response.Usage.SearchRequests = anthropicSearchRequests(cumulativeUsage)
+			response.Usage.ToolRequests = anthropicCodeExecutionRequests(cumulativeUsage)
 			if streamEvent.Usage.ServiceTier != "" {
 				if response.ServiceTier != "" && response.ServiceTier != streamEvent.Usage.ServiceTier {
 					return errors.New("Anthropic changed service tier during stream")
@@ -1570,12 +1649,16 @@ func openAIChatAnnotationChunkPayload(id, model string, annotation openai.ChatAn
 	return string(payload)
 }
 
-func openAIChatToolCallChunkPayload(id, model string, toolIndex int, call openai.ToolCall) string {
+func openAIChatToolCallChunkPayload(id, model string, toolIndex int, call openai.ToolCall, role ...string) string {
 	index := toolIndex
 	call.Index = &index
+	delta := map[string]any{"tool_calls": []openai.ToolCall{call}}
+	if len(role) > 0 && role[0] != "" {
+		delta["role"] = role[0]
+	}
 	payload, err := json.Marshal(map[string]any{
 		"id": id, "object": "chat.completion.chunk", "created": time.Now().UTC().Unix(), "model": model,
-		"choices": []map[string]any{{"index": 0, "delta": map[string]any{"tool_calls": []openai.ToolCall{call}}, "finish_reason": nil}},
+		"choices": []map[string]any{{"index": 0, "delta": delta, "finish_reason": nil}},
 	})
 	if err != nil {
 		return "{}"
@@ -1590,6 +1673,7 @@ func streamAnthropicResponses(body io.Reader, fallbackModel string, structured b
 		Status: "completed",
 	}
 	toolOutputs := map[int]int{}
+	var cumulativeUsage anthropicUsage
 	err := scanSSEEvents(body, func(event string, payload string) error {
 		if event == "message_stop" {
 			return io.EOF
@@ -1600,9 +1684,15 @@ func streamAnthropicResponses(body io.Reader, fallbackModel string, structured b
 		}
 		switch event {
 		case "message_start":
+			if err := validateAnthropicUsage(streamEvent.Message.Usage); err != nil {
+				return err
+			}
+			cumulativeUsage = streamEvent.Message.Usage
 			response.ID = streamEvent.Message.ID
 			response.Model = streamEvent.Message.Model
 			response.Usage.InputTokens = anthropicInputTokens(streamEvent.Message.Usage)
+			response.Usage.OutputTokens = streamEvent.Message.Usage.OutputTokens
+			response.Usage.TotalTokens = response.Usage.InputTokens + response.Usage.OutputTokens
 			response.Usage.InputTokensDetails = &openai.InputTokenDetails{CachedTokens: streamEvent.Message.Usage.CacheReadInputTokens, CacheWriteTokens: streamEvent.Message.Usage.CacheCreationInputTokens}
 			response.CreatedAt = time.Now().UTC().Unix()
 			response.Status = "in_progress"
@@ -1647,10 +1737,17 @@ func streamAnthropicResponses(body io.Reader, fallbackModel string, structured b
 				}
 			}
 		case "message_delta":
-			if streamEvent.Usage.OutputTokens != 0 {
-				response.Usage.OutputTokens = streamEvent.Usage.OutputTokens
-				response.Usage.TotalTokens = response.Usage.InputTokens + response.Usage.OutputTokens
+			if err := validateAnthropicUsage(streamEvent.Usage); err != nil {
+				return err
 			}
+			cumulativeUsage, err = mergeAnthropicStreamUsage(cumulativeUsage, payload)
+			if err != nil {
+				return err
+			}
+			response.Usage.InputTokens = anthropicInputTokens(cumulativeUsage)
+			response.Usage.OutputTokens = cumulativeUsage.OutputTokens
+			response.Usage.TotalTokens = response.Usage.InputTokens + response.Usage.OutputTokens
+			response.Usage.InputTokensDetails = &openai.InputTokenDetails{CachedTokens: cumulativeUsage.CacheReadInputTokens, CacheWriteTokens: cumulativeUsage.CacheCreationInputTokens}
 		}
 		return nil
 	})

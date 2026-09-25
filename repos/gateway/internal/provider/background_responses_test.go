@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"ai-gateway-gateway/internal/asyncstate"
+	"ai-gateway-gateway/internal/conversationstate"
 	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/openai"
 )
@@ -186,6 +187,85 @@ func TestBackgroundResponseDefersSettlementAndSurvivesRouterRestart(t *testing.T
 	}
 	if settled, err := restarted.BackgroundResponseSettled(t.Context(), req, response.ID); err != nil || !settled {
 		t.Fatalf("completed settled=%t err=%v", settled, err)
+	}
+}
+
+func TestBackgroundResponseConversationStagesAndCommitsWithoutPersistingPromptInJob(t *testing.T) {
+	storeResponse := true
+	request := openai.ResponseRequest{Model: "public-model", Input: "conversation-secret", Store: &storeResponse, Background: true}
+	owner := conversationstate.OwnerKey("credential", "user")
+	conversationStore := &memoryConversationStore{turn: conversationstate.Turn{
+		Conversation: conversationstate.Conversation{ID: "conv_background", OwnerKey: owner},
+		ExecutionID:  "execution-conversation",
+	}}
+	input, err := conversationInputItems(request.Input, owner, "conv_background")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := modules.RequestContext{
+		RequestID: "execution-conversation", CredentialID: "credential", UserID: "user",
+		Request: openai.ChatCompletionRequest{Model: request.Model}, ResponseRequest: &request,
+		ConversationTurn: &conversationStore.turn, ConversationInputItems: input,
+	}
+	jobs := &backgroundJobStore{}
+	client := &backgroundResponseClient{retrieve: openai.ResponseResponse{
+		ID: "resp_background", Model: request.Model, Status: "completed",
+		Output: []openai.ResponseOutputItem{{ID: "item_answer", Type: "message", Role: "assistant", Content: []openai.ResponseOutputContent{{Type: "output_text", Text: "answer"}}}},
+		Usage:  openai.ResponseUsage{InputTokens: 2, OutputTokens: 1, TotalTokens: 3},
+	}}
+	endpoint := Endpoint{Name: "deployment", ProviderID: "provider", Type: "openai-compatible", Models: []string{request.Model}, Capabilities: []string{"responses", "background_responses"}, Provider: client, Admission: newAdmissionController(0, 0, 0)}
+	router := Router{endpoints: []Endpoint{endpoint}, endpointState: &endpointRegistry{}, modules: modules.NewPipeline(nil), health: newEndpointHealthTracker(), routeCounter: &atomic.Uint64{}, ownership: newResponseOwnershipStore(time.Hour, &ownershipTestStore{data: map[string][]byte{}}), asyncJobs: jobs, conversations: conversationStore}
+	router.endpointState.current.Store(&router.endpoints)
+
+	response, err := router.Responses(t.Context(), req)
+	if err != nil || response.Status != "queued" || jobs.job == nil || !req.ConversationTurn.Durable {
+		t.Fatalf("response=%+v job=%+v turn=%+v err=%v", response, jobs.job, req.ConversationTurn, err)
+	}
+	if bytes.Contains(jobs.job.Payload, []byte("conversation-secret")) || !bytes.Contains(jobs.job.Payload, []byte("conv_background")) {
+		t.Fatalf("unsafe background job payload: %s", jobs.job.Payload)
+	}
+	if len(conversationStore.staged) != 1 || len(conversationStore.completed) != 0 {
+		t.Fatalf("staged=%+v completed=%+v", conversationStore.staged, conversationStore.completed)
+	}
+	if processed, err := router.ProcessBackgroundResponses(t.Context()); err != nil || processed != 1 {
+		t.Fatalf("processed=%d err=%v", processed, err)
+	}
+	if len(conversationStore.staged) != 0 || len(conversationStore.completed) != 2 || conversationStore.completed[1].ID != "item_answer" || conversationStore.turn.ExecutionID != "" {
+		t.Fatalf("staged=%+v completed=%+v turn=%+v", conversationStore.staged, conversationStore.completed, conversationStore.turn)
+	}
+}
+
+func TestFailedBackgroundResponseReleasesConversationAndDiscardsPendingInput(t *testing.T) {
+	storeResponse := true
+	request := openai.ResponseRequest{Model: "public-model", Input: "discard-me", Store: &storeResponse, Background: true}
+	owner := conversationstate.OwnerKey("credential", "user")
+	conversationStore := &memoryConversationStore{turn: conversationstate.Turn{
+		Conversation: conversationstate.Conversation{ID: "conv_failed", OwnerKey: owner},
+		ExecutionID:  "execution-failed",
+	}}
+	input, err := conversationInputItems(request.Input, owner, "conv_failed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := modules.RequestContext{
+		RequestID: "execution-failed", CredentialID: "credential", UserID: "user",
+		Request: openai.ChatCompletionRequest{Model: request.Model}, ResponseRequest: &request,
+		ConversationTurn: &conversationStore.turn, ConversationInputItems: input,
+	}
+	jobs := &backgroundJobStore{}
+	client := &backgroundResponseClient{retrieve: openai.ResponseResponse{ID: "resp_background", Model: request.Model, Status: "failed", Error: &openai.ResponseError{Message: "provider failed"}}}
+	endpoint := Endpoint{Name: "deployment", ProviderID: "provider", Type: "openai-compatible", Models: []string{request.Model}, Capabilities: []string{"responses", "background_responses"}, Provider: client, Admission: newAdmissionController(0, 0, 0)}
+	router := Router{endpoints: []Endpoint{endpoint}, endpointState: &endpointRegistry{}, modules: modules.NewPipeline(nil), health: newEndpointHealthTracker(), routeCounter: &atomic.Uint64{}, ownership: newResponseOwnershipStore(time.Hour, &ownershipTestStore{data: map[string][]byte{}}), asyncJobs: jobs, conversations: conversationStore}
+	router.endpointState.current.Store(&router.endpoints)
+
+	if _, err := router.Responses(t.Context(), req); err != nil {
+		t.Fatal(err)
+	}
+	if processed, err := router.ProcessBackgroundResponses(t.Context()); err != nil || processed != 1 {
+		t.Fatalf("processed=%d err=%v", processed, err)
+	}
+	if !conversationStore.released || len(conversationStore.staged) != 0 || len(conversationStore.completed) != 0 || conversationStore.turn.ExecutionID != "" {
+		t.Fatalf("released=%t staged=%+v completed=%+v turn=%+v", conversationStore.released, conversationStore.staged, conversationStore.completed, conversationStore.turn)
 	}
 }
 

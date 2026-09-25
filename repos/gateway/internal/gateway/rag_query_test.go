@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -39,6 +40,7 @@ type ragQueryProvider struct {
 	chatRequest      modules.RequestContext
 	streamRequest    modules.RequestContext
 	stream           bool
+	streamFail       bool
 }
 
 func (p *ragQueryProvider) Embeddings(_ context.Context, req modules.RequestContext) (openai.EmbeddingResponse, error) {
@@ -64,7 +66,7 @@ func (p *ragQueryProvider) ChatCompletions(_ context.Context, req modules.Reques
 	p.chatRequest = req
 	return openai.ChatCompletionResponse{
 		ID: "chatcmpl-rag", Object: "chat.completion", Model: req.Request.Model,
-		Choices: []openai.Choice{{Index: 0, Message: openai.Message{Role: "assistant", Content: "answer"}, FinishReason: "stop"}},
+		Choices: []openai.Choice{{Index: 0, Message: openai.Message{Role: "assistant", Content: "answer [1]"}, FinishReason: "stop"}},
 		Usage:   openai.Usage{PromptTokens: 12, CompletionTokens: 1, TotalTokens: 13},
 	}, nil
 }
@@ -75,7 +77,13 @@ func (p *ragQueryProvider) StreamChatCompletions(_ context.Context, req modules.
 	}
 	p.streamRequest = req
 	response := openai.ChatCompletionResponse{ID: "chatcmpl-rag-stream", Object: "chat.completion", Model: req.Request.Model, Usage: openai.Usage{PromptTokens: 10, CompletionTokens: 1, TotalTokens: 11}}
-	if err := write(`{"id":"chatcmpl-rag-stream","object":"chat.completion.chunk","model":"chat-model","choices":[{"index":0,"delta":{"content":"answer"},"finish_reason":null}]}`); err != nil {
+	if err := write(`{"id":"chatcmpl-rag-stream","object":"chat.completion.chunk","model":"chat-model","choices":[{"index":0,"delta":{"content":"answer ["},"finish_reason":null}]}`); err != nil {
+		return openai.ChatCompletionResponse{}, true, err
+	}
+	if p.streamFail {
+		return response, true, errors.New("upstream stream failed")
+	}
+	if err := write(`{"id":"chatcmpl-rag-stream","object":"chat.completion.chunk","model":"chat-model","choices":[{"index":0,"delta":{"content":"1]"},"finish_reason":"stop"}]}`); err != nil {
 		return openai.ChatCompletionResponse{}, true, err
 	}
 	return response, true, nil
@@ -93,6 +101,62 @@ func TestRAGQueryStreamsChatCompletion(t *testing.T) {
 	}
 	if runtime.streamRequest.RequestID == "" || runtime.streamRequest.Request.Model != "chat-model" || len(runtime.streamRequest.Request.Messages) != 2 || runtime.chatRequest.Request.Model != "" {
 		t.Fatalf("stream request=%+v fallback request=%+v", runtime.streamRequest, runtime.chatRequest)
+	}
+	stream := response.Body.String()
+	textEnd := strings.Index(stream, `"content":"1]"`)
+	annotation := strings.Index(stream, `"source_citation"`)
+	finish := strings.Index(stream, `"finish_reason":"stop"`)
+	if textEnd < 0 || annotation < textEnd || finish < annotation || !strings.Contains(stream, `"source":"file_alpha"`) {
+		t.Fatalf("stream citation order or source is invalid: %s", stream)
+	}
+	for _, line := range strings.Split(stream, "\n") {
+		if !strings.HasPrefix(line, "data: {") || !strings.Contains(line, `"source_citation"`) {
+			continue
+		}
+		var chunk struct {
+			Choices []struct {
+				Index int `json:"index"`
+				Delta struct {
+					Annotations []openai.ChatAnnotation `json:"annotations"`
+				} `json:"delta"`
+			} `json:"choices"`
+		}
+		if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &chunk); err != nil || len(chunk.Choices) != 1 || chunk.Choices[0].Index != 0 || len(chunk.Choices[0].Delta.Annotations) != 1 {
+			t.Fatalf("citation chunk=%+v err=%v", chunk, err)
+		}
+		citation := chunk.Choices[0].Delta.Annotations[0].SourceCitation
+		if citation == nil || citation.Source != "file_alpha" || citation.StartIndex != 7 || citation.EndIndex != 10 {
+			t.Fatalf("stream citation=%+v", citation)
+		}
+		return
+	}
+	t.Fatal("citation chunk is missing")
+}
+
+func TestRAGQueryStreamFallbackAndFailureCitationBehavior(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		stream     bool
+		streamFail bool
+		citation   bool
+	}{
+		{name: "buffered fallback", citation: true},
+		{name: "upstream failure", stream: true, streamFail: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			runtime := &ragQueryProvider{stream: test.stream, streamFail: test.streamFail}
+			_, handler := newRAGQueryHandler(t, "user", runtime)
+			request := httptest.NewRequest(http.MethodPost, "/v1/rag/query", strings.NewReader(`{"model":"chat-model","messages":[{"role":"user","content":"alpha"}],"stream":true,"retrieval_config":{"vector_store_id":"vs_owned","model":"embed-model","top_k":1}}`))
+			request.Header.Set("Authorization", "Bearer key")
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			if response.Code != http.StatusOK || strings.Contains(response.Body.String(), `"source_citation"`) != test.citation {
+				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+			}
+			if test.streamFail && !strings.Contains(response.Body.String(), `"provider_failed"`) {
+				t.Fatalf("missing stream failure: %s", response.Body.String())
+			}
+		})
 	}
 }
 
@@ -164,6 +228,14 @@ func TestRAGQueryRunsOwnerScopedRetrievalRerankAndChatWithDistinctExecutions(t *
 	if response.Code != http.StatusOK || auth.calls != 2 || !strings.Contains(response.Body.String(), `"id":"chatcmpl-rag"`) {
 		t.Fatalf("status=%d auth=%d body=%s", response.Code, auth.calls, response.Body.String())
 	}
+	var completion openai.ChatCompletionResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &completion); err != nil || len(completion.Choices) != 1 || len(completion.Choices[0].Message.Annotations) != 1 {
+		t.Fatalf("completion=%+v err=%v", completion, err)
+	}
+	citation := completion.Choices[0].Message.Annotations[0].SourceCitation
+	if citation == nil || citation.Source != "file_beta" || citation.Title != "beta.txt" || citation.StartIndex != 7 || citation.EndIndex != 10 || citation.DocumentIndex == nil || *citation.DocumentIndex != 0 || citation.LocationType != "document_chunk" {
+		t.Fatalf("citation=%+v", citation)
+	}
 	if runtime.embeddingRequest.EmbeddingRequest == nil || runtime.rerankRequest.RerankRequest == nil || runtime.chatRequest.Request.Model != "chat-model" {
 		t.Fatalf("missing stage requests: embedding=%+v rerank=%+v chat=%+v", runtime.embeddingRequest, runtime.rerankRequest, runtime.chatRequest)
 	}
@@ -224,5 +296,45 @@ func TestDecodeRAGQueryPreservesChatParameters(t *testing.T) {
 	if !ok || response.Code != http.StatusOK || chat.ReasoningEffort != "high" || chat.ServiceTier != "priority" || retrieval.VectorStoreID != "vs_owned" {
 		payload, _ := json.Marshal(chat)
 		t.Fatalf("ok=%t status=%d chat=%s retrieval=%+v body=%s", ok, response.Code, payload, retrieval, response.Body.String())
+	}
+}
+
+func TestAnnotateRAGResponseUsesRuneOffsetsAndKnownSources(t *testing.T) {
+	response := openai.ChatCompletionResponse{Choices: []openai.Choice{{Message: openai.Message{Role: "assistant", Content: "Ответ [2], см. [1](https://example.com), `[1]`, ```\n[1]\n``` и [9]."}}}}
+	results := []vectorSearchResult{{FileID: "file_one", Filename: "one.txt", chunkIndex: 3}, {FileID: "file_two", Filename: "two.txt", chunkIndex: 7}}
+	annotated := annotateRAGResponse(response, results)
+	annotations := annotated.Choices[0].Message.Annotations
+	if len(annotations) != 1 {
+		t.Fatalf("annotations=%+v", annotations)
+	}
+	citation := annotations[0].SourceCitation
+	if citation == nil || citation.Source != "file_two" || citation.StartIndex != 6 || citation.EndIndex != 9 || citation.LocationStart != 7 || citation.LocationEnd != 8 || citation.DocumentIndex == nil || *citation.DocumentIndex != 1 {
+		t.Fatalf("citation=%+v", citation)
+	}
+}
+
+func TestRAGStreamCitationsTrackChoicesIndependently(t *testing.T) {
+	citations := newRAGStreamCitations([]vectorSearchResult{{FileID: "file_one", Filename: "one.txt"}, {FileID: "file_two", Filename: "two.txt"}})
+	first := `{"id":"chat","object":"chat.completion.chunk","model":"model","choices":[{"index":0,"delta":{"content":"A ["},"finish_reason":null},{"index":1,"delta":{"content":"B ["},"finish_reason":null}]}`
+	if output, err := citations.decorate(first); err != nil || len(output) != 1 || output[0] != first {
+		t.Fatalf("first output=%v err=%v", output, err)
+	}
+	last := `{"id":"chat","object":"chat.completion.chunk","model":"model","choices":[{"index":0,"delta":{"content":"1]"},"finish_reason":"stop"},{"index":1,"delta":{"content":"2]"},"finish_reason":"stop"}]}`
+	output, err := citations.decorate(last)
+	if err != nil || len(output) != 4 || !strings.Contains(output[0], `"content":"1]"`) || !strings.Contains(output[3], `"finish_reason":"stop"`) {
+		t.Fatalf("last output=%v err=%v", output, err)
+	}
+	for index, raw := range output[1:3] {
+		var chunk struct {
+			Choices []struct {
+				Index int `json:"index"`
+				Delta struct {
+					Annotations []openai.ChatAnnotation `json:"annotations"`
+				} `json:"delta"`
+			} `json:"choices"`
+		}
+		if err := json.Unmarshal([]byte(raw), &chunk); err != nil || len(chunk.Choices) != 1 || chunk.Choices[0].Index != index || len(chunk.Choices[0].Delta.Annotations) != 1 || chunk.Choices[0].Delta.Annotations[0].SourceCitation == nil || chunk.Choices[0].Delta.Annotations[0].SourceCitation.Source != []string{"file_one", "file_two"}[index] {
+			t.Fatalf("index=%d chunk=%+v err=%v", index, chunk, err)
+		}
 	}
 }
