@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"net/url"
@@ -110,7 +111,7 @@ func validateResponseConfigurationPayload(payload []byte, response *openai.Respo
 	if len(wire.Tools) > 0 && string(wire.Tools) != "null" {
 		response.Tools = nil
 		if err := decodeStrictResponseConfiguration(wire.Tools, &response.Tools); err != nil {
-			return errors.New("provider returned invalid response tools configuration")
+			return fmt.Errorf("provider returned invalid response tools configuration: %w", err)
 		}
 	}
 	if len(wire.Text) > 0 {

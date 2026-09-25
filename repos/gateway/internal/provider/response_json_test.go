@@ -1111,6 +1111,23 @@ func TestResponsesAcceptEchoedAutomaticToolChoiceWithoutTools(t *testing.T) {
 	}
 }
 
+func TestResponsesReportUnsupportedEchoedToolField(t *testing.T) {
+	document := `{"id":"r","object":"response","model":"m","tools":[{"type":"function","name":"lookup","unsupported_field":true}]}`
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprintf("stream=%v", stream), func(t *testing.T) {
+			var err error
+			if stream {
+				_, err = streamResponseData(strings.NewReader("data: {\"type\":\"response.completed\",\"response\":"+document+"}\n\n"), "m", func(string, string) error { return nil })
+			} else {
+				_, err = decodeResponseJSON(strings.NewReader(document))
+			}
+			if err == nil || !strings.Contains(err.Error(), `unknown field "unsupported_field"`) {
+				t.Fatalf("missing unsupported field in error: %v", err)
+			}
+		})
+	}
+}
+
 func TestResponsesRejectsInvalidImageGenerationResults(t *testing.T) {
 	for _, output := range []string{
 		`{"type":"image_generation_call","status":"completed"}`,
