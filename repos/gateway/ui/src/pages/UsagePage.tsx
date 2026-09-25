@@ -70,15 +70,22 @@ function queryFor(filters: UsageFilters) {
   return query;
 }
 
+function sortDailyUsage(rows: UsageAggregate[]) {
+  return [...rows].sort((left, right) => {
+    const byDate = (left.date || "9999-12-31").localeCompare(right.date || "9999-12-31");
+    return byDate || left.currency.localeCompare(right.currency);
+  });
+}
+
 function UsageBars({ title, rows, value, format }: { title: string; rows: UsageAggregate[]; value: (row: UsageAggregate) => number; format: (value: number, row: UsageAggregate) => string }) {
   const max = Math.max(0, ...rows.map(value));
-  return <section className="usage-chart-card"><h2>{title}</h2>{rows.length ? <div className="usage-bars">{rows.map((row, index) => { const amount = value(row); return <div className="usage-bar-row" key={`${row.date}-${row.currency}-${index}`}><span>{row.date || "Unknown"}{title === "Spend per day" ? ` · ${row.currency}` : ""}</span><div className="usage-bar-track"><span style={{ width: `${max ? Math.max(2, amount / max * 100) : 0}%` }} /></div><strong>{format(amount, row)}</strong></div>; })}</div> : <p className="muted">No daily usage in this period.</p>}</section>;
+  return <section className="usage-chart-card"><h2>{title}</h2>{rows.length ? <div className="usage-bars">{sortDailyUsage(rows).map((row, index) => { const amount = value(row); return <div className="usage-bar-row" key={`${row.date}-${row.currency}-${index}`}><span>{row.date || "Unknown"}{title === "Spend per day" ? ` · ${row.currency}` : ""}</span><div className="usage-bar-track"><span style={{ width: `${max ? Math.max(2, amount / max * 100) : 0}%` }} /></div><strong>{format(amount, row)}</strong></div>; })}</div> : <p className="muted">No daily usage in this period.</p>}</section>;
 }
 
 function UsageTrend({ rows }: { rows: UsageAggregate[] }) {
   const maxSpend = Math.max(0, ...rows.map((row) => row.cost));
   const maxRequests = Math.max(0, ...rows.map((row) => row.requests));
-  return <GravityThemeScope className="gravity-card-scope usage-trend-scope"><Card type="container" view="raised" className="usage-analytics-card usage-trend-card"><div className="usage-card-heading"><div><h2>Spend and requests</h2><p>Daily finalized traffic by currency</p><span className="sr-only">Spend per day</span></div><div className="usage-legend"><span><i className="spend" />Spend</span><span><i className="requests" />Requests</span></div></div>{rows.length ? <div className="usage-combo-chart">{rows.map((row, index) => <div className="usage-combo-column" key={`${row.date}-${row.currency}-${index}`} title={`${row.date || "Unknown"} · ${formatCost(row.cost, row.currency)} · ${row.requests} requests`}><div className="usage-combo-bars"><i className="spend" style={{ height: `${maxSpend ? Math.max(3, row.cost / maxSpend * 100) : 0}%` }} /><i className="requests" style={{ height: `${maxRequests ? Math.max(3, row.requests / maxRequests * 100) : 0}%` }} /></div><span>{row.date?.slice(5) || "—"}<small>{row.currency}</small></span></div>)}</div> : <p className="muted">No daily usage in this period.</p>}</Card></GravityThemeScope>;
+  return <GravityThemeScope className="gravity-card-scope usage-trend-scope"><Card type="container" view="raised" className="usage-analytics-card usage-trend-card"><div className="usage-card-heading"><div><h2>Spend and requests</h2><p>Daily finalized traffic by currency</p><span className="sr-only">Spend per day</span></div><div className="usage-legend"><span><i className="spend" />Spend</span><span><i className="requests" />Requests</span></div></div>{rows.length ? <div className="usage-combo-chart">{sortDailyUsage(rows).map((row, index) => <div className="usage-combo-column" key={`${row.date}-${row.currency}-${index}`} title={`${row.date || "Unknown"} · ${formatCost(row.cost, row.currency)} · ${row.requests} requests`}><div className="usage-combo-bars"><i className="spend" style={{ height: `${maxSpend ? Math.max(3, row.cost / maxSpend * 100) : 0}%` }} /><i className="requests" style={{ height: `${maxRequests ? Math.max(3, row.requests / maxRequests * 100) : 0}%` }} /></div><span>{row.date?.slice(5) || "—"}<small>{row.currency}</small></span></div>)}</div> : <p className="muted">No daily usage in this period.</p>}</Card></GravityThemeScope>;
 }
 
 function CacheOutcomes({ requests, successful, errors, cacheHits, cacheReadTokens, cacheWriteTokens }: { requests: number; successful: number; errors: number; cacheHits: number; cacheReadTokens: number; cacheWriteTokens: number }) {

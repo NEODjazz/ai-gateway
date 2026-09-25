@@ -52,6 +52,34 @@ describe("operational pages", () => {
     await waitFor(() => expect(fetchMock).toHaveBeenLastCalledWith("/admin/v1/usage/report?days=7", expect.anything()));
   });
 
+  it("orders daily usage charts by date and currency", async () => {
+    const aggregate = { currency: "USD", requests: 1, errors: 0, total_tokens: 1, cost: 1, avg_latency_ms: 1, cache_hits: 0 };
+    const daily = [
+      { ...aggregate, date: "2026-09-11" },
+      { ...aggregate, date: "2026-09-09", currency: "USD" },
+      { ...aggregate, date: "2026-09-07" },
+      { ...aggregate, date: "2026-09-09", currency: "EUR" }
+    ];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(JSON.stringify({ totals: [aggregate], daily, by_model: [{ ...aggregate, name: "gpt" }] }), { status: 200 }));
+    const { container } = authenticated(<UsagePage />);
+    await screen.findByText("Spend and requests");
+    await waitFor(() => expect(container.querySelectorAll(".usage-combo-column")).toHaveLength(4));
+    expect([...container.querySelectorAll(".usage-combo-column")].map((column) => column.getAttribute("title")?.slice(0, 10))).toEqual([
+      "2026-09-07", "2026-09-09", "2026-09-09", "2026-09-11"
+    ]);
+    expect([...container.querySelectorAll(".usage-combo-column small")].map((currency) => currency.textContent)).toEqual(["USD", "EUR", "USD", "USD"]);
+
+    await userEvent.click(screen.getByRole("tab", { name: "Models" }));
+    await userEvent.click(screen.getByRole("button", { name: "Actions for gpt" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Inspect" }));
+    const dialog = await screen.findByRole("dialog", { name: "Usage details" });
+    await waitFor(() => expect(dialog.querySelectorAll(".usage-bar-row")).toHaveLength(7));
+    const spendChart = dialog.querySelector(".usage-chart-card");
+    expect([...spendChart!.querySelectorAll(".usage-bar-row > span")].map((label) => label.textContent)).toEqual([
+      "2026-09-07 · USD", "2026-09-09 · EUR", "2026-09-09 · USD", "2026-09-11 · USD"
+    ]);
+  });
+
   it("keeps spend separated by currency and weights latency by request count", async () => {
     const base = { errors: 0, input_tokens: 0, output_tokens: 0, total_tokens: 10, cache_read_input_tokens: 0, cache_write_input_tokens: 0, cache_hits: 0, cost_per_request: 0 };
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
