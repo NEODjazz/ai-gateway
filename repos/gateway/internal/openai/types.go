@@ -842,6 +842,7 @@ type ResponseTool struct {
 	Name              string                     `json:"name,omitempty"`
 	Description       string                     `json:"description,omitempty"`
 	Parameters        any                        `json:"parameters,omitempty"`
+	OutputSchema      map[string]any             `json:"output_schema,omitempty"`
 	Strict            *bool                      `json:"strict,omitempty"`
 	ServerLabel       string                     `json:"server_label,omitempty"`
 	ServerURL         string                     `json:"server_url,omitempty"`

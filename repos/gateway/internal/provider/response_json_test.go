@@ -1111,6 +1111,36 @@ func TestResponsesAcceptEchoedAutomaticToolChoiceWithoutTools(t *testing.T) {
 	}
 }
 
+func TestResponsesPreserveEchoedFunctionOutputSchema(t *testing.T) {
+	document := `{"id":"r","object":"response","model":"m","status":"completed","tools":[{"type":"function","name":"lookup","parameters":{"type":"object"},"output_schema":{"type":"object","properties":{"found":{"type":"boolean"}}}}],"tool_choice":"auto"}`
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprintf("stream=%v", stream), func(t *testing.T) {
+			var response openai.ResponseResponse
+			var err error
+			if stream {
+				response, err = streamResponseData(strings.NewReader("data: {\"type\":\"response.completed\",\"response\":"+document+"}\n\n"), "m", func(string, string) error { return nil })
+			} else {
+				response, err = decodeResponseJSON(strings.NewReader(document))
+			}
+			if err != nil || len(response.Tools) != 1 || response.Tools[0].OutputSchema["type"] != "object" {
+				t.Fatalf("response=%+v err=%v", response, err)
+			}
+			encoded, err := json.Marshal(response)
+			if err != nil || !strings.Contains(string(encoded), `"output_schema":{"properties":{"found":{"type":"boolean"}},"type":"object"}`) {
+				t.Fatalf("output_schema was not preserved: %s, err=%v", encoded, err)
+			}
+		})
+	}
+	for _, tools := range []string{
+		`[{"type":"function","name":"lookup","output_schema":"invalid"}]`,
+		`[{"type":"custom","name":"lookup","output_schema":{"type":"object"}}]`,
+	} {
+		if _, err := decodeResponseJSON(strings.NewReader(`{"id":"r","object":"response","model":"m","tools":` + tools + `}`)); err == nil {
+			t.Fatalf("invalid output_schema accepted: %s", tools)
+		}
+	}
+}
+
 func TestResponsesReportUnsupportedEchoedToolField(t *testing.T) {
 	document := `{"id":"r","object":"response","model":"m","tools":[{"type":"function","name":"lookup","unsupported_field":true}]}`
 	for _, stream := range []bool{false, true} {

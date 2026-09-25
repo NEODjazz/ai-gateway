@@ -528,6 +528,21 @@ func TestAzureResponsesAcceptDefaultAutomaticToolChoiceWithoutTools(t *testing.T
 	}
 }
 
+func TestAzureResponsesPreserveEchoedFunctionOutputSchema(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("api-key") != "test-key" {
+			t.Error("missing Azure API key")
+		}
+		_, _ = fmt.Fprint(w, `{"id":"resp-test","object":"response","model":"deployment","status":"completed","tools":[{"type":"function","name":"lookup","parameters":{"type":"object"},"output_schema":{"type":"object","properties":{"found":{"type":"boolean"}}}}],"tool_choice":"auto","output":[],"usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}`)
+	}))
+	t.Cleanup(server.Close)
+	client := NewAzureOpenAI(server.URL, "test-key", false, "", "api_key")
+	response, err := client.Responses(t.Context(), openai.ResponseRequest{Model: "deployment", Input: "lookup"})
+	if err != nil || response.Usage.TotalTokens != 5 || len(response.Tools) != 1 || response.Tools[0].OutputSchema["type"] != "object" {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
 func TestAzureFoundryStreamResponsesRequireTerminalUsage(t *testing.T) {
 	for _, tc := range []struct {
 		name, usage string

@@ -313,6 +313,9 @@ func validateResponseTools(tools []ResponseTool) string {
 	mcpLabels := make(map[string]struct{}, len(tools))
 	hostedTypes := make(map[string]struct{}, 4)
 	for index, tool := range tools {
+		if tool.Type != "function" && tool.OutputSchema != nil {
+			return "output_schema is supported only for function tools"
+		}
 		switch tool.Type {
 		case "function":
 			if !chatFunctionName.MatchString(tool.Name) {
