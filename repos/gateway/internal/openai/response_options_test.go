@@ -249,6 +249,19 @@ func TestResponseToolChoiceValidation(t *testing.T) {
 	}
 }
 
+func TestResponseToolChoiceAutoWithoutTools(t *testing.T) {
+	request := ResponseRequest{Model: "m", Input: "hello", ToolChoice: "auto"}
+	if message := request.Validate(); message != "" {
+		t.Fatalf("auto without tools rejected: %s", message)
+	}
+	if message := ValidateResponseConfiguration(nil, "auto", nil, nil); message != "" {
+		t.Fatalf("echoed auto without tools rejected: %s", message)
+	}
+	if message := (ResponseRequest{Model: "m", Input: "hello", ToolChoice: "required"}).Validate(); message == "" {
+		t.Fatal("required without tools was accepted")
+	}
+}
+
 func TestResponseImageGenerationToolValidation(t *testing.T) {
 	compression, partialImages := 90, 3
 	validMask := "data:image/png;base64,iVBORw0KGgpmaXh0dXJl"

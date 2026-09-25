@@ -104,6 +104,8 @@ For ambient Entra credentials, an upstream `401` invalidates only the token used
 by that request, so the next independent request refreshes it. The rejected
 inference request is not replayed; explicitly supplied bearer tokens remain
 operator-managed.
+Responses accepts a provider-echoed `tool_choice: "auto"` with an empty tools
+array. A required or named tool choice still needs an available tool.
 
 Ollama model discovery reads `/api/tags` and inspects up to 128 listed models
 through `/api/show` within a 10-second metadata budget. Verified completion,

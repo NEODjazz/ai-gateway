@@ -823,9 +823,9 @@ func validateResponseToolChoice(tools []ResponseTool, choice any) string {
 	}
 	if value, ok := choice.(string); ok {
 		switch value {
-		case "none":
+		case "none", "auto":
 			return ""
-		case "auto", "required":
+		case "required":
 			if len(tools) > 0 {
 				return ""
 			}

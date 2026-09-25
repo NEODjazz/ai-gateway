@@ -1090,6 +1090,27 @@ func TestResponsesPreserveAndValidateEchoedConfiguration(t *testing.T) {
 	}
 }
 
+func TestResponsesAcceptEchoedAutomaticToolChoiceWithoutTools(t *testing.T) {
+	document := `{"id":"r","object":"response","model":"m","status":"completed","tools":[],"tool_choice":"auto","output":[{"type":"message","id":"msg_1","status":"completed","role":"assistant","content":[{"type":"output_text","text":"Summary","annotations":[]}]}],"usage":{"input_tokens":4,"output_tokens":1,"total_tokens":5}}`
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprintf("stream=%v", stream), func(t *testing.T) {
+			var response openai.ResponseResponse
+			var err error
+			if stream {
+				response, err = streamResponseData(strings.NewReader("data: {\"type\":\"response.completed\",\"response\":"+document+"}\n\n"), "m", func(string, string) error { return nil })
+			} else {
+				response, err = decodeResponseJSON(strings.NewReader(document))
+			}
+			if err != nil || response.ToolChoice != "auto" || len(response.Tools) != 0 || response.Usage.TotalTokens != 5 {
+				t.Fatalf("response=%+v err=%v", response, err)
+			}
+		})
+	}
+	if _, err := decodeResponseJSON(strings.NewReader(strings.Replace(document, `"tool_choice":"auto"`, `"tool_choice":"required"`, 1))); err == nil {
+		t.Fatal("required tool choice without tools was accepted")
+	}
+}
+
 func TestResponsesRejectsInvalidImageGenerationResults(t *testing.T) {
 	for _, output := range []string{
 		`{"type":"image_generation_call","status":"completed"}`,

@@ -506,6 +506,28 @@ func TestAzureResponsesRequireExactUsage(t *testing.T) {
 	}
 }
 
+func TestAzureResponsesAcceptDefaultAutomaticToolChoiceWithoutTools(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("api-key") != "test-key" {
+			t.Error("missing Azure API key")
+		}
+		var request map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+		}
+		if _, sent := request["tool_choice"]; sent {
+			t.Error("tool_choice was added to a request that omitted tools")
+		}
+		_, _ = fmt.Fprint(w, `{"id":"resp-test","object":"response","model":"deployment","status":"completed","tools":[],"tool_choice":"auto","output":[],"usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}`)
+	}))
+	t.Cleanup(server.Close)
+	client := NewAzureOpenAI(server.URL, "test-key", false, "", "api_key")
+	response, err := client.Responses(t.Context(), openai.ResponseRequest{Model: "deployment", Input: "Summarize the release notes."})
+	if err != nil || response.Usage.TotalTokens != 5 || response.ToolChoice != "auto" {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
 func TestAzureFoundryStreamResponsesRequireTerminalUsage(t *testing.T) {
 	for _, tc := range []struct {
 		name, usage string
