@@ -2240,8 +2240,7 @@ func writeProviderFailure(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusTooManyRequests, "provider_busy", "provider capacity is temporarily exhausted")
 		return
 	}
-	var providerErr *provider.Error
-	if errors.As(err, &providerErr) {
+	if providerErr := lastProviderError(err); providerErr != nil {
 		switch providerErr.Class {
 		case provider.FailureRateLimit:
 			setProviderRetryAfter(w, providerErr.RetryAfter)
@@ -2295,6 +2294,26 @@ func writeProviderFailure(w http.ResponseWriter, err error) {
 		return
 	}
 	writeError(w, http.StatusBadGateway, "provider_failed", err.Error())
+}
+
+// Router failures may contain one error per attempted endpoint. Report the
+// final provider attempt rather than an earlier error that was retried.
+func lastProviderError(err error) *provider.Error {
+	if providerErr, ok := err.(*provider.Error); ok {
+		return providerErr
+	}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		attempts := joined.Unwrap()
+		for index := len(attempts) - 1; index >= 0; index-- {
+			if providerErr := lastProviderError(attempts[index]); providerErr != nil {
+				return providerErr
+			}
+		}
+	}
+	if wrapped, ok := err.(interface{ Unwrap() error }); ok {
+		return lastProviderError(wrapped.Unwrap())
+	}
+	return nil
 }
 
 func setProviderRetryAfter(w http.ResponseWriter, delay time.Duration) {

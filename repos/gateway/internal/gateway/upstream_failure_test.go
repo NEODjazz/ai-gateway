@@ -52,3 +52,30 @@ func TestChatPreservesSafeUpstreamFailureAfterRouting(t *testing.T) {
 		})
 	}
 }
+
+func TestChatFailureReportsLastUpstreamAttempt(t *testing.T) {
+	firstCalls, lastCalls := 0, 0
+	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		firstCalls++
+		w.Header().Set("Retry-After", "3")
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	t.Cleanup(first.Close)
+	last := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		lastCalls++
+		w.Header().Set("Retry-After", "2")
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(last.Close)
+	runtime := provider.New(provider.Config{Endpoints: []config.ProviderEndpointConfig{
+		{Name: "first", Type: "openai-compatible", BaseURL: first.URL, Models: []string{"model"}, Capabilities: []string{"chat"}, Priority: 1},
+		{Name: "last", Type: "openai-compatible", BaseURL: last.URL, Models: []string{"model"}, Capabilities: []string{"chat"}, Priority: 2},
+	}})
+	handler := Routes(NewHandler(modules.NewPipeline(nil), runtime))
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"model","messages":[{"role":"user","content":"hello"}]}`))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if firstCalls != 1 || lastCalls != 1 || response.Code != http.StatusServiceUnavailable || response.Header().Get("Retry-After") != "2" || !strings.Contains(response.Body.String(), `"code":"upstream_unavailable"`) {
+		t.Fatalf("first=%d last=%d status=%d retry-after=%q body=%s", firstCalls, lastCalls, response.Code, response.Header().Get("Retry-After"), response.Body.String())
+	}
+}
