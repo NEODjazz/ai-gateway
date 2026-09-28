@@ -70,6 +70,23 @@ func TestHTTPLogFingerprintsExternalRequestID(t *testing.T) {
 	}
 }
 
+func TestHTTPLogNormalizesUnrecognizedMethod(t *testing.T) {
+	previous := log.Writer()
+	var output bytes.Buffer
+	log.SetOutput(&output)
+	t.Cleanup(func() { log.SetOutput(previous) })
+
+	const privateMethod = "privateCredential"
+	request := httptest.NewRequest(privateMethod, "/healthz", nil)
+	response := httptest.NewRecorder()
+	observabilityMiddleware(NewMetrics(), http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	})).ServeHTTP(response, request)
+	if logged := output.String(); strings.Contains(logged, privateMethod) || !strings.Contains(logged, `"method":"OTHER"`) {
+		t.Fatalf("unsafe HTTP method log: %s", logged)
+	}
+}
+
 func TestBatchFailureLogOmitsRawErrorAndCustomID(t *testing.T) {
 	previous := log.Writer()
 	var output bytes.Buffer
