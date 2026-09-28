@@ -221,9 +221,7 @@ func (r Router) processBackgroundResponse(ctx context.Context, claimed asyncstat
 			req.Metadata = map[string]string{}
 		}
 		req.Metadata["provider.status"] = "error"
-		if response.Error != nil {
-			req.Metadata["provider.error"] = response.Error.Message
-		}
+		delete(req.Metadata, "provider.error")
 	}
 	req.ResponsesResponse = &response
 	if err := r.modules.RunPostResponse(ctx, &req); err != nil && !errors.Is(err, modules.ErrContentRejected) {
@@ -257,9 +255,7 @@ func (r Router) processBackgroundInteraction(ctx context.Context, claimed asyncs
 			req.Metadata = map[string]string{}
 		}
 		req.Metadata["provider.status"] = "error"
-		if response.Error != nil {
-			req.Metadata["provider.error"] = response.Error.Message
-		}
+		delete(req.Metadata, "provider.error")
 	}
 	shared := openai.ResponseFromInteraction(response)
 	req.ResponsesResponse = &shared

@@ -24,6 +24,11 @@ RS256/ES256. HS256 и built-in demo/static keys предназначены дл�
 
 `RequestContext` не является network DTO. Remote responses применяются по
 allowlist полей и не могут перезаписать identity или routing state целиком.
+При ошибке provider в request metadata остаются статус и, где он определён,
+ограниченный `failure_class`. Raw error и текст ошибки фонового ответа не
+копируются в metadata, передаваемую последующим модулям. Provider и module
+traces, а также сообщения о пропуске optional modules, записывают только
+ограниченный класс ошибки.
 
 Internal `/authorize`, `/usage`, `/scan`, `/anonymize` и `/internal/v1/*`
 должны оставаться cluster-internal. Service contracts защищаются отдельными

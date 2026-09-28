@@ -143,7 +143,7 @@ func (p Pipeline) RunAfterAuthentication(ctx context.Context, req *RequestContex
 			if module.Required() || errors.Is(err, ErrContentRejected) || errors.Is(err, ErrGuardrailUnavailable) {
 				return fmt.Errorf("%s module failed: %w", module.Name(), err)
 			}
-			log.Printf("optional module %s skipped after error: %v", module.Name(), err)
+			log.Printf("optional module %s skipped: %s", module.Name(), moduleResult(err))
 		}
 	}
 	return nil
@@ -167,7 +167,7 @@ func (p Pipeline) RunTokenCountAfterAuthentication(ctx context.Context, req *Req
 			if module.Required() || errors.Is(err, ErrContentRejected) || errors.Is(err, ErrGuardrailUnavailable) {
 				return fmt.Errorf("%s module failed: %w", module.Name(), err)
 			}
-			log.Printf("optional module %s skipped after error: %v", module.Name(), err)
+			log.Printf("optional module %s skipped: %s", module.Name(), moduleResult(err))
 		}
 	}
 	return nil
@@ -187,7 +187,7 @@ func (p Pipeline) RunAuthentication(ctx context.Context, req *RequestContext) er
 			if module.Required() {
 				return fmt.Errorf("%s module failed: %w", module.Name(), err)
 			}
-			log.Printf("optional module %s skipped after error: %v", module.Name(), err)
+			log.Printf("optional module %s skipped: %s", module.Name(), moduleResult(err))
 		}
 	}
 	if !found || req.CredentialID == "" {
@@ -242,7 +242,7 @@ func (p Pipeline) runPre(ctx context.Context, req *RequestContext, tokenCount bo
 			if module.Required() || errors.Is(err, ErrContentRejected) || errors.Is(err, ErrGuardrailUnavailable) {
 				return fmt.Errorf("%s module failed: %w", module.Name(), err)
 			}
-			log.Printf("optional module %s skipped after error: %v", module.Name(), err)
+			log.Printf("optional module %s skipped: %s", module.Name(), moduleResult(err))
 		}
 	}
 	return nil
@@ -261,7 +261,7 @@ func (p Pipeline) RunPostResponse(ctx context.Context, req *RequestContext) erro
 				terminal = append(terminal, fmt.Errorf("%s post-response module failed: %w", module.Name(), err))
 				continue
 			}
-			log.Printf("optional post-response module %s skipped after error: %v", module.Name(), err)
+			log.Printf("optional post-response module %s skipped: %s", module.Name(), moduleResult(err))
 		}
 	}
 	return errors.Join(terminal...)
@@ -278,7 +278,7 @@ func (p Pipeline) RunNamed(ctx context.Context, req *RequestContext, name string
 			if module.Required() || errors.Is(err, ErrContentRejected) || errors.Is(err, ErrGuardrailUnavailable) {
 				return fmt.Errorf("%s module failed: %w", name, err)
 			}
-			log.Printf("optional module %s skipped after error: %v", name, err)
+			log.Printf("optional module %s skipped: %s", name, moduleResult(err))
 		}
 		return nil
 	}
@@ -301,7 +301,7 @@ func (p Pipeline) RunNamedPostResponse(ctx context.Context, req *RequestContext,
 			if module.Required() || errors.Is(err, ErrContentRejected) || errors.Is(err, ErrGuardrailUnavailable) {
 				return fmt.Errorf("%s post-response module failed: %w", name, err)
 			}
-			log.Printf("optional post-response module %s skipped after error: %v", name, err)
+			log.Printf("optional post-response module %s skipped: %s", name, moduleResult(err))
 		}
 		return nil
 	}
@@ -321,7 +321,6 @@ func (p Pipeline) RunFailure(ctx context.Context, req *RequestContext, cause err
 		result := moduleResult(err)
 		span.SetAttributes(attribute.String("ai.module.result", result))
 		if err != nil {
-			span.RecordError(err)
 			span.SetStatus(codes.Error, result)
 		}
 		span.End()
@@ -329,7 +328,7 @@ func (p Pipeline) RunFailure(ctx context.Context, req *RequestContext, cause err
 			p.observer.ObserveModule(module.Name(), "failure", result, time.Since(started))
 		}
 		if err != nil {
-			log.Printf("failure hook %s skipped after error: %v", module.Name(), err)
+			log.Printf("failure hook %s skipped: %s", module.Name(), result)
 		}
 	}
 }
@@ -342,7 +341,6 @@ func (p Pipeline) run(ctx context.Context, req *RequestContext, module Module, p
 	result := moduleResult(err)
 	span.SetAttributes(attribute.String("ai.module.result", result))
 	if err != nil {
-		span.RecordError(err)
 		span.SetStatus(codes.Error, result)
 	}
 	span.End()

@@ -3088,7 +3088,6 @@ func (r Router) startProviderCall(ctx context.Context, endpoint Endpoint, operat
 		result := "ok"
 		if err != nil {
 			result = string(failureClass(err))
-			span.RecordError(err)
 			span.SetStatus(codes.Error, result)
 		}
 		span.SetAttributes(attribute.String("ai.result", result))
@@ -3114,7 +3113,7 @@ func setAttemptMetadata(req *modules.RequestContext, started time.Time, err erro
 		return
 	}
 	req.Metadata["provider.status"] = "error"
-	req.Metadata["provider.error"] = err.Error()
+	delete(req.Metadata, "provider.error")
 	req.Metadata["provider.failure_class"] = string(failureClass(err))
 }
 

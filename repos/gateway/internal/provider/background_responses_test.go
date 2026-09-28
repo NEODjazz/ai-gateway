@@ -127,6 +127,8 @@ type backgroundLifecycleRecorder struct {
 	totalTokens        int
 	anonymizationMode  string
 	anonymizationRules string
+	providerStatus     string
+	rawProviderError   string
 }
 
 func (*backgroundLifecycleRecorder) Name() string   { return "billing" }
@@ -142,6 +144,8 @@ func (r *backgroundLifecycleRecorder) HandlePostResponse(_ context.Context, req 
 	r.totalTokens = req.ResponsesResponse.Usage.TotalTokens
 	r.anonymizationMode = req.Metadata["provider.modules.anonymizer.mode"]
 	r.anonymizationRules = req.Metadata["provider.modules.anonymizer.rules"]
+	r.providerStatus = req.Metadata["provider.status"]
+	r.rawProviderError = req.Metadata["provider.error"]
 	return nil
 }
 func (r *backgroundLifecycleRecorder) HandleFailure(context.Context, *modules.RequestContext, error) error {
@@ -253,9 +257,10 @@ func TestFailedBackgroundResponseReleasesConversationAndDiscardsPendingInput(t *
 		ConversationTurn: &conversationStore.turn, ConversationInputItems: input,
 	}
 	jobs := &backgroundJobStore{}
-	client := &backgroundResponseClient{retrieve: openai.ResponseResponse{ID: "resp_background", Model: request.Model, Status: "failed", Error: &openai.ResponseError{Message: "provider failed"}}}
+	client := &backgroundResponseClient{retrieve: openai.ResponseResponse{ID: "resp_background", Model: request.Model, Status: "failed", Error: &openai.ResponseError{Message: "private prompt and credential"}}}
+	recorder := &backgroundLifecycleRecorder{}
 	endpoint := Endpoint{Name: "deployment", ProviderID: "provider", Type: "openai-compatible", Models: []string{request.Model}, Capabilities: []string{"responses", "background_responses"}, Provider: client, Admission: newAdmissionController(0, 0, 0)}
-	router := Router{endpoints: []Endpoint{endpoint}, endpointState: &endpointRegistry{}, modules: modules.NewPipeline(nil), health: newEndpointHealthTracker(), routeCounter: &atomic.Uint64{}, ownership: newResponseOwnershipStore(time.Hour, &ownershipTestStore{data: map[string][]byte{}}), asyncJobs: jobs, conversations: conversationStore}
+	router := Router{endpoints: []Endpoint{endpoint}, endpointState: &endpointRegistry{}, modules: modules.NewPipeline([]modules.Module{recorder}), health: newEndpointHealthTracker(), routeCounter: &atomic.Uint64{}, ownership: newResponseOwnershipStore(time.Hour, &ownershipTestStore{data: map[string][]byte{}}), asyncJobs: jobs, conversations: conversationStore}
 	router.endpointState.current.Store(&router.endpoints)
 
 	if _, err := router.Responses(t.Context(), req); err != nil {
@@ -266,6 +271,9 @@ func TestFailedBackgroundResponseReleasesConversationAndDiscardsPendingInput(t *
 	}
 	if !conversationStore.released || len(conversationStore.staged) != 0 || len(conversationStore.completed) != 0 || conversationStore.turn.ExecutionID != "" {
 		t.Fatalf("released=%t staged=%+v completed=%+v turn=%+v", conversationStore.released, conversationStore.staged, conversationStore.completed, conversationStore.turn)
+	}
+	if recorder.post != 1 || recorder.providerStatus != "error" || recorder.rawProviderError != "" {
+		t.Fatalf("unsafe failed response metadata: %+v", recorder)
 	}
 }
 
