@@ -1407,6 +1407,12 @@ func (r Router) Rerank(ctx context.Context, req modules.RequestContext) (openai.
 			continue
 		}
 		progress.enter(endpoint)
+		if err := validateRerankAdapter(endpoint.Provider, request); err != nil {
+			if lastAttempt != nil {
+				r.modules.RunFailure(ctx, lastAttempt, err)
+			}
+			return openai.RerankResponse{}, err
+		}
 		attemptCtx := providerAttemptContext(req, endpoint)
 		r.applyCatalogPricing(ctx, &attemptCtx, endpoint, request.Model)
 		if endpoint.GuardrailPolicy != "" && !endpoint.GuardrailPolicyValid {
@@ -1417,6 +1423,9 @@ func (r Router) Rerank(ctx context.Context, req modules.RequestContext) (openai.
 		}
 		if err := r.modules.Run(ctx, &attemptCtx); err != nil {
 			if terminalModuleError(err) || ctx.Err() != nil {
+				if lastAttempt != nil {
+					r.modules.RunFailure(ctx, lastAttempt, err)
+				}
 				return openai.RerankResponse{}, fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err)
 			}
 			wrapped := fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err)

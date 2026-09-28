@@ -45,6 +45,22 @@ type embeddingFailoverProvider struct {
 	validationErr  error
 }
 
+type rerankFailoverProvider struct {
+	countingProvider
+	rerankCalls   int
+	rerankErr     error
+	validationErr error
+}
+
+func (p *rerankFailoverProvider) Rerank(context.Context, openai.RerankRequest) (openai.RerankResponse, error) {
+	p.rerankCalls++
+	return openai.RerankResponse{Results: []openai.RerankResult{{Index: 0}}}, p.rerankErr
+}
+
+func (p *rerankFailoverProvider) ValidateRerankParameters(openai.RerankRequest) error {
+	return p.validationErr
+}
+
 func (p *embeddingFailoverProvider) Embeddings(context.Context, openai.EmbeddingRequest) (openai.EmbeddingResponse, error) {
 	p.embeddingCalls++
 	return openai.EmbeddingResponse{}, p.embeddingErr
@@ -224,6 +240,39 @@ func TestEmbeddingFailoverBudgetRejectionCancelsPreviousReserve(t *testing.T) {
 	_, err := router.Embeddings(t.Context(), modules.RequestContext{RequestID: "execution", Request: openai.ChatCompletionRequest{Model: "model"}, EmbeddingRequest: &request})
 	if !errors.Is(err, modules.ErrBudgetExceeded) || billing.reserves != 2 || billing.cancels != 1 || primary.embeddingCalls != 1 || secondary.embeddingCalls != 0 {
 		t.Fatalf("unexpected lifecycle: err=%v reserves=%d cancels=%d primary=%d secondary=%d", err, billing.reserves, billing.cancels, primary.embeddingCalls, secondary.embeddingCalls)
+	}
+}
+
+func TestRerankFailoverRejectionCancelsPreviousReserve(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		validation bool
+	}{
+		{name: "parameter rejection", validation: true},
+		{name: "budget rejection"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			primary := &rerankFailoverProvider{rerankErr: statusError("primary", http.StatusServiceUnavailable)}
+			secondary := &rerankFailoverProvider{}
+			billing := &rejectSecondReserve{}
+			wantErr, wantReserves := error(modules.ErrBudgetExceeded), 2
+			if test.validation {
+				secondary.validationErr = errors.New("unsupported rerank parameter")
+				wantErr, wantReserves = secondary.validationErr, 1
+			}
+			router := Router{
+				health: newEndpointHealthTracker(), routeCounter: &atomic.Uint64{}, modules: modules.NewPipeline([]modules.Module{billing}),
+				endpoints: []Endpoint{
+					{Name: "primary", Type: "openai", Models: []string{"model"}, Capabilities: []string{"rerank"}, Provider: primary},
+					{Name: "secondary", Type: "openai", Models: []string{"model"}, Capabilities: []string{"rerank"}, Provider: secondary},
+				},
+			}
+			request := openai.RerankRequest{Model: "model", Query: "hello", Documents: []any{"document"}}
+			_, err := router.Rerank(t.Context(), modules.RequestContext{RequestID: "execution", Request: openai.ChatCompletionRequest{Model: "model"}, RerankRequest: &request})
+			if !errors.Is(err, wantErr) || billing.reserves != wantReserves || billing.cancels != 1 || primary.rerankCalls != 1 || secondary.rerankCalls != 0 {
+				t.Fatalf("unexpected lifecycle: err=%v reserves=%d cancels=%d primary=%d secondary=%d", err, billing.reserves, billing.cancels, primary.rerankCalls, secondary.rerankCalls)
+			}
+		})
 	}
 }
 
