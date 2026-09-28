@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -48,11 +49,24 @@ func TestMissingDeploymentToolsDoesNotCallUpstream(t *testing.T) {
 	t.Cleanup(server.Close)
 	router := New(Config{Endpoints: []config.ProviderEndpointConfig{{Name: "qwen", Type: "openai-compatible", BaseURL: server.URL, Models: []string{"qwen3.6:27b"}, Capabilities: []string{"chat"}}}})
 	request := openai.ChatCompletionRequest{Model: "qwen3.6:27b", Tools: []openai.Tool{{Type: "function", Function: openai.FunctionDefinition{Name: "lookup", Parameters: map[string]any{"type": "object"}}}}}
-	if _, err := router.ChatCompletions(t.Context(), modules.RequestContext{Request: request}); err == nil {
-		t.Fatal("request with unsupported tools was accepted")
+	if _, err := router.ChatCompletions(t.Context(), modules.RequestContext{Request: request}); err == nil || !strings.Contains(err.Error(), "required capabilities unavailable") || !strings.Contains(err.Error(), "tools") {
+		t.Fatalf("capability mismatch was not reported: %v", err)
 	}
 	if got := calls.Load(); got != 0 {
 		t.Fatalf("upstream calls = %d, want 0", got)
+	}
+}
+
+func TestNoEndpointErrorDistinguishesModelAndCapability(t *testing.T) {
+	router := New(Config{Endpoints: []config.ProviderEndpointConfig{{Name: "chat-only", Type: "openai-compatible", BaseURL: "http://unused.invalid", Models: []string{"known"}, Capabilities: []string{"chat"}}}})
+	response := openai.ResponseRequest{Model: "known", Input: "hello"}
+	_, err := router.Responses(t.Context(), modules.RequestContext{Request: openai.ChatCompletionRequest{Model: "known"}, ResponseRequest: &response})
+	if err == nil || !strings.Contains(err.Error(), "required capabilities unavailable") || !strings.Contains(err.Error(), "responses") {
+		t.Fatalf("Responses capability mismatch was not reported: %v", err)
+	}
+	_, err = router.ChatCompletions(t.Context(), modules.RequestContext{Request: openai.ChatCompletionRequest{Model: "missing"}})
+	if err == nil || strings.Contains(err.Error(), "required capabilities unavailable") {
+		t.Fatalf("unknown model was mislabeled as capability mismatch: %v", err)
 	}
 }
 

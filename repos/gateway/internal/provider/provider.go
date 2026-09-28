@@ -737,6 +737,9 @@ func (r Router) ChatCompletions(ctx context.Context, req modules.RequestContext)
 		if err := r.validateCachedContentRequestBinding(request); err != nil {
 			return openai.ChatCompletionResponse{}, err
 		}
+		if required := requiredChatCapabilities(request, false); r.routeCapabilityMismatch(ctx, request, required...) {
+			return openai.ChatCompletionResponse{}, fmt.Errorf("no provider endpoint for provider=%q model=%q: required capabilities unavailable (%s)", request.Provider, request.Model, strings.Join(required, ", "))
+		}
 		return openai.ChatCompletionResponse{}, fmt.Errorf("no provider endpoint for provider=%q model=%q", request.Provider, request.Model)
 	}
 
@@ -1114,6 +1117,9 @@ func (r Router) Responses(ctx context.Context, req modules.RequestContext) (open
 	if len(candidates) == 0 {
 		if request.Background {
 			return openai.ResponseResponse{}, ErrBackgroundResponsesUnsupported
+		}
+		if required := requiredResponseCapabilities(request, false); r.routeCapabilityMismatch(ctx, openai.ChatCompletionRequest{Provider: request.Provider, Model: request.Model}, required...) {
+			return openai.ResponseResponse{}, fmt.Errorf("no provider endpoint for provider=%q model=%q: required capabilities unavailable (%s)", request.Provider, request.Model, strings.Join(required, ", "))
 		}
 		return openai.ResponseResponse{}, fmt.Errorf("no provider endpoint for provider=%q model=%q", request.Provider, request.Model)
 	}
@@ -3180,6 +3186,39 @@ func (r Router) candidatesWithCounter(ctx context.Context, request openai.ChatCo
 	}
 	r.routeCounter = counter
 	return r.weightedOrder(candidates)
+}
+
+// routeCapabilityMismatch distinguishes an unsupported operation from an
+// unknown provider or model. Admission and health failures retain their own
+// generic no-endpoint error rather than being reported as capability failures.
+func (r Router) routeCapabilityMismatch(ctx context.Context, request openai.ChatCompletionRequest, required ...string) bool {
+	catalog := r.catalog.Current(ctx)
+	provider := strings.TrimSpace(request.Provider)
+	if provider == "" && strings.TrimSpace(request.Model) == "" {
+		provider = r.defaultProvider
+	}
+	group, grouped := r.modelGroup(request.Model)
+	groupDeployments := make(map[string]bool, len(group.DeploymentIDs))
+	for _, id := range group.DeploymentIDs {
+		groupDeployments[id] = true
+	}
+	matched := false
+	for _, endpoint := range r.runtimeEndpoints() {
+		if endpoint.Shadow || grouped && !groupDeployments[endpoint.Name] {
+			continue
+		}
+		if provider != "" && provider != "auto" && provider != endpoint.Name && provider != endpoint.Type {
+			continue
+		}
+		if !endpoint.supportsModel(request.Model) {
+			continue
+		}
+		matched = true
+		if supportsCatalogCapabilities(catalog, endpoint, request.Model, required...) {
+			return false
+		}
+	}
+	return matched
 }
 
 func (r Router) responseCandidates(ctx context.Context, req modules.RequestContext, request openai.ResponseRequest, capabilities ...string) ([]Endpoint, error) {
