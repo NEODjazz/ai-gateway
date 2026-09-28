@@ -55,6 +55,16 @@ jobs:
           allow-external-refs: false
           review: false
 
+  smoke-scripts:
+    name: Smoke script contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Verify prerequisites
+        run: command -v curl && command -v jq && command -v python3
+      - name: Test embedding smoke routing and credential handling
+        run: python3 -B -m unittest scripts/test_smoke_ollama_embeddings.py
+
   go:
     name: Go / ${{ matrix.service }}
     runs-on: ubuntu-latest
