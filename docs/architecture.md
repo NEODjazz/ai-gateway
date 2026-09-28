@@ -120,7 +120,7 @@ sequenceDiagram
 6. `billing` post-response — заменяет reservation фактическим provider usage; при окончательной ошибке выполняет cancel.
 7. Gateway восстанавливает placeholders в успешном ответе.
 
-Неуспешная попытка обязательного модуля или provider добавляется в агрегированную ошибку router, после чего router может перейти к следующему совместимому endpoint. Content rejection и budget rejection являются terminal: provider не вызывается, fallback не выполняется, клиент получает соответственно `451` или `429 budget_exceeded`. Если остальные кандидаты закончились, клиент получает `502 provider_failed`.
+Неуспешная попытка обязательного модуля или provider добавляется в агрегированную ошибку router, после чего router может перейти к следующему совместимому endpoint. Content rejection и budget rejection являются terminal: provider не вызывается, fallback не выполняется, клиент получает соответственно `451` или `429 budget_exceeded`. После исчерпания кандидатов типизированный ответ upstream 429 возвращается как `429 upstream_rate_limited` с безопасным `Retry-After`; upstream 401/403, 503 и 504 также сохраняют статус с нормализованным кодом без raw provider error. Upstream 500 и неизвестные ошибки возвращаются как `502`.
 
 Для streaming router повторяет вызов того же endpoint или переходит к fallback
 только до первой попытки записи SSE-события клиенту. После первого chunk/event

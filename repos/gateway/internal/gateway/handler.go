@@ -2243,6 +2243,32 @@ func writeProviderFailure(w http.ResponseWriter, err error) {
 	var providerErr *provider.Error
 	if errors.As(err, &providerErr) {
 		switch providerErr.Class {
+		case provider.FailureRateLimit:
+			setProviderRetryAfter(w, providerErr.RetryAfter)
+			writeError(w, http.StatusTooManyRequests, "upstream_rate_limited", "upstream provider rate limit exceeded")
+			return
+		case provider.FailureAuthentication:
+			status := providerErr.StatusCode
+			if status != http.StatusUnauthorized && status != http.StatusForbidden {
+				status = http.StatusBadGateway
+			}
+			writeError(w, status, "upstream_authentication_failed", "upstream provider authentication failed")
+			return
+		case provider.FailureUnavailable:
+			status := providerErr.StatusCode
+			if status != http.StatusBadGateway && status != http.StatusServiceUnavailable && status != http.StatusGatewayTimeout {
+				status = http.StatusBadGateway
+			}
+			setProviderRetryAfter(w, providerErr.RetryAfter)
+			writeError(w, status, "upstream_unavailable", "upstream provider is unavailable")
+			return
+		case provider.FailureTimeout:
+			status := providerErr.StatusCode
+			if status != http.StatusRequestTimeout && status != http.StatusGatewayTimeout {
+				status = http.StatusGatewayTimeout
+			}
+			writeError(w, status, "upstream_timeout", "upstream provider timed out")
+			return
 		case provider.FailureClientRequest:
 			code := providerErr.UpstreamCode
 			if code == "" {
@@ -2265,8 +2291,21 @@ func writeProviderFailure(w http.ResponseWriter, err error) {
 			writeError(w, http.StatusUnavailableForLegalReasons, "provider_content_policy", "upstream provider rejected the request under its content policy")
 			return
 		}
+		writeError(w, http.StatusBadGateway, "provider_failed", "upstream provider failed")
+		return
 	}
 	writeError(w, http.StatusBadGateway, "provider_failed", err.Error())
+}
+
+func setProviderRetryAfter(w http.ResponseWriter, delay time.Duration) {
+	if delay <= 0 {
+		return
+	}
+	seconds := int64(delay / time.Second)
+	if delay%time.Second != 0 {
+		seconds++
+	}
+	w.Header().Set("Retry-After", strconv.FormatInt(seconds, 10))
 }
 
 func writeProviderParameterError(w http.ResponseWriter, status int, code, message, param string) {

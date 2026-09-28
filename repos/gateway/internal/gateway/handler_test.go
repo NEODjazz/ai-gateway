@@ -1206,6 +1206,38 @@ func TestProviderQuotaFailureReturnsDistinct429WithRetryAfter(t *testing.T) {
 	}
 }
 
+func TestUpstreamFailurePreservesSafeStatus(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		class      provider.FailureClass
+		upstream   int
+		wantStatus int
+		wantCode   string
+		retryAfter time.Duration
+		wantRetry  string
+	}{
+		{name: "rate limit", class: provider.FailureRateLimit, upstream: http.StatusTooManyRequests, wantStatus: http.StatusTooManyRequests, wantCode: "upstream_rate_limited", retryAfter: 1500 * time.Millisecond, wantRetry: "2"},
+		{name: "authentication", class: provider.FailureAuthentication, upstream: http.StatusUnauthorized, wantStatus: http.StatusUnauthorized, wantCode: "upstream_authentication_failed"},
+		{name: "forbidden", class: provider.FailureAuthentication, upstream: http.StatusForbidden, wantStatus: http.StatusForbidden, wantCode: "upstream_authentication_failed"},
+		{name: "unavailable", class: provider.FailureUnavailable, upstream: http.StatusServiceUnavailable, wantStatus: http.StatusServiceUnavailable, wantCode: "upstream_unavailable", retryAfter: 3 * time.Second, wantRetry: "3"},
+		{name: "server error", class: provider.FailureUnavailable, upstream: http.StatusInternalServerError, wantStatus: http.StatusBadGateway, wantCode: "upstream_unavailable"},
+		{name: "timeout", class: provider.FailureTimeout, upstream: http.StatusGatewayTimeout, wantStatus: http.StatusGatewayTimeout, wantCode: "upstream_timeout"},
+		{name: "unknown", class: provider.FailureUnknown, upstream: http.StatusTeapot, wantStatus: http.StatusBadGateway, wantCode: "provider_failed"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			writeProviderFailure(recorder, &provider.Error{Class: test.class, Provider: "private-provider", StatusCode: test.upstream, UpstreamCode: "secret_code", RetryAfter: test.retryAfter, Err: errors.New("raw upstream secret")})
+			if recorder.Code != test.wantStatus || recorder.Header().Get("Retry-After") != test.wantRetry {
+				t.Fatalf("status=%d retry-after=%q, want %d and %q", recorder.Code, recorder.Header().Get("Retry-After"), test.wantStatus, test.wantRetry)
+			}
+			body := recorder.Body.String()
+			if !strings.Contains(body, `"code":"`+test.wantCode+`"`) || strings.Contains(body, "private-provider") || strings.Contains(body, "raw upstream secret") || strings.Contains(body, "secret_code") {
+				t.Fatalf("unsafe upstream response: %s", body)
+			}
+		})
+	}
+}
+
 func TestProviderClientRequestPreservesSafeStatusAndParameter(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	writeProviderFailure(recorder, &provider.Error{
