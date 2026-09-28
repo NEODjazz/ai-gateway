@@ -18,6 +18,7 @@ import (
 )
 
 const (
+	azureServicePrincipalPrefix    = "azure-sp:v1:"
 	azureIMDSTokenURL              = "http://169.254.169.254/metadata/identity/oauth2/token"
 	azureAuthorityURL              = "https://login.microsoftonline.com"
 	azureOpenAIResource            = "https://cognitiveservices.azure.com/"
@@ -35,6 +36,8 @@ const (
 
 type azureTokenSource struct {
 	explicit         string
+	servicePrincipal *azureServicePrincipal
+	configurationErr error
 	client           *http.Client
 	getenv           func(string) string
 	now              func() time.Time
@@ -52,6 +55,28 @@ type azureTokenSource struct {
 	refreshCompleted chan struct{}
 }
 
+type azureServicePrincipal struct {
+	TenantID     string `json:"tenant_id"`
+	ClientID     string `json:"client_id"`
+	ClientSecret string `json:"client_secret"`
+}
+
+func parseAzureServicePrincipal(secret string) (*azureServicePrincipal, bool, error) {
+	if !strings.HasPrefix(secret, azureServicePrincipalPrefix) {
+		return nil, false, nil
+	}
+	var principal azureServicePrincipal
+	decoder := json.NewDecoder(strings.NewReader(strings.TrimPrefix(secret, azureServicePrincipalPrefix)))
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&principal) != nil || decoder.Decode(&struct{}{}) != io.EOF ||
+		!validAzureIdentifier(principal.TenantID) || !validAzureIdentifier(principal.ClientID) ||
+		len(principal.ClientSecret) > azureClientSecretMaxBytes || strings.TrimSpace(principal.ClientSecret) == "" ||
+		strings.ContainsAny(principal.ClientSecret, "\x00\r\n") {
+		return nil, true, errors.New("invalid Azure service principal credential")
+	}
+	return &principal, true, nil
+}
+
 type azureTokenResponse struct {
 	AccessToken string          `json:"access_token"`
 	ExpiresOn   json.RawMessage `json:"expires_on"`
@@ -63,7 +88,11 @@ func newAzureTokenSource(explicit string, providerBaseURL ...string) *azureToken
 	client := newProviderHTTPClient(2 * time.Second)
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	authority, resource := azureIdentityEndpoints(providerBaseURL...)
-	return &azureTokenSource{explicit: explicit, client: client, getenv: os.Getenv, now: time.Now, imdsURL: azureIMDSTokenURL, authorityBaseURL: authority, resource: resource, scope: resource + ".default"}
+	principal, matched, err := parseAzureServicePrincipal(explicit)
+	if matched {
+		explicit = ""
+	}
+	return &azureTokenSource{explicit: explicit, servicePrincipal: principal, configurationErr: err, client: client, getenv: os.Getenv, now: time.Now, imdsURL: azureIMDSTokenURL, authorityBaseURL: authority, resource: resource, scope: resource + ".default"}
 }
 
 func newAzureTokenSourceWithCloud(explicit, providerBaseURL, cloud string) *azureTokenSource {
@@ -145,6 +174,9 @@ func azureIdentityEndpoints(providerBaseURL ...string) (string, string) {
 }
 
 func (s *azureTokenSource) Token(ctx context.Context) (string, error) {
+	if s.configurationErr != nil {
+		return "", s.configurationErr
+	}
 	if s.explicit != "" {
 		if !validAzureBearerToken(s.explicit) {
 			return "", errors.New("invalid explicit Azure Entra token")
@@ -227,6 +259,9 @@ func azureTokenRefreshAt(now, expiration time.Time) time.Time {
 }
 
 func (s *azureTokenSource) load(ctx context.Context) (string, time.Time, error) {
+	if s.servicePrincipal != nil {
+		return s.loadClientSecret(ctx, s.servicePrincipal.TenantID, s.servicePrincipal.ClientID, s.servicePrincipal.ClientSecret)
+	}
 	tenantID := strings.TrimSpace(s.getenv("AZURE_TENANT_ID"))
 	clientID := strings.TrimSpace(s.getenv("AZURE_CLIENT_ID"))
 	clientSecret := s.getenv("AZURE_CLIENT_SECRET")

@@ -155,8 +155,14 @@ Provider form загружает этот профиль и показывает
 аутентификации для выбранного типа. Ошибка capability endpoint не блокирует
 список и редактирование providers: форма использует встроенный безопасный набор.
 
-Для `azure-openai` режим `auth_type=entra` использует статический bearer token
-из привязанного write-only credential. Без credential gateway сначала проверяет
+Для `azure-openai` режим `auth_type=entra` поддерживает два вида привязанного
+write-only credential в UI **Credentials** и мастере **Model Onboarding**:
+готовый bearer token или service principal (Tenant ID, Client ID и Client Secret). Service principal доступен
+только для credential, привязанного к Azure provider с `auth_type=entra`;
+gateway сам получает и обновляет краткоживущий access token. При ротации
+выберите вид credential повторно и введите новые значения: секретные поля
+не возвращаются через API. Готовый bearer token не обновляется автоматически.
+Без привязанного credential gateway сначала проверяет
 service principal через `AZURE_TENANT_ID`, `AZURE_CLIENT_ID` и
 `AZURE_CLIENT_SECRET`, затем AKS workload identity через первые два поля и абсолютный
 `AZURE_FEDERATED_TOKEN_FILE`, затем локальные `IDENTITY_ENDPOINT` и

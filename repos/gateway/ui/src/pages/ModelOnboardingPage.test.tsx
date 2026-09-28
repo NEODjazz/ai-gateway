@@ -9,6 +9,37 @@ function json(value: unknown, status = 200) {
 }
 
 describe("ModelOnboardingPage", () => {
+  it("creates a service principal credential during Azure onboarding", async () => {
+    let credential: { provider_id: string; secret: string } | undefined;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, options) => {
+      const path = String(input);
+      if (!options?.method && path === "/admin/v1/providers") return json({ data: [{ id: "azure", type: "azure-openai", base_url: "https://example.openai.azure.com/openai/v1", auth_type: "entra", enabled: true }] });
+      if (!options?.method && path === "/admin/v1/credentials") return json({ data: [] });
+      if (!options?.method && path === "/admin/v1/model-catalog") return json({ version: "v1", models: [] });
+      if (!options?.method && path === "/admin/v1/model-groups") return json({ data: [] });
+      if (!options?.method && path === "/admin/v1/provider-capabilities") return json({ data: [{ type: "azure-openai", capabilities: ["chat"], auth_types: ["api_key", "entra"] }] });
+      if (path === "/admin/v1/credentials" && options?.method === "POST") {
+        credential = JSON.parse(String(options.body)); return json({ id: "azure-sp", provider_id: "azure", kind: "azure_service_principal" }, 201);
+      }
+      if (path.endsWith("/test")) return json({ status: "available", latency_ms: 1, model_count: 1 });
+      if (path.endsWith("/discover-models")) return json({ data: [{ id: "deployment-a", capabilities: ["chat"], capability_source: "provider_metadata" }] });
+      return json({ error: { message: `Unexpected ${path}` } }, 500);
+    });
+    sessionStorage.setItem("ai-gateway.admin-token", "token");
+    render(<MemoryRouter><AuthProvider><ModelOnboardingPage /></AuthProvider></MemoryRouter>);
+    await screen.findByRole("option", { name: "azure — azure-openai" });
+    await userEvent.selectOptions(screen.getByLabelText("Credential"), "__new");
+    await userEvent.type(screen.getByLabelText("Credential ID"), "azure-sp");
+    await userEvent.selectOptions(screen.getByLabelText("Azure credential type"), "service_principal");
+    await userEvent.type(screen.getByLabelText("Tenant ID"), "tenant-a");
+    await userEvent.type(screen.getByLabelText("Client ID"), "client-a");
+    await userEvent.type(screen.getByLabelText("Client secret"), "private-value");
+    await userEvent.click(screen.getByRole("button", { name: "Test & discover models" }));
+    await screen.findByText("deployment-a");
+    expect(credential?.provider_id).toBe("azure");
+    expect(JSON.parse(credential!.secret.slice("azure-sp:v1:".length))).toEqual({ tenant_id: "tenant-a", client_id: "client-a", client_secret: "private-value" });
+    expect(screen.queryByDisplayValue("private-value")).not.toBeInTheDocument();
+  });
   it("requires explicit Azure capabilities and prices during resource onboarding", async () => {
     const plans: Array<{ deployments: Array<{ capabilities: string[] }>; catalog: { models: Array<{ input_cost_per_1m: number; output_cost_per_1m: number; currency: string }> } }> = [];
     const applied: Array<{ catalog: { models: Array<{ input_cost_per_1m: number; output_cost_per_1m: number; currency: string }> } }> = [];
