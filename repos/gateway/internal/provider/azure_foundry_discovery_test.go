@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +12,44 @@ import (
 	"testing"
 	"time"
 )
+
+func TestAzureFoundryProjectDiscoveryRejectsOversizedResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprint(w, `{"value":[],"padding":"`+strings.Repeat("x", 2<<20)+`"}`)
+	}))
+	t.Cleanup(server.Close)
+	_, err := discoverAzureFoundryProjectModels(t.Context(), ManagedProvider{BaseURL: server.URL + "/api/projects/project-a", AuthType: "api_key"}, "test-key", "/api/projects/project-a")
+	if !errors.Is(err, ErrProviderProbeFailed) {
+		t.Fatalf("oversized discovery response accepted: %v", err)
+	}
+}
+
+func TestAzureFoundryProjectDiscoveryDoesNotFollowRedirect(t *testing.T) {
+	var forwarded atomic.Bool
+	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { forwarded.Store(true) }))
+	t.Cleanup(target.Close)
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Location", target.URL+"/api/projects/project-a/deployments")
+		w.WriteHeader(http.StatusFound)
+	}))
+	t.Cleanup(source.Close)
+	_, err := discoverAzureFoundryProjectModels(t.Context(), ManagedProvider{BaseURL: source.URL + "/api/projects/project-a", AuthType: "api_key"}, "test-key", "/api/projects/project-a")
+	if !errors.Is(err, ErrProviderProbeFailed) || forwarded.Load() {
+		t.Fatalf("redirect accepted or credential forwarded: err=%v forwarded=%t", err, forwarded.Load())
+	}
+}
+
+func TestAzureFoundryProjectDiscoveryHonorsCancellation(t *testing.T) {
+	var called atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called.Store(true) }))
+	t.Cleanup(server.Close)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err := discoverAzureFoundryProjectModels(ctx, ManagedProvider{BaseURL: server.URL + "/api/projects/project-a", AuthType: "api_key"}, "test-key", "/api/projects/project-a")
+	if !errors.Is(err, ErrProviderProbeFailed) || called.Load() {
+		t.Fatalf("canceled discovery made a request: err=%v called=%t", err, called.Load())
+	}
+}
 
 func TestAzureFoundryProjectDiscoveryUsesExplicitGovernmentIdentity(t *testing.T) {
 	for _, name := range []string{"AZURE_TENANT_ID", "AZURE_CLIENT_ID", "AZURE_FEDERATED_TOKEN_FILE"} {
