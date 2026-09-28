@@ -1754,6 +1754,43 @@ func TestResponsesCatalogRequirementsIncludeToolsStructuredOutputAndStream(t *te
 	}
 }
 
+func TestResponseTextRequiresStructuredOutputOnlyForJSONFormats(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		text any
+		want bool
+	}{
+		{name: "plain text", text: map[string]any{"format": map[string]any{"type": "text"}}},
+		{name: "empty text options", text: map[string]any{}},
+		{name: "null format", text: map[string]any{"format": nil}},
+		{name: "verbosity only", text: map[string]any{"verbosity": "low"}},
+		{name: "JSON object", text: map[string]any{"format": map[string]any{"type": "json_object"}}, want: true},
+		{name: "JSON schema", text: map[string]any{"format": map[string]any{"type": "json_schema", "schema": map[string]any{"type": "object"}}}, want: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			required := requiredResponseCapabilities(openai.ResponseRequest{Text: test.text}, false)
+			if hasCapability(required, "structured_output") != test.want {
+				t.Fatalf("text=%v requires %v", test.text, required)
+			}
+		})
+	}
+}
+
+func TestOllamaCloudPlainResponseTextRoutesWithoutStructuredOutput(t *testing.T) {
+	endpoint := Endpoint{
+		Type: "ollama", Provider: NewOllama("https://ollama.com", false),
+		Models: []string{"model"}, Capabilities: []string{"responses"},
+	}
+	plain := requiredResponseCapabilities(openai.ResponseRequest{Text: map[string]any{"format": map[string]any{"type": "text"}}}, false)
+	if !supportsCatalogCapabilities(modelcatalog.Catalog{}, endpoint, "model", plain...) {
+		t.Fatal("plain response text did not route to Ollama Cloud")
+	}
+	structured := requiredResponseCapabilities(openai.ResponseRequest{Text: map[string]any{"format": map[string]any{"type": "json_object"}}}, false)
+	if supportsCatalogCapabilities(modelcatalog.Catalog{}, endpoint, "model", structured...) {
+		t.Fatal("structured response text routed to Ollama Cloud")
+	}
+}
+
 func TestResponsesCodeInterpreterRequiresExplicitCapability(t *testing.T) {
 	required := requiredResponseCapabilities(openai.ResponseRequest{
 		Tools: []openai.ResponseTool{

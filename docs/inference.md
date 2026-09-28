@@ -276,6 +276,8 @@ modules, billing reserve и сетевого вызова.
 Если локальный Ollama перенаправляет модель в cloud, discovery учитывает
 `remote_host` из `/api/show`; имена `:cloud` и `-cloud` также исключаются из
 structured output при настройке, маршрутизации и прямом вызове adapter.
+В Responses capability `structured_output` требуется только при заданном
+JSON-формате; обычный `text.format=text` и пустые text options не меняют маршрут.
 
 ## Capabilities
 

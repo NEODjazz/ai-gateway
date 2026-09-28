@@ -3566,7 +3566,7 @@ func requiredResponseCapabilities(request openai.ResponseRequest, stream bool) [
 	if patchRequired {
 		required = append(required, "response_apply_patch")
 	}
-	if request.Text != nil {
+	if responseNeedsStructuredOutput(request.Text) {
 		required = append(required, "structured_output")
 	}
 	if openai.HasResponsePromptImages(request) {
@@ -3579,6 +3579,25 @@ func requiredResponseCapabilities(request openai.ResponseRequest, stream bool) [
 		required = append(required, "file_input")
 	}
 	return required
+}
+
+func responseNeedsStructuredOutput(text any) bool {
+	if text == nil {
+		return false
+	}
+	payload, err := json.Marshal(text)
+	if err != nil {
+		return true
+	}
+	var config struct {
+		Format *struct {
+			Type string `json:"type"`
+		} `json:"format"`
+	}
+	if json.Unmarshal(payload, &config) != nil {
+		return true
+	}
+	return config.Format != nil && config.Format.Type != "text"
 }
 
 func hasCapability(capabilities []string, expected string) bool {
