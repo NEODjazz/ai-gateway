@@ -195,6 +195,9 @@ func azureManagedDeploymentBaseURL(baseURL, apiVersion string, deployment ModelD
 		return "", ErrInvalidDeployment
 	}
 	if apiVersion == "" || apiVersion == "preview" {
+		if azureurl.LegacyDeploymentPath(parsed.Path) {
+			return "", ErrInvalidDeployment
+		}
 		return baseURL, nil
 	}
 	path := strings.TrimRight(parsed.Path, "/")

@@ -79,6 +79,9 @@ func TestValidateAzureOpenAIConfiguration(t *testing.T) {
 	if err := validateProviderAdmission([]ProviderEndpointConfig{valid}); err != nil {
 		t.Fatalf("valid Azure configuration rejected: %v", err)
 	}
+	if err := validateProviderAdmission([]ProviderEndpointConfig{{Name: "azure-legacy", Type: "azure-openai", BaseURL: "https://proxy.example.test/tenant/openai/deployments/model-a", APIVersion: "2024-10-21"}}); err != nil {
+		t.Fatalf("versioned legacy deployment rejected: %v", err)
+	}
 	if err := validateProviderAdmission([]ProviderEndpointConfig{{Name: "foundry", Type: "azure-openai", BaseURL: "https://resource.services.ai.azure.com/api/projects/project-a", AuthType: "entra"}}); err != nil {
 		t.Fatalf("valid Foundry project configuration rejected: %v", err)
 	}
@@ -100,6 +103,8 @@ func TestValidateAzureOpenAIConfiguration(t *testing.T) {
 		{Name: "foundry", Type: "azure-openai", BaseURL: "https://resource.services.ai.azure.com/api/projects/project-a?", AuthType: "entra"},
 		{Name: "azure", Type: "azure-openai", BaseURL: "https://proxy.example.test/tenant/../openai/v1"},
 		{Name: "azure", Type: "azure-openai", BaseURL: "https://proxy.example.test/tenant%2fother/openai/v1"},
+		{Name: "azure", Type: "azure-openai", BaseURL: "https://resource.openai.azure.com/openai/deployments/model-a"},
+		{Name: "azure", Type: "azure-openai", BaseURL: "https://proxy.example.test/tenant/openai/deployments/model-a", APIVersion: "preview"},
 		{Name: "foundry", Type: "azure-openai", BaseURL: "https://resource.services.ai.azure.com/api/projects/project-a", APIVersion: "2025-04-01-preview", AuthType: "entra"},
 		{Name: "foundry", Type: "azure-openai", BaseURL: "https://resource.services.ai.azure.com/api/projects/project-a/openai/v1", APIVersion: "2025-04-01-preview", AuthType: "entra"},
 		{Name: "foundry", Type: "azure-openai", BaseURL: "https://proxy.example.test/tenant/api/projects/project-a", APIVersion: "2025-04-01-preview", AuthType: "entra"},

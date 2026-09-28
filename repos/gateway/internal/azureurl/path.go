@@ -44,3 +44,9 @@ func ProjectPath(path string) (string, bool) {
 	}
 	return "/" + strings.Join(parts[:projectIndex+3], "/"), true
 }
+
+// LegacyDeploymentPath identifies an explicit deployment route, including one
+// behind a reverse-proxy prefix. These routes require a dated API version.
+func LegacyDeploymentPath(path string) bool {
+	return strings.Contains(path, "/openai/deployments/") || strings.HasSuffix(path, "/openai/deployments")
+}

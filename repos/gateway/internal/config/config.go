@@ -451,6 +451,8 @@ func validateProviderAdmission(endpoints []ProviderEndpointConfig) error {
 				result = errors.Join(result, fmt.Errorf("provider %q base_url has invalid query, fragment, or path", name))
 			} else if azureFoundryProjectPath(parsed.Path) && endpoint.APIVersion != "" {
 				result = errors.Join(result, fmt.Errorf("provider %q Foundry project endpoint must not set api_version", name))
+			} else if azureurl.LegacyDeploymentPath(parsed.Path) && (endpoint.APIVersion == "" || endpoint.APIVersion == "preview") {
+				result = errors.Join(result, fmt.Errorf("provider %q legacy deployment URL requires a dated api_version", name))
 			}
 			if !validAzureAPIVersion(endpoint.APIVersion) {
 				result = errors.Join(result, fmt.Errorf("provider %q has invalid api_version", name))

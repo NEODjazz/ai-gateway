@@ -349,6 +349,9 @@ func normalizeManagedProvider(input ManagedProvider) (ManagedProvider, error) {
 		if _, project := azureFoundryProjectPath(parsed.Path); project && input.APIVersion != "" {
 			return ManagedProvider{}, ErrInvalidProvider
 		}
+		if azureurl.LegacyDeploymentPath(parsed.Path) && (input.APIVersion == "" || input.APIVersion == "preview") {
+			return ManagedProvider{}, ErrInvalidProvider
+		}
 		if _, project := azureFoundryProjectPath(parsed.Path); project && input.AzureCloud == "china" {
 			return ManagedProvider{}, ErrInvalidProvider
 		}

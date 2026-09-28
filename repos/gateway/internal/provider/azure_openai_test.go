@@ -1179,6 +1179,8 @@ func TestAzureManagedDeploymentBaseURL(t *testing.T) {
 		{name: "explicit deployment", baseURL: "https://resource.openai.azure.com/openai/deployments/deployment-a", apiVersion: "2024-10-21", models: []string{"public", "other"}, want: "https://resource.openai.azure.com/openai/deployments/deployment-a"},
 		{name: "GA v1", baseURL: "https://resource.openai.azure.com", models: []string{"public", "other"}, want: "https://resource.openai.azure.com"},
 		{name: "v1 preview", baseURL: "https://resource.openai.azure.com", apiVersion: "preview", models: []string{"public", "other"}, want: "https://resource.openai.azure.com"},
+		{name: "unversioned explicit deployment", baseURL: "https://resource.openai.azure.com/openai/deployments/deployment-a", models: []string{"public"}, invalid: true},
+		{name: "preview explicit deployment behind prefix", baseURL: "https://proxy.example.test/tenant/openai/deployments/deployment-a", apiVersion: "preview", models: []string{"public"}, invalid: true},
 		{name: "ambiguous model", baseURL: "https://resource.openai.azure.com", apiVersion: "2024-10-21", models: []string{"one", "two"}, invalid: true},
 		{name: "unsafe deployment segment", baseURL: "https://resource.openai.azure.com", apiVersion: "2024-10-21", upstream: "name/other", models: []string{"public"}, invalid: true},
 		{name: "dot deployment segment", baseURL: "https://resource.openai.azure.com", apiVersion: "2024-10-21", upstream: "..", models: []string{"public"}, invalid: true},
@@ -1423,9 +1425,9 @@ func TestAzureOpenAIBasePathDiscoveryKeepsVersionedRoute(t *testing.T) {
 	}
 }
 
-func TestAzureDeploymentBaseDiscoveryUsesV1AndCredential(t *testing.T) {
+func TestAzureDeploymentBaseDiscoveryUsesVersionedRouteAndCredential(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/tenant/openai/v1/models" || r.URL.RawQuery != "" || r.Header.Get("api-key") != "resource-key" || r.Header.Get("Authorization") != "" {
+		if r.URL.Path != "/tenant/openai/models" || r.URL.RawQuery != "api-version=2024-10-21" || r.Header.Get("api-key") != "resource-key" || r.Header.Get("Authorization") != "" {
 			t.Errorf("unexpected discovery request: %s headers=%v", r.URL, r.Header)
 			http.Error(w, "invalid discovery route", http.StatusBadRequest)
 			return
@@ -1434,7 +1436,7 @@ func TestAzureDeploymentBaseDiscoveryUsesV1AndCredential(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 	router := New(Config{CredentialEncryptionKey: []byte("azure-deployment-discovery-key")}).(*Router)
-	if _, err := router.CreateProvider(ManagedProvider{ID: "azure", Type: "azure-openai", BaseURL: server.URL + "/tenant/openai/deployments/legacy", AuthType: "api_key", Enabled: true}); err != nil {
+	if _, err := router.CreateProvider(ManagedProvider{ID: "azure", Type: "azure-openai", BaseURL: server.URL + "/tenant/openai/deployments/legacy", APIVersion: "2024-10-21", AuthType: "api_key", Enabled: true}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := router.CreateCredential(CredentialInput{ID: "azure-key", ProviderID: "azure", Secret: "resource-key"}); err != nil {
@@ -1472,6 +1474,8 @@ func TestManagedAzureOpenAIRejectsInvalidNativeSettings(t *testing.T) {
 		{ID: "foundry", Type: "azure-openai", BaseURL: "https://resource.services.ai.azure.com/api/projects/project-a?", AuthType: "entra"},
 		{ID: "azure", Type: "azure-openai", BaseURL: "https://proxy.example.test/tenant/../openai/v1"},
 		{ID: "azure", Type: "azure-openai", BaseURL: "https://proxy.example.test/tenant%2fother/openai/v1"},
+		{ID: "azure", Type: "azure-openai", BaseURL: "https://resource.openai.azure.com/openai/deployments/model-a"},
+		{ID: "azure", Type: "azure-openai", BaseURL: "https://proxy.example.test/tenant/openai/deployments/model-a", APIVersion: "preview"},
 		{ID: "azure", Type: "azure-openai", BaseURL: "https://example.test#fragment"},
 		{ID: "foundry", Type: "azure-openai", BaseURL: "https://resource.services.ai.azure.com/api/projects/project-a", APIVersion: "2025-04-01-preview", AuthType: "entra"},
 		{ID: "foundry", Type: "azure-openai", BaseURL: "https://resource.services.ai.azure.com/api/projects/project-a/openai/v1", APIVersion: "2025-04-01-preview", AuthType: "entra"},
