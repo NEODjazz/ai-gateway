@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -224,6 +225,66 @@ func TestControlPlaneRollsBackMutationWhenPersistenceFails(t *testing.T) {
 	}
 	if providers := router.ListProviders(context.Background()); len(providers) != 0 {
 		t.Fatalf("failed mutation leaked into runtime: %+v", providers)
+	}
+}
+
+func TestControlPlaneRestoresPreviousDeploymentSnapshot(t *testing.T) {
+	store := &memoryControlPlaneStore{}
+	config := Config{CredentialEncryptionKey: []byte("rollback-snapshot-key"), ControlPlaneStore: store, ControlPlaneRefresh: time.Nanosecond}
+	runtime, err := NewWithError(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := runtime.(*Router)
+	if _, err := router.CreateProvider(ManagedProvider{ID: "provider", Type: "openai-compatible", BaseURL: "https://provider.example/v1", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	original := ModelDeployment{ID: "deployment", ProviderID: "provider", Models: []string{"public"}, UpstreamModel: "upstream-v1", Capabilities: []string{"chat"}, Weight: 1, Enabled: true}
+	if _, err := router.CreateModelDeployment(original); err != nil {
+		t.Fatal(err)
+	}
+	store.mu.Lock()
+	previous := cloneControlPlaneSnapshot(store.snapshot)
+	store.mu.Unlock()
+
+	changed := original
+	changed.UpstreamModel = "upstream-v2"
+	changed.Capabilities = []string{"chat", "tools"}
+	if _, err := router.UpdateModelDeployment(original.ID, changed); err != nil {
+		t.Fatal(err)
+	}
+	findDeployment := func() (Endpoint, bool) {
+		for _, endpoint := range router.configuredEndpoints() {
+			if endpoint.Name == original.ID {
+				return endpoint, true
+			}
+		}
+		return Endpoint{}, false
+	}
+	updated, found := findDeployment()
+	if !found || updated.ModelAliases["public"] != "upstream-v2" || !slices.Contains(updated.Capabilities, "tools") {
+		t.Fatalf("updated deployment was not active: found=%t alias=%q capabilities=%v", found, updated.ModelAliases["public"], updated.Capabilities)
+	}
+	store.mu.Lock()
+	currentRevision := store.snapshot.Revision
+	store.mu.Unlock()
+	if _, err := store.Save(t.Context(), currentRevision, previous); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := router.AdminState(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	restored, found := findDeployment()
+	if !found || restored.ModelAliases["public"] != "upstream-v1" || slices.Contains(restored.Capabilities, "tools") {
+		t.Fatalf("previous deployment was not restored: found=%t alias=%q capabilities=%v", found, restored.ModelAliases["public"], restored.Capabilities)
+	}
+	reloaded, err := NewWithError(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deployments := reloaded.(*Router).ListModelDeployments(t.Context())
+	if len(deployments) != 1 || deployments[0].UpstreamModel != "upstream-v1" || slices.Contains(deployments[0].Capabilities, "tools") {
+		t.Fatalf("restored snapshot was not durable: %+v", deployments)
 	}
 }
 
