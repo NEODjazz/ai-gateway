@@ -1420,6 +1420,8 @@ func TestAzureOpenAIBasePathDiscoveryKeepsVersionedRoute(t *testing.T) {
 		{name: "GA root", basePath: "/tenant/openai", wantPath: "/tenant/openai/v1/models"},
 		{name: "v1 preview root", basePath: "/tenant/openai", apiVersion: "preview", wantPath: "/tenant/openai/v1/models"},
 		{name: "versioned root", basePath: "/tenant/openai", apiVersion: "2024-10-21", wantPath: "/tenant/openai/models"},
+		{name: "versioned v1 root", basePath: "/openai/v1", apiVersion: "2024-10-21", wantPath: "/openai/models"},
+		{name: "versioned prefixed v1 root", basePath: "/tenant/openai/v1", apiVersion: "2024-10-21", wantPath: "/tenant/openai/models"},
 		{name: "GA deployment", basePath: "/tenant/openai/deployments/legacy", wantPath: "/tenant/openai/v1/models"},
 		{name: "v1 preview deployment", basePath: "/tenant/openai/deployments/legacy", apiVersion: "preview", wantPath: "/tenant/openai/v1/models"},
 		{name: "versioned deployment", basePath: "/tenant/openai/deployments/legacy", apiVersion: "2024-10-21", wantPath: "/tenant/openai/models"},
@@ -1457,6 +1459,39 @@ func TestAzureDeploymentBaseDiscoveryUsesVersionedRouteAndCredential(t *testing.
 	models, err := router.DiscoverProviderModels(t.Context(), "azure", "azure-key")
 	if err != nil || len(models) != 1 || models[0].ID != "deployment-a" {
 		t.Fatalf("models=%+v err=%v", models, err)
+	}
+}
+
+func TestAzureDatedV1BaseDiscoveryUsesLegacyModelsRoute(t *testing.T) {
+	for _, authType := range []string{"api_key", "entra"} {
+		t.Run(authType, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/tenant/openai/models" || r.URL.RawQuery != "api-version=2024-10-21" {
+					t.Errorf("unexpected discovery route: %s", r.URL)
+					http.Error(w, "invalid route", http.StatusBadRequest)
+					return
+				}
+				if authType == "entra" && (r.Header.Get("Authorization") != "Bearer test-credential" || r.Header.Get("api-key") != "") ||
+					authType == "api_key" && (r.Header.Get("api-key") != "test-credential" || r.Header.Get("Authorization") != "") {
+					t.Errorf("unexpected discovery authentication: %v", r.Header)
+					http.Error(w, "invalid authentication", http.StatusUnauthorized)
+					return
+				}
+				_, _ = w.Write([]byte(`{"data":[{"id":"model-a"}]}`))
+			}))
+			t.Cleanup(server.Close)
+			router := New(Config{CredentialEncryptionKey: []byte("azure-dated-v1-discovery")}).(*Router)
+			if _, err := router.CreateProvider(ManagedProvider{ID: "azure", Type: "azure-openai", BaseURL: server.URL + "/tenant/openai/v1", APIVersion: "2024-10-21", AuthType: authType, Enabled: true}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := router.CreateCredential(CredentialInput{ID: "credential", ProviderID: "azure", Secret: "test-credential"}); err != nil {
+				t.Fatal(err)
+			}
+			models, err := router.DiscoverProviderModels(t.Context(), "azure", "credential")
+			if err != nil || len(models) != 1 || models[0].ID != "model-a" {
+				t.Fatalf("models=%+v err=%v", models, err)
+			}
+		})
 	}
 }
 
