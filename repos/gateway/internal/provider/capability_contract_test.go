@@ -57,6 +57,49 @@ func TestMissingDeploymentToolsDoesNotCallUpstream(t *testing.T) {
 	}
 }
 
+func TestMissingToolsCapabilitySkipsAllIntegrationPaths(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		typeName   string
+		basePath   string
+		apiVersion string
+	}{
+		{name: "Azure resource", typeName: "azure-openai", basePath: "/openai/deployments/upstream", apiVersion: "2025-04-01-preview"},
+		{name: "Foundry project OpenAI API", typeName: "azure-openai", basePath: "/api/projects/project-a/openai/v1"},
+		{name: "Ollama", typeName: "ollama"},
+		{name: "compatible backend", typeName: "openai-compatible", basePath: "/v1"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var calls atomic.Int32
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				calls.Add(1)
+				w.WriteHeader(http.StatusInternalServerError)
+			}))
+			t.Cleanup(upstream.Close)
+			catalog, err := modelcatalog.Parse(`{"version":"v1","models":[{"provider":"deployment","model":"upstream","capabilities":["chat","tools"]}]}`)
+			if err != nil {
+				t.Fatal(err)
+			}
+			configured, err := NewWithError(Config{Catalog: catalog, Endpoints: []config.ProviderEndpointConfig{{
+				Name: "deployment", Type: test.typeName, BaseURL: upstream.URL + test.basePath,
+				APIKey: "synthetic-test-key", APIVersion: test.apiVersion, Models: []string{"public"},
+				ModelAliases: map[string]string{"public": "upstream"}, Capabilities: []string{"chat"},
+			}}})
+			if err != nil {
+				t.Fatalf("configure integration path: %v", err)
+			}
+			request := openai.ChatCompletionRequest{Model: "public", Tools: []openai.Tool{{Type: "function", Function: openai.FunctionDefinition{Name: "lookup", Parameters: map[string]any{"type": "object"}}}}}
+			_, err = configured.ChatCompletions(t.Context(), modules.RequestContext{Request: request})
+			if err == nil || !strings.Contains(err.Error(), "tools") {
+				t.Fatalf("missing tools capability was accepted: %v", err)
+			}
+			if got := calls.Load(); got != 0 {
+				t.Fatalf("upstream calls = %d, want 0", got)
+			}
+		})
+	}
+}
+
 func TestMissingOperationCapabilitySkipsUpstream(t *testing.T) {
 	for _, test := range []struct {
 		name         string
