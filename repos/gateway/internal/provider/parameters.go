@@ -341,6 +341,9 @@ func (Demo) ValidateEmbeddingParameters(request openai.EmbeddingRequest) error {
 }
 
 func (p OpenAICompatible) ValidateEmbeddingParameters(request openai.EmbeddingRequest) error {
+	if p.providerName() == "azure-openai" && azureFoundryProjectBaseURL(p.baseURL) {
+		return &Error{Class: FailureClientRequest, Provider: "azure-openai", StatusCode: http.StatusBadRequest, UpstreamCode: "unsupported_operation", Param: "embeddings", Err: errors.New("Foundry project URL does not route embeddings; use an Azure OpenAI resource URL")}
+	}
 	return rejectParameters(p.providerName(), parameterCheck{"metadata", request.Metadata != nil && p.providerName() != "mistral"}, parameterCheck{"output_dtype", request.OutputDType != "" && p.providerName() != "mistral"}, parameterCheck{"input_type", request.InputType != ""})
 }
 

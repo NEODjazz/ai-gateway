@@ -342,6 +342,22 @@ func TestAzureFoundryProjectDoesNotRouteEmbeddings(t *testing.T) {
 	}
 }
 
+func TestAzureFoundryProjectAdapterRejectsEmbeddingsBeforeUpstream(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
+	t.Cleanup(server.Close)
+	for _, authType := range []string{"api_key", "entra"} {
+		for _, path := range []string{"/api/projects/project-a", "/tenant/api/projects/project-a/openai/v1"} {
+			client := NewAzureOpenAI(server.URL+path, "credential", false, "", authType)
+			_, err := client.Embeddings(t.Context(), openai.EmbeddingRequest{Model: "deployment", Input: "hello"})
+			var failure *Error
+			if !errors.As(err, &failure) || failure.UpstreamCode != "unsupported_operation" || failure.Param != "embeddings" || calls.Load() != 0 {
+				t.Fatalf("auth=%s path=%s calls=%d err=%v", authType, path, calls.Load(), err)
+			}
+		}
+	}
+}
+
 func TestAzureOpenAIHTTPRejectsInvalidEntraTokenBeforeUpstream(t *testing.T) {
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -682,28 +698,24 @@ func TestAzureEmbeddingsRequireExactUsage(t *testing.T) {
 		{"reported zero", `,"usage":{"prompt_tokens":0,"total_tokens":0}`, false},
 		{"reported count", `,"usage":{"prompt_tokens":3,"total_tokens":3}`, false},
 	} {
-		for _, foundry := range []bool{false, true} {
-			t.Run(fmt.Sprintf("%s/foundry=%t", tc.name, foundry), func(t *testing.T) {
-				basePath := ""
-				authType, credential := "api_key", "resource-key"
-				wantPath := "/openai/v1/embeddings"
-				if foundry {
-					basePath = "/api/projects/project-a"
-					authType, credential = "entra", "project-token"
-					wantPath = "/api/projects/project-a/openai/v1/embeddings"
+		for _, authType := range []string{"api_key", "entra"} {
+			t.Run(fmt.Sprintf("%s/auth=%s", tc.name, authType), func(t *testing.T) {
+				credential := "resource-key"
+				if authType == "entra" {
+					credential = "resource-token"
 				}
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					if r.URL.Path != wantPath {
+					if r.URL.Path != "/openai/v1/embeddings" {
 						t.Errorf("unexpected Azure embeddings path: %s", r.URL.Path)
 					}
-					if foundry && (r.Header.Get("Authorization") != "Bearer project-token" || r.Header.Get("api-key") != "") ||
-						!foundry && (r.Header.Get("api-key") != "resource-key" || r.Header.Get("Authorization") != "") {
+					if authType == "entra" && (r.Header.Get("Authorization") != "Bearer resource-token" || r.Header.Get("api-key") != "") ||
+						authType == "api_key" && (r.Header.Get("api-key") != "resource-key" || r.Header.Get("Authorization") != "") {
 						t.Errorf("unexpected Azure embeddings authentication")
 					}
 					_, _ = fmt.Fprint(w, `{"object":"list","model":"deployment","data":[{"object":"embedding","index":0,"embedding":[0.1,0.2]}]`+tc.usage+`}`)
 				}))
 				t.Cleanup(server.Close)
-				client := NewAzureOpenAI(server.URL+basePath, credential, false, "", authType)
+				client := NewAzureOpenAI(server.URL, credential, false, "", authType)
 				response, err := client.Embeddings(t.Context(), openai.EmbeddingRequest{Model: "deployment", Input: "hello"})
 				if tc.wantError {
 					if err == nil || !strings.Contains(err.Error(), "usage") {
