@@ -22,10 +22,11 @@ type ProviderProbe struct {
 }
 
 type DiscoveredModel struct {
-	ID           string   `json:"id"`
-	Capabilities []string `json:"capabilities,omitempty"`
-	ModelName    string   `json:"model_name,omitempty"`
-	Publisher    string   `json:"model_publisher,omitempty"`
+	ID               string   `json:"id"`
+	Capabilities     []string `json:"capabilities,omitempty"`
+	CapabilitySource string   `json:"capability_source,omitempty"`
+	ModelName        string   `json:"model_name,omitempty"`
+	Publisher        string   `json:"model_publisher,omitempty"`
 }
 
 type ProviderDiscoveryController interface {
@@ -198,6 +199,7 @@ func discoverOllamaCapabilities(ctx context.Context, client *http.Client, tagsUR
 		}
 		structuredOutput := !ollamaCloudBaseURL(tagsURL) && !ollamaCloudBaseURL(details.RemoteHost) && !ollamaCloudModelName(models[index].ID)
 		models[index].Capabilities = ollamaGatewayCapabilities(*details.Capabilities, structuredOutput)
+		models[index].CapabilitySource = "provider_metadata"
 	}
 }
 

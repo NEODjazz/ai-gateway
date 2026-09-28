@@ -69,7 +69,7 @@ describe("ModelOnboardingPage", () => {
       if (!options?.method && path === "/admin/v1/model-groups") return json({ data: [] });
       if (!options?.method && path === "/admin/v1/provider-capabilities") return json({ data: [{ type: "azure-openai", capabilities: ["chat", "embeddings"] }] });
       if (path.endsWith("/test")) return json({ status: "available", latency_ms: 1, model_count: 1 });
-      if (path.endsWith("/discover-models")) return json({ data: [{ id: "deployment-a", capabilities: ["chat", "embeddings"] }] });
+      if (path.endsWith("/discover-models")) return json({ data: [{ id: "deployment-a", capabilities: ["chat", "embeddings"], capability_source: "provider_metadata" }] });
       if (path === "/admin/v1/model-onboarding/plan") {
         plannedCapabilities = JSON.parse(String(options?.body)).deployments[0].capabilities;
         return json({ revision: 1, catalog_version: "v1", deployments: [], model_groups: [], changes: [] });
@@ -142,7 +142,7 @@ describe("ModelOnboardingPage", () => {
       if (!options?.method && path === "/admin/v1/model-groups") return json({ data: [] });
       if (!options?.method && path === "/admin/v1/provider-capabilities") return json({ data: [{ type: "ollama", capabilities: ["chat", "responses", "embeddings", "stream"] }] });
       if (path.endsWith("/test")) return json({ status: "available", latency_ms: 1, model_count: 2 });
-      if (path.endsWith("/discover-models")) return json({ data: [{ id: "embed", capabilities: ["embeddings"] }, { id: "unknown" }] });
+      if (path.endsWith("/discover-models")) return json({ data: [{ id: "embed", capabilities: ["embeddings"], capability_source: "provider_metadata" }, { id: "unknown" }] });
       if (path === "/admin/v1/model-onboarding/plan") {
         const body = JSON.parse(String(options?.body)) as { deployments: Array<{ upstream_model: string; capabilities: string[] }> };
         plans.push(body);
@@ -157,9 +157,12 @@ describe("ModelOnboardingPage", () => {
     expect(await screen.findByText("embed")).toBeInTheDocument();
     await userEvent.click(screen.getAllByRole("checkbox")[0]);
     await userEvent.click(screen.getAllByRole("checkbox")[1]);
+    expect(screen.getByText("Verified by provider metadata")).toBeInTheDocument();
+    expect(screen.getByText("Capabilities unknown — select explicitly")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Review 2 model(s)" })).toBeDisabled();
     await userEvent.click(screen.getByLabelText("Capabilities unknown"));
     await userEvent.click(screen.getByRole("option", { name: /Chat/ }));
+    expect(screen.getByText("Selected by operator")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Review 2 model(s)" }));
     await screen.findByText("Review onboarding plan");
     expect(plans[0].deployments).toEqual(expect.arrayContaining([
@@ -177,7 +180,7 @@ describe("ModelOnboardingPage", () => {
       if (!options?.method && path === "/admin/v1/model-catalog") return json({ version: "v1", models: [] });
       if (!options?.method && path === "/admin/v1/model-groups") return json({ data: [] });
       if (path.endsWith("/test")) return json({ provider_id: "azure", status: "available", latency_ms: 12, model_count: 2 });
-      if (path.endsWith("/discover-models")) return json({ data: [{ id: "gpt-a" }, { id: "gpt-b" }] });
+      if (path.endsWith("/discover-models")) return json({ data: [{ id: "gpt-a", capabilities: ["responses"] }, { id: "gpt-b" }] });
       if (path === "/admin/v1/model-onboarding/plan" && options?.method === "POST") {
         const body = JSON.parse(String(options.body));
         return json({ revision: 7, catalog_version: body.catalog.version, deployments: body.deployments, model_groups: body.model_groups, changes: ["replace catalog", "create deployment", "upsert group"] });
@@ -197,6 +200,12 @@ describe("ModelOnboardingPage", () => {
     await userEvent.click(screen.getByRole("button", { name: "Test & discover models" }));
     expect(await screen.findByText("gpt-a")).toBeInTheDocument();
     await userEvent.click(screen.getAllByRole("checkbox")[0]);
+    expect(screen.getByText("Capabilities unknown — select explicitly")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Review 1 model(s)" })).toBeDisabled();
+    await userEvent.click(screen.getByLabelText("Capabilities gpt-a"));
+    await userEvent.click(screen.getByRole("option", { name: /Chat/ }));
+    await userEvent.click(screen.getByLabelText("Capabilities gpt-a"));
+    await userEvent.click(screen.getByRole("option", { name: /Stream/ }));
     await userEvent.click(screen.getByLabelText("Capabilities gpt-a"));
     await userEvent.click(screen.getByRole("option", { name: /Tools/ }));
     await userEvent.click(screen.getByRole("button", { name: "Review 1 model(s)" }));
@@ -268,7 +277,7 @@ describe("ModelOnboardingPage", () => {
       if (!options?.method && path === "/admin/v1/credentials") return json({ data: [{ id: "unused", provider_id: "vertex" }] });
       if (!options?.method && path === "/admin/v1/model-catalog") return json({ version: "v1", models: [] });
       if (!options?.method && path === "/admin/v1/model-groups") return json({ data: [] });
-      if (!options?.method && path === "/admin/v1/provider-capabilities") return json({ data: [{ type: "vertex-gemini", operations: ["chat", "count_tokens", "stream"], capabilities: ["chat", "stream", "tools"] }] });
+      if (!options?.method && path === "/admin/v1/provider-capabilities") return json({ data: [{ type: "vertex-gemini", operations: ["chat", "count_tokens", "stream", "embeddings"], capabilities: ["chat", "stream", "tools", "embeddings"] }] });
       if (path === "/admin/v1/model-onboarding/plan") return json({ revision: 3, catalog_version: "v1", deployments: body?.deployments, model_groups: body?.model_groups, changes: [] });
       return json({ error: { message: `Unexpected ${path}` } }, 500);
     });
@@ -280,6 +289,10 @@ describe("ModelOnboardingPage", () => {
     await userEvent.type(screen.getByLabelText("Upstream model"), "gemini-embedding-001");
     await userEvent.click(screen.getByRole("button", { name: "Configure model" }));
     expect(await screen.findByText("Configured model")).toBeInTheDocument();
+    expect(screen.getByText("Capabilities unknown — select explicitly")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Review 1 model(s)" })).toBeDisabled();
+    await userEvent.click(screen.getByLabelText("Capabilities gemini-embedding-001"));
+    await userEvent.click(screen.getByRole("option", { name: /Embeddings/ }));
     await userEvent.click(screen.getByRole("button", { name: "Review 1 model(s)" }));
     await screen.findByText("Review onboarding plan");
 
@@ -371,6 +384,8 @@ describe("ModelOnboardingPage", () => {
     await userEvent.click(screen.getByLabelText("Capabilities voyage-4"));
     expect(screen.getByRole("option", { name: /Rerank/ })).toBeInTheDocument();
     expect(screen.queryByRole("option", { name: /Image generation/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Review 1 model(s)" })).toBeDisabled();
+    await userEvent.click(screen.getByRole("option", { name: /Embeddings/ }));
     await userEvent.click(screen.getByRole("button", { name: "Review 1 model(s)" }));
     await screen.findByText("Review onboarding plan");
     const plan = calls.find((call) => call.path === "/admin/v1/model-onboarding/plan")?.body as { deployments?: Array<{ capabilities?: string[] }> };

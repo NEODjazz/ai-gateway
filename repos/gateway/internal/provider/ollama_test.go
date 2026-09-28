@@ -320,7 +320,7 @@ func TestOllamaDiscoveryDoesNotAdvertiseUnknownCapabilities(t *testing.T) {
 		t.Fatal(err)
 	}
 	models, err := router.DiscoverProviderModels(t.Context(), "ollama", "")
-	if err != nil || len(models) != 2 || !slices.Equal(models[0].Capabilities, []string{"embeddings"}) || len(models[1].Capabilities) != 0 {
+	if err != nil || len(models) != 2 || !slices.Equal(models[0].Capabilities, []string{"embeddings"}) || models[0].CapabilitySource != "provider_metadata" || len(models[1].Capabilities) != 0 || models[1].CapabilitySource != "" {
 		t.Fatalf("models=%+v err=%v", models, err)
 	}
 }

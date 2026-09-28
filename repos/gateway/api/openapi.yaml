@@ -11741,7 +11741,12 @@ components:
       type: object
       additionalProperties: false
       required: [id]
-      properties: {id: {type: string, minLength: 1, maxLength: 256}}
+      properties:
+        id: {type: string, minLength: 1, maxLength: 256}
+        capabilities: {type: array, items: {type: string}}
+        capability_source: {type: string, enum: [provider_metadata], description: Present only when model-level provider metadata was inspected successfully. Omission means capabilities are unknown.}
+        model_name: {type: string}
+        model_publisher: {type: string}
     ModelGroup:
       type: object
       additionalProperties: false
