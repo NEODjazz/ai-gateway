@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	"ai-gateway-gateway/internal/config"
@@ -12,6 +13,48 @@ import (
 	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/openai"
 )
+
+func TestDeploymentAndCatalogCapabilityIntersection(t *testing.T) {
+	catalog, err := modelcatalog.Parse(`{"version":"v1","models":[{"provider":"deployment","model":"upstream","capabilities":["chat","tools"]},{"provider":"empty","model":"upstream","capabilities":[]}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name         string
+		endpoint     Endpoint
+		capabilities []string
+		want         bool
+	}{
+		{name: "deployment excludes tools", endpoint: Endpoint{Name: "deployment", Type: "openai-compatible", ModelAliases: map[string]string{"public": "upstream"}, Capabilities: []string{"chat"}}, capabilities: []string{"chat", "tools"}},
+		{name: "alias resolves catalog entry", endpoint: Endpoint{Name: "deployment", Type: "openai-compatible", ModelAliases: map[string]string{"public": "upstream"}, Capabilities: []string{"chat", "tools"}}, capabilities: []string{"chat", "tools"}, want: true},
+		{name: "explicit empty catalog denies chat", endpoint: Endpoint{Name: "empty", Type: "openai-compatible", ModelAliases: map[string]string{"public": "upstream"}, Capabilities: []string{"chat"}}, capabilities: []string{"chat"}},
+		{name: "unknown model preserves legacy route", endpoint: Endpoint{Name: "legacy", Type: "openai-compatible", Capabilities: []string{"chat"}}, capabilities: []string{"chat"}, want: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := supportsCatalogCapabilities(catalog, test.endpoint, "public", test.capabilities...); got != test.want {
+				t.Fatalf("supportsCatalogCapabilities = %t, want %t", got, test.want)
+			}
+		})
+	}
+}
+
+func TestMissingDeploymentToolsDoesNotCallUpstream(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	t.Cleanup(server.Close)
+	router := New(Config{Endpoints: []config.ProviderEndpointConfig{{Name: "qwen", Type: "openai-compatible", BaseURL: server.URL, Models: []string{"qwen3.6:27b"}, Capabilities: []string{"chat"}}}})
+	request := openai.ChatCompletionRequest{Model: "qwen3.6:27b", Tools: []openai.Tool{{Type: "function", Function: openai.FunctionDefinition{Name: "lookup", Parameters: map[string]any{"type": "object"}}}}}
+	if _, err := router.ChatCompletions(t.Context(), modules.RequestContext{Request: request}); err == nil {
+		t.Fatal("request with unsupported tools was accepted")
+	}
+	if got := calls.Load(); got != 0 {
+		t.Fatalf("upstream calls = %d, want 0", got)
+	}
+}
 
 func TestCatalogCannotExpandDeploymentCapabilities(t *testing.T) {
 	catalog, err := modelcatalog.Parse(`{"version":"v1","models":[{"provider":"endpoint","model":"m","capabilities":["chat","stream","embeddings","tools"]}]}`)
