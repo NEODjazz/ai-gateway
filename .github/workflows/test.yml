@@ -139,6 +139,10 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: repos/gateway/go.mod
+      - name: Set up Helm
+        uses: azure/setup-helm@v5
+        with:
+          version: v4.2.1
       - name: Create isolated test databases
         run: |
           psql postgres://postgres@127.0.0.1:5432/postgres -v ON_ERROR_STOP=1 -c 'CREATE DATABASE gateway_test' -c 'CREATE DATABASE auth_test' -c 'CREATE DATABASE billing_test'
