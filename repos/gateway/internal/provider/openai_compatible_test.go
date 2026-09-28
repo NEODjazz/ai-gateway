@@ -1186,7 +1186,7 @@ func TestChatStreamRejectsInvalidResponseEnvelope(t *testing.T) {
 }
 
 func TestChatStreamIndexBoundaries(t *testing.T) {
-	payload := `data: {"choices":[{"index":127,"delta":{"tool_calls":[{"index":127,"function":{"arguments":"{}"}}]}}]}` + "\n\n"
+	payload := `data: {"choices":[{"index":127,"delta":{"tool_calls":[{"index":127,"function":{"arguments":"{}"}}]}}]}` + "\n\n" + "data: [DONE]\n\n"
 	response, err := decodeChatCompletionStream(strings.NewReader(payload), "test")
 	if err != nil {
 		t.Fatal(err)
@@ -1197,7 +1197,7 @@ func TestChatStreamIndexBoundaries(t *testing.T) {
 }
 
 func TestCompatibleStreamPreservesToolSignatures(t *testing.T) {
-	payload := `data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call","type":"function","function":{"name":"lookup","arguments":"{}"},"extra_content":{"google":{"thought_signature":"opaque"}}}]}}]}` + "\n\n"
+	payload := `data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call","type":"function","function":{"name":"lookup","arguments":"{}"},"extra_content":{"google":{"thought_signature":"opaque"}}}]}}]}` + "\n\n" + "data: [DONE]\n\n"
 	response, err := decodeChatCompletionStream(strings.NewReader(payload), "test")
 	if err != nil {
 		t.Fatal(err)

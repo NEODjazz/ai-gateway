@@ -1129,8 +1129,10 @@ func streamChatCompletionDataWithNormalizer(body io.Reader, fallbackModel string
 		},
 	}
 	var idSeen, modelSeen, createdSeen, metadataSeen, serviceTierSeen, fingerprintSeen bool
+	terminal := false
 	err := scanSSEData(&responseStreamReader{source: body, remaining: maxResponseStreamBytes}, func(payload string) error {
 		if payload == "[DONE]" {
+			terminal = true
 			return io.EOF
 		}
 		if normalize != nil {
@@ -1275,6 +1277,7 @@ func streamChatCompletionDataWithNormalizer(body io.Reader, fallbackModel string
 			}
 			if choice.FinishReason != nil && *choice.FinishReason != "" {
 				current.FinishReason = *choice.FinishReason
+				terminal = true
 			}
 			if choice.StopSequence != nil {
 				current.StopSequence = choice.StopSequence
@@ -1287,6 +1290,9 @@ func streamChatCompletionDataWithNormalizer(body io.Reader, fallbackModel string
 	})
 	if err != nil && !errors.Is(err, io.EOF) {
 		return openai.ChatCompletionResponse{}, err
+	}
+	if !terminal {
+		return openai.ChatCompletionResponse{}, io.ErrUnexpectedEOF
 	}
 	return response, nil
 }
