@@ -370,6 +370,8 @@ ClickHouse username/password и service/management shared secrets должны
 reserve с отдельным ограниченным по времени context, чтобы снять резерв до TTL.
 Если следующий endpoint в failover отклоняет запрос на preflight, предыдущий
 reserve отменяется перед возвратом ошибки.
+Если проверка формы prompt или права сохранения Responses отклоняет запрос после
+reserve, Gateway также отправляет `cancel` до возврата ошибки клиенту.
 Billing-запрос передает статус и класс сбоя, но не сырой текст ошибки провайдера.
 
 ## Anonymizer, DLP и AV
