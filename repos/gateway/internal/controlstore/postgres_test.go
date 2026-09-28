@@ -143,6 +143,22 @@ func TestPostgresControlPlaneSnapshotLifecycleIntegration(t *testing.T) {
 	if current, err := store.Revision(ctx); err != nil || current != 1 || string(cache.values[revisionCacheKey]) != "1" {
 		t.Fatalf("postgres revision did not repair cache: revision=%d cache=%q err=%v", current, cache.values[revisionCacheKey], err)
 	}
+	changed := loaded
+	changed.Deployments = append([]provider.ModelDeployment(nil), loaded.Deployments...)
+	changed.Deployments[0].UpstreamModel = "qwen-updated"
+	if revision, err := store.Save(ctx, 1, changed); err != nil || revision != 2 {
+		t.Fatalf("updated snapshot revision=%d err=%v", revision, err)
+	}
+	if _, err := store.Save(ctx, 1, loaded); !errors.Is(err, provider.ErrControlPlaneConflict) {
+		t.Fatalf("stale rollback did not conflict: %v", err)
+	}
+	if revision, err := store.Save(ctx, 2, loaded); err != nil || revision != 3 {
+		t.Fatalf("restored snapshot revision=%d err=%v", revision, err)
+	}
+	restored, found, err := store.Load(ctx)
+	if err != nil || !found || restored.Revision != 3 || len(restored.Deployments) != 1 || restored.Deployments[0].UpstreamModel != "qwen" {
+		t.Fatalf("PostgreSQL rollback was not durable: found=%t err=%v revision=%d deployments=%+v", found, err, restored.Revision, restored.Deployments)
+	}
 }
 
 func TestPostgresControlPlaneRestoresManagedRouterIntegration(t *testing.T) {
