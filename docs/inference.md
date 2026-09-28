@@ -508,6 +508,9 @@ Responses. Foundry project endpoints допускают `web_search` тольк�
 `web_search_options` в Chat отклоняется до upstream-вызова. При настройке
 managed deployment capability `web_search` разрешён для Foundry project с
 `responses`, но Chat-запросы с веб-поиском не выбирают этот deployment.
+Foundry project endpoints не принимают `embeddings`: managed deployment с этой
+capability отклоняется при настройке, а legacy startup endpoint исключается из
+маршрутизации embeddings. Для embeddings используется Azure OpenAI resource URL.
 Responses function tools preserve an explicit `defer_loading=false` in requests
 and provider responses. `defer_loading=true` is rejected until Responses tool
 search is supported; the field is not accepted on other tool types.

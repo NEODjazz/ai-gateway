@@ -306,6 +306,42 @@ func TestManagedAzureWebSearchCapabilityIsResponsesOnly(t *testing.T) {
 	}
 }
 
+func TestAzureFoundryProjectDoesNotRouteEmbeddings(t *testing.T) {
+	for _, baseURL := range []string{
+		"https://resource.services.ai.azure.com/api/projects/project-a",
+		"https://proxy.example.test/tenant/api/projects/project-a/openai/v1",
+	} {
+		t.Run(baseURL, func(t *testing.T) {
+			router := New(Config{CredentialEncryptionKey: []byte("foundry-embedding-test-key")}).(*Router)
+			if _, err := router.CreateProvider(ManagedProvider{ID: "foundry", Type: "azure-openai", BaseURL: baseURL, AuthType: "entra", Enabled: true}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := router.CreateCredential(CredentialInput{ID: "credential", ProviderID: "foundry", Secret: "test-token"}); err != nil {
+				t.Fatal(err)
+			}
+			_, err := router.CreateModelDeployment(ModelDeployment{ID: "embedding", ProviderID: "foundry", CredentialID: "credential", Models: []string{"m"}, Capabilities: []string{"embeddings"}, Enabled: true})
+			if !errors.Is(err, ErrUnsupportedProviderCapability) {
+				t.Fatalf("project embeddings deployment accepted: %v", err)
+			}
+		})
+	}
+
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
+	t.Cleanup(server.Close)
+	router := New(Config{Endpoints: []config.ProviderEndpointConfig{{
+		Name: "foundry", Type: "azure-openai", BaseURL: server.URL + "/api/projects/project-a", APIKey: "test-key", Models: []string{"m"}, Capabilities: []string{"embeddings"},
+	}}}).(*Router)
+	request := openai.EmbeddingRequest{Model: "m", Input: "hello"}
+	if _, err := router.Embeddings(t.Context(), modules.RequestContext{Request: openai.ChatCompletionRequest{Model: "m"}, EmbeddingRequest: &request}); err == nil || calls.Load() != 0 {
+		t.Fatalf("project embeddings reached upstream: err=%v calls=%d", err, calls.Load())
+	}
+	resource := Endpoint{Type: "azure-openai", BaseURL: "https://resource.openai.azure.com/openai/v1", Capabilities: []string{"embeddings"}}
+	if !resource.supportsCapabilities("embeddings") {
+		t.Fatal("resource embeddings were disabled")
+	}
+}
+
 func TestAzureOpenAIHTTPRejectsInvalidEntraTokenBeforeUpstream(t *testing.T) {
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
