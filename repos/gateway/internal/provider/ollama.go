@@ -166,6 +166,15 @@ func ollamaCloudBaseURL(value string) bool {
 	return err == nil && strings.EqualFold(parsed.Hostname(), "ollama.com")
 }
 
+func ollamaCloudModelName(value string) bool {
+	value = strings.ToLower(strings.TrimSpace(value))
+	return strings.HasSuffix(value, ":cloud") || strings.HasSuffix(value, "-cloud")
+}
+
+func (p Ollama) supportsStructuredOutput(model string) bool {
+	return p.SupportsStructuredOutput() && !ollamaCloudModelName(model)
+}
+
 func (Ollama) SupportsVision() bool { return true }
 
 func (p Ollama) Completions(ctx context.Context, request openai.CompletionRequest) (openai.CompletionResponse, error) {
@@ -839,7 +848,7 @@ func (p Ollama) Responses(ctx context.Context, request openai.ResponseRequest) (
 	if err := p.ValidateResponseParameters(request); err != nil {
 		return openai.ResponseResponse{}, err
 	}
-	text, err := normalizeOllamaResponseText(request.Text, p.SupportsStructuredOutput())
+	text, err := normalizeOllamaResponseText(request.Text, p.supportsStructuredOutput(request.Model))
 	if err != nil {
 		return openai.ResponseResponse{}, err
 	}
@@ -891,7 +900,7 @@ func (p Ollama) StreamResponses(ctx context.Context, request openai.ResponseRequ
 	if !p.upstreamStream {
 		return openai.ResponseResponse{}, ErrStreamingUnsupported
 	}
-	text, err := normalizeOllamaResponseText(request.Text, p.SupportsStructuredOutput())
+	text, err := normalizeOllamaResponseText(request.Text, p.supportsStructuredOutput(request.Model))
 	if err != nil {
 		return openai.ResponseResponse{}, err
 	}

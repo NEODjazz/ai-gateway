@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"ai-gateway-gateway/internal/modelcatalog"
 	"ai-gateway-gateway/internal/openai"
 )
 
@@ -225,35 +226,70 @@ func TestOllamaStructuredOutputDependsOnEndpoint(t *testing.T) {
 }
 
 func TestOllamaDiscoveryOmitsCloudStructuredOutput(t *testing.T) {
-	client := &http.Client{Transport: ollamaRoundTripFunc(func(request *http.Request) (*http.Response, error) {
-		if request.URL.Path != "/api/show" {
-			t.Errorf("unexpected discovery path: %s", request.URL.Path)
-		}
-		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"capabilities":["completion","tools"]}`))}, nil
-	})}
 	for _, test := range []struct {
-		baseURL string
-		allowed bool
+		baseURL, model, remoteHost string
+		allowed                    bool
 	}{
-		{baseURL: "http://localhost:11434", allowed: true},
-		{baseURL: "https://ollama.com", allowed: false},
+		{baseURL: "http://localhost:11434", model: "local", allowed: true},
+		{baseURL: "https://ollama.com", model: "model", allowed: false},
+		{baseURL: "http://localhost:11434", model: "gpt-oss:120b-cloud", allowed: false},
+		{baseURL: "http://localhost:11434", model: "gemma4:cloud", allowed: false},
+		{baseURL: "http://localhost:11434", model: "alias", remoteHost: "https://ollama.com", allowed: false},
+		{baseURL: "http://localhost:11434", model: "remote-local", remoteHost: "https://remote.example.test", allowed: true},
 	} {
-		models := []DiscoveredModel{{ID: "model"}}
+		client := &http.Client{Transport: ollamaRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+			if request.URL.Path != "/api/show" {
+				t.Errorf("unexpected discovery path: %s", request.URL.Path)
+			}
+			payload, err := json.Marshal(map[string]any{"capabilities": []string{"completion", "tools"}, "remote_host": test.remoteHost})
+			if err != nil {
+				return nil, err
+			}
+			return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(string(payload)))}, nil
+		})}
+		models := []DiscoveredModel{{ID: test.model}}
 		discoverOllamaCapabilities(t.Context(), client, test.baseURL+"/api/tags", "", models)
 		if slices.Contains(models[0].Capabilities, "structured_output") != test.allowed {
-			t.Fatalf("discovery for %s returned %v", test.baseURL, models[0].Capabilities)
+			t.Fatalf("discovery for %s model=%s remote=%s returned %v", test.baseURL, test.model, test.remoteHost, models[0].Capabilities)
 		}
 	}
 }
 
 func TestOllamaCloudDeploymentRejectsStructuredOutput(t *testing.T) {
-	router := New(Config{}).(*Router)
-	if _, err := router.CreateProvider(ManagedProvider{ID: "cloud", Type: "ollama", BaseURL: "https://ollama.com/api", Enabled: true}); err != nil {
-		t.Fatal(err)
+	for _, test := range []struct {
+		baseURL, model, upstream string
+		reject                   bool
+	}{
+		{baseURL: "https://ollama.com/api", model: "model", reject: true},
+		{baseURL: "http://localhost:11434", model: "gemma4:cloud", reject: true},
+		{baseURL: "http://localhost:11434", model: "public", upstream: "gpt-oss:120b-cloud", reject: true},
+		{baseURL: "http://localhost:11434", model: "local", reject: false},
+	} {
+		t.Run(test.baseURL+"/"+test.model+"/"+test.upstream, func(t *testing.T) {
+			router := New(Config{}).(*Router)
+			if _, err := router.CreateProvider(ManagedProvider{ID: "ollama", Type: "ollama", BaseURL: test.baseURL, Enabled: true}); err != nil {
+				t.Fatal(err)
+			}
+			_, err := router.CreateModelDeployment(ModelDeployment{ID: "model", ProviderID: "ollama", Models: []string{test.model}, UpstreamModel: test.upstream, Capabilities: []string{"chat", "structured_output"}, Enabled: true})
+			if test.reject && !errors.Is(err, ErrUnsupportedProviderCapability) || !test.reject && err != nil {
+				t.Fatalf("deployment reject=%t err=%v", test.reject, err)
+			}
+		})
 	}
-	_, err := router.CreateModelDeployment(ModelDeployment{ID: "model", ProviderID: "cloud", Models: []string{"model"}, Capabilities: []string{"chat", "structured_output"}, Enabled: true})
-	if !errors.Is(err, ErrUnsupportedProviderCapability) {
-		t.Fatalf("cloud structured output deployment accepted: %v", err)
+}
+
+func TestOllamaCloudModelAliasDoesNotRouteStructuredOutput(t *testing.T) {
+	client := NewOllama("http://localhost:11434", false)
+	endpoint := Endpoint{
+		Type: "ollama", Provider: client, Models: []string{"public"},
+		ModelAliases: map[string]string{"public": "gpt-oss:120b-cloud"},
+		Capabilities: []string{"chat", "structured_output"},
+	}
+	if supportsCatalogCapabilities(modelcatalog.Catalog{}, endpoint, "public", "chat", "structured_output") {
+		t.Fatal("cloud model alias routed structured output")
+	}
+	if !supportsCatalogCapabilities(modelcatalog.Catalog{}, endpoint, "public", "chat") {
+		t.Fatal("cloud model alias lost ordinary chat routing")
 	}
 }
 

@@ -273,6 +273,9 @@ modules, billing reserve и сетевого вызова.
 Для локального Ollama discovery предлагает `structured_output` у моделей с
 `completion`. Прямой cloud endpoint `ollama.com` эту capability не объявляет:
 настройка deployment и запросы с JSON-форматом отклоняются до upstream-вызова.
+Если локальный Ollama перенаправляет модель в cloud, discovery учитывает
+`remote_host` из `/api/show`; имена `:cloud` и `-cloud` также исключаются из
+structured output при настройке, маршрутизации и прямом вызове adapter.
 
 ## Capabilities
 

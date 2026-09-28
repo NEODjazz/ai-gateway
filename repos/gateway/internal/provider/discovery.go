@@ -191,11 +191,13 @@ func discoverOllamaCapabilities(ctx context.Context, client *http.Client, tagsUR
 		}
 		var details struct {
 			Capabilities *[]string `json:"capabilities"`
+			RemoteHost   string    `json:"remote_host"`
 		}
 		if json.Unmarshal(payload, &details) != nil || details.Capabilities == nil {
 			continue
 		}
-		models[index].Capabilities = ollamaGatewayCapabilities(*details.Capabilities, !ollamaCloudBaseURL(tagsURL))
+		structuredOutput := !ollamaCloudBaseURL(tagsURL) && !ollamaCloudBaseURL(details.RemoteHost) && !ollamaCloudModelName(models[index].ID)
+		models[index].Capabilities = ollamaGatewayCapabilities(*details.Capabilities, structuredOutput)
 	}
 }
 

@@ -184,7 +184,7 @@ func (p Ollama) ValidateResponseParameters(request openai.ResponseRequest) error
 	); err != nil {
 		return err
 	}
-	_, err := normalizeOllamaResponseText(request.Text, p.SupportsStructuredOutput())
+	_, err := normalizeOllamaResponseText(request.Text, p.supportsStructuredOutput(request.Model))
 	return err
 }
 
@@ -195,7 +195,7 @@ func (p Ollama) ValidateChatParameters(request openai.ChatCompletionRequest) err
 	if err := validateOllamaChatResponseFormat(request.ResponseFormat); err != nil {
 		return err
 	}
-	if request.ResponseFormat != nil && request.ResponseFormat.Type != "text" && !p.SupportsStructuredOutput() {
+	if request.ResponseFormat != nil && request.ResponseFormat.Type != "text" && !p.supportsStructuredOutput(request.Model) {
 		return rejectParameters("ollama", parameterCheck{"response_format", true})
 	}
 	if err := rejectChatModeration("ollama", request); err != nil {

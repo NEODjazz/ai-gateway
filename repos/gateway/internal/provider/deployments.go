@@ -514,6 +514,17 @@ func (r *Router) endpointForManagedDeploymentWithSecret(deployment ModelDeployme
 		}
 	}
 	endpoint := Endpoint{Name: deployment.ID, ProviderID: deployment.ProviderID, Type: managed.Type, Models: append([]string(nil), deployment.Models...), Capabilities: append([]string(nil), deployment.Capabilities...), Priority: deployment.Priority, Weight: deployment.Weight, GuardrailPolicy: deployment.GuardrailPolicy, GuardrailPolicyValid: true, ModelAliases: aliases, Provider: client, Admission: newAdmissionController(deployment.MaxParallelRequests, deployment.QueueCapacity, time.Duration(deployment.QueueTimeoutMS)*time.Millisecond), BaseURL: managed.BaseURL, CredentialID: deployment.CredentialID, RequestTimeout: time.Duration(deployment.RequestTimeoutMS) * time.Millisecond, MaxRetries: deployment.MaxRetries, CooldownAfterFailures: deployment.CooldownAfterFailures, Cooldown: time.Duration(deployment.CooldownSeconds) * time.Second, RateLimitRPM: deployment.RateLimitRPM, RateLimitTPM: deployment.RateLimitTPM, ProviderRateLimitRPM: managed.RateLimitRPM, ProviderRateLimitTPM: managed.RateLimitTPM}
+	if managed.Type == "ollama" && hasCapability(deployment.Capabilities, "structured_output") {
+		models := deployment.Models
+		if deployment.UpstreamModel != "" {
+			models = []string{deployment.UpstreamModel}
+		}
+		for _, model := range models {
+			if ollamaCloudModelName(model) {
+				return Endpoint{}, fmt.Errorf("%w: Ollama cloud model does not support structured_output", ErrUnsupportedProviderCapability)
+			}
+		}
+	}
 	if hasCapability(deployment.Capabilities, "responses") && hasCapability(deployment.Capabilities, "web_search") && !endpoint.supportsCapabilities("responses", "web_search") {
 		return Endpoint{}, fmt.Errorf("%w: %s does not support web_search for Responses", ErrUnsupportedProviderCapability, managed.Type)
 	}

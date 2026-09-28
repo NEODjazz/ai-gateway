@@ -19,36 +19,44 @@ func (f ollamaRoundTripFunc) RoundTrip(request *http.Request) (*http.Response, e
 }
 
 func TestOllamaCloudRejectsStructuredOutputBeforeUpstream(t *testing.T) {
-	var calls atomic.Int32
-	client := NewOllama("https://ollama.com/api", true)
-	client.client.Transport = ollamaRoundTripFunc(func(*http.Request) (*http.Response, error) {
-		calls.Add(1)
-		return nil, errors.New("unexpected upstream request")
-	})
-	for _, format := range []*openai.ResponseFormat{
-		{Type: "json_object"},
-		{Type: "json_schema", JSONSchema: &openai.JSONSchemaFormat{Schema: map[string]any{"type": "object"}}},
+	for _, test := range []struct{ baseURL, model string }{
+		{baseURL: "https://ollama.com/api", model: "model"},
+		{baseURL: "http://localhost:11434", model: "gemma4:cloud"},
+		{baseURL: "http://localhost:11434", model: "gpt-oss:120b-cloud"},
 	} {
-		request := openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}}, ResponseFormat: format}
-		_, err := client.ChatCompletions(t.Context(), request)
-		assertUnsupportedParameter(t, err, "response_format")
-		request.Stream = true
-		_, err = client.StreamChatCompletions(t.Context(), request, func(string) error { return nil })
-		assertUnsupportedParameter(t, err, "response_format")
-	}
-	for _, format := range []string{"json_object", "json_schema"} {
-		request := openai.ResponseRequest{Model: "model", Input: "hello", Text: map[string]any{"format": map[string]any{"type": format, "schema": map[string]any{"type": "object"}}}}
-		if format == "json_object" {
-			request.Text = map[string]any{"format": map[string]any{"type": format}}
-		}
-		_, err := client.Responses(t.Context(), request)
-		assertUnsupportedParameter(t, err, "text.format")
-		request.Stream = true
-		_, err = client.StreamResponses(t.Context(), request, func(string, string) error { return nil })
-		assertUnsupportedParameter(t, err, "text.format")
-	}
-	if calls.Load() != 0 {
-		t.Fatalf("cloud structured output reached upstream %d times", calls.Load())
+		t.Run(test.baseURL+"/"+test.model, func(t *testing.T) {
+			var calls atomic.Int32
+			client := NewOllama(test.baseURL, true)
+			client.client.Transport = ollamaRoundTripFunc(func(*http.Request) (*http.Response, error) {
+				calls.Add(1)
+				return nil, errors.New("unexpected upstream request")
+			})
+			for _, format := range []*openai.ResponseFormat{
+				{Type: "json_object"},
+				{Type: "json_schema", JSONSchema: &openai.JSONSchemaFormat{Schema: map[string]any{"type": "object"}}},
+			} {
+				request := openai.ChatCompletionRequest{Model: test.model, Messages: []openai.Message{{Role: "user", Content: "hello"}}, ResponseFormat: format}
+				_, err := client.ChatCompletions(t.Context(), request)
+				assertUnsupportedParameter(t, err, "response_format")
+				request.Stream = true
+				_, err = client.StreamChatCompletions(t.Context(), request, func(string) error { return nil })
+				assertUnsupportedParameter(t, err, "response_format")
+			}
+			for _, format := range []string{"json_object", "json_schema"} {
+				request := openai.ResponseRequest{Model: test.model, Input: "hello", Text: map[string]any{"format": map[string]any{"type": format, "schema": map[string]any{"type": "object"}}}}
+				if format == "json_object" {
+					request.Text = map[string]any{"format": map[string]any{"type": format}}
+				}
+				_, err := client.Responses(t.Context(), request)
+				assertUnsupportedParameter(t, err, "text.format")
+				request.Stream = true
+				_, err = client.StreamResponses(t.Context(), request, func(string, string) error { return nil })
+				assertUnsupportedParameter(t, err, "text.format")
+			}
+			if calls.Load() != 0 {
+				t.Fatalf("cloud structured output reached upstream %d times", calls.Load())
+			}
+		})
 	}
 }
 

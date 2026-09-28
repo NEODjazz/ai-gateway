@@ -3816,6 +3816,15 @@ func supportsCatalogCapabilities(catalog modelcatalog.Catalog, endpoint Endpoint
 	if !endpoint.supportsCapabilities(required...) {
 		return false
 	}
+	if endpoint.Type == "ollama" && hasCapability(required, "structured_output") {
+		model := requestedModel
+		if upstream, found := endpoint.ModelAliases[requestedModel]; found {
+			model = upstream
+		}
+		if ollamaCloudModelName(model) {
+			return false
+		}
+	}
 	models := []string{requestedModel}
 	if upstream, found := endpoint.ModelAliases[requestedModel]; found {
 		models = append(models, upstream)
