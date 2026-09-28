@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -314,6 +315,31 @@ func TestRemoteBillingCancelsReservationAfterClientCancellation(t *testing.T) {
 	reserve, cancelRequest := <-phases, <-phases
 	if reserve.Phase != "reserve" || cancelRequest.Phase != "cancel" || reserve.RequestID != cancelRequest.RequestID {
 		t.Fatalf("unexpected billing phases: reserve=%+v cancel=%+v", reserve, cancelRequest)
+	}
+}
+
+func TestRemoteBillingFailureDoesNotTransmitRawProviderError(t *testing.T) {
+	const privateFragment = "private prompt and credential fragment"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Error(err)
+			http.Error(w, "invalid request", http.StatusBadRequest)
+			return
+		}
+		if strings.Contains(string(body), privateFragment) {
+			t.Error("billing request contained raw provider error")
+		}
+		var request UsageRequest
+		if err := json.Unmarshal(body, &request); err != nil || request.Phase != "cancel" || request.Status != "error" || request.FailureClass != "unavailable" || request.Error != "" {
+			t.Errorf("unsafe failure projection: phase=%q status=%q class=%q raw_error_present=%t decode_error=%v", request.Phase, request.Status, request.FailureClass, request.Error != "", err)
+		}
+		_ = json.NewEncoder(w).Encode(UsageResponse{})
+	}))
+	t.Cleanup(server.Close)
+	req := RequestContext{RequestID: "execution-private-error", Request: openai.ChatCompletionRequest{Model: "model"}, Metadata: map[string]string{"provider.failure_class": "unavailable"}}
+	if err := NewRemoteBillingModule(true, server.URL).HandleFailure(t.Context(), &req, errors.New(privateFragment)); err != nil {
+		t.Fatal(err)
 	}
 }
 

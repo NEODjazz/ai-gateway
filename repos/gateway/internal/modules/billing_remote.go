@@ -102,12 +102,11 @@ func (m RemoteBillingModule) Handle(ctx context.Context, req *RequestContext) er
 	return m.send(ctx, req, "reserve")
 }
 
-func (m RemoteBillingModule) HandleFailure(ctx context.Context, req *RequestContext, cause error) error {
+func (m RemoteBillingModule) HandleFailure(ctx context.Context, req *RequestContext, _ error) error {
 	if req.Metadata == nil {
 		req.Metadata = map[string]string{}
 	}
 	req.Metadata["provider.status"] = "error"
-	req.Metadata["provider.error"] = cause.Error()
 	// Releasing a budget reservation must survive cancellation of the client request.
 	cancelCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
@@ -155,7 +154,6 @@ func billingRequest(req *RequestContext) UsageRequest {
 		ProviderEndpointName:   metadataValue(req.Metadata, "provider.endpoint.name"),
 		ProviderEndpointType:   metadataValue(req.Metadata, "provider.endpoint.type"),
 		Status:                 metadataValue(req.Metadata, "provider.status"),
-		Error:                  metadataValue(req.Metadata, "provider.error"),
 		FailureClass:           metadataValue(req.Metadata, "provider.failure_class"),
 		LatencyMS:              metadataValue(req.Metadata, "provider.latency_ms"),
 		FirstTokenLatencyMS:    metadataValue(req.Metadata, "provider.first_token_latency_ms"),
