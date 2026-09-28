@@ -278,9 +278,10 @@ func (p Ollama) ChatCompletions(ctx context.Context, request openai.ChatCompleti
 	}
 
 	return openai.ChatCompletionResponse{
-		ID:     "chatcmpl-" + rand.Text(),
-		Object: "chat.completion",
-		Model:  ollamaResp.Model,
+		UsageReported: true,
+		ID:            "chatcmpl-" + rand.Text(),
+		Object:        "chat.completion",
+		Model:         ollamaResp.Model,
 		Choices: []openai.Choice{
 			{
 				Index:        0,
@@ -508,6 +509,7 @@ func (p Ollama) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 			}
 			response.Choices[0].FinishReason = finishReason
 			response.Usage = terminalUsage
+			response.UsageReported = true
 			role := ""
 			if !sentRole {
 				role = "assistant"

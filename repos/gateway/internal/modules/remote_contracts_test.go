@@ -15,6 +15,61 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
+func TestRemoteBillingPreservesReportedZeroUsage(t *testing.T) {
+	tests := []struct {
+		name  string
+		apply func(*RequestContext)
+	}{
+		{"chat", func(req *RequestContext) { req.Response = &openai.ChatCompletionResponse{UsageReported: true} }},
+		{"completions", func(req *RequestContext) {
+			req.CompletionRequest = &openai.CompletionRequest{Model: "model", Prompt: "count these tokens"}
+			req.CompletionResponse = &openai.CompletionResponse{UsageReported: true}
+		}},
+		{"responses", func(req *RequestContext) {
+			req.ResponseRequest = &openai.ResponseRequest{Model: "model", Input: "count these tokens"}
+			req.ResponsesResponse = &openai.ResponseResponse{InputTokensReported: true, OutputTokensReported: true, TotalTokensReported: true}
+		}},
+		{"embeddings", func(req *RequestContext) {
+			req.EmbeddingRequest = &openai.EmbeddingRequest{Model: "model", Input: "count these tokens"}
+			req.EmbeddingResponse = &openai.EmbeddingResponse{UsageReported: true}
+		}},
+		{"compaction", func(req *RequestContext) {
+			req.ResponseRequest = &openai.ResponseRequest{Model: "model", Input: "count these tokens"}
+			req.CompactedResponse = &openai.CompactedResponse{}
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			req := RequestContext{Request: openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "count these tokens"}}}}
+			test.apply(&req)
+			got := billingRequest(&req)
+			if got.Phase != "commit" || got.InputTokens != 0 || got.OutputTokens != 0 || got.TotalTokens != 0 || got.UsageEstimated {
+				t.Fatalf("reported zero was replaced by estimated usage: %+v", got)
+			}
+		})
+	}
+}
+
+func TestRemoteBillingEstimatesMissingZeroUsage(t *testing.T) {
+	req := RequestContext{Request: openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "count these tokens"}}}, Response: &openai.ChatCompletionResponse{}}
+	got := billingRequest(&req)
+	if !got.UsageEstimated || got.TotalTokens == 0 {
+		t.Fatalf("missing usage was treated as an exact zero: %+v", got)
+	}
+}
+
+func TestRemoteBillingEstimatesPartialResponseUsage(t *testing.T) {
+	req := RequestContext{
+		Request:           openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "count these tokens"}}},
+		ResponseRequest:   &openai.ResponseRequest{Model: "model", Input: "count these tokens"},
+		ResponsesResponse: &openai.ResponseResponse{InputTokensReported: true, TotalTokensReported: true},
+	}
+	got := billingRequest(&req)
+	if !got.UsageEstimated || got.TotalTokens == 0 {
+		t.Fatalf("partial response usage was treated as exact: %+v", got)
+	}
+}
+
 func TestRemoteAuthIsTheOnlyModuleReceivingBearerToken(t *testing.T) {
 	const token = "client-bearer-token"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

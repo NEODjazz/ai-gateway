@@ -357,6 +357,10 @@ secret, отключённые demo keys и static fallback после мигр�
 ClickHouse username/password и service/management shared secrets должны
 приходить из Secret. Gateway и Billing должны получать одинаковые catalog JSON
 и billing service secret. Management secret является отдельным credential.
+При `commit` подтвержденный провайдером `total_tokens=0` сохраняется как точный
+ноль; запасная оценка применяется только при отсутствующем или неполном usage.
+Сервис billing использует переданный Gateway признак `usage_estimated`, чтобы
+отличить эти случаи.
 
 ## Anonymizer, DLP и AV
 

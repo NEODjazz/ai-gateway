@@ -81,6 +81,49 @@ func TestPostgresBudgetAndOutboxRollbackTogether(t *testing.T) {
 	}
 }
 
+func TestPostgresExactZeroCommitReleasesReservation(t *testing.T) {
+	pool := reliabilityTestPool(t)
+	ctx := context.Background()
+	id := "exact-zero-" + time.Now().Format("150405.000000000")
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM billing_outbox WHERE payload->>'request_id'=$1`, id)
+		_, _ = pool.Exec(ctx, `DELETE FROM billing_event_ledger WHERE request_id=$1`, id)
+		_, _ = pool.Exec(ctx, `DELETE FROM billing_budget_reservations WHERE request_id=$1`, id)
+	})
+	repository, err := NewPostgresOutboxRepository(os.Getenv("BILLING_POSTGRES_TEST_DSN"), NoopUsageEventWriter{}, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	module := NewBillingModuleWithPricing(true, PricingConfig{Currency: "USD"})
+	module.policy = NewPostgresBudgetPolicyChecker(os.Getenv("BILLING_POSTGRES_TEST_DSN"), time.Minute)
+	module.durable = repository
+	t.Cleanup(module.Close)
+	req := RequestContext{
+		RequestID: id, CredentialID: "key-zero", UserID: "user-zero", BillingPhase: "reserve",
+		Request: openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "reserve tokens"}}},
+	}
+	if err := module.Handle(ctx, &req); err != nil {
+		t.Fatal(err)
+	}
+	req.BillingPhase = "commit"
+	req.PostResponse = true
+	req.Usage = &openai.Usage{}
+	req.Metadata["usage.estimated"] = "false"
+	if err := module.Handle(ctx, &req); err != nil {
+		t.Fatal(err)
+	}
+	var state string
+	var actualTokens int64
+	if err := pool.QueryRow(ctx, `SELECT state,actual_tokens FROM billing_budget_reservations WHERE request_id=$1`, id).Scan(&state, &actualTokens); err != nil || state != "committed" || actualTokens != 0 {
+		t.Fatalf("reservation state=%q actual_tokens=%d err=%v", state, actualTokens, err)
+	}
+	var totalTokens int
+	var estimated bool
+	if err := pool.QueryRow(ctx, `SELECT (payload->>'total_tokens')::integer,(payload->>'usage_estimated')::boolean FROM billing_outbox WHERE event_id=$1`, id+":commit").Scan(&totalTokens, &estimated); err != nil || totalTokens != 0 || estimated {
+		t.Fatalf("outbox total_tokens=%d estimated=%t err=%v", totalTokens, estimated, err)
+	}
+}
+
 func TestPostgresOutboxSurvivesWorkerRestartAndDeliveryFailure(t *testing.T) {
 	pool := reliabilityTestPool(t)
 	ctx := context.Background()

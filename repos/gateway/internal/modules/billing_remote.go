@@ -133,6 +133,7 @@ func (m RemoteBillingModule) send(ctx context.Context, req *RequestContext, phas
 }
 
 func billingRequest(req *RequestContext) UsageRequest {
+	reportedUsage := false
 	request := UsageRequest{
 		RequestID:              req.RequestID,
 		SessionID:              req.SessionID,
@@ -379,7 +380,8 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.OutputTokens = req.Response.Usage.CompletionTokens
 		request.TotalTokens = req.Response.Usage.TotalTokens
 		request.UpstreamModel = req.Response.Model
-		request.UsageEstimated = request.TotalTokens == 0
+		reportedUsage = req.Response.UsageReported || request.TotalTokens > 0
+		request.UsageEstimated = !reportedUsage
 		request.SearchRequests = req.Response.Usage.SearchRequests
 		if req.Response.Usage.ToolRequestsReported {
 			request.ToolRequests = req.Response.Usage.ToolRequests
@@ -409,7 +411,8 @@ func billingRequest(req *RequestContext) UsageRequest {
 		if req.CompletionResponse.Usage.ToolRequestsReported {
 			request.ToolRequests = req.CompletionResponse.Usage.ToolRequests
 		}
-		request.UsageEstimated = request.TotalTokens == 0
+		reportedUsage = req.CompletionResponse.UsageReported || request.TotalTokens > 0
+		request.UsageEstimated = !reportedUsage
 		if details := req.CompletionResponse.Usage.PromptTokensDetails; details != nil {
 			request.CacheReadInputTokens = nonNegative(details.CachedTokens)
 			request.CacheWriteInputTokens = nonNegative(firstNonZero(details.CacheWriteTokens, details.CacheCreationTokens))
@@ -436,7 +439,8 @@ func billingRequest(req *RequestContext) UsageRequest {
 			request.ToolRequests += len(patchOutputs)
 		}
 		request.SearchRequestsEstimated = false
-		request.UsageEstimated = request.TotalTokens == 0
+		reportedUsage = req.ResponsesResponse.InputTokensReported && req.ResponsesResponse.OutputTokensReported && req.ResponsesResponse.TotalTokensReported || request.TotalTokens > 0
+		request.UsageEstimated = !reportedUsage
 		if details := req.ResponsesResponse.Usage.InputTokensDetails; details != nil {
 			request.CacheReadInputTokens = nonNegative(details.CachedTokens)
 			request.CacheWriteInputTokens = nonNegative(firstNonZero(details.CacheWriteTokens, details.CacheCreationTokens))
@@ -448,7 +452,8 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.OutputTokens = req.CompactedResponse.Usage.OutputTokens
 		request.TotalTokens = req.CompactedResponse.Usage.TotalTokens
 		request.UpstreamModel = request.Model
-		request.UsageEstimated = request.TotalTokens == 0
+		reportedUsage = true
+		request.UsageEstimated = false
 		request.ProviderCostUSDTicks = trustedProviderCost(req, req.CompactedResponse.Usage.ProviderCostUSDTicks)
 		if details := req.CompactedResponse.Usage.InputTokensDetails; details != nil {
 			request.CacheReadInputTokens = nonNegative(details.CachedTokens)
@@ -461,7 +466,8 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.OutputTokens = 0
 		request.TotalTokens = req.EmbeddingResponse.Usage.TotalTokens
 		request.UpstreamModel = req.EmbeddingResponse.Model
-		request.UsageEstimated = request.TotalTokens == 0
+		reportedUsage = req.EmbeddingResponse.UsageReported || request.TotalTokens > 0
+		request.UsageEstimated = !reportedUsage
 	}
 	if req.RerankResponse != nil {
 		request.Phase = "commit"
@@ -531,6 +537,7 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.SearchRequests = req.SearchResponse.Usage.SearchRequests
 		request.SearchRequestsEstimated = false
 		request.UsageEstimated = false
+		reportedUsage = true
 	}
 	if req.OCRResponse != nil {
 		request.Phase = "commit"
@@ -544,8 +551,8 @@ func billingRequest(req *RequestContext) UsageRequest {
 	if request.CacheStatus == "hit" {
 		request.UsageEstimated = false
 	}
-	providerReportedUsage := (req.ImageGenerationResponse != nil && req.ImageGenerationResponse.Usage != nil) || (req.AudioTranscriptionResponse != nil && req.AudioTranscriptionResponse.Usage != nil)
-	if request.TotalTokens == 0 && request.APIType != "fine_tuning" && request.APIType != "video" && !(request.APIType == "realtime" && metadataValue(req.Metadata, "gateway.realtime_usage_exact") == "true") && request.CacheStatus != "hit" && !providerReportedUsage {
+	reportedUsage = reportedUsage || (req.ImageGenerationResponse != nil && req.ImageGenerationResponse.Usage != nil) || (req.AudioTranscriptionResponse != nil && req.AudioTranscriptionResponse.Usage != nil) || (req.AudioSpeechResponse != nil && req.AudioSpeechResponse.Usage != nil)
+	if request.TotalTokens == 0 && request.APIType != "fine_tuning" && request.APIType != "video" && !(request.APIType == "realtime" && metadataValue(req.Metadata, "gateway.realtime_usage_exact") == "true") && request.CacheStatus != "hit" && !reportedUsage {
 		if req.CompletionRequest != nil {
 			request.InputTokens = openai.CompletionInputTokens(*req.CompletionRequest)
 			request.TotalTokens = openai.CompletionReserveTokens(*req.CompletionRequest)

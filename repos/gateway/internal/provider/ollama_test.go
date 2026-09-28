@@ -691,6 +691,29 @@ func TestOllamaChatCompletions(t *testing.T) {
 	}
 }
 
+func TestOllamaChatReportsExactZeroUsage(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprintf("stream=%t", stream), func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = fmt.Fprintln(w, `{"model":"test-model","message":{"role":"assistant","content":""},"done":true,"done_reason":"stop","prompt_eval_count":0,"eval_count":0}`)
+			}))
+			t.Cleanup(server.Close)
+			client := NewOllama(server.URL, stream)
+			request := openai.ChatCompletionRequest{Model: "test-model", Stream: stream}
+			var response openai.ChatCompletionResponse
+			var err error
+			if stream {
+				response, err = client.StreamChatCompletions(t.Context(), request, func(string) error { return nil })
+			} else {
+				response, err = client.ChatCompletions(t.Context(), request)
+			}
+			if err != nil || !response.UsageReported || response.Usage.TotalTokens != 0 {
+				t.Fatalf("exact zero usage lost: response=%+v err=%v", response, err)
+			}
+		})
+	}
+}
+
 func TestOllamaChatJSONRequiresCompletion(t *testing.T) {
 	for _, doneField := range []string{"", `,"done":false`} {
 		t.Run(fmt.Sprintf("done-field-%d", len(doneField)), func(t *testing.T) {
