@@ -191,6 +191,71 @@ func TestPostgresDeploymentPricingMatchesCommittedUsageAndOutbox(t *testing.T) {
 	}
 }
 
+func TestPostgresFailoverReplacesDeploymentPricingBeforeCommit(t *testing.T) {
+	pool := reliabilityTestPool(t)
+	ctx := t.Context()
+	id := fmt.Sprintf("failover-pricing-%d", time.Now().UnixNano())
+	t.Cleanup(func() {
+		cleanupCtx := context.Background()
+		_, _ = pool.Exec(cleanupCtx, `DELETE FROM billing_outbox WHERE payload->>'request_id'=$1`, id)
+		_, _ = pool.Exec(cleanupCtx, `DELETE FROM billing_event_ledger WHERE request_id=$1`, id)
+		_, _ = pool.Exec(cleanupCtx, `DELETE FROM billing_budget_reservations WHERE request_id=$1`, id)
+	})
+	repository, err := NewPostgresOutboxRepository(os.Getenv("BILLING_POSTGRES_TEST_DSN"), NoopUsageEventWriter{}, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	module := NewBillingModuleWithPricing(true, PricingConfig{Currency: "USD"})
+	module.policy = NewPostgresBudgetPolicyChecker(os.Getenv("BILLING_POSTGRES_TEST_DSN"), time.Minute)
+	module.durable = repository
+	t.Cleanup(module.Close)
+	req := RequestContext{
+		RequestID: id, CredentialID: "key-failover-pricing", UserID: "user-failover-pricing", BillingPhase: "reserve",
+		Request: openai.ChatCompletionRequest{Model: "shared-model"},
+		Usage:   &openai.Usage{PromptTokens: 1000},
+	}
+	for _, route := range []struct {
+		deployment, inputPrice, outputPrice string
+	}{
+		{deployment: "deployment-a", inputPrice: "1", outputPrice: "2"},
+		{deployment: "deployment-b", inputPrice: "3", outputPrice: "4"},
+	} {
+		req.Metadata = map[string]string{
+			"provider.endpoint.name":           route.deployment,
+			"provider.endpoint.type":           "openai-compatible",
+			"model_catalog.version":            "pricing-v1",
+			"model_catalog.pricing_key":        route.deployment + "/shared-model",
+			"model_catalog.input_cost_per_1m":  route.inputPrice,
+			"model_catalog.output_cost_per_1m": route.outputPrice,
+			"model_catalog.currency":           "USD",
+		}
+		if err := module.Handle(ctx, &req); err != nil {
+			t.Fatalf("reserve %s: %v", route.deployment, err)
+		}
+	}
+	req.BillingPhase = "commit"
+	req.PostResponse = true
+	req.Usage = &openai.Usage{PromptTokens: 1000, CompletionTokens: 500, TotalTokens: 1500}
+	req.Metadata["usage.estimated"] = "false"
+	if err := module.Handle(ctx, &req); err != nil {
+		t.Fatalf("commit fallback: %v", err)
+	}
+	var deployment, pricingKey, state string
+	var actualCost float64
+	if err := pool.QueryRow(ctx, `SELECT deployment_name,pricing_key,state,actual_cost::float8 FROM billing_budget_reservations WHERE request_id=$1`, id).Scan(&deployment, &pricingKey, &state, &actualCost); err != nil || deployment != "deployment-b" || pricingKey != "deployment-b/shared-model" || state != "committed" || math.Abs(actualCost-0.005) > 1e-10 {
+		t.Fatalf("reservation deployment=%q pricing=%q state=%q cost=%g err=%v", deployment, pricingKey, state, actualCost, err)
+	}
+	var reserveEvents, commitEvents int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FILTER (WHERE phase='reserve'),count(*) FILTER (WHERE phase='commit') FROM billing_event_ledger WHERE request_id=$1`, id).Scan(&reserveEvents, &commitEvents); err != nil || reserveEvents != 1 || commitEvents != 1 {
+		t.Fatalf("ledger reserve=%d commit=%d err=%v", reserveEvents, commitEvents, err)
+	}
+	var outboxPricingKey string
+	var outboxCost float64
+	if err := pool.QueryRow(ctx, `SELECT payload->>'pricing_key',(payload->>'cost')::float8 FROM billing_outbox WHERE event_id=$1`, id+":commit").Scan(&outboxPricingKey, &outboxCost); err != nil || outboxPricingKey != "deployment-b/shared-model" || math.Abs(outboxCost-0.005) > 1e-10 {
+		t.Fatalf("outbox pricing=%q cost=%g err=%v", outboxPricingKey, outboxCost, err)
+	}
+}
+
 func TestPostgresOutboxSurvivesWorkerRestartAndDeliveryFailure(t *testing.T) {
 	pool := reliabilityTestPool(t)
 	ctx := context.Background()
