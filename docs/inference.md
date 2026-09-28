@@ -268,6 +268,8 @@ usage через provider-specific `stream_options.include_usage`; generic compa
 adapter не получает этот параметр автоматически. Текущий Ollama contract не принимает
 prompt arrays; gateway возвращает terminal `unsupported_parameter` до policy
 modules, billing reserve и сетевого вызова.
+В native Ollama Chat аргументы предыдущих function tool calls должны быть JSON-объектами;
+некорректный JSON и другие JSON-типы отклоняются до upstream-вызова.
 
 ## Capabilities
 

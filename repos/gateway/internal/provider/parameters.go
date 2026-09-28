@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -264,6 +265,12 @@ func validateOllamaChatMessages(messages []openai.Message) error {
 		}
 		if len(message.Reasoning) > 0 {
 			return unsupported("messages.reasoning")
+		}
+		for _, call := range message.ToolCalls {
+			var arguments map[string]any
+			if json.Unmarshal([]byte(call.Function.Arguments), &arguments) != nil || arguments == nil {
+				return &Error{Class: FailureClientRequest, Provider: "ollama", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_parameter", Param: "messages.tool_calls.function.arguments", Err: errors.New("tool call arguments must be a JSON object")}
+			}
 		}
 		switch content := message.Content.(type) {
 		case nil, string:

@@ -1076,6 +1076,31 @@ func TestOllamaNormalizesToolArgumentsAndForwardsOptions(t *testing.T) {
 	}
 }
 
+func TestOllamaRejectsNonObjectToolArgumentsBeforeUpstream(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
+	t.Cleanup(server.Close)
+	client := NewOllama(server.URL, true)
+	for _, arguments := range []string{"", "not-json", `null`, `[]`, `"text"`, `1`} {
+		for _, stream := range []bool{false, true} {
+			request := openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{
+				Role: "assistant", ToolCalls: []openai.ToolCall{{ID: "call-1", Type: "function", Function: openai.FunctionCall{Name: "weather", Arguments: arguments}}},
+			}}}
+			var err error
+			if stream {
+				request.Stream = true
+				_, err = client.StreamChatCompletions(t.Context(), request, func(string) error { return nil })
+			} else {
+				_, err = client.ChatCompletions(t.Context(), request)
+			}
+			var failure *Error
+			if !errors.As(err, &failure) || failure.UpstreamCode != "invalid_parameter" || failure.Param != "messages.tool_calls.function.arguments" || calls.Load() != 0 {
+				t.Fatalf("arguments=%q stream=%t calls=%d err=%v", arguments, stream, calls.Load(), err)
+			}
+		}
+	}
+}
+
 func TestOllamaStreamsNativeToolCalls(t *testing.T) {
 	var upstream ollamaChatRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
