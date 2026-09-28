@@ -246,15 +246,15 @@ func (h Handler) compensateContainer(ctx context.Context, runtime provider.Conta
 	defer cancel()
 	_, deleteErr := runtime.DeleteContainer(compensation, binding, id)
 	if deleteErr != nil {
-		log.Printf("container compensation delete failed for %s: %v", id, deleteErr)
+		log.Print("container compensation delete failed")
 	} else if stored {
 		if err := h.containers.DeleteContainerRecord(compensation, owner, id); err != nil {
-			log.Printf("container compensation ownership cleanup failed for %s: %v", id, err)
+			log.Print("container compensation ownership cleanup failed")
 		}
 	}
 	if reserved {
 		if err := h.resourceBillingPipeline().RunBillingLifecycle(compensation, request, "cancel", cause); err != nil {
-			log.Printf("container billing cancellation failed for %s: %v", id, err)
+			log.Print("container billing cancellation failed")
 		}
 	}
 }
@@ -263,7 +263,7 @@ func (h Handler) cancelContainerBilling(ctx context.Context, request *modules.Re
 	compensation, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
 	if err := h.resourceBillingPipeline().RunBillingLifecycle(compensation, request, "cancel", cause); err != nil {
-		log.Printf("container billing cancellation failed: %v", err)
+		log.Print("container billing cancellation failed")
 	}
 }
 

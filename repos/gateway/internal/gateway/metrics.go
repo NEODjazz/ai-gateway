@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"bufio"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -259,7 +260,13 @@ func observabilityMiddleware(metrics *Metrics, next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
+		externalID := strings.TrimSpace(r.Header.Get("X-Request-ID"))
 		id := requestID(r)
+		telemetryID := id
+		if externalID != "" && externalID == id {
+			fingerprint := sha256.Sum256([]byte(id))
+			telemetryID = fmt.Sprintf("sha256:%x", fingerprint)
+		}
 		r.Header.Set("X-Request-ID", id)
 		w.Header().Set("X-Request-ID", id)
 		started := time.Now()
@@ -273,7 +280,7 @@ func observabilityMiddleware(metrics *Metrics, next http.Handler) http.Handler {
 		path := metricPath(r.URL.Path)
 		metrics.Observe(metricMethod(r.Method), path, status, duration)
 		span := trace.SpanFromContext(r.Context())
-		span.SetAttributes(attribute.String("ai.request.id", id), attribute.String("http.route", path))
+		span.SetAttributes(attribute.String("ai.request.id", telemetryID), attribute.String("http.route", path))
 		executionID := recorder.Header().Get("X-Execution-ID")
 		if executionID != "" {
 			span.SetAttributes(attribute.String("ai.execution.id", executionID))
@@ -284,7 +291,7 @@ func observabilityMiddleware(metrics *Metrics, next http.Handler) http.Handler {
 			traceID, spanID = spanContext.TraceID().String(), spanContext.SpanID().String()
 		}
 		payload, _ := json.Marshal(map[string]any{
-			"event": "http_request", "request_id": id, "method": r.Method,
+			"event": "http_request", "request_id": telemetryID, "method": r.Method,
 			"path": path, "status": status, "duration_ms": duration.Milliseconds(),
 			"trace_id": traceID, "span_id": spanID, "execution_id": executionID,
 		})

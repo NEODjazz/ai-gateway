@@ -774,7 +774,7 @@ func (h Handler) executeBatchItem(ctx context.Context, batch batchstate.Batch, i
 		return nil, false, true
 	}
 	if err != nil {
-		log.Printf("batch item %s/%s failed: %v", batch.ID, item.CustomID, err)
+		log.Print("batch item execution failed")
 		return batchErrorResult(item, "provider_error", "batch item execution failed"), true, false
 	}
 	line := openai.BatchOutputLine{ID: "batch_req_" + item.ExecutionID, CustomID: item.CustomID, Response: &openai.BatchOutputResponse{StatusCode: status, RequestID: item.ExecutionID, Body: body}}
@@ -1165,7 +1165,7 @@ func RunBatchWorker(ctx context.Context, handler Handler) {
 	defer ticker.Stop()
 	for {
 		if _, err := handler.ProcessBatchItems(ctx); err != nil && ctx.Err() == nil {
-			log.Printf("batch processing failed: %v", err)
+			log.Print("batch processing failed")
 		}
 		select {
 		case <-ctx.Done():

@@ -508,10 +508,10 @@ func (h Handler) compensateCachedContent(ctx context.Context, runtime provider.C
 	compensation, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
 	if err := runtime.DeleteCachedContent(compensation, binding, name); err != nil && !cachedContentProviderNotFound(err) {
-		log.Printf("cached content compensation delete failed for %s: %v", name, err)
+		log.Print("cached content compensation delete failed")
 	} else if stored {
 		if err := h.cachedContents.DeleteCachedContentRecord(compensation, owner, name); err != nil && !errors.Is(err, cachedstate.ErrNotFound) {
-			log.Printf("cached content compensation ownership cleanup failed for %s: %v", name, err)
+			log.Print("cached content compensation ownership cleanup failed")
 		}
 	}
 	if request != nil {
@@ -523,6 +523,6 @@ func (h Handler) restoreCachedContentExpiration(ctx context.Context, runtime pro
 	compensation, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
 	if _, err := runtime.UpdateCachedContent(compensation, record.Binding, record.Content.Name, openai.GeminiCachedContentExpiration{ExpireTime: record.Content.ExpireTime}); err != nil {
-		log.Printf("cached content expiration compensation failed for %s: %v", record.Content.Name, err)
+		log.Print("cached content expiration compensation failed")
 	}
 }

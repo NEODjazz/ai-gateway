@@ -29,6 +29,9 @@ allowlist полей и не могут перезаписать identity или
 копируются в metadata, передаваемую последующим модулям или сохраняемую в
 background jobs. Provider и module traces, а также логи ошибок provider
 worker, cache и optional modules, не записывают сырой текст ошибки.
+Gateway operational logs пишут фиксированный тип сбоя без пользовательских
+идентификаторов и raw error; внешний `X-Request-ID` в HTTP-логах и traces
+представлен SHA-256 fingerprint.
 
 Internal `/authorize`, `/usage`, `/scan`, `/anonymize` и `/internal/v1/*`
 должны оставаться cluster-internal. Service contracts защищаются отдельными
