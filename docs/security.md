@@ -35,6 +35,8 @@ Gateway operational logs пишут фиксированный тип сбоя �
 идентификаторов и raw error; внешний `X-Request-ID` в HTTP-логах и traces
 представлен SHA-256 fingerprint. Журнал management actions сервиса Auth
 также записывает только fingerprint внешнего request ID.
+Billing readiness возвращает только фиксированную причину недоступности,
+не раскрывая подробности подключения к хранилищу.
 
 Internal `/authorize`, `/usage`, `/scan`, `/anonymize` и `/internal/v1/*`
 должны оставаться cluster-internal. Service contracts защищаются отдельными

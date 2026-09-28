@@ -34,17 +34,15 @@ func run() error {
 		defer auditStore.Close()
 	}
 
-	http.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		if err := module.Ready(r.Context()); err != nil {
-			http.Error(w, err.Error(), http.StatusServiceUnavailable)
-			return
+	http.HandleFunc("/healthz", billingHealthHandler(module.Ready, func(ctx context.Context) error {
+		if auditErr != nil {
+			return auditErr
 		}
-		if auditErr != nil || auditStore == nil || auditStore.Ready(r.Context()) != nil {
-			http.Error(w, "audit storage unavailable", http.StatusServiceUnavailable)
-			return
+		if auditStore == nil {
+			return errors.New("audit storage unavailable")
 		}
-		w.WriteHeader(http.StatusNoContent)
-	})
+		return auditStore.Ready(ctx)
+	}))
 	http.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
 		stats := module.UsageDeliveryStats()
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
@@ -171,6 +169,20 @@ func run() error {
 		<-finished
 	}
 	return nil
+}
+
+func billingHealthHandler(moduleReady, auditReady func(context.Context) error) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if moduleReady(r.Context()) != nil {
+			http.Error(w, "billing unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		if auditReady(r.Context()) != nil {
+			http.Error(w, "audit storage unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
 }
 
 func authorizeBillingUsage(w http.ResponseWriter, r *http.Request, secret string) bool {
