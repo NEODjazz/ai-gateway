@@ -38,6 +38,22 @@ type failingCompletionProvider struct {
 	completionCalls int
 }
 
+type embeddingFailoverProvider struct {
+	countingProvider
+	embeddingCalls int
+	embeddingErr   error
+	validationErr  error
+}
+
+func (p *embeddingFailoverProvider) Embeddings(context.Context, openai.EmbeddingRequest) (openai.EmbeddingResponse, error) {
+	p.embeddingCalls++
+	return openai.EmbeddingResponse{}, p.embeddingErr
+}
+
+func (p *embeddingFailoverProvider) ValidateEmbeddingParameters(openai.EmbeddingRequest) error {
+	return p.validationErr
+}
+
 type parameterRejectingProvider struct {
 	failingCompletionProvider
 	err         error
@@ -171,6 +187,43 @@ func TestFailoverParameterRejectionCancelsPreviousReserve(t *testing.T) {
 				t.Fatalf("unexpected lifecycle: err=%v reserves=%d cancels=%d secondary=%+v", err, billing.reserves, billing.cancels, secondary)
 			}
 		})
+	}
+}
+
+func TestEmbeddingFailoverParameterRejectionCancelsPreviousReserve(t *testing.T) {
+	validationErr := errors.New("unsupported embedding parameter")
+	primary := &embeddingFailoverProvider{embeddingErr: statusError("primary", http.StatusServiceUnavailable)}
+	secondary := &embeddingFailoverProvider{validationErr: validationErr}
+	billing := &rejectSecondReserve{}
+	router := Router{
+		health: newEndpointHealthTracker(), routeCounter: &atomic.Uint64{}, modules: modules.NewPipeline([]modules.Module{billing}),
+		endpoints: []Endpoint{
+			{Name: "primary", Type: "openai", Models: []string{"model"}, Capabilities: []string{"embeddings"}, Provider: primary},
+			{Name: "secondary", Type: "openai", Models: []string{"model"}, Capabilities: []string{"embeddings"}, Provider: secondary},
+		},
+	}
+	request := openai.EmbeddingRequest{Model: "model", Input: "hello"}
+	_, err := router.Embeddings(t.Context(), modules.RequestContext{RequestID: "execution", Request: openai.ChatCompletionRequest{Model: "model"}, EmbeddingRequest: &request})
+	if !errors.Is(err, validationErr) || billing.reserves != 1 || billing.cancels != 1 || primary.embeddingCalls != 1 || secondary.embeddingCalls != 0 {
+		t.Fatalf("unexpected lifecycle: err=%v reserves=%d cancels=%d primary=%d secondary=%d", err, billing.reserves, billing.cancels, primary.embeddingCalls, secondary.embeddingCalls)
+	}
+}
+
+func TestEmbeddingFailoverBudgetRejectionCancelsPreviousReserve(t *testing.T) {
+	primary := &embeddingFailoverProvider{embeddingErr: statusError("primary", http.StatusServiceUnavailable)}
+	secondary := &embeddingFailoverProvider{}
+	billing := &rejectSecondReserve{}
+	router := Router{
+		health: newEndpointHealthTracker(), routeCounter: &atomic.Uint64{}, modules: modules.NewPipeline([]modules.Module{billing}),
+		endpoints: []Endpoint{
+			{Name: "primary", Type: "openai", Models: []string{"model"}, Capabilities: []string{"embeddings"}, Provider: primary},
+			{Name: "secondary", Type: "openai", Models: []string{"model"}, Capabilities: []string{"embeddings"}, Provider: secondary},
+		},
+	}
+	request := openai.EmbeddingRequest{Model: "model", Input: "hello"}
+	_, err := router.Embeddings(t.Context(), modules.RequestContext{RequestID: "execution", Request: openai.ChatCompletionRequest{Model: "model"}, EmbeddingRequest: &request})
+	if !errors.Is(err, modules.ErrBudgetExceeded) || billing.reserves != 2 || billing.cancels != 1 || primary.embeddingCalls != 1 || secondary.embeddingCalls != 0 {
+		t.Fatalf("unexpected lifecycle: err=%v reserves=%d cancels=%d primary=%d secondary=%d", err, billing.reserves, billing.cancels, primary.embeddingCalls, secondary.embeddingCalls)
 	}
 }
 

@@ -1309,6 +1309,9 @@ func (r Router) Embeddings(ctx context.Context, req modules.RequestContext) (ope
 		}
 		progress.enter(endpoint)
 		if err := validateEmbeddingAdapter(endpoint.Provider, request); err != nil {
+			if lastAttempt != nil {
+				r.modules.RunFailure(ctx, lastAttempt, err)
+			}
 			return openai.EmbeddingResponse{}, err
 		}
 		attemptCtx := providerAttemptContext(req, endpoint)
@@ -1325,6 +1328,9 @@ func (r Router) Embeddings(ctx context.Context, req modules.RequestContext) (ope
 		}
 		if err := r.modules.Run(ctx, &attemptCtx); err != nil {
 			if terminalModuleError(err) || ctx.Err() != nil {
+				if lastAttempt != nil {
+					r.modules.RunFailure(ctx, lastAttempt, err)
+				}
 				return openai.EmbeddingResponse{}, fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err)
 			}
 			wrapped := fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err)
