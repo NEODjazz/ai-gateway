@@ -759,6 +759,9 @@ func (r Router) ChatCompletions(ctx context.Context, req modules.RequestContext)
 		}
 		progress.enter(endpoint)
 		if err := validateChatAdapter(endpoint.Provider, request); err != nil {
+			if lastAttempt != nil {
+				r.modules.RunFailure(ctx, lastAttempt, err)
+			}
 			return openai.ChatCompletionResponse{}, err
 		}
 		attemptCtx := providerAttemptContext(req, endpoint)
@@ -968,6 +971,9 @@ func (r Router) StreamChatCompletions(ctx context.Context, req modules.RequestCo
 		progress.enter(endpoint)
 
 		if err := validateChatAdapter(endpoint.Provider, request); err != nil {
+			if lastAttempt != nil {
+				r.modules.RunFailure(ctx, lastAttempt, err)
+			}
 			return openai.ChatCompletionResponse{}, false, err
 		}
 		attemptCtx := providerAttemptContext(req, endpoint)
@@ -1146,6 +1152,9 @@ func (r Router) Responses(ctx context.Context, req modules.RequestContext) (open
 		}
 		progress.enter(endpoint)
 		if err := validateResponseAdapter(endpoint.Provider, request); err != nil {
+			if lastAttempt != nil {
+				r.modules.RunFailure(ctx, lastAttempt, err)
+			}
 			return openai.ResponseResponse{}, err
 		}
 		attemptCtx := providerAttemptContext(req, endpoint)
@@ -2159,6 +2168,9 @@ func (r Router) StreamResponses(ctx context.Context, req modules.RequestContext,
 		progress.enter(endpoint)
 
 		if err := validateResponseAdapter(endpoint.Provider, request); err != nil {
+			if lastAttempt != nil {
+				r.modules.RunFailure(ctx, lastAttempt, err)
+			}
 			return openai.ResponseResponse{}, false, err
 		}
 		attemptCtx := providerAttemptContext(req, endpoint)

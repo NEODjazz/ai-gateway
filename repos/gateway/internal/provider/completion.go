@@ -166,6 +166,9 @@ func (r Router) Completions(ctx context.Context, req modules.RequestContext) (op
 		}
 		client := endpoint.Provider.(CompletionClient)
 		if err := validateCompletionAdapter(client, request); err != nil {
+			if lastAttempt != nil {
+				r.modules.RunFailure(ctx, lastAttempt, err)
+			}
 			return openai.CompletionResponse{}, err
 		}
 		progress.enter(endpoint)
@@ -266,6 +269,9 @@ func (r Router) StreamCompletions(ctx context.Context, req modules.RequestContex
 			continue
 		}
 		if err := validateCompletionAdapter(completionClient, request); err != nil {
+			if lastAttempt != nil {
+				r.modules.RunFailure(ctx, lastAttempt, err)
+			}
 			return openai.CompletionResponse{}, false, err
 		}
 		progress.enter(endpoint)

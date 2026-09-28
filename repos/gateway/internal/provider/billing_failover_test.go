@@ -38,6 +38,34 @@ type failingCompletionProvider struct {
 	completionCalls int
 }
 
+type parameterRejectingProvider struct {
+	failingCompletionProvider
+	err         error
+	streamCalls int
+}
+
+func (p *parameterRejectingProvider) ValidateChatParameters(openai.ChatCompletionRequest) error {
+	return p.err
+}
+
+func (p *parameterRejectingProvider) ValidateResponseParameters(openai.ResponseRequest) error {
+	return p.err
+}
+
+func (p *parameterRejectingProvider) ValidateCompletionParameters(openai.CompletionRequest) error {
+	return p.err
+}
+
+func (p *parameterRejectingProvider) StreamChatCompletions(context.Context, openai.ChatCompletionRequest, ChatCompletionStreamWriter) (openai.ChatCompletionResponse, error) {
+	p.streamCalls++
+	return openai.ChatCompletionResponse{}, errors.New("unexpected chat provider call")
+}
+
+func (p *parameterRejectingProvider) StreamResponses(context.Context, openai.ResponseRequest, ResponseStreamWriter) (openai.ResponseResponse, error) {
+	p.streamCalls++
+	return openai.ResponseResponse{}, errors.New("unexpected responses provider call")
+}
+
 func (p *failingCompletionProvider) Completions(context.Context, openai.CompletionRequest) (openai.CompletionResponse, error) {
 	p.completionCalls++
 	return openai.CompletionResponse{}, statusError("completion", http.StatusServiceUnavailable)
@@ -46,6 +74,83 @@ func (p *failingCompletionProvider) Completions(context.Context, openai.Completi
 func (p *failingCompletionProvider) StreamCompletions(context.Context, openai.CompletionRequest, CompletionStreamWriter) (openai.CompletionResponse, error) {
 	p.completionCalls++
 	return openai.CompletionResponse{}, statusError("completion", http.StatusServiceUnavailable)
+}
+
+func TestFailoverParameterRejectionCancelsPreviousReserve(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		capabilities []string
+		first        Client
+		run          func(Router) error
+	}{
+		{
+			name: "chat", capabilities: []string{"chat"},
+			first: &countingProvider{err: statusError("primary", http.StatusServiceUnavailable)},
+			run: func(r Router) error {
+				_, err := r.ChatCompletions(t.Context(), modules.RequestContext{RequestID: "execution", Request: openai.ChatCompletionRequest{Model: "model"}})
+				return err
+			},
+		},
+		{
+			name: "stream chat", capabilities: []string{"chat", "stream"},
+			first: &scriptedStreamingProvider{failChatBeforeWrite: 1},
+			run: func(r Router) error {
+				_, _, err := r.StreamChatCompletions(t.Context(), modules.RequestContext{RequestID: "execution", Request: openai.ChatCompletionRequest{Model: "model"}}, func(string) error { return nil })
+				return err
+			},
+		},
+		{
+			name: "responses", capabilities: []string{"responses"},
+			first: &countingProvider{err: statusError("primary", http.StatusServiceUnavailable)},
+			run: func(r Router) error {
+				request := openai.ResponseRequest{Model: "model", Input: "hello"}
+				_, err := r.Responses(t.Context(), modules.RequestContext{RequestID: "execution", Request: openai.ChatCompletionRequest{Model: "model"}, ResponseRequest: &request})
+				return err
+			},
+		},
+		{
+			name: "stream responses", capabilities: []string{"responses", "stream"},
+			first: &scriptedStreamingProvider{failRespBeforeWrite: 1},
+			run: func(r Router) error {
+				request := openai.ResponseRequest{Model: "model", Input: "hello"}
+				_, _, err := r.StreamResponses(t.Context(), modules.RequestContext{RequestID: "execution", Request: openai.ChatCompletionRequest{Model: "model"}, ResponseRequest: &request}, func(string, string) error { return nil })
+				return err
+			},
+		},
+		{
+			name: "completions", capabilities: []string{"chat"}, first: &failingCompletionProvider{},
+			run: func(r Router) error {
+				request := openai.CompletionRequest{Model: "model", Prompt: "hello"}
+				_, err := r.Completions(t.Context(), modules.RequestContext{RequestID: "execution", Request: openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}}}, CompletionRequest: &request})
+				return err
+			},
+		},
+		{
+			name: "stream completions", capabilities: []string{"chat", "stream"}, first: &failingCompletionProvider{},
+			run: func(r Router) error {
+				request := openai.CompletionRequest{Model: "model", Prompt: "hello"}
+				_, _, err := r.StreamCompletions(t.Context(), modules.RequestContext{RequestID: "execution", Request: openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}}}, CompletionRequest: &request}, func(string) error { return nil })
+				return err
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			validationErr := errors.New("unsupported parameter")
+			secondary := &parameterRejectingProvider{err: validationErr}
+			billing := &rejectSecondReserve{}
+			router := Router{
+				health: newEndpointHealthTracker(), routeCounter: &atomic.Uint64{}, modules: modules.NewPipeline([]modules.Module{billing}),
+				endpoints: []Endpoint{
+					{Name: "primary", Type: "openai", Models: []string{"model"}, Capabilities: test.capabilities, Provider: test.first},
+					{Name: "secondary", Type: "openai", Models: []string{"model"}, Capabilities: test.capabilities, Provider: secondary},
+				},
+			}
+			err := test.run(router)
+			if !errors.Is(err, validationErr) || billing.reserves != 1 || billing.cancels != 1 || secondary.calls != 0 || secondary.responses != 0 || secondary.completionCalls != 0 || secondary.streamCalls != 0 {
+				t.Fatalf("unexpected lifecycle: err=%v reserves=%d cancels=%d secondary=%+v", err, billing.reserves, billing.cancels, secondary)
+			}
+		})
+	}
 }
 
 func TestFailoverPreflightRejectionRunsPreviousFailureLifecycle(t *testing.T) {
