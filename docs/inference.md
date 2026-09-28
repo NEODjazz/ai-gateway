@@ -2554,8 +2554,9 @@ Azure OpenAI и Foundry base URLs не принимают query или fragment,
 могут возвращаться до появления финального usage.
 Azure embeddings требуют provider-reported `prompt_tokens` и `total_tokens` с
 одинаковым значением; отсутствие usage не заменяется оценкой для успешного
-billing. Это правило действует для resource и Foundry project endpoints при
-API-key и Entra authentication.
+billing. Это правило действует для Azure OpenAI resource endpoints при API-key
+и Entra authentication. Foundry project URL не маршрутизирует embeddings;
+для них нужен resource URL.
 Azure legacy Completions JSON/SSE требуют явных `prompt_tokens`,
 `completion_tokens` и согласованного `total_tokens`. Для SSE adapter запрашивает
 финальный usage chunk через `stream_options.include_usage`; поток без него не
