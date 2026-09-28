@@ -67,6 +67,9 @@ func backgroundResponseOwner(req modules.RequestContext) string {
 func backgroundJobMetadata(metadata map[string]string) map[string]string {
 	result := make(map[string]string)
 	for key, value := range metadata {
+		if key == "provider.error" {
+			continue
+		}
 		if key == "gateway.api_type" || strings.HasPrefix(key, "provider.") || strings.HasPrefix(key, "policy.") || strings.HasPrefix(key, "model_catalog.") || strings.HasPrefix(key, "billing.") {
 			result[key] = value
 		}
@@ -286,7 +289,7 @@ func RunBackgroundResponseWorker(ctx context.Context, processor BackgroundRespon
 	defer ticker.Stop()
 	for {
 		if _, err := processor.ProcessBackgroundResponses(ctx); err != nil && ctx.Err() == nil {
-			log.Printf("background response processing failed: %v", err)
+			log.Printf("background response processing failed: %s", failureClass(err))
 		}
 		select {
 		case <-ctx.Done():

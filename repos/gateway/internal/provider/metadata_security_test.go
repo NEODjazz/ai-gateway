@@ -3,6 +3,8 @@ package provider
 import (
 	"context"
 	"errors"
+	"log"
+	"strings"
 	"testing"
 	"time"
 
@@ -40,5 +42,67 @@ func TestProviderTraceOmitsRawFailure(t *testing.T) {
 	ended := spans.Ended()
 	if len(ended) != 1 || ended[0].Status().Code != codes.Error || ended[0].Status().Description != string(FailureUnavailable) || len(ended[0].Events()) != 0 {
 		t.Fatalf("unsafe provider trace: %+v", ended)
+	}
+}
+
+func TestBackgroundJobMetadataRejectsRawProviderError(t *testing.T) {
+	metadata := backgroundJobMetadata(map[string]string{
+		"provider.error":         "private prompt and credential",
+		"provider.status":        "error",
+		"policy.example.enabled": "true",
+	})
+	if _, present := metadata["provider.error"]; present {
+		t.Fatal("background job persisted raw provider error")
+	}
+	if metadata["provider.status"] != "error" || metadata["policy.example.enabled"] != "true" {
+		t.Fatalf("safe job metadata lost: %+v", metadata)
+	}
+}
+
+type failingBackgroundProcessor struct{}
+
+func (failingBackgroundProcessor) ProcessBackgroundResponses(context.Context) (int, error) {
+	return 0, errors.New("private prompt and credential")
+}
+
+type providerLogLines chan string
+
+func (lines providerLogLines) Write(payload []byte) (int, error) {
+	select {
+	case lines <- string(payload):
+	default:
+	}
+	return len(payload), nil
+}
+
+func TestBackgroundWorkerLogOmitsRawError(t *testing.T) {
+	previous := log.Writer()
+	lines := make(providerLogLines, 1000)
+	log.SetOutput(lines)
+	t.Cleanup(func() { log.SetOutput(previous) })
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		RunBackgroundResponseWorker(ctx, failingBackgroundProcessor{})
+		close(done)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case line := <-lines:
+			if !strings.Contains(line, "background response processing failed") {
+				continue
+			}
+			if strings.Contains(line, "private prompt") || !strings.Contains(line, string(FailureUnknown)) {
+				t.Fatalf("unsafe background worker log: %s", line)
+			}
+			return
+		case <-deadline:
+			t.Fatal("background worker did not report its failure")
+		}
 	}
 }

@@ -819,7 +819,7 @@ func (r Router) ChatCompletions(ctx context.Context, req modules.RequestContext)
 			}
 		} else if cacheErr != nil {
 			attemptCtx.Metadata["provider.cache.status"] = "error"
-			log.Printf("provider cache get failed: %v", cacheErr)
+			log.Print("provider cache get failed")
 		}
 		semanticScope, semanticVector := "", []float64(nil)
 		if scope, text, eligible := semanticRequest(attemptCtx, endpoint); replaySafe && eligible && r.semantic != nil {
@@ -828,7 +828,7 @@ func (r Router) ChatCompletions(ctx context.Context, req modules.RequestContext)
 				if r.observer != nil {
 					r.observer.ObserveCache("semantic_get", "error")
 				}
-				log.Printf("semantic cache embedding failed: %v", embedErr)
+				log.Printf("semantic cache embedding failed: %s", failureClass(embedErr))
 			} else {
 				semanticScope, semanticVector = scope, vector
 				if payload, found := r.semantic.lookup(scope, vector); found {
@@ -882,7 +882,7 @@ func (r Router) ChatCompletions(ctx context.Context, req modules.RequestContext)
 			if len(cachePayload) > 0 {
 				if cacheErr := r.cacheSet(ctx, cacheKey, cachePayload); cacheErr != nil {
 					attemptCtx.Metadata["provider.cache.status"] = "error"
-					log.Printf("provider cache set failed: %v", cacheErr)
+					log.Print("provider cache set failed")
 				}
 				if semanticScope != "" && len(semanticVector) > 0 {
 					stored := r.semantic.set(semanticScope, semanticVector, cachePayload)
@@ -1206,7 +1206,7 @@ func (r Router) Responses(ctx context.Context, req modules.RequestContext) (open
 			}
 		} else if cacheErr != nil {
 			attemptCtx.Metadata["provider.cache.status"] = "error"
-			log.Printf("provider cache get failed: %v", cacheErr)
+			log.Print("provider cache get failed")
 		}
 		if !mirrored && attemptCtx.ConversationTurn == nil && !persistentResponseRequested(*attemptCtx.ResponseRequest) && responseReplaySafe(*attemptCtx.ResponseRequest) {
 			r.mirrorResponses(ctx, req.RequestID, *attemptCtx.ResponseRequest, request.Model, requiredResponseCapabilities(request, false)...)
@@ -1254,7 +1254,7 @@ func (r Router) Responses(ctx context.Context, req modules.RequestContext) (open
 			if len(cachePayload) > 0 && cacheableResponsesResult(response) {
 				if cacheErr := r.cacheSet(ctx, cacheKey, cachePayload); cacheErr != nil {
 					attemptCtx.Metadata["provider.cache.status"] = "error"
-					log.Printf("provider cache set failed: %v", cacheErr)
+					log.Print("provider cache set failed")
 				}
 			}
 			if err := r.persistResponseOwnership(ctx, attemptCtx, *attemptCtx.ResponseRequest, request.Model, response.ID, endpoint); err != nil {
