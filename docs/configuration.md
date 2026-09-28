@@ -368,6 +368,8 @@ ClickHouse username/password и service/management shared secrets должны
 отличить эти случаи.
 При отмене клиентского запроса Gateway отправляет `cancel` для активного budget
 reserve с отдельным ограниченным по времени context, чтобы снять резерв до TTL.
+Если следующий endpoint в failover отклоняет запрос на preflight, предыдущий
+reserve отменяется перед возвратом ошибки.
 Billing-запрос передает статус и класс сбоя, но не сырой текст ошибки провайдера.
 
 ## Anonymizer, DLP и AV
