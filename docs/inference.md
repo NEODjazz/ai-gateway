@@ -508,6 +508,9 @@ Responses. Foundry project endpoints допускают `web_search` тольк�
 `web_search_options` в Chat отклоняется до upstream-вызова. При настройке
 managed deployment capability `web_search` разрешён для Foundry project с
 `responses`, но Chat-запросы с веб-поиском не выбирают этот deployment.
+Responses function tools preserve an explicit `defer_loading=false` in requests
+and provider responses. `defer_loading=true` is rejected until Responses tool
+search is supported; the field is not accepted on other tool types.
 
 For native Ollama Chat, `reasoning_effort=default` leaves `think` unset so the
 selected model uses its own default. The managed capability profile lists this

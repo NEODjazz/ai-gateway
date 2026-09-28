@@ -543,6 +543,30 @@ func TestAzureResponsesPreserveEchoedFunctionOutputSchema(t *testing.T) {
 	}
 }
 
+func TestAzureResponsesPreserveNonDeferredFunction(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Tools []openai.ResponseTool `json:"tools"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+		}
+		if len(request.Tools) != 1 || request.Tools[0].DeferLoading == nil || *request.Tools[0].DeferLoading {
+			t.Errorf("non-deferred function was not sent: %+v", request.Tools)
+		}
+		_, _ = fmt.Fprint(w, `{"id":"resp-test","object":"response","model":"deployment","status":"completed","tools":[{"type":"function","name":"lookup","defer_loading":false}],"output":[],"usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}`)
+	}))
+	t.Cleanup(server.Close)
+	client := NewAzureOpenAI(server.URL, "test-key", false, "", "api_key")
+	deferred := false
+	response, err := client.Responses(t.Context(), openai.ResponseRequest{
+		Model: "deployment", Input: "lookup", Tools: []openai.ResponseTool{{Type: "function", Name: "lookup", DeferLoading: &deferred}},
+	})
+	if err != nil || response.Usage.TotalTokens != 5 || len(response.Tools) != 1 || response.Tools[0].DeferLoading == nil || *response.Tools[0].DeferLoading {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
 func TestAzureFoundryStreamResponsesRequireTerminalUsage(t *testing.T) {
 	for _, tc := range []struct {
 		name, usage string

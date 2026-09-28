@@ -1141,6 +1141,37 @@ func TestResponsesPreserveEchoedFunctionOutputSchema(t *testing.T) {
 	}
 }
 
+func TestResponsesPreserveEchoedNonDeferredFunction(t *testing.T) {
+	document := `{"id":"r","object":"response","model":"m","status":"completed","tools":[{"type":"function","name":"lookup","defer_loading":false}]}`
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprintf("stream=%v", stream), func(t *testing.T) {
+			var response openai.ResponseResponse
+			var err error
+			if stream {
+				response, err = streamResponseData(strings.NewReader("data: {\"type\":\"response.completed\",\"response\":"+document+"}\n\n"), "m", nil)
+			} else {
+				response, err = decodeResponseJSON(strings.NewReader(document))
+			}
+			if err != nil || len(response.Tools) != 1 || response.Tools[0].DeferLoading == nil || *response.Tools[0].DeferLoading {
+				t.Fatalf("non-deferred function was not preserved: response=%+v err=%v", response, err)
+			}
+			encoded, err := json.Marshal(response)
+			if err != nil || !strings.Contains(string(encoded), `"defer_loading":false`) {
+				t.Fatalf("non-deferred flag was not returned: %s, err=%v", encoded, err)
+			}
+		})
+	}
+	for _, tools := range []string{
+		`[{"type":"function","name":"lookup","defer_loading":true}]`,
+		`[{"type":"function","name":"lookup","defer_loading":"false"}]`,
+		`[{"type":"custom","name":"lookup","defer_loading":false}]`,
+	} {
+		if _, err := decodeResponseJSON(strings.NewReader(`{"id":"r","object":"response","model":"m","tools":` + tools + `}`)); err == nil {
+			t.Fatalf("invalid defer_loading accepted: %s", tools)
+		}
+	}
+}
+
 func TestResponsesReportUnsupportedEchoedToolField(t *testing.T) {
 	document := `{"id":"r","object":"response","model":"m","tools":[{"type":"function","name":"lookup","unsupported_field":true}]}`
 	for _, stream := range []bool{false, true} {

@@ -316,6 +316,14 @@ func validateResponseTools(tools []ResponseTool) string {
 		if tool.Type != "function" && tool.OutputSchema != nil {
 			return "output_schema is supported only for function tools"
 		}
+		if tool.DeferLoading != nil {
+			if tool.Type != "function" {
+				return "defer_loading is supported only for function tools"
+			}
+			if *tool.DeferLoading {
+				return "defer_loading=true requires tool search support"
+			}
+		}
 		switch tool.Type {
 		case "function":
 			if !chatFunctionName.MatchString(tool.Name) {

@@ -262,6 +262,30 @@ func TestResponseToolChoiceAutoWithoutTools(t *testing.T) {
 	}
 }
 
+func TestResponseFunctionDeferLoadingValidation(t *testing.T) {
+	falseValue, trueValue := false, true
+	for _, tool := range []ResponseTool{
+		{Type: "function", Name: "lookup", DeferLoading: &falseValue},
+		{Type: "function", Name: "lookup"},
+	} {
+		if message := (ResponseRequest{Tools: []ResponseTool{tool}}).Validate(); message != "" {
+			t.Fatalf("non-deferred function rejected: %s", message)
+		}
+	}
+	for _, test := range []struct {
+		tool ResponseTool
+		want string
+	}{
+		{ResponseTool{Type: "function", Name: "lookup", DeferLoading: &trueValue}, "defer_loading=true requires tool search support"},
+		{ResponseTool{Type: "custom", Name: "lookup", DeferLoading: &falseValue}, "defer_loading is supported only for function tools"},
+		{ResponseTool{Type: "mcp", ServerLabel: "docs", ServerURL: "https://example.test", DeferLoading: &falseValue}, "defer_loading is supported only for function tools"},
+	} {
+		if message := (ResponseRequest{Tools: []ResponseTool{test.tool}}).Validate(); message != test.want {
+			t.Fatalf("tool=%+v: got %q, want %q", test.tool, message, test.want)
+		}
+	}
+}
+
 func TestResponseImageGenerationToolValidation(t *testing.T) {
 	compression, partialImages := 90, 3
 	validMask := "data:image/png;base64,iVBORw0KGgpmaXh0dXJl"
