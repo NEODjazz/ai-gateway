@@ -114,6 +114,11 @@ uninspected metadata produces no automatic capability selection; the operator
 must choose a capability before applying the plan. The connection probe only
 checks the model list, so unavailable detail metadata does not mark the provider
 offline.
+For a correction to an existing deployment's capabilities, onboarding can set
+`update_existing_deployments=true` and submit the full replacement deployment
+alongside a new catalog version. The plan distinguishes updates from creates;
+apply checks the expected control-plane revision and commits both changes
+together. The default remains create-only, and duplicate input IDs are rejected.
 Native Ollama Chat accepts only the known terminal reasons `stop`, `length` and
 the empty default; an unknown reason fails the JSON or SSE request before a
 terminal stream chunk is forwarded.

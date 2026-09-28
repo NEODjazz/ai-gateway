@@ -8197,6 +8197,10 @@ components:
           minItems: 1
           maxItems: 128
           items: {$ref: '#/components/schemas/ModelDeploymentInput'}
+        update_existing_deployments:
+          type: boolean
+          default: false
+          description: When true, a deployment with an existing ID is replaced by its complete input in the same control-plane revision as the catalog. Duplicate IDs in the input remain invalid.
         model_groups:
           type: array
           maxItems: 128
@@ -8213,6 +8217,10 @@ components:
           minItems: 1
           maxItems: 128
           items: {$ref: '#/components/schemas/ModelDeploymentInput'}
+        update_existing_deployments:
+          type: boolean
+          default: false
+          description: Set true to fully replace listed existing deployments in the same optimistic transaction as the catalog. Apply revalidates the input and expected revision.
         model_groups:
           type: array
           maxItems: 128

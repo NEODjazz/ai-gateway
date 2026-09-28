@@ -16,6 +16,7 @@ import (
 
 	"ai-gateway-gateway/internal/config"
 	"ai-gateway-gateway/internal/modelcatalog"
+	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/openai"
 )
 
@@ -495,5 +496,93 @@ func TestModelOnboardingRejectsStalePlanAndRollsBackFailedPersistence(t *testing
 	}
 	if groups := router.ListModelGroups(context.Background()); len(groups) != 1 || groups[0].ID != "existing" {
 		t.Fatalf("failed apply corrupted existing groups: %+v", groups)
+	}
+}
+
+func TestModelOnboardingAtomicallyUpdatesExistingDeployment(t *testing.T) {
+	store := &memoryControlPlaneStore{}
+	var upstreamCalls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		upstreamCalls.Add(1)
+		http.Error(w, "unexpected upstream call", http.StatusInternalServerError)
+	}))
+	t.Cleanup(upstream.Close)
+	runtime, err := NewWithError(Config{CredentialEncryptionKey: []byte("stable-key"), ControlPlaneStore: store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := runtime.(*Router)
+	if _, err := router.CreateProvider(ManagedProvider{ID: "ollama", Type: "ollama", BaseURL: upstream.URL, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := modelcatalog.Parse(`{"version":"before","models":[{"provider":"ollama","model":"m","capabilities":["chat","embeddings"]}]}`)
+	if _, err := router.UpdateModelCatalog(t.Context(), before); err != nil {
+		t.Fatal(err)
+	}
+	deployment := ModelDeployment{ID: "ollama-m", ProviderID: "ollama", Models: []string{"m"}, Capabilities: []string{"chat", "embeddings"}, Weight: 1, Enabled: true}
+	if _, err := router.CreateModelDeployment(deployment); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := modelcatalog.Parse(`{"version":"after","models":[{"provider":"ollama","model":"m","capabilities":["embeddings"]}]}`)
+	deployment.Capabilities = []string{"embeddings"}
+	input := ModelOnboardingInput{Catalog: after, Deployments: []ModelDeployment{deployment}}
+	if _, err := router.PlanModelOnboarding(t.Context(), input); !errors.Is(err, ErrDeploymentExists) {
+		t.Fatalf("create-only plan accepted an existing deployment: %v", err)
+	}
+	input.UpdateExistingDeployments = true
+	plan, err := router.PlanModelOnboarding(t.Context(), input)
+	if err != nil || !slices.Contains(plan.Changes, "update deployment ollama-m") {
+		t.Fatalf("update plan=%+v err=%v", plan, err)
+	}
+	if current := router.catalog.Current(t.Context()); current.Version != "before" {
+		t.Fatalf("plan changed catalog: %+v", current)
+	}
+	duplicate := input
+	duplicate.Deployments = append(append([]ModelDeployment(nil), input.Deployments...), deployment)
+	if _, err := router.PlanModelOnboarding(t.Context(), duplicate); !errors.Is(err, ErrInvalidModelOnboarding) {
+		t.Fatalf("duplicate deployment plan error = %v", err)
+	}
+	store.mu.Lock()
+	store.saveErr = errors.New("database unavailable")
+	store.mu.Unlock()
+	if _, err := router.ApplyModelOnboarding(t.Context(), plan.Revision, input); err == nil {
+		t.Fatal("expected persistence failure")
+	}
+	if current := router.catalog.Current(t.Context()); current.Version != "before" {
+		t.Fatalf("failed apply leaked catalog: %+v", current)
+	}
+	if deployments := router.ListModelDeployments(t.Context()); len(deployments) != 1 || !slices.Equal(deployments[0].Capabilities, []string{"chat", "embeddings"}) {
+		t.Fatalf("failed apply leaked deployment: %+v", deployments)
+	}
+	store.mu.Lock()
+	store.saveErr = nil
+	store.mu.Unlock()
+	result, err := router.ApplyModelOnboarding(t.Context(), plan.Revision, input)
+	if err != nil || result.Revision != plan.Revision+1 {
+		t.Fatalf("apply result=%+v err=%v", result, err)
+	}
+	if current := router.catalog.Current(t.Context()); current.Version != "after" {
+		t.Fatalf("catalog was not updated: %+v", current)
+	}
+	if deployments := router.ListModelDeployments(t.Context()); len(deployments) != 1 || !slices.Equal(deployments[0].Capabilities, []string{"embeddings"}) {
+		t.Fatalf("deployment was not replaced: %+v", deployments)
+	}
+	request := openai.ChatCompletionRequest{Model: "m", Messages: []openai.Message{{Role: "user", Content: "hello"}}}
+	if _, err := router.ChatCompletions(t.Context(), modules.RequestContext{Request: request}); err == nil || upstreamCalls.Load() != 0 {
+		t.Fatalf("unsupported chat reached upstream: err=%v calls=%d", err, upstreamCalls.Load())
+	}
+	if _, err := router.ApplyModelOnboarding(t.Context(), plan.Revision, input); !errors.Is(err, ErrControlPlaneConflict) {
+		t.Fatalf("stale plan error = %v", err)
+	}
+	replicaRuntime, err := NewWithError(Config{CredentialEncryptionKey: []byte("stable-key"), ControlPlaneStore: store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	replica := replicaRuntime.(*Router)
+	if current := replica.catalog.Current(t.Context()); current.Version != "after" {
+		t.Fatalf("replica catalog=%+v", current)
+	}
+	if deployments := replica.ListModelDeployments(t.Context()); len(deployments) != 1 || !slices.Equal(deployments[0].Capabilities, []string{"embeddings"}) {
+		t.Fatalf("replica deployments=%+v", deployments)
 	}
 }
