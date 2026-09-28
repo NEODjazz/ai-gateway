@@ -57,6 +57,94 @@ func TestMissingDeploymentToolsDoesNotCallUpstream(t *testing.T) {
 	}
 }
 
+func TestMissingOperationCapabilitySkipsUpstream(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		capabilities []string
+		wantError    string
+		run          func(context.Context, *Router) (bool, error)
+	}{
+		{
+			name: "chat tools", capabilities: []string{"chat"}, wantError: "tools",
+			run: func(ctx context.Context, router *Router) (bool, error) {
+				request := openai.ChatCompletionRequest{Model: "public", Tools: []openai.Tool{{Type: "function", Function: openai.FunctionDefinition{Name: "lookup", Parameters: map[string]any{"type": "object"}}}}}
+				_, err := router.ChatCompletions(ctx, modules.RequestContext{Request: request})
+				return false, err
+			},
+		},
+		{
+			name: "responses", capabilities: []string{"chat"}, wantError: "responses",
+			run: func(ctx context.Context, router *Router) (bool, error) {
+				request := openai.ResponseRequest{Model: "public", Input: "hello"}
+				_, err := router.Responses(ctx, modules.RequestContext{Request: openai.ChatCompletionRequest{Model: "public"}, ResponseRequest: &request})
+				return false, err
+			},
+		},
+		{
+			name: "embeddings", capabilities: []string{"chat"}, wantError: "no embedding endpoint",
+			run: func(ctx context.Context, router *Router) (bool, error) {
+				request := openai.EmbeddingRequest{Model: "public", Input: "hello"}
+				_, err := router.Embeddings(ctx, modules.RequestContext{Request: openai.ChatCompletionRequest{Model: "public"}, EmbeddingRequest: &request})
+				return false, err
+			},
+		},
+		{
+			name: "native chat stream", capabilities: []string{"chat"},
+			run: func(ctx context.Context, router *Router) (bool, error) {
+				_, handled, err := router.StreamChatCompletions(ctx, modules.RequestContext{Request: openai.ChatCompletionRequest{Model: "public"}}, func(string) error { return nil })
+				return handled, err
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var calls atomic.Int32
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				calls.Add(1)
+				w.WriteHeader(http.StatusInternalServerError)
+			}))
+			t.Cleanup(upstream.Close)
+			router := New(Config{Endpoints: []config.ProviderEndpointConfig{{Name: "deployment", Type: "openai-compatible", BaseURL: upstream.URL, Models: []string{"public"}, Capabilities: test.capabilities}}}).(*Router)
+			handled, err := test.run(t.Context(), router)
+			if test.wantError != "" {
+				if err == nil || !strings.Contains(err.Error(), test.wantError) {
+					t.Fatalf("capability rejection = %v, want %q", err, test.wantError)
+				}
+			} else if err != nil || handled {
+				// The handler may synthesize SSE from a non-streaming Chat response.
+				// This native streaming route must not call the upstream itself.
+				t.Fatalf("native stream handled=%t err=%v", handled, err)
+			}
+			if got := calls.Load(); got != 0 {
+				t.Fatalf("upstream calls = %d, want 0", got)
+			}
+		})
+	}
+}
+
+func TestCatalogOmissionSkipsAliasedEmbeddingUpstream(t *testing.T) {
+	catalog, err := modelcatalog.Parse(`{"version":"v1","models":[{"provider":"deployment","model":"upstream","capabilities":["chat"]}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var calls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	t.Cleanup(upstream.Close)
+	router := New(Config{Catalog: catalog, Endpoints: []config.ProviderEndpointConfig{{
+		Name: "deployment", Type: "openai-compatible", BaseURL: upstream.URL,
+		Models: []string{"public"}, ModelAliases: map[string]string{"public": "upstream"}, Capabilities: []string{"chat", "embeddings"},
+	}}}).(*Router)
+	request := openai.EmbeddingRequest{Model: "public", Input: "hello"}
+	if _, err := router.Embeddings(t.Context(), modules.RequestContext{Request: openai.ChatCompletionRequest{Model: "public"}, EmbeddingRequest: &request}); err == nil || !strings.Contains(err.Error(), "no embedding endpoint") {
+		t.Fatalf("missing catalog capability was accepted: %v", err)
+	}
+	if got := calls.Load(); got != 0 {
+		t.Fatalf("upstream calls = %d, want 0", got)
+	}
+}
+
 func TestNoEndpointErrorDistinguishesModelAndCapability(t *testing.T) {
 	router := New(Config{Endpoints: []config.ProviderEndpointConfig{{Name: "chat-only", Type: "openai-compatible", BaseURL: "http://unused.invalid", Models: []string{"known"}, Capabilities: []string{"chat"}}}})
 	response := openai.ResponseRequest{Model: "known", Input: "hello"}
