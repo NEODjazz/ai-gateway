@@ -37,6 +37,8 @@ Gateway operational logs пишут фиксированный тип сбоя �
 также записывает только fingerprint внешнего request ID.
 Billing readiness возвращает только фиксированную причину недоступности,
 не раскрывая подробности подключения к хранилищу.
+Внутренний `/usage` Billing не переносит сырой `error` в metadata обработки;
+для диагностики сохраняются статус и ограниченный `failure_class`.
 
 Internal `/authorize`, `/usage`, `/scan`, `/anonymize` и `/internal/v1/*`
 должны оставаться cluster-internal. Service contracts защищаются отдельными
