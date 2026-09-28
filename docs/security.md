@@ -40,6 +40,9 @@ Billing readiness возвращает только фиксированную �
 не раскрывая подробности подключения к хранилищу.
 Внутренний `/usage` Billing не переносит сырой `error` в metadata обработки;
 для диагностики сохраняются статус и ограниченный `failure_class`.
+Новые ошибки доставки durable billing outbox записываются в PostgreSQL как
+ограниченные коды `event_decode_failed` или `usage_delivery_failed`. Ранее
+сохранённые значения `last_error` это изменение не переписывает.
 
 Internal `/authorize`, `/usage`, `/scan`, `/anonymize` и `/internal/v1/*`
 должны оставаться cluster-internal. Service contracts защищаются отдельными

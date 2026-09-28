@@ -165,11 +165,11 @@ func (r *PostgresOutboxRepository) DeliverOnce(ctx context.Context) (bool, error
 
 	var event BillingEvent
 	if err := json.Unmarshal(payload, &event); err != nil {
-		_ = r.deliveryFailed(ctx, id, attempts, "decode event: "+err.Error())
+		_ = r.deliveryFailed(ctx, id, attempts, "event_decode_failed")
 		return true, err
 	}
 	if err := r.writer.WriteUsageEvent(ctx, event); err != nil {
-		_ = r.deliveryFailed(ctx, id, attempts, err.Error())
+		_ = r.deliveryFailed(ctx, id, attempts, "usage_delivery_failed")
 		return true, err
 	}
 	_, err = r.pool.Exec(ctx, `

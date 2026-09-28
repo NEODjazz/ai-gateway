@@ -200,7 +200,7 @@ func TestPostgresOutboxSurvivesWorkerRestartAndDeliveryFailure(t *testing.T) {
 		_, _ = pool.Exec(ctx, `DELETE FROM billing_outbox WHERE event_id=$1`, id)
 		_, _ = pool.Exec(ctx, `DELETE FROM billing_event_ledger WHERE event_id=$1`, id)
 	})
-	first, err := NewPostgresOutboxRepository(dsn, failedUsageWriter{}, time.Hour)
+	first, err := NewPostgresOutboxRepository(dsn, sensitiveFailureUsageWriter{}, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,6 +212,11 @@ func TestPostgresOutboxSurvivesWorkerRestartAndDeliveryFailure(t *testing.T) {
 	if _, err := first.DeliverOnce(ctx); err == nil {
 		first.Close()
 		t.Fatal("failure not reported")
+	}
+	var lastError string
+	if err := pool.QueryRow(ctx, `SELECT last_error FROM billing_outbox WHERE event_id=$1`, id).Scan(&lastError); err != nil || lastError != "usage_delivery_failed" {
+		first.Close()
+		t.Fatalf("unsafe durable failure reason: %q, %v", lastError, err)
 	}
 	first.Close()
 	if _, err := pool.Exec(ctx, `UPDATE billing_outbox SET available_at=now(),locked_at=NULL WHERE event_id=$1`, id); err != nil {
@@ -236,6 +241,40 @@ func TestPostgresOutboxSurvivesWorkerRestartAndDeliveryFailure(t *testing.T) {
 	var delivered bool
 	if err := pool.QueryRow(ctx, `SELECT attempts,delivered_at IS NOT NULL FROM billing_outbox WHERE event_id=$1`, id).Scan(&attempts, &delivered); err != nil || attempts != 2 || !delivered {
 		t.Fatal("delivery state not durable")
+	}
+}
+
+type sensitiveFailureUsageWriter struct{}
+
+func (sensitiveFailureUsageWriter) WriteUsageEvent(context.Context, BillingEvent) error {
+	return errors.New("private prompt and credential")
+}
+
+func TestPostgresOutboxRedactsInvalidEventPayload(t *testing.T) {
+	pool := reliabilityTestPool(t)
+	ctx := context.Background()
+	id := "invalid-payload-" + time.Now().Format("150405.000000000")
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM billing_outbox WHERE event_id=$1`, id)
+		_, _ = pool.Exec(ctx, `DELETE FROM billing_event_ledger WHERE event_id=$1`, id)
+	})
+	if _, err := pool.Exec(ctx, `INSERT INTO billing_event_ledger (event_id,request_id,phase) VALUES ($1,$1,'commit')`, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO billing_outbox (event_id,payload) VALUES ($1,$2::jsonb)`, id, `"private prompt and credential"`); err != nil {
+		t.Fatal(err)
+	}
+	repository, err := NewPostgresOutboxRepository(os.Getenv("BILLING_POSTGRES_TEST_DSN"), NoopUsageEventWriter{}, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(repository.Close)
+	if delivered, err := repository.DeliverOnce(ctx); !delivered || err == nil {
+		t.Fatalf("invalid event was not rejected: delivered=%t err=%v", delivered, err)
+	}
+	var lastError string
+	if err := pool.QueryRow(ctx, `SELECT last_error FROM billing_outbox WHERE event_id=$1`, id).Scan(&lastError); err != nil || lastError != "event_decode_failed" {
+		t.Fatalf("unsafe durable decode reason: %q, %v", lastError, err)
 	}
 }
 
