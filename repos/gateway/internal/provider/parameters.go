@@ -114,6 +114,9 @@ func (Anthropic) ValidateResponseParameters(request openai.ResponseRequest) erro
 		if tool.Type != "function" {
 			return &Error{Class: FailureClientRequest, Provider: "anthropic", StatusCode: http.StatusBadRequest, UpstreamCode: "unsupported_parameter", Param: "tools", Err: fmt.Errorf("Responses tool type %q is not supported by this adapter", tool.Type)}
 		}
+		if tool.OutputSchema != nil {
+			return rejectParameters("anthropic", parameterCheck{"tools.output_schema", true})
+		}
 	}
 	_, verbositySupplied := openai.ResponseTextVerbosity(request.Text)
 	return rejectParameters("anthropic",

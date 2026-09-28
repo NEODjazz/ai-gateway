@@ -2187,6 +2187,9 @@ conversion. Validation runs before upstream HTTP execution in both JSON and SSE
 paths. Regression tests verify zero upstream calls for those inputs and continued
 acceptance of ordinary message input. Native Responses forwarding remains the
 path for upstreams that understand their own encrypted continuation context.
+Anthropic Chat and Responses function tools forward an explicit `strict` value to
+the native tool definition. Responses function `output_schema` is rejected before
+upstream execution because the adapter cannot preserve that output contract.
 
 ### Anthropic Responses tool history
 

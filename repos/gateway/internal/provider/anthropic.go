@@ -86,6 +86,7 @@ type anthropicTool struct {
 	Name              string                                  `json:"name,omitempty"`
 	Description       string                                  `json:"description,omitempty"`
 	InputSchema       any                                     `json:"input_schema,omitempty"`
+	Strict            *bool                                   `json:"strict,omitempty"`
 	MaxUses           int                                     `json:"max_uses,omitempty"`
 	UserLocation      *anthropicUserLocation                  `json:"user_location,omitempty"`
 	AllowedDomains    []string                                `json:"allowed_domains,omitempty"`
@@ -863,7 +864,7 @@ func anthropicChatTools(tools []openai.Tool, choice any) ([]anthropicTool, map[s
 		if schema == nil {
 			schema = map[string]any{"type": "object", "properties": map[string]any{}}
 		}
-		converted = append(converted, anthropicTool{Name: tool.Function.Name, Description: tool.Function.Description, InputSchema: schema, CacheControl: anthropicToolCacheControl(tool.Function.PromptCacheBreakpoint), DeferLoading: tool.Function.DeferLoading})
+		converted = append(converted, anthropicTool{Name: tool.Function.Name, Description: tool.Function.Description, InputSchema: schema, Strict: tool.Function.Strict, CacheControl: anthropicToolCacheControl(tool.Function.PromptCacheBreakpoint), DeferLoading: tool.Function.DeferLoading})
 	}
 	return applyAnthropicToolChoice(converted, choice)
 }
@@ -878,7 +879,7 @@ func anthropicResponseTools(tools []openai.ResponseTool, choice any) ([]anthropi
 		if schema == nil {
 			schema = map[string]any{"type": "object", "properties": map[string]any{}}
 		}
-		converted = append(converted, anthropicTool{Name: tool.Name, Description: tool.Description, InputSchema: schema})
+		converted = append(converted, anthropicTool{Name: tool.Name, Description: tool.Description, InputSchema: schema, Strict: tool.Strict})
 	}
 	return applyAnthropicToolChoice(converted, choice)
 }
