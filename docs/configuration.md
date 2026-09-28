@@ -366,6 +366,8 @@ ClickHouse username/password и service/management shared secrets должны
 ноль; запасная оценка применяется только при отсутствующем или неполном usage.
 Сервис billing использует переданный Gateway признак `usage_estimated`, чтобы
 отличить эти случаи.
+При отмене клиентского запроса Gateway отправляет `cancel` для активного budget
+reserve с отдельным ограниченным по времени context, чтобы снять резерв до TTL.
 
 ## Anonymizer, DLP и AV
 

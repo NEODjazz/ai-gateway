@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"time"
 
 	"ai-gateway-gateway/internal/openai"
 	"go.opentelemetry.io/otel/trace"
@@ -107,7 +108,10 @@ func (m RemoteBillingModule) HandleFailure(ctx context.Context, req *RequestCont
 	}
 	req.Metadata["provider.status"] = "error"
 	req.Metadata["provider.error"] = cause.Error()
-	return m.send(ctx, req, "cancel")
+	// Releasing a budget reservation must survive cancellation of the client request.
+	cancelCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+	defer cancel()
+	return m.send(cancelCtx, req, "cancel")
 }
 
 func (m RemoteBillingModule) send(ctx context.Context, req *RequestContext, phase string) error {

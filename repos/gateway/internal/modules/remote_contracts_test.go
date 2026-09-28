@@ -288,6 +288,35 @@ func TestRemoteBillingLifecyclePhases(t *testing.T) {
 	}
 }
 
+func TestRemoteBillingCancelsReservationAfterClientCancellation(t *testing.T) {
+	phases := make(chan UsageRequest, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request UsageRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+			http.Error(w, "invalid request", http.StatusBadRequest)
+			return
+		}
+		phases <- request
+		_ = json.NewEncoder(w).Encode(UsageResponse{})
+	}))
+	t.Cleanup(server.Close)
+	module := NewRemoteBillingModule(true, server.URL)
+	req := RequestContext{RequestID: "execution-canceled", Request: openai.ChatCompletionRequest{Model: "model"}}
+	if err := module.Handle(t.Context(), &req); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := module.HandleFailure(ctx, &req, context.Canceled); err != nil {
+		t.Fatalf("billing reservation was not canceled: %v", err)
+	}
+	reserve, cancelRequest := <-phases, <-phases
+	if reserve.Phase != "reserve" || cancelRequest.Phase != "cancel" || reserve.RequestID != cancelRequest.RequestID {
+		t.Fatalf("unexpected billing phases: reserve=%+v cancel=%+v", reserve, cancelRequest)
+	}
+}
+
 func TestRemoteBillingCarriesOnlyValidatedRuntimePricingFields(t *testing.T) {
 	req := sensitiveContext()
 	if req.Metadata == nil {
