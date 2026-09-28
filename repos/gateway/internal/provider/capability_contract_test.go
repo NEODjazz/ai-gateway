@@ -158,6 +158,67 @@ func TestNoEndpointErrorDistinguishesModelAndCapability(t *testing.T) {
 	}
 }
 
+func TestOtherInferenceRoutesExplainCapabilityMismatch(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		capability string
+		allowed    []string
+		run        func(context.Context, *Router, string) error
+	}{
+		{
+			name: "embeddings", capability: "embeddings", allowed: []string{"chat"},
+			run: func(ctx context.Context, router *Router, model string) error {
+				request := openai.EmbeddingRequest{Model: model, Input: "hello"}
+				_, err := router.Embeddings(ctx, modules.RequestContext{Request: openai.ChatCompletionRequest{Model: model}, EmbeddingRequest: &request})
+				return err
+			},
+		},
+		{
+			name: "rerank", capability: "rerank", allowed: []string{"chat"},
+			run: func(ctx context.Context, router *Router, model string) error {
+				request := openai.RerankRequest{Model: model, Query: "hello", Documents: []any{"document"}}
+				_, err := router.Rerank(ctx, modules.RequestContext{Request: openai.ChatCompletionRequest{Model: model}, RerankRequest: &request})
+				return err
+			},
+		},
+		{
+			name: "moderation", capability: "moderation", allowed: []string{"chat"},
+			run: func(ctx context.Context, router *Router, model string) error {
+				request := openai.ModerationRequest{Model: model, Input: "hello"}
+				_, err := router.Moderations(ctx, modules.RequestContext{Request: openai.ChatCompletionRequest{Model: model}, ModerationRequest: &request})
+				return err
+			},
+		},
+		{
+			name: "completions", capability: "chat", allowed: []string{"embeddings"},
+			run: func(ctx context.Context, router *Router, model string) error {
+				request := openai.CompletionRequest{Model: model, Prompt: "hello"}
+				_, err := router.Completions(ctx, modules.RequestContext{Request: openai.ChatCompletionRequest{Model: model, Messages: []openai.Message{{Role: "user", Content: "hello"}}}, CompletionRequest: &request})
+				return err
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var calls atomic.Int32
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				calls.Add(1)
+				w.WriteHeader(http.StatusInternalServerError)
+			}))
+			t.Cleanup(upstream.Close)
+			router := New(Config{Endpoints: []config.ProviderEndpointConfig{{Name: "deployment", Type: "openai-compatible", BaseURL: upstream.URL, Models: []string{"known"}, Capabilities: test.allowed}}}).(*Router)
+			if err := test.run(t.Context(), router, "known"); err == nil || !strings.Contains(err.Error(), "required capabilities unavailable") || !strings.Contains(err.Error(), test.capability) {
+				t.Fatalf("missing capability was not explained: %v", err)
+			}
+			if err := test.run(t.Context(), router, "missing"); err == nil || strings.Contains(err.Error(), "required capabilities unavailable") {
+				t.Fatalf("unknown model was mislabeled: %v", err)
+			}
+			if got := calls.Load(); got != 0 {
+				t.Fatalf("upstream calls = %d, want 0", got)
+			}
+		})
+	}
+}
+
 func TestCatalogCannotExpandDeploymentCapabilities(t *testing.T) {
 	catalog, err := modelcatalog.Parse(`{"version":"v1","models":[{"provider":"endpoint","model":"m","capabilities":["chat","stream","embeddings","tools"]}]}`)
 	if err != nil {

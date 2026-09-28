@@ -139,6 +139,9 @@ func (r Router) Completions(ctx context.Context, req modules.RequestContext) (op
 	}
 	candidates := r.routeCandidates(ctx, req, req.Request, "chat")
 	if len(candidates) == 0 {
+		if r.routeCapabilityMismatch(ctx, req.Request, "chat") {
+			return openai.CompletionResponse{}, fmt.Errorf("no completion endpoint for provider=%q model=%q: required capabilities unavailable (chat)", request.Provider, request.Model)
+		}
 		return openai.CompletionResponse{}, fmt.Errorf("no completion endpoint for provider=%q model=%q", request.Provider, request.Model)
 	}
 	implemented := candidates[:0]

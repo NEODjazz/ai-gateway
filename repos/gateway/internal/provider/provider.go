@@ -1286,6 +1286,9 @@ func (r Router) Embeddings(ctx context.Context, req modules.RequestContext) (ope
 	request := *req.EmbeddingRequest
 	candidates := r.routeCandidates(ctx, req, openai.ChatCompletionRequest{Provider: request.Provider, Model: request.Model}, "embeddings")
 	if len(candidates) == 0 {
+		if r.routeCapabilityMismatch(ctx, openai.ChatCompletionRequest{Provider: request.Provider, Model: request.Model}, "embeddings") {
+			return openai.EmbeddingResponse{}, fmt.Errorf("no embedding endpoint for provider=%q model=%q: required capabilities unavailable (embeddings)", request.Provider, request.Model)
+		}
 		return openai.EmbeddingResponse{}, fmt.Errorf("no embedding endpoint for provider=%q model=%q", request.Provider, request.Model)
 	}
 
@@ -1386,6 +1389,9 @@ func (r Router) Rerank(ctx context.Context, req modules.RequestContext) (openai.
 	request := *req.RerankRequest
 	candidates := r.routeCandidates(ctx, req, openai.ChatCompletionRequest{Provider: request.Provider, Model: request.Model}, "rerank")
 	if len(candidates) == 0 {
+		if r.routeCapabilityMismatch(ctx, openai.ChatCompletionRequest{Provider: request.Provider, Model: request.Model}, "rerank") {
+			return openai.RerankResponse{}, fmt.Errorf("no rerank endpoint for provider=%q model=%q: required capabilities unavailable (rerank)", request.Provider, request.Model)
+		}
 		return openai.RerankResponse{}, fmt.Errorf("no rerank endpoint for provider=%q model=%q", request.Provider, request.Model)
 	}
 	var errs []error
@@ -1485,6 +1491,9 @@ func (r Router) Moderations(ctx context.Context, req modules.RequestContext) (op
 	request := *req.ModerationRequest
 	candidates := r.routeCandidates(ctx, req, openai.ChatCompletionRequest{Provider: request.Provider, Model: request.Model}, "moderation")
 	if len(candidates) == 0 {
+		if r.routeCapabilityMismatch(ctx, openai.ChatCompletionRequest{Provider: request.Provider, Model: request.Model}, "moderation") {
+			return openai.ModerationResponse{}, fmt.Errorf("no moderation endpoint for provider=%q model=%q: required capabilities unavailable (moderation)", request.Provider, request.Model)
+		}
 		return openai.ModerationResponse{}, fmt.Errorf("no moderation endpoint for provider=%q model=%q", request.Provider, request.Model)
 	}
 	_, err := openai.InspectModerationInput(request.Input)
