@@ -510,7 +510,9 @@ managed deployment capability `web_search` разрешён для Foundry proje
 `responses`, но Chat-запросы с веб-поиском не выбирают этот deployment.
 Foundry project endpoints не принимают `embeddings`: managed deployment с этой
 capability отклоняется при настройке, а legacy startup endpoint исключается из
-маршрутизации embeddings. Для embeddings используется Azure OpenAI resource URL.
+маршрутизации embeddings. UI onboarding и редактирования deployment скрывает
+эту capability для project URL, в том числе за reverse proxy. Для embeddings
+используется Azure OpenAI resource URL.
 Azure Responses отклоняет `tools.output_schema` до upstream-вызова: этот
 параметр отсутствует во входном function tool контракте Azure. Схема аргументов
 function tool передаётся через `tools.parameters`.

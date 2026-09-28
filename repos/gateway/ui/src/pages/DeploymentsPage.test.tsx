@@ -9,6 +9,25 @@ function response(value: unknown) {
 }
 
 describe("DeploymentsPage", () => {
+  it("does not offer embeddings when editing a Foundry project deployment", async () => {
+    const deployment = { id: "project-chat", provider_id: "project", provider_type: "azure-openai", upstream_model: "model-a", models: ["model-a"], capabilities: ["chat"], priority: 0, weight: 1, enabled: true, runtime_state: "available" };
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const path = String(input);
+      if (path.startsWith("/admin/v1/model-deployments?")) return response({ data: [deployment], total: 1 });
+      if (path === "/admin/v1/provider-capabilities") return response({ data: [{ type: "azure-openai", capabilities: ["chat", "embeddings"] }] });
+      if (path === "/admin/v1/providers") return response({ data: [{ id: "project", base_url: "https://proxy.example.test/api/projects/project-a" }] });
+      return response({ data: [] });
+    });
+    sessionStorage.setItem("ai-gateway.admin-token", "token");
+    render(<MemoryRouter><AuthProvider><DeploymentsPage /></AuthProvider></MemoryRouter>);
+    await screen.findByText("project-chat");
+    await userEvent.click(screen.getByRole("button", { name: "Actions for project-chat" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
+    const edit = await screen.findByRole("dialog", { name: "Edit project-chat" });
+    await userEvent.click(within(edit).getByLabelText("Capabilities"));
+    expect(within(edit).queryByRole("option", { name: /Embeddings/ })).not.toBeInTheDocument();
+  });
+
   it("shows health details, runs checks and pauses a deployment", async () => {
     const deployment = { id: "azure-gpt", provider_id: "azure", credential_id: "azure-key", provider_type: "openai-compatible", upstream_model: "gpt-versioned", models: ["gpt"], capabilities: ["chat"], priority: 0, weight: 1, rate_limit_rpm: 120, rate_limit_tpm: 64000, enabled: true, runtime_state: "available", latency_ewma_ms: 100, failure_ewma: 0.01 };
     const check = { deployment_id: "azure-gpt", provider_id: "azure", model: "gpt-versioned", status: "available", latency_ms: 42, checked_at: "2026-08-27T18:00:00Z" };

@@ -77,10 +77,15 @@ export const modelCapabilityOptions: ChipOption[] = [
   { value: "file_input", label: "File input", description: "Bounded inline PDF input" }
 ];
 
-export function providerModelCapabilityOptions(capabilities?: string[]): ChipOption[] {
-  if (!capabilities) return modelCapabilityOptions;
-  const supported = new Set(capabilities);
-  return modelCapabilityOptions.filter(({ value }) => supported.has(value));
+export function providerModelCapabilityOptions(capabilities?: string[], providerType?: string, baseURL?: string): ChipOption[] {
+  const supported = capabilities && new Set(capabilities);
+  let foundryProject = false;
+  if (providerType === "azure-openai" && baseURL) {
+    try {
+      foundryProject = /(?:^|\/)api\/projects\/[^/]+(?:\/openai\/v1)?\/?$/.test(new URL(baseURL).pathname);
+    } catch { /* Invalid URLs are rejected by the provider form. */ }
+  }
+  return modelCapabilityOptions.filter(({ value }) => (!supported || supported.has(value)) && !(foundryProject && value === "embeddings"));
 }
 
 export function defaultModelCapabilities(providerType: string): string[] {

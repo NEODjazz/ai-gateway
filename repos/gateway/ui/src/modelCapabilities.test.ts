@@ -102,4 +102,12 @@ describe("modelCapabilityOptions", () => {
     const values = providerModelCapabilityOptions(["embeddings", "rerank"]).map(({ value }) => value);
     expect(values).toEqual(["embeddings", "rerank"]);
   });
+
+  it("omits embeddings for Azure Foundry project URLs behind proxy prefixes", () => {
+    const supported = ["chat", "responses", "embeddings"];
+    for (const path of ["/api/projects/project-a", "/tenant/api/projects/project-a/openai/v1"]) {
+      expect(providerModelCapabilityOptions(supported, "azure-openai", `https://proxy.example.test${path}`).map(({ value }) => value)).toEqual(["chat", "responses"]);
+    }
+    expect(providerModelCapabilityOptions(supported, "azure-openai", "https://proxy.example.test/tenant/openai/v1").map(({ value }) => value)).toEqual(supported);
+  });
 });

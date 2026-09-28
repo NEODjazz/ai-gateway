@@ -9,12 +9,12 @@ function json(value: unknown, status = 200) {
 }
 
 describe("ModelOnboardingPage", () => {
-  it("requires explicit Azure capabilities and prices during Foundry onboarding", async () => {
+  it("requires explicit Azure capabilities and prices during resource onboarding", async () => {
     const plans: Array<{ deployments: Array<{ capabilities: string[] }>; catalog: { models: Array<{ input_cost_per_1m: number; output_cost_per_1m: number; currency: string }> } }> = [];
     const applied: Array<{ catalog: { models: Array<{ input_cost_per_1m: number; output_cost_per_1m: number; currency: string }> } }> = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, options) => {
       const path = String(input);
-      if (!options?.method && path === "/admin/v1/providers") return json({ data: [{ id: "foundry", type: "azure-openai", base_url: "https://example.services.ai.azure.com/api/projects/project-a", auth_type: "entra", enabled: true }] });
+      if (!options?.method && path === "/admin/v1/providers") return json({ data: [{ id: "foundry", type: "azure-openai", base_url: "https://example.services.ai.azure.com/openai/v1", auth_type: "entra", enabled: true }] });
       if (!options?.method && path === "/admin/v1/credentials") return json({ data: [] });
       if (!options?.method && path === "/admin/v1/model-catalog") return json({ version: "v1", models: [] });
       if (!options?.method && path === "/admin/v1/model-groups") return json({ data: [] });
@@ -57,6 +57,37 @@ describe("ModelOnboardingPage", () => {
     await userEvent.click(screen.getByRole("button", { name: "Apply configuration" }));
     expect(await screen.findByText("Onboarding complete")).toBeInTheDocument();
     expect(applied[0].catalog.models[0]).toMatchObject({ provider: "foundry-deploy-a", input_cost_per_1m: 0.2, output_cost_per_1m: 0, currency: "USD" });
+  });
+
+  it("does not offer project embeddings or keep an unsupported discovery suggestion", async () => {
+    let plannedCapabilities: string[] | undefined;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, options) => {
+      const path = String(input);
+      if (!options?.method && path === "/admin/v1/providers") return json({ data: [{ id: "project", type: "azure-openai", base_url: "https://proxy.example.test/tenant/api/projects/project-a/openai/v1", auth_type: "entra", enabled: true }] });
+      if (!options?.method && path === "/admin/v1/credentials") return json({ data: [] });
+      if (!options?.method && path === "/admin/v1/model-catalog") return json({ version: "v1", models: [] });
+      if (!options?.method && path === "/admin/v1/model-groups") return json({ data: [] });
+      if (!options?.method && path === "/admin/v1/provider-capabilities") return json({ data: [{ type: "azure-openai", capabilities: ["chat", "embeddings"] }] });
+      if (path.endsWith("/test")) return json({ status: "available", latency_ms: 1, model_count: 1 });
+      if (path.endsWith("/discover-models")) return json({ data: [{ id: "deployment-a", capabilities: ["chat", "embeddings"] }] });
+      if (path === "/admin/v1/model-onboarding/plan") {
+        plannedCapabilities = JSON.parse(String(options?.body)).deployments[0].capabilities;
+        return json({ revision: 1, catalog_version: "v1", deployments: [], model_groups: [], changes: [] });
+      }
+      return json({ error: { message: `Unexpected ${path}` } }, 500);
+    });
+    sessionStorage.setItem("ai-gateway.admin-token", "token");
+    render(<MemoryRouter><AuthProvider><ModelOnboardingPage /></AuthProvider></MemoryRouter>);
+    await screen.findByRole("option", { name: "project — azure-openai" });
+    await userEvent.click(screen.getByRole("button", { name: "Test & discover models" }));
+    await screen.findByText("deployment-a");
+    await userEvent.click(screen.getByRole("checkbox"));
+    await userEvent.click(screen.getByLabelText("Capabilities deployment-a"));
+    expect(screen.queryByRole("option", { name: /Embeddings/ })).not.toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText("Input cost deployment-a"), "0.1");
+    await userEvent.type(screen.getByLabelText("Output cost deployment-a"), "0.2");
+    await userEvent.click(screen.getByRole("button", { name: "Review 1 model(s)" }));
+    await waitFor(() => expect(plannedCapabilities).toEqual(["chat"]));
   });
 
   it("keeps distinct deployment prices for one public model", async () => {

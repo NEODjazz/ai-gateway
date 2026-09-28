@@ -103,7 +103,7 @@ export function ModelOnboardingPage() {
   const selectedProvider = providers.find((provider) => provider.id === providerID);
   const selectedProviderType = selectedProvider?.type || newProvider.type;
   const manualProvider = selectedProviderType === "vertex-gemini";
-  const capabilityOptions = providerModelCapabilityOptions(providerCapabilities[selectedProviderType]);
+  const capabilityOptions = providerModelCapabilityOptions(providerCapabilities[selectedProviderType], selectedProviderType, selectedProvider?.base_url || newProvider.base_url);
   const newProviderAuthTypes = providerAuthTypes[newProvider.type] ?? defaultProviderAuthTypes(newProvider.type);
   const availableCredentials = manualProvider ? [] : credentials.filter((credential) => !credential.provider_id || credential.provider_id === providerID);
   const selectedCandidates = candidates.filter((candidate) => candidate.selected);
@@ -157,7 +157,8 @@ export function ModelOnboardingPage() {
         client.request<{ data?: Array<{ id: string; capabilities?: string[]; model_name?: string; model_publisher?: string }> }>(`/admin/v1/providers/${encodeURIComponent(selected.providerID)}/discover-models`, { method: "POST", body })
       ]);
       setProbe(probeResult);
-      setCandidates((discovery.data || []).map(({ id, capabilities, model_name, model_publisher }) => ({ upstream: id, modelName: model_name, publisher: model_publisher, selected: false, publicModel: id, deploymentID: safeID(`${selected.providerID}-${id}`), capabilities: requiresVerifiedCapabilities(selected.providerType) ? capabilities || [] : defaultModelCapabilities(selected.providerType), inputCost: "", outputCost: "", currency: "USD" })));
+      const allowedCapabilities = new Set(capabilityOptions.map((option) => option.value));
+      setCandidates((discovery.data || []).map(({ id, capabilities, model_name, model_publisher }) => ({ upstream: id, modelName: model_name, publisher: model_publisher, selected: false, publicModel: id, deploymentID: safeID(`${selected.providerID}-${id}`), capabilities: (requiresVerifiedCapabilities(selected.providerType) ? capabilities || [] : defaultModelCapabilities(selected.providerType)).filter((capability) => allowedCapabilities.has(capability)), inputCost: "", outputCost: "", currency: "USD" })));
       setStep(2);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Provider discovery failed"); }
     finally { setBusy(false); }
