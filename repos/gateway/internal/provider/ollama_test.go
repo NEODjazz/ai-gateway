@@ -1204,8 +1204,8 @@ func TestOllamaStreamsNativeToolCalls(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&upstream); err != nil {
 			t.Fatal(err)
 		}
-		_, _ = w.Write([]byte("{\"model\":\"llama3.2:latest\",\"message\":{\"role\":\"assistant\",\"tool_calls\":[{\"function\":{\"name\":\"weather.get\",\"arguments\":{\"city\":\"Moscow\"}}}]}}\n"))
-		_, _ = w.Write([]byte("{\"model\":\"llama3.2:latest\",\"done\":true,\"done_reason\":\"stop\",\"prompt_eval_count\":2,\"eval_count\":1}\n"))
+		_, _ = w.Write([]byte("{\"model\":\"test-model\",\"message\":{\"role\":\"assistant\",\"tool_calls\":[{\"function\":{\"name\":\"weather.get\",\"arguments\":{\"city\":\"Moscow\"}}}]}}\n"))
+		_, _ = w.Write([]byte("{\"model\":\"test-model\",\"done\":true,\"done_reason\":\"stop\",\"prompt_eval_count\":2,\"eval_count\":1}\n"))
 	}))
 	defer server.Close()
 
@@ -1213,7 +1213,7 @@ func TestOllamaStreamsNativeToolCalls(t *testing.T) {
 	topK := 20
 	minP := 0.1
 	response, err := NewOllama(server.URL, true).StreamChatCompletions(context.Background(), openai.ChatCompletionRequest{
-		Model: "llama3.2:latest", Stream: true, Messages: []openai.Message{{Role: "user", Content: "weather"}},
+		Model: "test-model", Stream: true, Messages: []openai.Message{{Role: "user", Content: "weather"}},
 		Tools:                 []openai.Tool{{Type: "function", Function: openai.FunctionDefinition{Name: "weather.get"}}},
 		ChatGenerationOptions: openai.ChatGenerationOptions{TopK: &topK, MinP: &minP, ReasoningEffort: "none"},
 	}, func(payload string) error {

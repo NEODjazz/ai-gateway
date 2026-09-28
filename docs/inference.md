@@ -548,6 +548,13 @@ that reaches the model. This helps guide tool calls but does not enforce numeric
 bounds on generated arguments. Unsupported keywords such as
 `additionalProperties` and `const`, malformed bounds, and the function `strict`
 control fail before upstream execution.
+The local `llama3.2` tool template can return a complete
+`{"name":"...","parameters":{...}}` object as assistant text instead of a
+native tool call. For this model, the adapter converts that exact shape into a
+tool call only when the function was declared and its parameters are a JSON
+object. Tool-enabled streams use the existing buffered SSE fallback so the
+complete response can be checked before any text is sent. Malformed JSON and
+ordinary prose remain assistant text.
 Ollama Responses function tools reject `output_schema` before upstream execution
 because its tool contract does not preserve that control.
 Chat response formats are limited to text, JSON object, or a supplied JSON Schema;

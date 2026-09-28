@@ -249,6 +249,9 @@ func (p Ollama) ChatCompletions(ctx context.Context, request openai.ChatCompleti
 	if err := openai.ValidateChatReasoningContent(message.Role, message.ReasoningContent); err != nil {
 		return openai.ChatCompletionResponse{}, fmt.Errorf("invalid Ollama chat reasoning content: %w", err)
 	}
+	if ollamaTextToolCallsEnabled(request.Model) {
+		promoteOllamaTextToolCall(&message, tools)
+	}
 	normalizeOllamaToolCalls(&message)
 	if err := validateOllamaResponseToolCalls(message.ToolCalls, tools, nil); err != nil {
 		return openai.ChatCompletionResponse{}, err
@@ -336,6 +339,11 @@ func (p Ollama) Embeddings(ctx context.Context, request openai.EmbeddingRequest)
 func (p Ollama) StreamChatCompletions(ctx context.Context, request openai.ChatCompletionRequest, write ChatCompletionStreamWriter) (openai.ChatCompletionResponse, error) {
 	if err := p.ValidateChatParameters(request); err != nil {
 		return openai.ChatCompletionResponse{}, err
+	}
+	if ollamaTextToolCallsEnabled(request.Model) && len(ollamaChatTools(request)) > 0 {
+		// This model's tool template emits JSON text. The normal path must see
+		// the complete message before it can safely identify a tool call.
+		return openai.ChatCompletionResponse{}, ErrStreamingUnsupported
 	}
 	if !p.upstreamStream {
 		return openai.ChatCompletionResponse{}, ErrStreamingUnsupported
