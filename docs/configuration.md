@@ -372,6 +372,8 @@ reserve с отдельным ограниченным по времени conte
 reserve отменяется перед возвратом ошибки.
 Если проверка формы prompt или права сохранения Responses отклоняет запрос после
 reserve, Gateway также отправляет `cancel` до возврата ошибки клиенту.
+То же правило действует при preflight-отказе Embeddings, Rerank и Moderations,
+включая failover на следующий endpoint.
 Billing-запрос передает статус и класс сбоя, но не сырой текст ошибки провайдера.
 
 ## Anonymizer, DLP и AV
