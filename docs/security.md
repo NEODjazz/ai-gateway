@@ -29,6 +29,8 @@ allowlist полей и не могут перезаписать identity или
 копируются в metadata, передаваемую последующим модулям или сохраняемую в
 background jobs. Provider и module traces, а также логи ошибок provider
 worker, cache и optional modules, не записывают сырой текст ошибки.
+Это также относится к optional modules сервисов Auth, Billing и Anonymizer:
+их журналы содержат имя модуля и факт пропуска, но не текст ошибки.
 Gateway operational logs пишут фиксированный тип сбоя без пользовательских
 идентификаторов и raw error; внешний `X-Request-ID` в HTTP-логах и traces
 представлен SHA-256 fingerprint.
