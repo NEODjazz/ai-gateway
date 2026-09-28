@@ -521,6 +521,8 @@ and reasoning blocks fail before provider execution instead of being dropped.
 Function tools sent through native Ollama Chat accept only the schema fields its
 tool contract can preserve; unsupported keywords such as `additionalProperties`
 and `const`, and the function `strict` control, fail before upstream execution.
+Ollama Responses function tools reject `output_schema` before upstream execution
+because its tool contract does not preserve that control.
 Chat response formats are limited to text, JSON object, or a supplied JSON Schema;
 unmappable formats and `strict=false` fail before provider execution.
 Native Chat preserves `prompt_eval_cached_count` as cached input-token detail

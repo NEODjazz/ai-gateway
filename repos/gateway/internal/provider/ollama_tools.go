@@ -34,6 +34,9 @@ func validateOllamaResponseTools(tools []openai.ResponseTool) error {
 		if tool.Type != "function" {
 			continue
 		}
+		if tool.OutputSchema != nil {
+			return ollamaToolParameterError("tools.output_schema", fmt.Sprintf("tool %d has unsupported output schema", index))
+		}
 		if tool.Strict != nil {
 			return ollamaToolParameterError("tools.strict", fmt.Sprintf("tool %d has unsupported strict control", index))
 		}

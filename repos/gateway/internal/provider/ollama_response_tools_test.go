@@ -28,6 +28,7 @@ func TestOllamaResponsesRejectUnsupportedFunctionToolControls(t *testing.T) {
 	}{
 		{name: "strict", tool: openai.ResponseTool{Type: "function", Name: "lookup", Strict: &strict}, param: "tools.strict"},
 		{name: "strict false", tool: openai.ResponseTool{Type: "function", Name: "lookup", Strict: &strictFalse}, param: "tools.strict"},
+		{name: "output schema", tool: openai.ResponseTool{Type: "function", Name: "lookup", OutputSchema: map[string]any{"type": "object"}}, param: "tools.output_schema"},
 		{name: "unsupported schema", tool: openai.ResponseTool{Type: "function", Name: "lookup", Parameters: map[string]any{"type": "object", "additionalProperties": false}}, param: "tools.parameters"},
 		{name: "malformed schema", tool: openai.ResponseTool{Type: "function", Name: "lookup", Parameters: map[string]any{"type": "object", "properties": map[string]any{"city": map[string]any{"type": []any{"string", "string"}}}}}, param: "tools.parameters"},
 	} {
