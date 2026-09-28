@@ -639,6 +639,13 @@ func (p OpenAICompatible) ValidateResponseParameters(request openai.ResponseRequ
 		return &Error{Class: FailureClientRequest, Provider: p.providerName(), StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: fmt.Errorf("%s", message)}
 	}
 	providerName := p.providerName()
+	if providerName == "azure-openai" {
+		for _, tool := range request.Tools {
+			if tool.OutputSchema != nil {
+				return rejectParameters(providerName, parameterCheck{"tools.output_schema", true})
+			}
+		}
+	}
 	if !p.SupportsResponseWebSearch() {
 		for _, tool := range request.Tools {
 			if openai.IsResponseWebSearchTool(tool.Type) {

@@ -579,6 +579,31 @@ func TestAzureResponsesPreserveEchoedFunctionOutputSchema(t *testing.T) {
 	}
 }
 
+func TestAzureResponsesRejectFunctionOutputSchemaBeforeUpstream(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	t.Cleanup(server.Close)
+	client := NewAzureOpenAI(server.URL, "test-key", true, "", "api_key")
+	request := openai.ResponseRequest{Model: "deployment", Input: "lookup", Tools: []openai.ResponseTool{{
+		Type: "function", Name: "lookup", Parameters: map[string]any{"type": "object"}, OutputSchema: map[string]any{"type": "object"},
+	}}}
+	for _, stream := range []bool{false, true} {
+		var err error
+		if stream {
+			_, err = client.StreamResponses(t.Context(), request, nil)
+		} else {
+			_, err = client.Responses(t.Context(), request)
+		}
+		var failure *Error
+		if !errors.As(err, &failure) || failure.UpstreamCode != "unsupported_parameter" || failure.Param != "tools.output_schema" || calls.Load() != 0 {
+			t.Fatalf("stream=%t, upstream calls=%d, error=%v", stream, calls.Load(), err)
+		}
+	}
+}
+
 func TestAzureResponsesPreserveNonDeferredFunction(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var request struct {
