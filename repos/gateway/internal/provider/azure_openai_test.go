@@ -1132,6 +1132,7 @@ func TestConfiguredAzureVersionedRootUsesDeploymentRoute(t *testing.T) {
 		{name: "API key", authType: "api_key", wantPath: "/openai/deployments/upstream-deployment/chat/completions", model: "public-model", models: []string{"public-model"}, aliases: map[string]string{"public-model": "upstream-deployment"}},
 		{name: "Entra with reverse proxy", authType: "entra", basePath: "/tenant-a/openai/v1", wantPath: "/tenant-a/openai/deployments/upstream-deployment/chat/completions", model: "public-model", models: []string{"public-model"}, aliases: map[string]string{"public-model": "upstream-deployment"}},
 		{name: "shared deployment aliases", authType: "api_key", wantPath: "/openai/deployments/upstream-deployment/chat/completions", model: "public-two", models: []string{"public-one", "public-two"}, aliases: map[string]string{"public-one": "upstream-deployment", "public-two": "upstream-deployment"}},
+		{name: "explicit deployment URL", authType: "api_key", basePath: "/openai/deployments/upstream-deployment", wantPath: "/openai/deployments/upstream-deployment/chat/completions", model: "public-model", models: []string{"public-model"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1170,6 +1171,51 @@ func TestConfiguredAzureVersionedRootUsesDeploymentRoute(t *testing.T) {
 	}
 }
 
+func TestManagedAzureExplicitDeploymentUsesURLModel(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/openai/deployments/deployment-a/chat/completions" || r.URL.Query().Get("api-version") != "2024-10-21" {
+			t.Errorf("unexpected Azure route: %s", r.URL)
+			http.NotFound(w, r)
+			return
+		}
+		var request openai.ChatCompletionRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request.Model != "deployment-a" {
+			t.Errorf("unexpected Azure request model: %q, err=%v", request.Model, err)
+		}
+		_ = json.NewEncoder(w).Encode(openai.ChatCompletionResponse{
+			ID: "chat-azure", Model: "deployment-a", Choices: []openai.Choice{{Index: 0, Message: openai.Message{Role: "assistant", Content: "hello"}, FinishReason: "stop"}},
+			Usage: openai.Usage{PromptTokens: 2, CompletionTokens: 1, TotalTokens: 3},
+		})
+	}))
+	t.Cleanup(server.Close)
+	router := New(Config{CredentialEncryptionKey: []byte("azure-explicit-deployment-key")}).(*Router)
+	if _, err := router.CreateProvider(ManagedProvider{ID: "azure", Type: "azure-openai", BaseURL: server.URL + "/openai/deployments/deployment-a", APIVersion: "2024-10-21", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := router.CreateCredential(CredentialInput{ID: "azure-key", ProviderID: "azure", Secret: "test-key"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := router.CreateModelDeployment(ModelDeployment{ID: "azure-deployment", ProviderID: "azure", CredentialID: "azure-key", Models: []string{"public-model"}, Capabilities: []string{"chat"}, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	response, err := router.ChatCompletions(t.Context(), modules.RequestContext{Request: openai.ChatCompletionRequest{Provider: "azure-deployment", Model: "public-model", Messages: []openai.Message{{Role: "user", Content: "hello"}}}})
+	if err != nil || response.Usage.TotalTokens != 3 {
+		t.Fatalf("Azure response=%+v err=%v", response, err)
+	}
+	if _, err := router.CreateModelDeployment(ModelDeployment{ID: "conflicting-deployment", ProviderID: "azure", CredentialID: "azure-key", Models: []string{"public-other"}, UpstreamModel: "deployment-b", Capabilities: []string{"chat"}, Enabled: true}); !errors.Is(err, ErrInvalidDeployment) {
+		t.Fatalf("conflicting deployment URL and upstream model accepted: %v", err)
+	}
+}
+
+func TestConfiguredAzureExplicitDeploymentRejectsConflictingAlias(t *testing.T) {
+	_, err := NewWithError(Config{Endpoints: []config.ProviderEndpointConfig{{
+		Name: "azure-static", Type: "azure-openai", BaseURL: "https://resource.openai.azure.com/openai/deployments/deployment-a", APIVersion: "2024-10-21", Models: []string{"public-model"}, ModelAliases: map[string]string{"public-model": "deployment-b"}, Capabilities: []string{"chat"},
+	}}})
+	if !errors.Is(err, ErrInvalidDeployment) {
+		t.Fatalf("conflicting Azure model alias accepted: %v", err)
+	}
+}
+
 func TestConfiguredAzureVersionedRootRejectsAmbiguousModels(t *testing.T) {
 	_, err := NewWithError(Config{Endpoints: []config.ProviderEndpointConfig{{
 		Name: "azure-static", Type: "azure-openai", BaseURL: "https://resource.openai.azure.com", APIVersion: "2024-10-21",
@@ -1189,6 +1235,7 @@ func TestAzureManagedDeploymentBaseURL(t *testing.T) {
 		{name: "resource root", baseURL: "https://resource.openai.azure.com", apiVersion: "2024-10-21", models: []string{"deployment-a"}, want: "https://resource.openai.azure.com/openai/deployments/deployment-a"},
 		{name: "reverse proxy prefix", baseURL: "https://proxy.example.test/tenant-a/openai/v1", apiVersion: "2024-10-21", upstream: "deployment-a", models: []string{"public"}, want: "https://proxy.example.test/tenant-a/openai/deployments/deployment-a"},
 		{name: "explicit deployment", baseURL: "https://resource.openai.azure.com/openai/deployments/deployment-a", apiVersion: "2024-10-21", models: []string{"public", "other"}, want: "https://resource.openai.azure.com/openai/deployments/deployment-a"},
+		{name: "conflicting explicit deployment", baseURL: "https://resource.openai.azure.com/openai/deployments/deployment-a", apiVersion: "2024-10-21", upstream: "deployment-b", models: []string{"public"}, invalid: true},
 		{name: "GA v1", baseURL: "https://resource.openai.azure.com", models: []string{"public", "other"}, want: "https://resource.openai.azure.com"},
 		{name: "v1 preview", baseURL: "https://resource.openai.azure.com", apiVersion: "preview", models: []string{"public", "other"}, want: "https://resource.openai.azure.com"},
 		{name: "unversioned explicit deployment", baseURL: "https://resource.openai.azure.com/openai/deployments/deployment-a", models: []string{"public"}, invalid: true},

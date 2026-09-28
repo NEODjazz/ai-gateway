@@ -2552,6 +2552,8 @@ Provider type `azure-openai` добавляет `/openai/v1` к resource-root UR
 
 Если датированная `api_version` задана вместе с resource URL, оканчивающимся на `/openai/v1`, discovery также использует resource-level `/openai/models`; префикс reverse proxy сохраняется. API key и Entra authentication при этом не меняются.
 
+Для датированного URL `/openai/deployments/{deployment}` это имя deployment используется как upstream model, если отдельное имя не задано. Явный `upstream_model` или `model_aliases`, противоречащий URL, отклоняется при создании deployment или загрузке стартового конфига; это предотвращает расхождение между маршрутом, телом запроса и ключом model pricing.
+
 Azure OpenAI и Foundry base URLs не принимают query или fragment, включая
 завершающие пустые `?` и `#`; это проверяется и в стартовом конфиге, и при
 создании managed provider.

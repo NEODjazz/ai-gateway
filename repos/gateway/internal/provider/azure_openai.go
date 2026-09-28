@@ -202,7 +202,8 @@ func azureManagedDeploymentBaseURL(baseURL, apiVersion string, deployment ModelD
 	}
 	path := strings.TrimRight(parsed.Path, "/")
 	if index := strings.LastIndex(path, "/openai/deployments/"); index >= 0 {
-		if !validAzureDeploymentPathSegment(path[index+len("/openai/deployments/"):]) {
+		explicitModel := path[index+len("/openai/deployments/"):]
+		if !validAzureDeploymentPathSegment(explicitModel) || deployment.UpstreamModel != "" && deployment.UpstreamModel != explicitModel {
 			return "", ErrInvalidDeployment
 		}
 		return baseURL, nil
@@ -227,6 +228,23 @@ func azureManagedDeploymentBaseURL(baseURL, apiVersion string, deployment ModelD
 	parsed.Path = path + "/openai/deployments/" + model
 	parsed.RawPath = ""
 	return parsed.String(), nil
+}
+
+func azureExplicitDeploymentModel(baseURL string) string {
+	parsed, err := url.Parse(baseURL)
+	if err != nil || !azureurl.ValidPath(parsed) {
+		return ""
+	}
+	path := strings.TrimRight(parsed.Path, "/")
+	index := strings.LastIndex(path, "/openai/deployments/")
+	if index < 0 {
+		return ""
+	}
+	model := path[index+len("/openai/deployments/"):]
+	if !validAzureDeploymentPathSegment(model) {
+		return ""
+	}
+	return model
 }
 
 func validAzureDeploymentPathSegment(value string) bool {

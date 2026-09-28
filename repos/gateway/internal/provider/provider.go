@@ -523,6 +523,22 @@ func NewWithError(cfg Config) (Provider, error) {
 					}
 				}
 			}
+			if explicitModel := azureExplicitDeploymentModel(providerBaseURL); explicitModel != "" {
+				aliases := make(map[string]string, len(endpoint.Models)+len(endpoint.ModelAliases))
+				for model, mapped := range endpoint.ModelAliases {
+					if mapped != "" && mapped != explicitModel {
+						return nil, fmt.Errorf("provider %q has conflicting Azure deployment model: %w", endpoint.Name, ErrInvalidDeployment)
+					}
+					if mapped != "" {
+						aliases[model] = mapped
+					}
+				}
+				for _, model := range endpoint.Models {
+					aliases[model] = explicitModel
+				}
+				endpoint.ModelAliases = aliases
+				upstreamModel = explicitModel
+			}
 			baseURL, err := azureManagedDeploymentBaseURL(providerBaseURL, endpoint.APIVersion, ModelDeployment{Models: endpoint.Models, UpstreamModel: upstreamModel})
 			if err != nil {
 				return nil, fmt.Errorf("provider %q has invalid Azure deployment route: %w", endpoint.Name, err)

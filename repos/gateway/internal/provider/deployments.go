@@ -508,9 +508,13 @@ func (r *Router) endpointForManagedDeploymentWithSecret(deployment ModelDeployme
 		return Endpoint{}, ErrInvalidDeployment
 	}
 	aliases := map[string]string{}
-	if deployment.UpstreamModel != "" {
+	upstreamModel := deployment.UpstreamModel
+	if managed.Type == "azure-openai" && upstreamModel == "" {
+		upstreamModel = azureExplicitDeploymentModel(managed.BaseURL)
+	}
+	if upstreamModel != "" {
 		for _, model := range deployment.Models {
-			aliases[model] = deployment.UpstreamModel
+			aliases[model] = upstreamModel
 		}
 	}
 	endpoint := Endpoint{Name: deployment.ID, ProviderID: deployment.ProviderID, Type: managed.Type, Models: append([]string(nil), deployment.Models...), Capabilities: append([]string(nil), deployment.Capabilities...), Priority: deployment.Priority, Weight: deployment.Weight, GuardrailPolicy: deployment.GuardrailPolicy, GuardrailPolicyValid: true, ModelAliases: aliases, Provider: client, Admission: newAdmissionController(deployment.MaxParallelRequests, deployment.QueueCapacity, time.Duration(deployment.QueueTimeoutMS)*time.Millisecond), BaseURL: managed.BaseURL, CredentialID: deployment.CredentialID, RequestTimeout: time.Duration(deployment.RequestTimeoutMS) * time.Millisecond, MaxRetries: deployment.MaxRetries, CooldownAfterFailures: deployment.CooldownAfterFailures, Cooldown: time.Duration(deployment.CooldownSeconds) * time.Second, RateLimitRPM: deployment.RateLimitRPM, RateLimitTPM: deployment.RateLimitTPM, ProviderRateLimitRPM: managed.RateLimitRPM, ProviderRateLimitTPM: managed.RateLimitTPM}
