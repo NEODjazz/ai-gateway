@@ -193,10 +193,13 @@ func (r Router) Completions(ctx context.Context, req modules.RequestContext) (op
 			continue
 		}
 		if attemptCtx.CompletionRequest == nil || len(attemptCtx.Request.Messages) != 1 {
-			return openai.CompletionResponse{}, errors.New("module removed completion request")
+			err := errors.New("module removed completion request")
+			r.modules.RunFailure(ctx, &attemptCtx, err)
+			return openai.CompletionResponse{}, err
 		}
 		effectivePrompt, err := openai.ApplyCompletionPromptPolicyContent(attemptCtx.CompletionRequest.Prompt, attemptCtx.Request.Messages[0].Content)
 		if err != nil {
+			r.modules.RunFailure(ctx, &attemptCtx, err)
 			return openai.CompletionResponse{}, err
 		}
 		attemptCtx.CompletionRequest.Prompt = effectivePrompt
@@ -296,10 +299,13 @@ func (r Router) StreamCompletions(ctx context.Context, req modules.RequestContex
 			continue
 		}
 		if attemptCtx.CompletionRequest == nil || len(attemptCtx.Request.Messages) != 1 {
-			return openai.CompletionResponse{}, false, errors.New("module removed completion request")
+			err := errors.New("module removed completion request")
+			r.modules.RunFailure(ctx, &attemptCtx, err)
+			return openai.CompletionResponse{}, false, err
 		}
 		effectivePrompt, err := openai.ApplyCompletionPromptPolicyContent(attemptCtx.CompletionRequest.Prompt, attemptCtx.Request.Messages[0].Content)
 		if err != nil {
+			r.modules.RunFailure(ctx, &attemptCtx, err)
 			return openai.CompletionResponse{}, false, err
 		}
 		attemptCtx.CompletionRequest.Prompt = effectivePrompt

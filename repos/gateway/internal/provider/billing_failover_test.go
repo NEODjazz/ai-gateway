@@ -44,6 +44,17 @@ type parameterRejectingProvider struct {
 	streamCalls int
 }
 
+type corruptCompletionModule struct {
+	change func(*modules.RequestContext)
+}
+
+func (corruptCompletionModule) Name() string   { return "prompt-policy" }
+func (corruptCompletionModule) Required() bool { return true }
+func (m corruptCompletionModule) Handle(_ context.Context, req *modules.RequestContext) error {
+	m.change(req)
+	return nil
+}
+
 func (p *parameterRejectingProvider) ValidateChatParameters(openai.ChatCompletionRequest) error {
 	return p.err
 }
@@ -148,6 +159,44 @@ func TestFailoverParameterRejectionCancelsPreviousReserve(t *testing.T) {
 			err := test.run(router)
 			if !errors.Is(err, validationErr) || billing.reserves != 1 || billing.cancels != 1 || secondary.calls != 0 || secondary.responses != 0 || secondary.completionCalls != 0 || secondary.streamCalls != 0 {
 				t.Fatalf("unexpected lifecycle: err=%v reserves=%d cancels=%d secondary=%+v", err, billing.reserves, billing.cancels, secondary)
+			}
+		})
+	}
+}
+
+func TestCompletionPolicyFailureCancelsReserve(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		stream bool
+		change func(*modules.RequestContext)
+	}{
+		{name: "removed request", change: func(req *modules.RequestContext) { req.CompletionRequest = nil }},
+		{name: "invalid prompt shape", change: func(req *modules.RequestContext) { req.Request.Messages[0].Content = []any{"unexpected"} }},
+		{name: "stream removed request", stream: true, change: func(req *modules.RequestContext) { req.CompletionRequest = nil }},
+		{name: "stream invalid prompt shape", stream: true, change: func(req *modules.RequestContext) { req.Request.Messages[0].Content = []any{"unexpected"} }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			billing := &rejectSecondReserve{}
+			client := &failingCompletionProvider{}
+			capabilities := []string{"chat"}
+			if test.stream {
+				capabilities = append(capabilities, "stream")
+			}
+			router := Router{
+				health: newEndpointHealthTracker(), routeCounter: &atomic.Uint64{},
+				modules:   modules.NewPipeline([]modules.Module{corruptCompletionModule{change: test.change}, billing}),
+				endpoints: []Endpoint{{Name: "deployment", Type: "openai", Models: []string{"model"}, Capabilities: capabilities, Provider: client}},
+			}
+			request := openai.CompletionRequest{Model: "model", Prompt: "hello"}
+			req := modules.RequestContext{RequestID: "execution", Request: openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}}}, CompletionRequest: &request}
+			var err error
+			if test.stream {
+				_, _, err = router.StreamCompletions(t.Context(), req, func(string) error { return nil })
+			} else {
+				_, err = router.Completions(t.Context(), req)
+			}
+			if err == nil || billing.reserves != 1 || billing.cancels != 1 || client.completionCalls != 0 {
+				t.Fatalf("unexpected lifecycle: err=%v reserves=%d cancels=%d provider calls=%d", err, billing.reserves, billing.cancels, client.completionCalls)
 			}
 		})
 	}
