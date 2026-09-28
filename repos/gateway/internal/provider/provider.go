@@ -3609,6 +3609,12 @@ func (e Endpoint) supportsCapabilities(required ...string) bool {
 	if e.Type == "azure-openai" && hasCapability(required, "embeddings") && azureFoundryProjectBaseURL(e.BaseURL) {
 		return false
 	}
+	if e.Type == "ollama" && hasCapability(required, "structured_output") {
+		client, ok := e.Provider.(interface{ SupportsStructuredOutput() bool })
+		if !ok || !client.SupportsStructuredOutput() {
+			return false
+		}
+	}
 	if hasCapability(required, "chat") {
 		if client, ok := e.Provider.(interface{ SupportsChat() bool }); ok && !client.SupportsChat() {
 			return false

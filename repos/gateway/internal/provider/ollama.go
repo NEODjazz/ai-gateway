@@ -161,6 +161,11 @@ func normalizeOllamaBaseURL(value string) string {
 	return strings.TrimRight(parsed.String(), "/")
 }
 
+func ollamaCloudBaseURL(value string) bool {
+	parsed, err := url.Parse(value)
+	return err == nil && strings.EqualFold(parsed.Hostname(), "ollama.com")
+}
+
 func (Ollama) SupportsVision() bool { return true }
 
 func (p Ollama) Completions(ctx context.Context, request openai.CompletionRequest) (openai.CompletionResponse, error) {
@@ -733,7 +738,7 @@ func ollamaResponseFormat(format *openai.ResponseFormat) any {
 	return nil
 }
 
-func normalizeOllamaResponseText(value any) (any, error) {
+func normalizeOllamaResponseText(value any, structuredOutput bool) (any, error) {
 	if value == nil {
 		return nil, nil
 	}
@@ -759,6 +764,9 @@ func normalizeOllamaResponseText(value any) (any, error) {
 	}
 	switch formatType {
 	case "text", "json_object":
+		if formatType == "json_object" && !structuredOutput {
+			return nil, rejectParameters("ollama", parameterCheck{"text.format", true})
+		}
 		if len(format) != 1 {
 			return nil, &Error{Class: FailureClientRequest, Provider: "ollama", StatusCode: http.StatusBadRequest, UpstreamCode: "unsupported_parameter", Param: "text.format", Err: errors.New("this text format does not accept additional controls")}
 		}
@@ -768,6 +776,9 @@ func normalizeOllamaResponseText(value any) (any, error) {
 		text["format"] = json.RawMessage(`{"type":"json_schema","name":"response","schema":{"type":"object"}}`)
 		return text, nil
 	case "json_schema":
+		if !structuredOutput {
+			return nil, rejectParameters("ollama", parameterCheck{"text.format", true})
+		}
 		var schema map[string]json.RawMessage
 		if json.Unmarshal(format["schema"], &schema) != nil || schema == nil {
 			return nil, &Error{Class: FailureClientRequest, Provider: "ollama", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "text.format.schema", Err: errors.New("json_schema requires an object schema")}
@@ -828,7 +839,7 @@ func (p Ollama) Responses(ctx context.Context, request openai.ResponseRequest) (
 	if err := p.ValidateResponseParameters(request); err != nil {
 		return openai.ResponseResponse{}, err
 	}
-	text, err := normalizeOllamaResponseText(request.Text)
+	text, err := normalizeOllamaResponseText(request.Text, p.SupportsStructuredOutput())
 	if err != nil {
 		return openai.ResponseResponse{}, err
 	}
@@ -880,7 +891,7 @@ func (p Ollama) StreamResponses(ctx context.Context, request openai.ResponseRequ
 	if !p.upstreamStream {
 		return openai.ResponseResponse{}, ErrStreamingUnsupported
 	}
-	text, err := normalizeOllamaResponseText(request.Text)
+	text, err := normalizeOllamaResponseText(request.Text, p.SupportsStructuredOutput())
 	if err != nil {
 		return openai.ResponseResponse{}, err
 	}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -191,8 +192,68 @@ func TestOllamaDiscoveryNormalizesAPIBaseURL(t *testing.T) {
 		t.Fatal(err)
 	}
 	models, err := router.DiscoverProviderModels(t.Context(), "ollama", "ollama-token")
-	if err != nil || len(models) != 1 || models[0].ID != "test-model" || !slices.Equal(models[0].Capabilities, []string{"chat", "completions", "responses", "stream", "tools", "vision"}) {
+	if err != nil || len(models) != 1 || models[0].ID != "test-model" || !slices.Equal(models[0].Capabilities, []string{"chat", "completions", "responses", "stream", "structured_output", "tools", "vision"}) {
 		t.Fatalf("models=%+v err=%v", models, err)
+	}
+}
+
+func TestOllamaStructuredOutputDependsOnEndpoint(t *testing.T) {
+	for _, test := range []struct {
+		baseURL string
+		allowed bool
+	}{
+		{baseURL: "http://localhost:11434", allowed: true},
+		{baseURL: "https://proxy.example.test/ollama/api", allowed: true},
+		{baseURL: "https://ollama.com/api", allowed: false},
+		{baseURL: "https://OLLAMA.COM/v1", allowed: false},
+	} {
+		t.Run(test.baseURL, func(t *testing.T) {
+			client := NewOllama(test.baseURL, true)
+			if client.SupportsStructuredOutput() != test.allowed {
+				t.Fatalf("structured output support for %s = %t", test.baseURL, client.SupportsStructuredOutput())
+			}
+			endpoint := Endpoint{Type: "ollama", BaseURL: test.baseURL, Provider: client, Capabilities: []string{"chat", "structured_output"}}
+			if endpoint.supportsCapabilities("chat", "structured_output") != test.allowed {
+				t.Fatalf("structured output route for %s did not match endpoint capability", test.baseURL)
+			}
+			capabilities := ollamaGatewayCapabilities([]string{"completion", "tools"}, test.allowed)
+			if slices.Contains(capabilities, "structured_output") != test.allowed {
+				t.Fatalf("discovery capabilities for %s: %v", test.baseURL, capabilities)
+			}
+		})
+	}
+}
+
+func TestOllamaDiscoveryOmitsCloudStructuredOutput(t *testing.T) {
+	client := &http.Client{Transport: ollamaRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if request.URL.Path != "/api/show" {
+			t.Errorf("unexpected discovery path: %s", request.URL.Path)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"capabilities":["completion","tools"]}`))}, nil
+	})}
+	for _, test := range []struct {
+		baseURL string
+		allowed bool
+	}{
+		{baseURL: "http://localhost:11434", allowed: true},
+		{baseURL: "https://ollama.com", allowed: false},
+	} {
+		models := []DiscoveredModel{{ID: "model"}}
+		discoverOllamaCapabilities(t.Context(), client, test.baseURL+"/api/tags", "", models)
+		if slices.Contains(models[0].Capabilities, "structured_output") != test.allowed {
+			t.Fatalf("discovery for %s returned %v", test.baseURL, models[0].Capabilities)
+		}
+	}
+}
+
+func TestOllamaCloudDeploymentRejectsStructuredOutput(t *testing.T) {
+	router := New(Config{}).(*Router)
+	if _, err := router.CreateProvider(ManagedProvider{ID: "cloud", Type: "ollama", BaseURL: "https://ollama.com/api", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := router.CreateModelDeployment(ModelDeployment{ID: "model", ProviderID: "cloud", Models: []string{"model"}, Capabilities: []string{"chat", "structured_output"}, Enabled: true})
+	if !errors.Is(err, ErrUnsupportedProviderCapability) {
+		t.Fatalf("cloud structured output deployment accepted: %v", err)
 	}
 }
 

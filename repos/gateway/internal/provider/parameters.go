@@ -141,7 +141,7 @@ func (Anthropic) ValidateResponseParameters(request openai.ResponseRequest) erro
 	)
 }
 
-func (Ollama) ValidateResponseParameters(request openai.ResponseRequest) error {
+func (p Ollama) ValidateResponseParameters(request openai.ResponseRequest) error {
 	if err := validateOllamaResponseTools(request.Tools); err != nil {
 		return err
 	}
@@ -184,16 +184,19 @@ func (Ollama) ValidateResponseParameters(request openai.ResponseRequest) error {
 	); err != nil {
 		return err
 	}
-	_, err := normalizeOllamaResponseText(request.Text)
+	_, err := normalizeOllamaResponseText(request.Text, p.SupportsStructuredOutput())
 	return err
 }
 
-func (Ollama) ValidateChatParameters(request openai.ChatCompletionRequest) error {
+func (p Ollama) ValidateChatParameters(request openai.ChatCompletionRequest) error {
 	if _, err := openai.ChatImageAttachments(request.Messages); err != nil {
 		return &Error{Class: FailureClientRequest, Provider: "ollama", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_image", Param: "messages", Err: err}
 	}
 	if err := validateOllamaChatResponseFormat(request.ResponseFormat); err != nil {
 		return err
+	}
+	if request.ResponseFormat != nil && request.ResponseFormat.Type != "text" && !p.SupportsStructuredOutput() {
+		return rejectParameters("ollama", parameterCheck{"response_format", true})
 	}
 	if err := rejectChatModeration("ollama", request); err != nil {
 		return err

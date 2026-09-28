@@ -26,8 +26,10 @@ func (p OpenAICompatible) SupportsAssistantPrefill() bool {
 	return p.supportsMessagePrefix
 }
 
-func (Ollama) SupportsTools() bool            { return true }
-func (Ollama) SupportsStructuredOutput() bool { return true }
+func (Ollama) SupportsTools() bool { return true }
+func (p Ollama) SupportsStructuredOutput() bool {
+	return !ollamaCloudBaseURL(p.baseURL)
+}
 
 func (Anthropic) SupportsTools() bool             { return true }
 func (Anthropic) SupportsStructuredOutput() bool  { return true }

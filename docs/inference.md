@@ -270,6 +270,9 @@ prompt arrays; gateway возвращает terminal `unsupported_parameter` д�
 modules, billing reserve и сетевого вызова.
 В native Ollama Chat аргументы предыдущих function tool calls должны быть JSON-объектами;
 некорректный JSON и другие JSON-типы отклоняются до upstream-вызова.
+Для локального Ollama discovery предлагает `structured_output` у моделей с
+`completion`. Прямой cloud endpoint `ollama.com` эту capability не объявляет:
+настройка deployment и запросы с JSON-форматом отклоняются до upstream-вызова.
 
 ## Capabilities
 

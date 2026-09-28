@@ -195,18 +195,21 @@ func discoverOllamaCapabilities(ctx context.Context, client *http.Client, tagsUR
 		if json.Unmarshal(payload, &details) != nil || details.Capabilities == nil {
 			continue
 		}
-		models[index].Capabilities = ollamaGatewayCapabilities(*details.Capabilities)
+		models[index].Capabilities = ollamaGatewayCapabilities(*details.Capabilities, !ollamaCloudBaseURL(tagsURL))
 	}
 }
 
-func ollamaGatewayCapabilities(native []string) []string {
+func ollamaGatewayCapabilities(native []string, structuredOutput bool) []string {
 	available := make(map[string]bool, len(native))
 	for _, capability := range native {
 		available[capability] = true
 	}
-	capabilities := make([]string, 0, 7)
+	capabilities := make([]string, 0, 8)
 	if available["completion"] {
 		capabilities = append(capabilities, "chat", "completions", "responses", "stream")
+		if structuredOutput {
+			capabilities = append(capabilities, "structured_output")
+		}
 		if available["tools"] {
 			capabilities = append(capabilities, "tools")
 		}
