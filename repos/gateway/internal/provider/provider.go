@@ -1510,6 +1510,9 @@ func (r Router) Moderations(ctx context.Context, req modules.RequestContext) (op
 		}
 		progress.enter(endpoint)
 		if err := validateModerationAdapter(client, request); err != nil {
+			if lastAttempt != nil {
+				r.modules.RunFailure(ctx, lastAttempt, err)
+			}
 			return openai.ModerationResponse{}, err
 		}
 		attemptCtx := providerAttemptContext(req, endpoint)
@@ -1522,6 +1525,9 @@ func (r Router) Moderations(ctx context.Context, req modules.RequestContext) (op
 		}
 		if err := r.modules.Run(ctx, &attemptCtx); err != nil {
 			if terminalModuleError(err) || ctx.Err() != nil {
+				if lastAttempt != nil {
+					r.modules.RunFailure(ctx, lastAttempt, err)
+				}
 				return openai.ModerationResponse{}, fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err)
 			}
 			wrapped := fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err)
@@ -1530,11 +1536,15 @@ func (r Router) Moderations(ctx context.Context, req modules.RequestContext) (op
 			continue
 		}
 		if attemptCtx.ModerationRequest == nil {
-			return openai.ModerationResponse{}, fmt.Errorf("%s/%s modules removed moderation request", endpoint.Type, endpoint.Name)
+			err := fmt.Errorf("%s/%s modules removed moderation request", endpoint.Type, endpoint.Name)
+			r.modules.RunFailure(ctx, &attemptCtx, err)
+			return openai.ModerationResponse{}, err
 		}
 		attemptInfo, err := openai.InspectModerationInput(attemptCtx.ModerationRequest.Input)
 		if err != nil {
-			return openai.ModerationResponse{}, fmt.Errorf("%s/%s modules returned invalid moderation input: %w", endpoint.Type, endpoint.Name, err)
+			wrapped := fmt.Errorf("%s/%s modules returned invalid moderation input: %w", endpoint.Type, endpoint.Name, err)
+			r.modules.RunFailure(ctx, &attemptCtx, wrapped)
+			return openai.ModerationResponse{}, wrapped
 		}
 		started := time.Now()
 		lastAttempt = &attemptCtx

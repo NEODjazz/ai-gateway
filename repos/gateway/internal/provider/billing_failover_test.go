@@ -52,6 +52,22 @@ type rerankFailoverProvider struct {
 	validationErr error
 }
 
+type moderationFailoverProvider struct {
+	countingProvider
+	moderationCalls int
+	moderationErr   error
+	validationErr   error
+}
+
+func (p *moderationFailoverProvider) Moderations(context.Context, openai.ModerationRequest) (openai.ModerationResponse, error) {
+	p.moderationCalls++
+	return openai.ModerationResponse{}, p.moderationErr
+}
+
+func (p *moderationFailoverProvider) ValidateModerationParameters(openai.ModerationRequest) error {
+	return p.validationErr
+}
+
 func (p *rerankFailoverProvider) Rerank(context.Context, openai.RerankRequest) (openai.RerankResponse, error) {
 	p.rerankCalls++
 	return openai.RerankResponse{Results: []openai.RerankResult{{Index: 0}}}, p.rerankErr
@@ -78,6 +94,17 @@ type parameterRejectingProvider struct {
 
 type corruptCompletionModule struct {
 	change func(*modules.RequestContext)
+}
+
+type corruptModerationModule struct {
+	change func(*modules.RequestContext)
+}
+
+func (corruptModerationModule) Name() string   { return "moderation-policy" }
+func (corruptModerationModule) Required() bool { return true }
+func (m corruptModerationModule) Handle(_ context.Context, req *modules.RequestContext) error {
+	m.change(req)
+	return nil
 }
 
 type enableResponseStorageModule struct{}
@@ -271,6 +298,64 @@ func TestRerankFailoverRejectionCancelsPreviousReserve(t *testing.T) {
 			_, err := router.Rerank(t.Context(), modules.RequestContext{RequestID: "execution", Request: openai.ChatCompletionRequest{Model: "model"}, RerankRequest: &request})
 			if !errors.Is(err, wantErr) || billing.reserves != wantReserves || billing.cancels != 1 || primary.rerankCalls != 1 || secondary.rerankCalls != 0 {
 				t.Fatalf("unexpected lifecycle: err=%v reserves=%d cancels=%d primary=%d secondary=%d", err, billing.reserves, billing.cancels, primary.rerankCalls, secondary.rerankCalls)
+			}
+		})
+	}
+}
+
+func TestModerationFailoverRejectionCancelsPreviousReserve(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		validation bool
+	}{
+		{name: "parameter rejection", validation: true},
+		{name: "budget rejection"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			primary := &moderationFailoverProvider{moderationErr: statusError("primary", http.StatusServiceUnavailable)}
+			secondary := &moderationFailoverProvider{}
+			billing := &rejectSecondReserve{}
+			wantErr, wantReserves := error(modules.ErrBudgetExceeded), 2
+			if test.validation {
+				secondary.validationErr = errors.New("unsupported moderation parameter")
+				wantErr, wantReserves = secondary.validationErr, 1
+			}
+			router := Router{
+				health: newEndpointHealthTracker(), routeCounter: &atomic.Uint64{}, modules: modules.NewPipeline([]modules.Module{billing}),
+				endpoints: []Endpoint{
+					{Name: "primary", Type: "openai", Models: []string{"model"}, Capabilities: []string{"moderation"}, Provider: primary},
+					{Name: "secondary", Type: "openai", Models: []string{"model"}, Capabilities: []string{"moderation"}, Provider: secondary},
+				},
+			}
+			request := openai.ModerationRequest{Model: "model", Input: "hello"}
+			_, err := router.Moderations(t.Context(), modules.RequestContext{RequestID: "execution", Request: openai.ChatCompletionRequest{Model: "model"}, ModerationRequest: &request})
+			if !errors.Is(err, wantErr) || billing.reserves != wantReserves || billing.cancels != 1 || primary.moderationCalls != 1 || secondary.moderationCalls != 0 {
+				t.Fatalf("unexpected lifecycle: err=%v reserves=%d cancels=%d primary=%d secondary=%d", err, billing.reserves, billing.cancels, primary.moderationCalls, secondary.moderationCalls)
+			}
+		})
+	}
+}
+
+func TestModerationPolicyFailureCancelsReserve(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		change func(*modules.RequestContext)
+	}{
+		{name: "removed request", change: func(req *modules.RequestContext) { req.ModerationRequest = nil }},
+		{name: "invalid input", change: func(req *modules.RequestContext) { req.ModerationRequest.Input = 12 }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			billing := &rejectSecondReserve{}
+			client := &moderationFailoverProvider{}
+			router := Router{
+				health: newEndpointHealthTracker(), routeCounter: &atomic.Uint64{},
+				modules:   modules.NewPipeline([]modules.Module{corruptModerationModule{change: test.change}, billing}),
+				endpoints: []Endpoint{{Name: "deployment", Type: "openai", Models: []string{"model"}, Capabilities: []string{"moderation"}, Provider: client}},
+			}
+			request := openai.ModerationRequest{Model: "model", Input: "hello"}
+			_, err := router.Moderations(t.Context(), modules.RequestContext{RequestID: "execution", Request: openai.ChatCompletionRequest{Model: "model"}, ModerationRequest: &request})
+			if err == nil || billing.reserves != 1 || billing.cancels != 1 || client.moderationCalls != 0 {
+				t.Fatalf("unexpected lifecycle: err=%v reserves=%d cancels=%d provider calls=%d", err, billing.reserves, billing.cancels, client.moderationCalls)
 			}
 		})
 	}
