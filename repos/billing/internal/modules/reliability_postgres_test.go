@@ -4,7 +4,9 @@ import (
 	"ai-gateway-billing/internal/openai"
 	"context"
 	"errors"
+	"fmt"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"math"
 	"os"
 	"testing"
 	"time"
@@ -121,6 +123,71 @@ func TestPostgresExactZeroCommitReleasesReservation(t *testing.T) {
 	var estimated bool
 	if err := pool.QueryRow(ctx, `SELECT (payload->>'total_tokens')::integer,(payload->>'usage_estimated')::boolean FROM billing_outbox WHERE event_id=$1`, id+":commit").Scan(&totalTokens, &estimated); err != nil || totalTokens != 0 || estimated {
 		t.Fatalf("outbox total_tokens=%d estimated=%t err=%v", totalTokens, estimated, err)
+	}
+}
+
+func TestPostgresDeploymentPricingMatchesCommittedUsageAndOutbox(t *testing.T) {
+	pool := reliabilityTestPool(t)
+	ctx := t.Context()
+	idPrefix := "deployment-pricing-" + time.Now().Format("150405.000000000")
+	repository, err := NewPostgresOutboxRepository(os.Getenv("BILLING_POSTGRES_TEST_DSN"), NoopUsageEventWriter{}, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	module := NewBillingModuleWithPricing(true, PricingConfig{Currency: "USD"})
+	module.policy = NewPostgresBudgetPolicyChecker(os.Getenv("BILLING_POSTGRES_TEST_DSN"), time.Minute)
+	module.durable = repository
+	t.Cleanup(module.Close)
+	for index, test := range []struct {
+		deployment, inputPrice, outputPrice string
+		cost                                float64
+	}{
+		{deployment: "deployment-a", inputPrice: "1", outputPrice: "2", cost: 0.002},
+		{deployment: "deployment-b", inputPrice: "3", outputPrice: "4", cost: 0.005},
+	} {
+		id := fmt.Sprintf("%s-%d", idPrefix, index)
+		t.Cleanup(func() {
+			_, _ = pool.Exec(context.Background(), `DELETE FROM billing_outbox WHERE payload->>'request_id'=$1`, id)
+			_, _ = pool.Exec(context.Background(), `DELETE FROM billing_event_ledger WHERE request_id=$1`, id)
+			_, _ = pool.Exec(context.Background(), `DELETE FROM billing_budget_reservations WHERE request_id=$1`, id)
+		})
+		req := RequestContext{
+			RequestID: id, CredentialID: "key-pricing", UserID: "user-pricing", BillingPhase: "reserve",
+			Request: openai.ChatCompletionRequest{Model: "shared-model"},
+			Usage:   &openai.Usage{PromptTokens: 1000},
+			Metadata: map[string]string{
+				"provider.endpoint.name":           test.deployment,
+				"provider.endpoint.type":           "openai-compatible",
+				"model_catalog.version":            "pricing-v1",
+				"model_catalog.pricing_key":        test.deployment + "/shared-model",
+				"model_catalog.input_cost_per_1m":  test.inputPrice,
+				"model_catalog.output_cost_per_1m": test.outputPrice,
+				"model_catalog.currency":           "USD",
+			},
+		}
+		if err := module.Handle(ctx, &req); err != nil {
+			t.Fatal(err)
+		}
+		req.BillingPhase = "commit"
+		req.PostResponse = true
+		req.Usage = &openai.Usage{PromptTokens: 1000, CompletionTokens: 500, TotalTokens: 1500}
+		req.Metadata["usage.estimated"] = "false"
+		if err := module.Handle(ctx, &req); err != nil {
+			t.Fatal(err)
+		}
+		var state string
+		var actualTokens int
+		var actualCost float64
+		if err := pool.QueryRow(ctx, `SELECT state,actual_tokens,actual_cost::float8 FROM billing_budget_reservations WHERE request_id=$1`, id).Scan(&state, &actualTokens, &actualCost); err != nil || state != "committed" || actualTokens != 1500 || math.Abs(actualCost-test.cost) > 1e-10 {
+			t.Fatalf("deployment=%s state=%s tokens=%d cost=%g err=%v", test.deployment, state, actualTokens, actualCost, err)
+		}
+		var outboxTokens int
+		var outboxCost float64
+		var pricingKey string
+		var estimated bool
+		if err := pool.QueryRow(ctx, `SELECT (payload->>'total_tokens')::int,(payload->>'cost')::float8,payload->>'pricing_key',(payload->>'usage_estimated')::boolean FROM billing_outbox WHERE event_id=$1`, id+":commit").Scan(&outboxTokens, &outboxCost, &pricingKey, &estimated); err != nil || outboxTokens != 1500 || math.Abs(outboxCost-test.cost) > 1e-10 || pricingKey != test.deployment+"/shared-model" || estimated {
+			t.Fatalf("deployment=%s outbox tokens=%d cost=%g pricing=%q estimated=%t err=%v", test.deployment, outboxTokens, outboxCost, pricingKey, estimated, err)
+		}
 	}
 }
 
