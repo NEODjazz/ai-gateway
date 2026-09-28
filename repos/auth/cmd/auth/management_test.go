@@ -1,8 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,6 +14,29 @@ import (
 
 	"ai-gateway-auth/internal/modules"
 )
+
+func TestManagementLogFingerprintsExternalRequestID(t *testing.T) {
+	var output bytes.Buffer
+	previous := log.Writer()
+	log.SetOutput(&output)
+	t.Cleanup(func() { log.SetOutput(previous) })
+
+	const externalID = "private-request-id"
+	request := httptest.NewRequest(http.MethodPost, "/internal/v1/keys", nil)
+	request.Header.Set("X-Request-ID", externalID)
+	request.Header.Set("X-Actor-ID", "operator")
+	request.Header.Set("X-Actor-Credential-ID", "credential")
+	logManagementAction(request, "virtual_key.create", "key-1")
+
+	message := output.String()
+	expected := fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(externalID)))
+	if !strings.Contains(message, expected) || strings.Contains(message, externalID) {
+		t.Fatalf("management log leaked external request ID: %q", message)
+	}
+	if !strings.Contains(message, `"actor_id":"operator"`) || !strings.Contains(message, `"target_id":"key-1"`) {
+		t.Fatalf("management log lost audit identity: %q", message)
+	}
+}
 
 type commandManagementStore struct {
 	created modules.StoredVirtualKey

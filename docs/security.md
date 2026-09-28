@@ -33,7 +33,8 @@ worker, cache и optional modules, не записывают сырой текс
 их журналы содержат имя модуля и факт пропуска, но не текст ошибки.
 Gateway operational logs пишут фиксированный тип сбоя без пользовательских
 идентификаторов и raw error; внешний `X-Request-ID` в HTTP-логах и traces
-представлен SHA-256 fingerprint.
+представлен SHA-256 fingerprint. Журнал management actions сервиса Auth
+также записывает только fingerprint внешнего request ID.
 
 Internal `/authorize`, `/usage`, `/scan`, `/anonymize` и `/internal/v1/*`
 должны оставаться cluster-internal. Service contracts защищаются отдельными

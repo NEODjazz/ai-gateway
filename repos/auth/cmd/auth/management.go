@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -587,8 +588,12 @@ func decodeManagedVirtualKey(w http.ResponseWriter, r *http.Request) (modules.Ma
 }
 
 func logManagementAction(r *http.Request, action, target string) {
+	requestID := strings.TrimSpace(r.Header.Get("X-Request-ID"))
+	if requestID != "" {
+		requestID = fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(requestID)))
+	}
 	payload, _ := json.Marshal(map[string]string{
-		"event": "management_action", "request_id": r.Header.Get("X-Request-ID"),
+		"event": "management_action", "request_id": requestID,
 		"actor_id": r.Header.Get("X-Actor-ID"), "actor_credential_id": r.Header.Get("X-Actor-Credential-ID"),
 		"action": action, "target_id": target,
 	})
