@@ -48,6 +48,16 @@ type corruptCompletionModule struct {
 	change func(*modules.RequestContext)
 }
 
+type enableResponseStorageModule struct{}
+
+func (enableResponseStorageModule) Name() string   { return "response-policy" }
+func (enableResponseStorageModule) Required() bool { return true }
+func (enableResponseStorageModule) Handle(_ context.Context, req *modules.RequestContext) error {
+	store := true
+	req.ResponseRequest.Store = &store
+	return nil
+}
+
 func (corruptCompletionModule) Name() string   { return "prompt-policy" }
 func (corruptCompletionModule) Required() bool { return true }
 func (m corruptCompletionModule) Handle(_ context.Context, req *modules.RequestContext) error {
@@ -197,6 +207,39 @@ func TestCompletionPolicyFailureCancelsReserve(t *testing.T) {
 			}
 			if err == nil || billing.reserves != 1 || billing.cancels != 1 || client.completionCalls != 0 {
 				t.Fatalf("unexpected lifecycle: err=%v reserves=%d cancels=%d provider calls=%d", err, billing.reserves, billing.cancels, client.completionCalls)
+			}
+		})
+	}
+}
+
+func TestResponseOwnershipFailureAfterPolicyCancelsReserve(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		name := "responses"
+		if stream {
+			name = "stream responses"
+		}
+		t.Run(name, func(t *testing.T) {
+			billing := &rejectSecondReserve{}
+			client := &scriptedStreamingProvider{}
+			capabilities := []string{"responses"}
+			if stream {
+				capabilities = append(capabilities, "stream")
+			}
+			router := Router{
+				health: newEndpointHealthTracker(), routeCounter: &atomic.Uint64{},
+				modules:   modules.NewPipeline([]modules.Module{enableResponseStorageModule{}, billing}),
+				endpoints: []Endpoint{{Name: "deployment", Type: "openai", Models: []string{"model"}, Capabilities: capabilities, Provider: client}},
+			}
+			request := openai.ResponseRequest{Model: "model", Input: "hello"}
+			req := modules.RequestContext{RequestID: "execution", Request: openai.ChatCompletionRequest{Model: "model"}, ResponseRequest: &request}
+			var err error
+			if stream {
+				_, _, err = router.StreamResponses(t.Context(), req, func(string, string) error { return nil })
+			} else {
+				_, err = router.Responses(t.Context(), req)
+			}
+			if !errors.Is(err, ErrResponseOwnershipUnavailable) || billing.reserves != 1 || billing.cancels != 1 || client.responseCalls != 0 {
+				t.Fatalf("unexpected lifecycle: err=%v reserves=%d cancels=%d provider calls=%d", err, billing.reserves, billing.cancels, client.responseCalls)
 			}
 		})
 	}

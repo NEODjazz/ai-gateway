@@ -1178,6 +1178,7 @@ func (r Router) Responses(ctx context.Context, req modules.RequestContext) (open
 			continue
 		}
 		if err := r.validateResponseOwnership(attemptCtx, *attemptCtx.ResponseRequest); err != nil {
+			r.modules.RunFailure(ctx, &attemptCtx, err)
 			return openai.ResponseResponse{}, err
 		}
 
@@ -2195,6 +2196,7 @@ func (r Router) StreamResponses(ctx context.Context, req modules.RequestContext,
 			continue
 		}
 		if err := r.validateResponseOwnership(attemptCtx, *attemptCtx.ResponseRequest); err != nil {
+			r.modules.RunFailure(ctx, &attemptCtx, err)
 			return openai.ResponseResponse{}, true, err
 		}
 		lastAttempt = &attemptCtx
