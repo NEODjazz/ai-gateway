@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -57,5 +58,23 @@ func TestOllamaResponsesAcceptSupportedFunctionToolSchema(t *testing.T) {
 	}}
 	if err := (Ollama{}).ValidateResponseParameters(openai.ResponseRequest{Tools: []openai.ResponseTool{tool}}); err != nil {
 		t.Fatalf("supported function tool schema rejected: %v", err)
+	}
+}
+
+func TestOllamaResponseToolsPreserveNumericConstraints(t *testing.T) {
+	parameters := map[string]any{"type": "object", "properties": map[string]any{
+		"limit": map[string]any{"type": "integer", "minimum": 0, "maximum": 100},
+	}}
+	request := openai.ResponseRequest{Tools: []openai.ResponseTool{{Type: "function", Name: "lookup", Parameters: parameters}}}
+	if err := (Ollama{}).ValidateResponseParameters(request); err != nil {
+		t.Fatalf("valid response tool schema rejected: %v", err)
+	}
+	tools := ollamaResponseTools(request)
+	limit := tools[0].Parameters.(map[string]any)["properties"].(map[string]any)["limit"].(map[string]any)
+	if limit["minimum"] != float64(0) || limit["maximum"] != float64(100) || !strings.Contains(limit["description"].(string), "minimum=0, maximum=100") {
+		t.Fatalf("numeric constraints were not preserved: %v", limit)
+	}
+	if _, ok := parameters["properties"].(map[string]any)["limit"].(map[string]any)["description"]; ok {
+		t.Fatal("response schema was mutated")
 	}
 }

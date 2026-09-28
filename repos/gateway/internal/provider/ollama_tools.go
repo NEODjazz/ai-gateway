@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"ai-gateway-gateway/internal/openai"
 )
@@ -69,6 +70,10 @@ func validOllamaToolSchema(value any, root bool) bool {
 	}
 	for field, item := range schema {
 		switch field {
+		case "$schema":
+			if !root || item != "https://json-schema.org/draft/2020-12/schema" {
+				return false
+			}
 		case "type":
 			if !validOllamaToolType(item) {
 				return false
@@ -135,11 +140,89 @@ func validOllamaToolSchema(value any, root bool) bool {
 					}
 				}
 			}
+		case "minimum", "maximum", "exclusiveMinimum":
+			if root {
+				return false
+			}
+			if _, ok := item.(float64); !ok {
+				return false
+			}
+		case "default":
+			if root {
+				return false
+			}
 		default:
 			return false
 		}
 	}
+	if minimum, ok := schema["minimum"].(float64); ok {
+		if maximum, ok := schema["maximum"].(float64); ok && minimum > maximum {
+			return false
+		}
+	}
+	if exclusiveMinimum, ok := schema["exclusiveMinimum"].(float64); ok {
+		if maximum, ok := schema["maximum"].(float64); ok && exclusiveMinimum >= maximum {
+			return false
+		}
+	}
 	return true
+}
+
+// Ollama accepts these JSON Schema keywords but drops them while parsing tools.
+// Keep the original keywords for newer versions and expose their values in the
+// property description that the current model template actually receives.
+func ollamaToolParameters(parameters any) any {
+	encoded, err := json.Marshal(parameters)
+	if err != nil {
+		return parameters // Parameter validation rejects this before the request is sent.
+	}
+	var schema map[string]any
+	if json.Unmarshal(encoded, &schema) != nil {
+		return parameters
+	}
+	annotateOllamaToolSchema(schema)
+	return schema
+}
+
+func annotateOllamaToolSchema(schema map[string]any) {
+	var constraints []string
+	for _, field := range []string{"minimum", "maximum", "exclusiveMinimum", "default"} {
+		if value, ok := schema[field]; ok {
+			encoded, _ := json.Marshal(value) // The schema has already passed JSON validation.
+			constraints = append(constraints, field+"="+string(encoded))
+		}
+	}
+	if len(constraints) > 0 {
+		description, _ := schema["description"].(string)
+		if description != "" {
+			description += "\n"
+		}
+		schema["description"] = description + "JSON Schema: " + strings.Join(constraints, ", ")
+	}
+	if properties, ok := schema["properties"].(map[string]any); ok {
+		for _, property := range properties {
+			if child, ok := property.(map[string]any); ok {
+				annotateOllamaToolSchema(child)
+			}
+		}
+	}
+	if definitions, ok := schema["$defs"].(map[string]any); ok {
+		for _, definition := range definitions {
+			if child, ok := definition.(map[string]any); ok {
+				annotateOllamaToolSchema(child)
+			}
+		}
+	}
+	if items, ok := schema["items"].(map[string]any); ok {
+		annotateOllamaToolSchema(items)
+	}
+	if variants, ok := schema["anyOf"].([]any); ok {
+		for _, variant := range variants {
+			if child, ok := variant.(map[string]any); ok {
+				annotateOllamaToolSchema(child)
+			}
+		}
+	}
 }
 
 func validOllamaToolType(value any) bool {

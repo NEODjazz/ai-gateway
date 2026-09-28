@@ -540,9 +540,14 @@ images fail as client errors instead of being omitted from the native message.
 Chat content accepts text and user image URL parts with automatic image detail;
 unsupported part types, explicit image detail levels, message names, annotations
 and reasoning blocks fail before provider execution instead of being dropped.
-Function tools sent through native Ollama Chat accept only the schema fields its
-tool contract can preserve; unsupported keywords such as `additionalProperties`
-and `const`, and the function `strict` control, fail before upstream execution.
+Function tools sent through native Ollama Chat accept the Draft 2020-12
+`$schema` marker and the `minimum`, `maximum`, `exclusiveMinimum`, and `default`
+property keywords. Ollama accepts these keywords but drops them while parsing
+tools, so the gateway also copies their values into the property description
+that reaches the model. This helps guide tool calls but does not enforce numeric
+bounds on generated arguments. Unsupported keywords such as
+`additionalProperties` and `const`, malformed bounds, and the function `strict`
+control fail before upstream execution.
 Ollama Responses function tools reject `output_schema` before upstream execution
 because its tool contract does not preserve that control.
 Chat response formats are limited to text, JSON object, or a supplied JSON Schema;
@@ -701,7 +706,11 @@ endpoint игнорирует (включая `strict`), возвращают я
 Function tools в Ollama Responses отклоняют `tools[].strict` и поля схемы,
 которые native adapter не может сохранить. В Chat и Responses значения `type`,
 `items`, `required`, `$defs`, `description`, `enum` и `anyOf` проверяются до
-HTTP-вызова; корневая схема параметров должна иметь `type: object`.
+HTTP-вызова; корневая схема параметров должна иметь `type: object`. Маркер
+`$schema` версии Draft 2020-12 и поля `minimum`, `maximum`,
+`exclusiveMinimum`, `default` также принимаются; ограничения дополнительно
+передаются в описании параметра, поскольку текущая Ollama не сохраняет их при
+разборе схемы инструмента.
 `tool_choice=auto` сохраняет объявленные tools и использует обычное поведение
 Ollama без дополнительного upstream-параметра.
 Для native Chat действует то же правило; `tool_choice=auto` передаёт объявленные

@@ -692,7 +692,14 @@ func ollamaChatTools(request openai.ChatCompletionRequest) []openai.Tool {
 	if choice, ok := request.ToolChoice.(string); ok && choice == "none" {
 		return nil
 	}
-	return request.Tools
+	tools := make([]openai.Tool, len(request.Tools))
+	copy(tools, request.Tools)
+	for index := range tools {
+		if tools[index].Function.Parameters != nil {
+			tools[index].Function.Parameters = ollamaToolParameters(tools[index].Function.Parameters)
+		}
+	}
+	return tools
 }
 
 func validateOllamaResponseToolCalls(calls []openai.ToolCall, tools []openai.Tool, previous []openai.ToolCall) error {
@@ -822,7 +829,14 @@ func ollamaResponseTools(request openai.ResponseRequest) []openai.ResponseTool {
 	if ollamaResponseToolChoiceNone(request.ToolChoice) {
 		return nil
 	}
-	return request.Tools
+	tools := make([]openai.ResponseTool, len(request.Tools))
+	copy(tools, request.Tools)
+	for index := range tools {
+		if tools[index].Type == "function" && tools[index].Parameters != nil {
+			tools[index].Parameters = ollamaToolParameters(tools[index].Parameters)
+		}
+	}
+	return tools
 }
 
 func validateOllamaResponseOutputTools(response openai.ResponseResponse, tools []openai.ResponseTool) error {
