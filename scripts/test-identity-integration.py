@@ -1014,6 +1014,8 @@ class Run:
             "OPENAI_API_BASE_URLS": "http://" + host + ":" + str(self.gw_port) + "/v1",
             "OPENAI_API_KEYS": "",
             "ENABLE_OLLAMA_API": "false",
+            "ENABLE_BASE_MODELS_CACHE": "false",
+            "ENABLE_EVALUATION_ARENA_MODELS": "false",
             "ENABLE_PERSISTENT_CONFIG": "false",
             "BYPASS_MODEL_ACCESS_CONTROL": "true",
             "OFFLINE_MODE": "true",
@@ -1142,6 +1144,43 @@ class Run:
                 status == 200 and b"[DONE]" in data, "OpenWebUI System OAuth SSE failed"
             )
             request["stream"] = False
+            status, data, _ = request_http(self.ui + "/api/models", opener=opener)
+            check(
+                status == 200
+                and {m["id"] for m in json.loads(data)["data"]}
+                == {model, "model-common"},
+                "OpenWebUI full model list mismatch: user="
+                + name
+                + " status="
+                + str(status)
+                + " model_ids="
+                + ",".join(m["id"] for m in json.loads(data).get("data", [])),
+            )
+            request["params"] = {"function_calling": "legacy"}
+            status, data, _ = request_http(
+                self.ui + "/api/chat/completions", request, opener=opener
+            )
+            check(
+                status == 200,
+                "OpenWebUI full chat JSON failed: status="
+                + str(status)
+                + " reason="
+                + re.sub(
+                    r"[a-zA-Z0-9_-]{24,}|https?://[^ ]+",
+                    "[redacted]",
+                    data.decode(errors="replace")[:300],
+                ),
+            )
+            request["stream"] = True
+            status, data, _ = request_http(
+                self.ui + "/api/chat/completions", request, opener=opener
+            )
+            check(
+                status == 200 and b"test response" in data,
+                "OpenWebUI full chat SSE failed",
+            )
+            request.pop("params")
+            request["stream"] = False
             request["model"] = hidden
             status, _, _ = request_http(
                 self.ui + "/openai/chat/completions", request, opener=opener
@@ -1233,7 +1272,7 @@ class Run:
             )
             os.chmod(ready, 0o600)
             print("Browser OAuth diagnostic services ready", flush=True)
-            deadline = time.monotonic() + 300
+            deadline = time.monotonic() + 600
             while (
                 time.monotonic() < deadline and not Path(str(ready) + ".done").exists()
             ):

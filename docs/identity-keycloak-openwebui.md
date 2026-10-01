@@ -91,6 +91,14 @@ refresh tokens не должны попадать в browser JavaScript, лог�
 эти режимы не обеспечивают выбранный per-user flow. Ошибка/отсутствие OAuth
 session не должна переключать connection на privileged shared key.
 
+Сохраняйте `ENABLE_BASE_MODELS_CACHE=false`: общий base-model cache внешнего
+интерфейса не должен подменять пользовательские каталоги. Для проверенного
+обычного chat-сценария отключён evaluation arena; в Controls → Function Calling
+выбран **Legacy**, чтобы OpenWebUI не добавлял built-in tools автоматически.
+Для Native режима явно назначьте нужные имена tools в Gateway binding или
+отключите built-in tools в model capabilities OpenWebUI. Gateway отклоняет весь
+запрос, если в нём есть неназначенный tool; не расширяйте grants до `*` ради входа.
+
 Gateway не принимает `X-OpenWebUI-*`, request `user` или metadata как identity.
 Проверяйте `/v1/models` для каждого пользователя и прямой вызов скрытой модели.
 Даже устаревший внешний model list не разрешает вызов запрещённой модели.
