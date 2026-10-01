@@ -17,7 +17,7 @@ OpenWebUI с достоверными правами, лимитами, ownershi
 | A. Identity/policy/ownership | Реализовано: opt-in directory JWT, immutable binding, stable credential, текущие grants/membership/organization/limits, изоляция cache/resources/billing; unit и реальные PG regressions |
 | B. Keycloak | Реализовано: secret-free realm/clients/mappers, явный provisioning/roles, реальные rotation/refresh/deprovision/logout/expiry/failure/recovery tests |
 | C. OpenWebUI | Реализовано: System OAuth, Authorization Code + PKCE, server refresh, разные `/openai/models` и `/api/models`, полный JSON/SSE chat, отсутствие session fallback, 401/429 и billing attribution |
-| D. CI/release/local rollout | Обязательные PostgreSQL и real identity jobs прошли в GitHub Actions; релиз 0.3.0 опубликован, уточнённый профиль 0.3.1 подготовлен. Local rollout ожидает разрешённой очистки Rancher Desktop: node DiskPressure, Pods Pending/Evicted; deployment ещё не обновлён |
+| D. CI/release/local rollout | Обязательные PostgreSQL и real identity jobs прошли в GitHub Actions; релизы 0.3.0 и 0.3.1 опубликованы, включая все шесть образов и восемь Helm-пакетов. Local rollout ожидает разрешённой очистки Rancher Desktop: node DiskPressure, Pods Pending/Evicted; deployment ещё не обновлён |
 
 Реализация и переход описаны в [профиле Keycloak/OpenWebUI](identity-keycloak-openwebui.md).
 [Сквозной сценарий](../scripts/test-identity-integration.py) использует реальные
