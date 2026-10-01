@@ -71,10 +71,17 @@ keys сохраняют прежнюю семантику пустых grants. �
 
 ## OpenWebUI connection
 
+Проверенный профиль: Keycloak `26.3.3`, OpenWebUI `0.11.4` (образы
+зафиксированы по digest в integration tests). OpenWebUI `0.8.12` не создаёт
+OAuth session cookie, а `0.9.0` использует общий ключ model-list cache; эти
+версии не подходят для данного профиля. Более ранние и последующие версии
+требуют такой же проверки двух пользователей.
+
 Настройте OIDC в OpenWebUI с `OAUTH_CLIENT_ID=openwebui`, отдельным client secret,
 `OPENID_PROVIDER_URL=https://identity.example.com/realms/gateway-users/.well-known/openid-configuration`,
 `OAUTH_SCOPES=openid email profile` и `OAUTH_CODE_CHALLENGE_METHOD=S256`.
-Сохраняйте стабильный secret шифрования OAuth sessions между restart/replicas;
+Задайте `OAUTH_SESSION_TOKEN_ENCRYPTION_KEY` (Fernet key) и стабильный
+`WEBUI_SECRET_KEY` через secret store; сохраняйте их между restart/replicas;
 refresh tokens не должны попадать в browser JavaScript, логи или Git.
 
 В Admin Settings → Connections добавьте OpenAI-compatible URL
@@ -123,3 +130,30 @@ Rollback — вернуть `legacy` и исходные IdP settings. Stable-ID
 Контракты: [Keycloak OIDC](https://www.keycloak.org/securing-apps/oidc-layers),
 [OpenWebUI SSO](https://docs.openwebui.com/features/authentication-access/auth/sso/),
 [OpenWebUI Keycloak](https://docs.openwebui.com/features/authentication-access/auth/sso/keycloak/).
+
+## Воспроизводимая проверка
+
+`python3 -B scripts/test_identity_profile.py` проверяет production realm offline.
+Для сквозного сценария задайте `IDENTITY_INTEGRATION_TESTS=true` и три отдельные
+**тестовые** PostgreSQL DSN: `AUTH_POSTGRES_TEST_DSN`, `BILLING_POSTGRES_TEST_DSN`,
+`CONTROL_PLANE_POSTGRES_TEST_DSN`; выполните
+`python3 -B scripts/test-identity-integration.py`. Нужны объявленный Go toolchain,
+Python, `psql`, Helm и Docker; на macOS используется работающий Rancher Desktop.
+Порты Auth/Billing 8082/8083 должны быть свободны. Скрипт создаёт отдельную
+Gateway database, realm, контейнеры и runtime secrets; останавливает только свои
+процессы и контейнеры. Переданные БД изменяются, поэтому рабочие DSN запрещены.
+
+Проверяются настоящий Authorization Code + PKCE и server OAuth refresh,
+раздельный model-list cache, JSON/SSE, отсутствие fallback без OAuth session,
+401/429, grants/tools/tool results, files/Conversations ownership, embeddings,
+12 параллельных запросов, shared quota/budget после refresh, SQL attribution,
+expiry, rotation/logout, отказ directory SQL и восстановление IdP/JWKS.
+Provider — детерминированный локальный HTTP fixture, поэтому результат не
+доказывает совместимость конкретной внешней модели или полного RAG pipeline.
+Тест HTTP/loopback settings не переносятся в production realm.
+
+CI выполняет этот сценарий отдельно от обязательных PostgreSQL regression tests
+для reservations, background cancellation/settlement и повторной доставки
+billing events. Runtime OAuth tokens, passwords и raw logs не публикуются как
+CI artifacts. Внешний UI и IdP не входят в Gateway deployment; их рабочие
+адреса, secrets и источник provisioning настраиваются оператором.

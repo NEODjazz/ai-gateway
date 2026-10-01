@@ -6,6 +6,7 @@ on:
     branches:
       - main
       - master
+      - test
   pull_request:
 
 permissions:
@@ -64,6 +65,8 @@ jobs:
         run: command -v curl && command -v jq && command -v python3
       - name: Test embedding smoke routing and credential handling
         run: python3 -B -m unittest scripts/test_smoke_ollama_embeddings.py
+      - name: Validate secret-free OIDC realm profile
+        run: python3 -B -m unittest scripts/test_identity_profile.py
 
   go:
     name: Go / ${{ matrix.service }}
@@ -148,6 +151,46 @@ jobs:
           psql postgres://postgres@127.0.0.1:5432/postgres -v ON_ERROR_STOP=1 -c 'CREATE DATABASE gateway_test' -c 'CREATE DATABASE auth_test' -c 'CREATE DATABASE billing_test'
       - name: Apply migrations and run required database scenarios
         run: bash scripts/test-postgres-integration.sh
+
+  identity-integration:
+    name: Keycloak and OpenWebUI identity integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      IDENTITY_INTEGRATION_TESTS: "true"
+      CONTROL_PLANE_POSTGRES_TEST_DSN: postgres://postgres@127.0.0.1:5432/identity_gateway_test?sslmode=disable
+      AUTH_POSTGRES_TEST_DSN: postgres://postgres@127.0.0.1:5432/identity_auth_test?sslmode=disable
+      BILLING_POSTGRES_TEST_DSN: postgres://postgres@127.0.0.1:5432/identity_billing_test?sslmode=disable
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: repos/gateway/go.mod
+      - uses: azure/setup-helm@v5
+        with:
+          version: v4.2.1
+      - name: Create dedicated test databases
+        run: |
+          psql postgres://postgres@127.0.0.1:5432/postgres -v ON_ERROR_STOP=1 -c 'CREATE DATABASE identity_gateway_test' -c 'CREATE DATABASE identity_auth_test' -c 'CREATE DATABASE identity_billing_test'
+      - name: Pull pinned real identity services
+        run: |
+          docker pull quay.io/keycloak/keycloak:26.3.3@sha256:6a7217a100bd3e5de4063a27a538ef999a3c5a88c4b4ec0ffc0a642aee7b2597
+          docker pull ghcr.io/open-webui/open-webui:v0.11.4-slim@sha256:0487ad4a5a4b986062dedace806c3ef1e88fec38c10d1e64d6a5501c66671e5e
+      - name: Verify user OAuth, refresh, grants, resources and billing
+        run: python3 -B scripts/test-identity-integration.py
+      # Never upload raw OAuth/service logs: they may contain runtime test tokens.
 
   admin-ui:
     name: React admin UI
