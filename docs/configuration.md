@@ -405,3 +405,6 @@ Default values удобны только для локального запус�
 Kubernetes Secrets. Не храните реальные provider keys, DSN passwords,
 encryption keys и shared secrets в Git. Изменение encryption key без
 перешифрования snapshot сделает сохранённые credentials нечитаемыми.
+
+Для directory JWT/Keycloak и внешнего пользовательского OpenWebUI см.
+[профиль identity](identity-keycloak-openwebui.md).

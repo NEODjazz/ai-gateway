@@ -130,3 +130,6 @@ Gateway отвечает только на `ping`; необъявленные pr
 - Swagger `Try it out` и demo/static auth отключайте вне trusted environment;
 - Request Logs, traces и metrics не должны содержать prompt, response, Bearer,
   raw provider error или unbounded tenant labels.
+
+Порядок provisioning, scope, отзыва и безопасного legacy cutover описан в
+[Keycloak/OpenWebUI profile](identity-keycloak-openwebui.md).
