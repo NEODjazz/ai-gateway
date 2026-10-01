@@ -17,7 +17,7 @@ OpenWebUI с достоверными правами, лимитами, ownershi
 | A. Identity/policy/ownership | Реализовано: opt-in directory JWT, immutable binding, stable credential, текущие grants/membership/organization/limits, изоляция cache/resources/billing; unit и реальные PG regressions |
 | B. Keycloak | Реализовано: secret-free realm/clients/mappers, явный provisioning/roles, реальные rotation/refresh/deprovision/logout/expiry/failure/recovery tests |
 | C. OpenWebUI | Реализовано: System OAuth, Authorization Code + PKCE, server refresh, разные `/openai/models` и `/api/models`, полный JSON/SSE chat, отсутствие session fallback, 401/429 и billing attribution |
-| D. CI/release/local rollout | Обязательные PostgreSQL и real identity jobs прошли в GitHub Actions; релиз 0.3.0 подготовлен. Local rollout ожидает разрешённой очистки Rancher Desktop: node DiskPressure, Pods Pending/Evicted; deployment ещё не обновлён |
+| D. CI/release/local rollout | Обязательные PostgreSQL и real identity jobs прошли в GitHub Actions; релиз 0.3.0 опубликован, уточнённый профиль 0.3.1 подготовлен. Local rollout ожидает разрешённой очистки Rancher Desktop: node DiskPressure, Pods Pending/Evicted; deployment ещё не обновлён |
 
 Реализация и переход описаны в [профиле Keycloak/OpenWebUI](identity-keycloak-openwebui.md).
 [Сквозной сценарий](../scripts/test-identity-integration.py) использует реальные
@@ -25,7 +25,7 @@ Keycloak 26.3.3, OpenWebUI 0.11.4, Auth/Gateway/Billing и PostgreSQL; provider 
 детерминированный HTTP fixture. Реальные JWT проверяют stable identity после
 refresh, разные grants/quotas/resources/cache и spend attribution. Directory SQL
 failure и недоступность IdP/JWKS закрывают доступ и допускают восстановление.
-Twelve concurrent requests — regression workload, а не production SLO benchmark.
+12 concurrent requests — regression workload, а не production SLO benchmark.
 
 Background Responses/Interactions cancellation ждёт terminal usage перед
 settlement, а queued batch повторно проверяет directory policy; подтверждённый
