@@ -383,6 +383,7 @@ type StreamingResponseClient interface {
 var ErrStreamingUnsupported = errors.New("streaming unsupported")
 
 type Config struct {
+	BackgroundAuthorization modules.Pipeline
 	Default                 string
 	Endpoints               []config.ProviderEndpointConfig
 	GuardrailPolicies       map[string]config.GuardrailPolicyConfig
@@ -458,34 +459,35 @@ type Endpoint struct {
 }
 
 type Router struct {
-	defaultProvider       string
-	endpoints             []Endpoint
-	endpointState         *endpointRegistry
-	modules               modules.Pipeline
-	health                *endpointHealthTracker
-	routeCounter          *atomic.Uint64
-	cache                 responseCache
-	catalog               *modelcatalog.Registry
-	observer              ProviderObserver
-	routingStrategy       string
-	adaptive              *adaptiveRouter
-	affinity              affinityStore
-	ownership             responseOwnershipStore
-	semantic              *semanticResponseCache
-	deployments           *deploymentRegistry
-	providers             *managedProviderRegistry
-	credentials           *credentialVault
-	modelGroups           *modelGroupRegistry
-	controlPlane          *controlPlaneRuntime
-	guardrails            *guardrailRegistry
-	adminState            *adminStateRegistry
-	deploymentHealth      *deploymentHealthRegistry
-	retry                 retryScheduler
-	deploymentQuotas      DeploymentQuotaStore
-	awsCredentials        *awsCredentialRegistry
-	asyncJobs             asyncstate.Store
-	conversations         conversationstate.Store
-	conversationItemQuota int
+	backgroundAuthorization modules.Pipeline
+	defaultProvider         string
+	endpoints               []Endpoint
+	endpointState           *endpointRegistry
+	modules                 modules.Pipeline
+	health                  *endpointHealthTracker
+	routeCounter            *atomic.Uint64
+	cache                   responseCache
+	catalog                 *modelcatalog.Registry
+	observer                ProviderObserver
+	routingStrategy         string
+	adaptive                *adaptiveRouter
+	affinity                affinityStore
+	ownership               responseOwnershipStore
+	semantic                *semanticResponseCache
+	deployments             *deploymentRegistry
+	providers               *managedProviderRegistry
+	credentials             *credentialVault
+	modelGroups             *modelGroupRegistry
+	controlPlane            *controlPlaneRuntime
+	guardrails              *guardrailRegistry
+	adminState              *adminStateRegistry
+	deploymentHealth        *deploymentHealthRegistry
+	retry                   retryScheduler
+	deploymentQuotas        DeploymentQuotaStore
+	awsCredentials          *awsCredentialRegistry
+	asyncJobs               asyncstate.Store
+	conversations           conversationstate.Store
+	conversationItemQuota   int
 }
 
 func New(cfg Config) Provider {
@@ -651,23 +653,24 @@ func NewWithError(cfg Config) (Provider, error) {
 		deploymentQuotas = NewMemoryDeploymentQuotaStore()
 	}
 	router := &Router{
-		defaultProvider:       cfg.Default,
-		endpoints:             endpoints,
-		modules:               cfg.Modules,
-		health:                newEndpointHealthTracker(cfg.CircuitStore),
-		routeCounter:          &atomic.Uint64{},
-		cache:                 newResponseCache(cfg.CacheTTL, cfg.CacheMaxBytes, cfg.CacheStore),
-		catalog:               registry,
-		observer:              cfg.Observer,
-		routingStrategy:       strings.ToLower(strings.TrimSpace(cfg.RoutingStrategy)),
-		adaptive:              newAdaptiveRouter(cfg.AdaptiveEWMAAlpha),
-		deploymentQuotas:      deploymentQuotas,
-		asyncJobs:             cfg.AsyncJobs,
-		conversations:         cfg.Conversations,
-		conversationItemQuota: cfg.ConversationItemQuota,
-		awsCredentials:        &awsCredentialRegistry{current: make(map[string]managedAWSCredentialSource)},
-		affinity:              newAffinityStore(cfg.AffinityTTL, cfg.SessionStore),
-		ownership:             newResponseOwnershipStore(cfg.ResponseOwnershipTTL, cfg.SessionStore),
+		backgroundAuthorization: cfg.BackgroundAuthorization,
+		defaultProvider:         cfg.Default,
+		endpoints:               endpoints,
+		modules:                 cfg.Modules,
+		health:                  newEndpointHealthTracker(cfg.CircuitStore),
+		routeCounter:            &atomic.Uint64{},
+		cache:                   newResponseCache(cfg.CacheTTL, cfg.CacheMaxBytes, cfg.CacheStore),
+		catalog:                 registry,
+		observer:                cfg.Observer,
+		routingStrategy:         strings.ToLower(strings.TrimSpace(cfg.RoutingStrategy)),
+		adaptive:                newAdaptiveRouter(cfg.AdaptiveEWMAAlpha),
+		deploymentQuotas:        deploymentQuotas,
+		asyncJobs:               cfg.AsyncJobs,
+		conversations:           cfg.Conversations,
+		conversationItemQuota:   cfg.ConversationItemQuota,
+		awsCredentials:          &awsCredentialRegistry{current: make(map[string]managedAWSCredentialSource)},
+		affinity:                newAffinityStore(cfg.AffinityTTL, cfg.SessionStore),
+		ownership:               newResponseOwnershipStore(cfg.ResponseOwnershipTTL, cfg.SessionStore),
 		semantic: newSemanticResponseCache(semanticCacheConfig{
 			ttl: cfg.SemanticCacheTTL, threshold: cfg.SemanticCacheThreshold,
 			maxEntries: cfg.SemanticCacheMaxEntries, maxBytes: cfg.SemanticCacheMaxBytes,

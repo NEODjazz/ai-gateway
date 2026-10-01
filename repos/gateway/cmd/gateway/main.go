@@ -50,7 +50,7 @@ func main() {
 	}
 
 	gatewayPipeline := modules.NewPipelineWithObserver([]modules.Module{
-		modules.Auth(cfg.Modules.Auth.Required, cfg.Modules.Auth.URL),
+		modules.AuthWithJWTReauthorization(cfg.Modules.Auth.Required, cfg.Modules.Auth.URL, cfg.Management.Secret),
 	}, metrics)
 	guardrailMonitor := gateway.NewGuardrailMonitorWithStore(cfg.Guardrails.Capacity, gateway.NewRedisGuardrailEventStore(redisStore, cfg.Guardrails.TTL))
 	loggingRegistry := gateway.NewLoggingRegistry(nil)
@@ -70,6 +70,7 @@ func main() {
 
 	modelRegistry := modelcatalog.NewRegistry(cfg.Catalog, registryStoreFor(redisStore), time.Second)
 	providerConfig := provider.Config{
+		BackgroundAuthorization: gatewayPipeline,
 		Default:                 cfg.Provider.Default,
 		Endpoints:               cfg.Provider.Endpoints,
 		GuardrailPolicies:       cfg.Provider.GuardrailPolicies,

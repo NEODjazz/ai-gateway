@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -88,6 +89,10 @@ func (m AuthModule) authorizeJWTPrincipal(ctx context.Context, req *RequestConte
 	if len(roles) == 0 {
 		return ErrUnauthorized
 	}
+	return applyJWTPrincipal(req, principal, roles)
+}
+
+func applyJWTPrincipal(req *RequestContext, principal authorizedJWTPrincipal, roles []string) error {
 	slices.Sort(roles)
 	req.UserID, req.TeamID, req.OrganizationID = principal.UserID, principal.TeamID, principal.OrganizationID
 	req.CredentialID = jwtPrincipalCredentialID(principal.Issuer, principal.Audience, principal.Subject)
@@ -102,6 +107,13 @@ func (m AuthModule) authorizeJWTPrincipal(ctx context.Context, req *RequestConte
 	if req.Metadata == nil {
 		req.Metadata = map[string]string{}
 	}
+	principal.Roles = roles
+	payload, err := json.Marshal(principal)
+	if err != nil {
+		return ErrJWTDirectoryUnavailable
+	}
+	digest := sha256.Sum256(payload)
+	req.JWTIdentity = &JWTIdentity{Issuer: principal.Issuer, Subject: principal.Subject, Audience: principal.Audience, PolicyDigest: hex.EncodeToString(digest[:])}
 	req.Metadata["auth.method"], req.Metadata["auth.issuer"] = "jwt_directory", principal.Issuer
 	return nil
 }
@@ -241,4 +253,49 @@ func (s *PostgresVirtualKeyStore) ListJWTPrincipals(ctx context.Context, userID 
 func isPrincipalForeignKeyViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23503"
+}
+
+// ReauthorizeJWTPrincipal is only exposed over the authenticated internal
+// management channel. Its identity and roles come from a previously authorized
+// durable job, never from a public request header or provider metadata.
+func (m AuthModule) ReauthorizeJWTPrincipal(ctx context.Context, req *RequestContext) error {
+	ref := req.JWTIdentity
+	if ref == nil || m.jwtConfig.IdentityMode != "directory" || ref.Issuer != m.jwtConfig.Issuer || ref.Audience != m.jwtConfig.Audience || !validJWTIdentityValue(ref.Subject, 256) || len(ref.PolicyDigest) != 64 || len(req.Roles) == 0 || req.CredentialID != jwtPrincipalCredentialID(ref.Issuer, ref.Audience, ref.Subject) {
+		return ErrUnauthorized
+	}
+	store, ok := m.store.(jwtPrincipalStore)
+	if !ok {
+		return ErrJWTDirectoryUnavailable
+	}
+	p, found, err := store.LookupJWTPrincipal(ctx, ref.Issuer, ref.Subject, ref.Audience)
+	if err != nil {
+		return ErrJWTDirectoryUnavailable
+	}
+	if !found || !p.Enabled || p.UserID != req.UserID {
+		return ErrUnauthorized
+	}
+	roles := []string{}
+	for _, role := range req.Roles {
+		mapped := false
+		for _, target := range m.jwtConfig.RoleMappings {
+			if target == role {
+				mapped = true
+				break
+			}
+		}
+		if mapped && slices.Contains(p.Roles, role) && !slices.Contains(roles, role) && (role != "team_admin" || p.TeamID != "") {
+			roles = append(roles, role)
+		}
+	}
+	if len(roles) == 0 {
+		return ErrUnauthorized
+	}
+	fresh := RequestContext{}
+	if err := applyJWTPrincipal(&fresh, p, roles); err != nil {
+		return err
+	}
+	if fresh.JWTIdentity.PolicyDigest != ref.PolicyDigest {
+		return ErrUnauthorized
+	}
+	return nil
 }

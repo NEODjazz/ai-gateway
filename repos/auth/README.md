@@ -151,3 +151,18 @@ The same `(issuer, subject, audience)` cannot be reassigned to another user, eve
 when disabled; revoke with `enabled=false`. Mutations require the existing audit
 service. The internal Auth endpoints require the management secret and audit
 identity and must not be exposed to end users.
+
+
+Directory JWT background jobs persist a principal reference and policy digest,
+not an access/refresh token. Gateway workers reauthorize over the existing
+management-secret channel before queued batch execution and while provider
+Responses/Interactions are pending. Disabled principals or changed directory
+policies terminate queued items before provider execution. Directory outages
+retry without execution. Changed access groups and policy attachments are
+resolved again before a batch item starts. Pending provider jobs are cancelled
+on confirmed revocation; settlement waits for a subsequent terminal retrieval
+and uses the original execution and billing attribution. Already completed
+work is settled even after revocation. A cancellation request alone never
+releases the reservation. The management secret must be configured in both
+services for directory background jobs; missing configuration fails closed.
+Legacy key/JWT jobs retain their existing behavior during opt-in migration.

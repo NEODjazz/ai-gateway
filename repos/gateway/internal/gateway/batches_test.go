@@ -1282,3 +1282,31 @@ func TestBatchWorkerReportsCauseAfterSchedulingRetry(t *testing.T) {
 		t.Fatalf("retry was not retained: %+v retained=%t", retried, retained)
 	}
 }
+
+type jwtBatchAuthorizer struct{ err error }
+
+func (*jwtBatchAuthorizer) Name() string                                          { return "auth" }
+func (*jwtBatchAuthorizer) Required() bool                                        { return true }
+func (*jwtBatchAuthorizer) Handle(context.Context, *modules.RequestContext) error { return nil }
+func (a *jwtBatchAuthorizer) ReauthorizeBackground(context.Context, modules.RequestContext) error {
+	return a.err
+}
+func TestQueuedJWTBatchRevocationDoesNotCallProvider(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		err         error
+		fail, retry bool
+	}{
+		{"revoked", modules.ErrUnauthorized, true, false},
+		{"directory unavailable", errors.New("directory outage"), false, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			h := NewHandler(modules.NewPipeline([]modules.Module{&jwtBatchAuthorizer{err: test.err}}), nil)
+			identity, _ := json.Marshal(modules.RequestContext{JWTIdentity: &modules.JWTIdentity{Subject: "sub"}, UserID: "user", CredentialID: "jwt:principal"})
+			body, failed, retry := h.executeBatchItem(t.Context(), batchstate.Batch{ID: "batch", Total: 1}, batchstate.Item{ExecutionID: "exec", Identity: identity})
+			if failed != test.fail || retry != test.retry {
+				t.Fatalf("failed=%t retry=%t body=%s", failed, retry, body)
+			}
+		})
+	}
+}

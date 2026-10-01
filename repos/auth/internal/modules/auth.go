@@ -141,6 +141,7 @@ func (m AuthModule) Handle(ctx context.Context, req *RequestContext) error {
 	if m.initErr != nil {
 		return m.initErr
 	}
+	req.JWTIdentity = nil
 	if strings.TrimSpace(req.APIKey) == "" {
 		return ErrUnauthorized
 	}

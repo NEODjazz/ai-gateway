@@ -763,6 +763,33 @@ func (h Handler) executeBatchItem(ctx context.Context, batch batchstate.Batch, i
 		return batchErrorResult(item, "invalid_batch_state", "stored batch identity is invalid"), true, false
 	}
 	identity.RequestID = item.ExecutionID
+	if err := h.pipeline.ReauthorizeBackground(ctx, identity); err != nil {
+		if errors.Is(err, modules.ErrUnauthorized) {
+			return batchErrorResult(item, "principal_authorization_revoked", "principal or queued policy is no longer authorized"), true, false
+		}
+		return nil, false, true
+	}
+	if identity.JWTIdentity != nil {
+		_, model, tools, err := validateBatchBody(item.URL, item.Body)
+		if err != nil {
+			return batchErrorResult(item, "invalid_batch_state", "stored batch request is invalid"), true, false
+		}
+		// Refresh policy attachments and fallback grants instead of trusting
+		// registry snapshots persisted when the batch was queued.
+		for key := range identity.Metadata {
+			if strings.HasPrefix(key, "policy.") || key == provider.EndpointPolicyAttachmentsMetadataKey {
+				delete(identity.Metadata, key)
+			}
+		}
+		check := &discardBatchAuthorizationResponse{}
+		if !h.prepareAccessGroups(check, &identity) || !h.authorizeBatchModel(check, identity, model) || !h.prepareModelFallbacks(check, ctx, &identity, model) || (len(tools) > 0 && !h.authorizeTools(check, identity, tools, true)) {
+			if check.status >= 500 {
+				return nil, false, true
+			}
+			return batchErrorResult(item, "principal_authorization_revoked", "queued request is no longer authorized"), true, false
+		}
+	}
+
 	if identity.Metadata == nil {
 		identity.Metadata = map[string]string{}
 	}
@@ -1174,3 +1201,10 @@ func RunBatchWorker(ctx context.Context, handler Handler) {
 		}
 	}
 }
+
+// Authorization helpers only need a response sink in a background worker.
+type discardBatchAuthorizationResponse struct{ status int }
+
+func (*discardBatchAuthorizationResponse) Header() http.Header         { return make(http.Header) }
+func (*discardBatchAuthorizationResponse) WriteHeader(int)             {}
+func (*discardBatchAuthorizationResponse) Write(p []byte) (int, error) { return len(p), nil }

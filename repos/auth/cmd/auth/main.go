@@ -44,6 +44,7 @@ func main() {
 			return
 		}
 		_ = json.NewEncoder(w).Encode(authResponse{
+			JWTIdentity:           ctx.JWTIdentity,
 			UserID:                ctx.UserID,
 			Roles:                 ctx.Roles,
 			CredentialID:          ctx.CredentialID,
@@ -71,18 +72,19 @@ type authRequest struct {
 }
 
 type authResponse struct {
-	UserID                string   `json:"user_id"`
-	Roles                 []string `json:"roles,omitempty"`
-	CredentialID          string   `json:"credential_id,omitempty"`
-	CredentialAlias       string   `json:"credential_alias,omitempty"`
-	TeamID                string   `json:"team_id,omitempty"`
-	OrganizationID        string   `json:"organization_id,omitempty"`
-	Tags                  []string `json:"tags,omitempty"`
-	AccessGroupIDs        []string `json:"access_group_ids,omitempty"`
-	ModelAccessRestricted bool     `json:"model_access_restricted,omitempty"`
-	ToolAccessRestricted  bool     `json:"tool_access_restricted,omitempty"`
-	AllowedModels         []string `json:"allowed_models,omitempty"`
-	AllowedTools          []string `json:"allowed_tools,omitempty"`
-	RateLimitRPM          int      `json:"rate_limit_rpm,omitempty"`
-	RateLimitTPM          int      `json:"rate_limit_tpm,omitempty"`
+	JWTIdentity           *modules.JWTIdentity `json:"jwt_identity,omitempty"`
+	UserID                string               `json:"user_id"`
+	Roles                 []string             `json:"roles,omitempty"`
+	CredentialID          string               `json:"credential_id,omitempty"`
+	CredentialAlias       string               `json:"credential_alias,omitempty"`
+	TeamID                string               `json:"team_id,omitempty"`
+	OrganizationID        string               `json:"organization_id,omitempty"`
+	Tags                  []string             `json:"tags,omitempty"`
+	AccessGroupIDs        []string             `json:"access_group_ids,omitempty"`
+	ModelAccessRestricted bool                 `json:"model_access_restricted,omitempty"`
+	ToolAccessRestricted  bool                 `json:"tool_access_restricted,omitempty"`
+	AllowedModels         []string             `json:"allowed_models,omitempty"`
+	AllowedTools          []string             `json:"allowed_tools,omitempty"`
+	RateLimitRPM          int                  `json:"rate_limit_rpm,omitempty"`
+	RateLimitTPM          int                  `json:"rate_limit_tpm,omitempty"`
 }

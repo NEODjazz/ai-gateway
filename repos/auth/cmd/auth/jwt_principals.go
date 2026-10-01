@@ -7,6 +7,27 @@ import (
 )
 
 func registerJWTPrincipalRoutes(mux *http.ServeMux, module *modules.AuthModule, secret string) {
+	mux.HandleFunc("POST /internal/v1/jwt-principals:reauthorize", managementAuthorized(secret, func(w http.ResponseWriter, r *http.Request) {
+		var input struct {
+			Identity     *modules.JWTIdentity `json:"jwt_identity"`
+			UserID       string               `json:"user_id"`
+			CredentialID string               `json:"credential_id"`
+			Roles        []string             `json:"roles"`
+		}
+		if !decodeManagementJSON(w, r, &input) {
+			return
+		}
+		req := modules.RequestContext{JWTIdentity: input.Identity, UserID: input.UserID, CredentialID: input.CredentialID, Roles: input.Roles}
+		if err := module.ReauthorizeJWTPrincipal(r.Context(), &req); err != nil {
+			if errors.Is(err, modules.ErrUnauthorized) {
+				http.Error(w, "principal authorization revoked", http.StatusUnauthorized)
+			} else {
+				http.Error(w, "identity directory unavailable", http.StatusServiceUnavailable)
+			}
+			return
+		}
+		writeManagementJSON(w, http.StatusOK, map[string]bool{"authorized": true})
+	}))
 	mux.HandleFunc("GET /internal/v1/jwt-principals", managementAuthorized(secret, func(w http.ResponseWriter, r *http.Request) {
 		limit, ok := managementLimit(w, r)
 		if !ok {

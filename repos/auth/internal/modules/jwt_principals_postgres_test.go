@@ -120,8 +120,14 @@ func TestPostgresJWTPrincipalDirectoryIntegration(t *testing.T) {
 	if err != nil || first.UserID != userID || first.TeamID != teamID || first.OrganizationID != orgID || first.RateLimitRPM != 4 || len(first.AllowedModels) != 1 {
 		t.Fatalf("directory binding was not applied: %v", err)
 	}
+	if err := module.ReauthorizeJWTPrincipal(ctx, &first); err != nil {
+		t.Fatal(err)
+	}
 	claims["exp"], claims["jti"] = 3000, "refresh"
 	query(`UPDATE auth_jwt_principals SET allowed_models=ARRAY['model-b'],rate_limit_rpm=2 WHERE user_id=$1`, userID)
+	if err := module.ReauthorizeJWTPrincipal(ctx, &first); !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("queued stale grants authorized: %v", err)
+	}
 	second, err := authorize()
 	if err != nil || second.CredentialID != first.CredentialID || second.UserID != first.UserID || second.RateLimitRPM != 2 || len(second.AllowedModels) != 1 || second.AllowedModels[0] != "model-b" {
 		t.Fatalf("refresh retained stale policy or changed identity: %v", err)
@@ -136,6 +142,9 @@ func TestPostgresJWTPrincipalDirectoryIntegration(t *testing.T) {
 		`UPDATE auth_jwt_principals SET enabled=false WHERE user_id=$1`,
 	} {
 		query(sql, userID)
+		if err := module.ReauthorizeJWTPrincipal(ctx, &second); !errors.Is(err, ErrUnauthorized) {
+			t.Fatalf("disabled queued principal retained authorization: %v", err)
+		}
 		if _, err := authorize(); !errors.Is(err, ErrUnauthorized) {
 			t.Fatalf("inactive directory relationship retained JWT access: %v", err)
 		}

@@ -15,6 +15,7 @@ import (
 )
 
 type RequestContext struct {
+	JWTIdentity                *JWTIdentity                       `json:"jwt_identity,omitempty"`
 	APIKey                     string                             `json:"-"`
 	RequestID                  string                             `json:"request_id,omitempty"`
 	SessionID                  string                             `json:"session_id,omitempty"`

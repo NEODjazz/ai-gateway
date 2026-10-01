@@ -330,3 +330,75 @@ func TestBackgroundResponseRequiresExplicitDeploymentCapability(t *testing.T) {
 		t.Fatalf("provider=%d reserve=%d", client.responseCalls, recorder.pre)
 	}
 }
+
+type jwtBackgroundAuth struct {
+	err   error
+	calls int
+}
+
+func (*jwtBackgroundAuth) Name() string                                          { return "auth" }
+func (*jwtBackgroundAuth) Required() bool                                        { return true }
+func (*jwtBackgroundAuth) Handle(context.Context, *modules.RequestContext) error { return nil }
+func (a *jwtBackgroundAuth) ReauthorizeBackground(_ context.Context, req modules.RequestContext) error {
+	a.calls++
+	return a.err
+}
+func TestJWTBackgroundRevocationCancelsAndSettlesWithoutNewExecution(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		authErr      error
+		pending      bool
+		cancel, post int
+	}{
+		{"active", nil, true, 0, 0},
+		{"revoked", modules.ErrUnauthorized, true, 1, 0},
+		{"directory outage", errors.New("directory unavailable"), true, 0, 0},
+		{"already completed still settles", modules.ErrUnauthorized, false, 0, 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			jobs := &backgroundJobStore{}
+			auth := &jwtBackgroundAuth{err: test.authErr}
+			billing := &backgroundLifecycleRecorder{}
+			status := "completed"
+			if test.pending {
+				status = "in_progress"
+			}
+			client := &backgroundResponseClient{retrieve: openai.ResponseResponse{ID: "resp_background", Status: status, Usage: openai.ResponseUsage{TotalTokens: 7}}}
+			endpoint := Endpoint{Name: "deployment", Type: "openai-compatible", Models: []string{"model"}, Provider: client, Admission: newAdmissionController(0, 0, 0)}
+			router := Router{endpoints: []Endpoint{endpoint}, endpointState: &endpointRegistry{}, backgroundAuthorization: modules.NewPipeline([]modules.Module{auth}), modules: modules.NewPipeline([]modules.Module{billing}), health: newEndpointHealthTracker(), ownership: newResponseOwnershipStore(time.Hour, &ownershipTestStore{data: map[string][]byte{}}), asyncJobs: jobs}
+			req := modules.RequestContext{JWTIdentity: &modules.JWTIdentity{Subject: "sub"}, CredentialID: "jwt:principal", UserID: "user", RequestID: "execution", ResponseRequest: &openai.ResponseRequest{Model: "model"}}
+			if err := router.ownership.put(t.Context(), req, "resp_background", responseOwnership{Endpoint: endpoint.Name, Model: "model", Deployment: responseDeploymentIdentity(endpoint)}); err != nil {
+				t.Fatal(err)
+			}
+			job := newBackgroundResponseJob(req)
+			payload, err := json.Marshal(job)
+			if err != nil {
+				t.Fatal(err)
+			}
+			jobs.job = &asyncstate.Job{Kind: backgroundResponseJobKind, ResourceID: "resp_background", OwnerKey: backgroundResponseOwner(req), EndpointID: endpoint.Name, ExecutionID: req.RequestID, Payload: payload}
+			_, err = router.ProcessBackgroundResponses(t.Context())
+			if client.cancelCalls != test.cancel || billing.post != test.post || billing.pre != 0 || client.responseCalls != 0 {
+				t.Fatalf("cancel=%d billing=%+v creates=%d err=%v", client.cancelCalls, billing, client.responseCalls, err)
+			}
+			if test.post == 1 && jobs.job != nil {
+				t.Fatal("settled job remains queued")
+			}
+			if test.post == 0 && jobs.job == nil {
+				t.Fatal("unsettled reservation lost")
+			}
+			if test.name == "directory outage" && err == nil {
+				t.Fatal("outage not reported")
+			}
+			if test.name == "revoked" {
+				client.retrieve.Status = "cancelled"
+				if _, err := router.ProcessBackgroundResponses(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+				if billing.post != 1 || billing.totalTokens != 7 || billing.requestID != "execution" || jobs.job != nil {
+					t.Fatalf("terminal usage not settled: %+v", billing)
+				}
+			}
+
+		})
+	}
+}
