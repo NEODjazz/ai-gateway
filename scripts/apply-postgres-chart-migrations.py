@@ -34,6 +34,7 @@ def parse_migrations(rendered: str) -> dict[str, str]:
     required = {
         "001_financial_core.sql",
         "007_gateway_control_plane.sql",
+        "013_jwt_principals.sql",
         "036_gateway_vector_store_chunking.sql",
         "037_gateway_conversations.sql",
         "038_gateway_conversation_background.sql",

@@ -1,6 +1,10 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
+  name: {{ include "postgres.fullname" . }}-migrations
+  labels:
+    {{- include "postgres.labels" . | nindent 4 }}
+data:
   013_jwt_principals.sql: |
     CREATE TABLE IF NOT EXISTS auth_jwt_principals
     (
@@ -21,10 +25,6 @@ metadata:
         PRIMARY KEY (issuer, subject, audience)
     );
     CREATE INDEX IF NOT EXISTS auth_jwt_principals_user_idx ON auth_jwt_principals(user_id);
-  name: {{ include "postgres.fullname" . }}-migrations
-  labels:
-    {{- include "postgres.labels" . | nindent 4 }}
-data:
   039_gateway_response_sessions.sql: |
     CREATE TABLE IF NOT EXISTS gateway_response_sessions (
         key TEXT PRIMARY KEY CHECK (length(key) BETWEEN 1 AND 256),
