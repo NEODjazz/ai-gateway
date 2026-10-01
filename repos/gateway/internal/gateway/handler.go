@@ -91,6 +91,7 @@ type Handler struct {
 	apiDocs            apiDocsConfig
 	adminUI            bool
 	browserSSO         *BrowserSSO
+	ssoManagement      SSOManagementClient
 	adminState         *AdminStateRuntime
 }
 

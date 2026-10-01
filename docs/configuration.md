@@ -1,5 +1,10 @@
 # Конфигурация
 
+Browser SSO также настраивается global admin через **System → Settings** после
+миграции PostgreSQL 014 и подготовки encryption key. См.
+[настройку SSO в UI](admin-sso-settings.md): draft/test/activate и влияние на JWT
+trust всех клиентов. Environment settings остаются fallback до активации.
+
 Helm values — рекомендуемый интерфейс Kubernetes-конфигурации. Charts
 преобразуют их в environment variables и Secrets. При локальном запуске те же
 переменные задаются процессу напрямую. HTTP resources и payloads описаны в

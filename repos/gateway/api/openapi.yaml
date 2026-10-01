@@ -43,6 +43,207 @@ tags:
 security:
   - bearerAuth: []
 paths:
+  /admin/v1/sso/settings:
+    get:
+      operationId: getSSOSettings
+      tags:
+      - Identity
+      summary: Read redacted managed SSO settings
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SSOSettingsView'
+        '400':
+          description: Invalid configuration or expired test
+        '403':
+          description: Global admin, same-user proof or virtual-key session required
+        '409':
+          description: Settings revision changed; reload and retry
+        '503':
+          description: Auth, encryption key, PostgreSQL migration or audit unavailable
+    put:
+      operationId: saveSSODraft
+      tags:
+      - Identity
+      summary: Save an encrypted configuration draft; invalidates previous test proof
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SSOSettingsView'
+        '400':
+          description: Invalid configuration or expired test
+        '403':
+          description: Global admin, same-user proof or virtual-key session required
+        '409':
+          description: Settings revision changed; reload and retry
+        '503':
+          description: Auth, encryption key, PostgreSQL migration or audit unavailable
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SSODraftInput'
+  /admin/v1/sso/discover:
+    post:
+      operationId: discoverSSOEndpoints
+      tags:
+      - Identity
+      summary: Discover and validate same-origin OIDC endpoints
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SSODiscovery'
+        '400':
+          description: Invalid configuration or expired test
+        '403':
+          description: Global admin, same-user proof or virtual-key session required
+        '409':
+          description: Settings revision changed; reload and retry
+        '503':
+          description: Auth, encryption key, PostgreSQL migration or audit unavailable
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                issuer:
+                  type: string
+                  maxLength: 2048
+              required:
+              - issuer
+  /admin/v1/sso/test:
+    post:
+      operationId: startSSOSettingsTest
+      tags:
+      - Identity
+      summary: Start a five-minute same-administrator test without changing active trust
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  start_url:
+                    type: string
+                    maxLength: 256
+                required:
+                - start_url
+        '400':
+          description: Invalid configuration or expired test
+        '403':
+          description: Global admin, same-user proof or virtual-key session required
+        '409':
+          description: Settings revision changed; reload and retry
+        '503':
+          description: Auth, encryption key, PostgreSQL migration or audit unavailable
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SSORevisionInput'
+  /admin/v1/sso/action:
+    post:
+      operationId: changeSSOSettings
+      tags:
+      - Identity
+      summary: Activate a verified draft, disable browser sign-in or restore previous
+        trust
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SSOSettingsView'
+        '400':
+          description: Invalid configuration or expired test
+        '403':
+          description: Global admin, same-user proof or virtual-key session required
+        '409':
+          description: Settings revision changed; reload and retry
+        '503':
+          description: Auth, encryption key, PostgreSQL migration or audit unavailable
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SSOActionInput'
+      description: Requires a global administrator authenticated with a virtual key.
+        Activation replaces issuer/audience/role policy for all Gateway JWT clients
+        after rechecking the directory proof. Disable preserves JWT trust for other
+        clients. Rollback restores the previous managed profile or environment configuration.
+  /auth/sso/test/start:
+    get:
+      operationId: startBrowserSSOTest
+      tags:
+      - Identity
+      summary: Start draft sign-in using a short-lived ticket
+      responses:
+        '400':
+          description: Invalid configuration or expired test
+        '403':
+          description: Global admin, same-user proof or virtual-key session required
+        '409':
+          description: Settings revision changed; reload and retry
+        '503':
+          description: Auth, encryption key, PostgreSQL migration or audit unavailable
+        '302':
+          description: Redirect to identity provider or console settings
+      security: []
+      parameters:
+      - name: ticket
+        in: query
+        required: true
+        schema:
+          type: string
+          maxLength: 4096
+  /auth/sso/test/callback:
+    get:
+      operationId: completeBrowserSSOTest
+      tags:
+      - Identity
+      summary: Verify draft sign-in without creating an active session
+      responses:
+        '400':
+          description: Invalid configuration or expired test
+        '403':
+          description: Global admin, same-user proof or virtual-key session required
+        '409':
+          description: Settings revision changed; reload and retry
+        '503':
+          description: Auth, encryption key, PostgreSQL migration or audit unavailable
+        '302':
+          description: Redirect to identity provider or console settings
+      security: []
+      parameters:
+      - name: state
+        in: query
+        required: true
+        schema:
+          type: string
+          maxLength: 4096
+      - name: code
+        in: query
+        required: true
+        schema:
+          type: string
+          maxLength: 4096
   /auth/sso/config:
     get:
       operationId: getBrowserSSOConfig
@@ -5089,6 +5290,281 @@ components:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
   schemas:
+    SSOProfileConfig:
+      type: object
+      properties:
+        issuer:
+          type: string
+          maxLength: 2048
+        audience:
+          type: string
+          maxLength: 512
+        jwks_url:
+          type: string
+          maxLength: 2048
+        authorization_url:
+          type: string
+          maxLength: 2048
+        token_url:
+          type: string
+          maxLength: 2048
+        client_id:
+          type: string
+          maxLength: 512
+        redirect_url:
+          type: string
+          maxLength: 2048
+        roles_claim:
+          type: string
+          maxLength: 512
+        scopes:
+          type: array
+          maxItems: 16
+          items:
+            type: string
+            maxLength: 128
+        role_mappings:
+          type: object
+          additionalProperties:
+            type: string
+            enum:
+            - admin
+            - user
+            - team_admin
+            - developer
+          minProperties: 1
+        session_ttl_seconds:
+          type: integer
+          minimum: 60
+          maximum: 86400
+      required:
+      - issuer
+      - audience
+      - jwks_url
+      - authorization_url
+      - token_url
+      - client_id
+      - redirect_url
+      - roles_claim
+      - scopes
+      - role_mappings
+      - session_ttl_seconds
+    SSODraftInput:
+      type: object
+      properties:
+        issuer:
+          type: string
+          maxLength: 2048
+        audience:
+          type: string
+          maxLength: 512
+        jwks_url:
+          type: string
+          maxLength: 2048
+        authorization_url:
+          type: string
+          maxLength: 2048
+        token_url:
+          type: string
+          maxLength: 2048
+        client_id:
+          type: string
+          maxLength: 512
+        redirect_url:
+          type: string
+          maxLength: 2048
+        roles_claim:
+          type: string
+          maxLength: 512
+        scopes:
+          type: array
+          maxItems: 16
+          items:
+            type: string
+            maxLength: 128
+        role_mappings:
+          type: object
+          additionalProperties:
+            type: string
+            enum:
+            - admin
+            - user
+            - team_admin
+            - developer
+          minProperties: 1
+        session_ttl_seconds:
+          type: integer
+          minimum: 60
+          maximum: 86400
+        expected_revision:
+          type: integer
+          minimum: 0
+        client_secret:
+          type: string
+          maxLength: 4096
+          writeOnly: true
+          description: Omit to preserve the saved secret; an empty string explicitly clears
+            it.
+      required:
+      - issuer
+      - audience
+      - jwks_url
+      - authorization_url
+      - token_url
+      - client_id
+      - redirect_url
+      - roles_claim
+      - scopes
+      - role_mappings
+      - session_ttl_seconds
+      - expected_revision
+      additionalProperties: false
+    SSOProfileView:
+      type: object
+      properties:
+        issuer:
+          type: string
+          maxLength: 2048
+        audience:
+          type: string
+          maxLength: 512
+        jwks_url:
+          type: string
+          maxLength: 2048
+        authorization_url:
+          type: string
+          maxLength: 2048
+        token_url:
+          type: string
+          maxLength: 2048
+        client_id:
+          type: string
+          maxLength: 512
+        redirect_url:
+          type: string
+          maxLength: 2048
+        roles_claim:
+          type: string
+          maxLength: 512
+        scopes:
+          type: array
+          maxItems: 16
+          items:
+            type: string
+            maxLength: 128
+        role_mappings:
+          type: object
+          additionalProperties:
+            type: string
+            enum:
+            - admin
+            - user
+            - team_admin
+            - developer
+          minProperties: 1
+        session_ttl_seconds:
+          type: integer
+          minimum: 60
+          maximum: 86400
+        id:
+          type: string
+          maxLength: 43
+        enabled:
+          type: boolean
+        client_secret_configured:
+          type: boolean
+      required:
+      - issuer
+      - audience
+      - jwks_url
+      - authorization_url
+      - token_url
+      - client_id
+      - redirect_url
+      - roles_claim
+      - scopes
+      - role_mappings
+      - session_ttl_seconds
+    SSOSettingsView:
+      type: object
+      properties:
+        revision:
+          type: integer
+          minimum: 0
+        active:
+          oneOf:
+          - $ref: '#/components/schemas/SSOProfileView'
+          - type: 'null'
+        draft:
+          oneOf:
+          - $ref: '#/components/schemas/SSOProfileView'
+          - type: 'null'
+        can_rollback:
+          type: boolean
+        test_status:
+          type: string
+          enum:
+          - not_started
+          - running
+          - passed
+          - failed
+          - expired
+        test_expires_at:
+          type: integer
+        key_session:
+          type: boolean
+      required:
+      - revision
+      - active
+      - draft
+      - can_rollback
+      - test_status
+      - key_session
+    SSORevisionInput:
+      type: object
+      properties:
+        expected_revision:
+          type: integer
+          minimum: 0
+      required:
+      - expected_revision
+      additionalProperties: false
+    SSOActionInput:
+      type: object
+      properties:
+        expected_revision:
+          type: integer
+          minimum: 0
+        action:
+          type: string
+          enum:
+          - activate
+          - disable
+          - rollback
+      required:
+      - expected_revision
+      - action
+      additionalProperties: false
+    SSODiscovery:
+      type: object
+      properties:
+        issuer:
+          type: string
+          maxLength: 2048
+        authorization_url:
+          type: string
+          maxLength: 2048
+        token_url:
+          type: string
+          maxLength: 2048
+        jwks_url:
+          type: string
+          maxLength: 2048
+      required:
+      - issuer
+      - authorization_url
+      - token_url
+      - jwks_url
     AssistantTool:
       type: object
       additionalProperties: false

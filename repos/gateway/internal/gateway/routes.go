@@ -24,6 +24,13 @@ var gatewayRoutes = []routeDefinition{
 	{RouteContract{http.MethodGet, "/auth/sso/start"}, func(h Handler) http.Handler { return http.HandlerFunc(h.StartBrowserSSO) }},
 	{RouteContract{http.MethodGet, "/auth/sso/callback"}, func(h Handler) http.Handler { return http.HandlerFunc(h.CompleteBrowserSSO) }},
 	{RouteContract{http.MethodPost, "/auth/sso/logout"}, func(h Handler) http.Handler { return http.HandlerFunc(h.EndBrowserSSO) }},
+	{RouteContract{http.MethodGet, "/auth/sso/test/start"}, func(h Handler) http.Handler { return http.HandlerFunc(h.StartBrowserSSOTest) }},
+	{RouteContract{http.MethodGet, "/auth/sso/test/callback"}, func(h Handler) http.Handler { return http.HandlerFunc(h.CompleteBrowserSSOTest) }},
+	{RouteContract{http.MethodGet, "/admin/v1/sso/settings"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GetSSOSettings) }},
+	{RouteContract{http.MethodPut, "/admin/v1/sso/settings"}, func(h Handler) http.Handler { return http.HandlerFunc(h.SaveSSODraft) }},
+	{RouteContract{http.MethodPost, "/admin/v1/sso/discover"}, func(h Handler) http.Handler { return http.HandlerFunc(h.DiscoverSSO) }},
+	{RouteContract{http.MethodPost, "/admin/v1/sso/test"}, func(h Handler) http.Handler { return http.HandlerFunc(h.StartSSOTest) }},
+	{RouteContract{http.MethodPost, "/admin/v1/sso/action"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ChangeSSO) }},
 	{RouteContract{http.MethodGet, "/scim/v2"}, func(h Handler) http.Handler { return http.HandlerFunc(h.SCIMBase) }},
 	{RouteContract{http.MethodGet, "/scim/v2/ServiceProviderConfig"}, func(h Handler) http.Handler { return http.HandlerFunc(h.SCIMServiceProviderConfig) }},
 	{RouteContract{http.MethodGet, "/scim/v2/ResourceTypes"}, func(h Handler) http.Handler { return http.HandlerFunc(h.SCIMResourceTypes) }},
@@ -315,7 +322,7 @@ func Routes(handler Handler) http.Handler {
 	if handler.adminUI {
 		registerAdminUI(mux)
 	}
-	observed := observabilityMiddleware(handler.metrics, browserSSOAuthMiddleware(handler.browserSSO, mux))
+	observed := observabilityMiddleware(handler.metrics, handler.browserSSOMiddleware(mux))
 	return otelhttp.NewHandler(observed, "ai-gateway.http",
 		otelhttp.WithFilter(func(r *http.Request) bool {
 			return !isInfrastructurePath(r.URL.Path)

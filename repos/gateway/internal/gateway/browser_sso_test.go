@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -137,5 +138,25 @@ func TestBrowserSSOConfigurationValidation(t *testing.T) {
 		if _, err := NewBrowserSSO(config); err == nil {
 			t.Fatal("invalid browser SSO config accepted")
 		}
+	}
+}
+
+func TestBrowserSSOTokenExchangeDoesNotFollowRedirect(t *testing.T) {
+	var forwarded atomic.Int64
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		forwarded.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer target.Close()
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusTemporaryRedirect)
+	}))
+	defer source.Close()
+	sso, err := NewBrowserSSO(BrowserSSOConfig{AuthorizationURL: source.URL, TokenURL: source.URL, ClientID: "console", ClientSecret: "fixture-client-secret", RedirectURL: "https://gateway.example/auth/sso/callback", SessionKey: []byte(strings.Repeat("k", 32))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := sso.exchange(context.Background(), "fixture-code", "fixture-verifier"); err == nil || forwarded.Load() != 0 {
+		t.Fatal("token exchange forwarded credentials to a redirected endpoint")
 	}
 }

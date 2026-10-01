@@ -21,6 +21,7 @@ type AuthModule struct {
 	staticFallback bool
 	demoKeys       bool
 	initErr        error
+	sso            *SSOManager
 }
 
 func NewAuthModule(required bool) AuthModule {
@@ -40,6 +41,9 @@ func NewAuthModule(required bool) AuthModule {
 		store, storeErr := NewPostgresVirtualKeyStore(settings.PostgresDSN)
 		module.store = store
 		module.initErr = errors.Join(module.initErr, storeErr)
+		if storeErr == nil {
+			module.sso, _ = NewSSOManager(store, settings.KeyHashSecret)
+		}
 	}
 	return module
 }
@@ -119,7 +123,11 @@ func (m AuthModule) Ready(ctx context.Context) error {
 			return err
 		}
 	}
-	if m.jwtConfig.IdentityMode == "directory" {
+	current, err := m.currentJWTModule(ctx)
+	if err != nil {
+		return err
+	}
+	if current.jwtConfig.IdentityMode == "directory" {
 		store, ok := m.store.(jwtPrincipalStore)
 		if !ok {
 			return ErrJWTDirectoryUnavailable
@@ -128,7 +136,7 @@ func (m AuthModule) Ready(ctx context.Context) error {
 			return err
 		}
 	}
-	return m.jwtVerifier.Ready(ctx)
+	return current.jwtVerifier.Ready(ctx)
 }
 
 func (m AuthModule) Close() {
@@ -227,6 +235,21 @@ func applyStoredVirtualKey(req *RequestContext, key StoredVirtualKey) {
 }
 
 func (m AuthModule) authorizeJWT(ctx context.Context, req *RequestContext) error {
+	current, err := m.currentJWTModule(ctx)
+	if err != nil {
+		return err
+	}
+	return current.authorizeJWTConfigured(ctx, req)
+}
+
+func (m AuthModule) currentJWTModule(ctx context.Context) (AuthModule, error) {
+	if m.sso != nil {
+		return m.sso.JWTModule(ctx, m)
+	}
+	return m, nil
+}
+
+func (m AuthModule) authorizeJWTConfigured(ctx context.Context, req *RequestContext) error {
 	claims, err := m.jwtVerifier.Verify(ctx, req.APIKey)
 	if err != nil {
 		return err

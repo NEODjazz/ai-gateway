@@ -44,9 +44,11 @@ type BrowserSSO struct {
 }
 
 type browserSSOState struct {
-	State     string `json:"state"`
-	Verifier  string `json:"verifier"`
-	ExpiresAt int64  `json:"expires_at"`
+	State      string `json:"state"`
+	Verifier   string `json:"verifier"`
+	ExpiresAt  int64  `json:"expires_at"`
+	ProfileID  string `json:"profile_id,omitempty"`
+	TestTicket string `json:"test_ticket,omitempty"`
 }
 
 type browserSSOSession struct {
@@ -55,7 +57,7 @@ type browserSSOSession struct {
 }
 
 func NewBrowserSSO(config BrowserSSOConfig) (*BrowserSSO, error) {
-	if !validBrowserSSOURL(config.AuthorizationURL) || !validBrowserSSOURL(config.TokenURL) || !validBrowserSSOURL(config.RedirectURL) || strings.TrimSpace(config.ClientID) == "" || len(config.ClientID) > 512 || len(config.ClientSecret) > 4096 || len(config.SessionKey) < 32 {
+	if !validBrowserSSOURL(config.AuthorizationURL) || !validBrowserSSOURL(config.TokenURL) || !validBrowserSSORedirectURL(config.RedirectURL) || strings.TrimSpace(config.ClientID) == "" || len(config.ClientID) > 512 || len(config.ClientSecret) > 4096 || len(config.SessionKey) < 32 {
 		return nil, errors.New("invalid browser SSO configuration")
 	}
 	if len(config.Scopes) == 0 {
@@ -73,7 +75,7 @@ func NewBrowserSSO(config BrowserSSOConfig) (*BrowserSSO, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &BrowserSSO{config: config, aead: aead, client: &http.Client{Timeout: 10 * time.Second}, now: time.Now}, nil
+	return &BrowserSSO{config: config, aead: aead, client: &http.Client{Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, now: time.Now}, nil
 }
 
 func validBrowserSSOURL(raw string) bool {
@@ -84,12 +86,30 @@ func validBrowserSSOURL(raw string) bool {
 	return parsed.Scheme == "https" || parsed.Scheme == "http" && (parsed.Hostname() == "127.0.0.1" || parsed.Hostname() == "localhost" || parsed.Hostname() == "::1")
 }
 
-func (h Handler) GetBrowserSSOConfig(w http.ResponseWriter, _ *http.Request) {
+func validBrowserSSORedirectURL(raw string) bool {
+	if validBrowserSSOURL(raw) {
+		return true
+	}
+	parsed, err := url.Parse(raw)
+	return err == nil && parsed.Scheme == "http" && strings.HasSuffix(parsed.Hostname(), ".localhost") && parsed.User == nil && parsed.Fragment == "" && parsed.RawQuery == ""
+}
+func (h Handler) GetBrowserSSOConfig(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusOK, map[string]any{"enabled": h.browserSSO != nil, "start_url": "/auth/sso/start"})
+	sso, err := h.resolveBrowserSSO(r)
+	if err != nil {
+		writeError(w, 503, "sso_unavailable", "Browser sign-in is unavailable.")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"enabled": sso != nil, "start_url": "/auth/sso/start"})
 }
 
 func (h Handler) StartBrowserSSO(w http.ResponseWriter, r *http.Request) {
+	sso, err := h.resolveBrowserSSO(r)
+	if err != nil {
+		writeError(w, 503, "sso_unavailable", "Browser sign-in is unavailable.")
+		return
+	}
+	h.browserSSO = sso
 	if h.browserSSO == nil {
 		http.NotFound(w, r)
 		return
@@ -97,6 +117,13 @@ func (h Handler) StartBrowserSSO(w http.ResponseWriter, r *http.Request) {
 	if r.URL.RawQuery != "" {
 		writeError(w, http.StatusBadRequest, "invalid_request", "query parameters are not supported")
 		return
+	}
+	h.startBrowserSSO(w, r, "", "")
+}
+func (h Handler) startBrowserSSO(w http.ResponseWriter, r *http.Request, profileID, ticket string) {
+	cookieName := browserSSOStateCookie
+	if ticket != "" {
+		cookieName = browserSSOTestStateCookie
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	state, err := randomBrowserSSOValue(32)
@@ -109,12 +136,12 @@ func (h Handler) StartBrowserSSO(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "sso_unavailable", "browser sign-in is unavailable")
 		return
 	}
-	sealed, err := h.browserSSO.seal(browserSSOStateCookie, browserSSOState{State: state, Verifier: verifier, ExpiresAt: h.browserSSO.now().Add(5 * time.Minute).Unix()})
+	sealed, err := h.browserSSO.seal(cookieName, browserSSOState{State: state, Verifier: verifier, ExpiresAt: h.browserSSO.now().Add(5 * time.Minute).Unix(), ProfileID: profileID, TestTicket: ticket})
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "sso_unavailable", "browser sign-in is unavailable")
 		return
 	}
-	h.browserSSO.setCookie(w, browserSSOStateCookie, sealed, "/auth/sso", 5*time.Minute, http.SameSiteLaxMode)
+	h.browserSSO.setCookie(w, cookieName, sealed, "/auth/sso", 5*time.Minute, http.SameSiteLaxMode)
 	authorization, _ := url.Parse(h.browserSSO.config.AuthorizationURL)
 	query := authorization.Query()
 	query.Set("response_type", "code")
@@ -130,34 +157,19 @@ func (h Handler) StartBrowserSSO(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) CompleteBrowserSSO(w http.ResponseWriter, r *http.Request) {
+	sso, err := h.resolveBrowserSSO(r)
+	if err != nil {
+		writeError(w, 503, "sso_unavailable", "Browser sign-in is unavailable.")
+		return
+	}
+	h.browserSSO = sso
 	if h.browserSSO == nil {
 		http.NotFound(w, r)
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	query := r.URL.Query()
-	if len(query["state"]) != 1 || len(query["code"]) != 1 || len(query["error"]) > 1 {
-		writeError(w, http.StatusBadRequest, "invalid_sso_callback", "browser sign-in callback is invalid")
-		return
-	}
-	cookie, err := r.Cookie(browserSSOStateCookie)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_sso_state", "browser sign-in state is invalid")
-		return
-	}
-	var state browserSSOState
-	if err := h.browserSSO.open(browserSSOStateCookie, cookie.Value, &state); err != nil || state.ExpiresAt < h.browserSSO.now().Unix() || state.State == "" || state.State != r.URL.Query().Get("state") || state.Verifier == "" {
-		writeError(w, http.StatusBadRequest, "invalid_sso_state", "browser sign-in state is invalid")
-		return
-	}
-	code := r.URL.Query().Get("code")
-	if code == "" || len(code) > 4096 || r.URL.Query().Get("error") != "" {
-		writeError(w, http.StatusBadRequest, "invalid_sso_callback", "browser sign-in callback is invalid")
-		return
-	}
-	token, expiresIn, err := h.browserSSO.exchange(r.Context(), code, state.Verifier)
-	if err != nil {
-		writeError(w, http.StatusBadGateway, "sso_exchange_failed", "identity provider token exchange failed")
+	token, expiresIn, _, ok := h.browserSSO.callbackToken(w, r, browserSSOStateCookie)
+	if !ok {
 		return
 	}
 	req := modules.RequestContext{APIKey: token, RequestID: requestID(r)}
@@ -176,11 +188,40 @@ func (h Handler) CompleteBrowserSSO(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/ui/", http.StatusFound)
 }
 
-func (h Handler) EndBrowserSSO(w http.ResponseWriter, _ *http.Request) {
-	if h.browserSSO != nil {
-		h.browserSSO.clearCookie(w, browserSSOSessionCookie, "/", http.SameSiteStrictMode)
-	}
+func (h Handler) EndBrowserSSO(w http.ResponseWriter, r *http.Request) {
+	// Cookie deletion must remain available if Auth or the active profile is unavailable.
+	http.SetCookie(w, &http.Cookie{Name: browserSSOSessionCookie, Path: "/", HttpOnly: true, Secure: r.TLS != nil, SameSite: http.SameSiteStrictMode, MaxAge: -1})
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *BrowserSSO) callbackToken(w http.ResponseWriter, r *http.Request, cookieName string) (string, time.Duration, browserSSOState, bool) {
+	query := r.URL.Query()
+	if len(query["state"]) != 1 || len(query["code"]) != 1 || len(query["error"]) > 1 {
+		writeError(w, http.StatusBadRequest, "invalid_sso_callback", "browser sign-in callback is invalid")
+		return "", 0, browserSSOState{}, false
+	}
+	cookie, err := r.Cookie(cookieName)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_sso_state", "browser sign-in state is invalid")
+		return "", 0, browserSSOState{}, false
+	}
+	var state browserSSOState
+	if err := s.open(cookieName, cookie.Value, &state); err != nil || state.ExpiresAt < s.now().Unix() || state.State == "" || state.State != r.URL.Query().Get("state") || state.Verifier == "" {
+		writeError(w, http.StatusBadRequest, "invalid_sso_state", "browser sign-in state is invalid")
+		return "", 0, browserSSOState{}, false
+	}
+	code := r.URL.Query().Get("code")
+	if code == "" || len(code) > 4096 || r.URL.Query().Get("error") != "" {
+		writeError(w, http.StatusBadRequest, "invalid_sso_callback", "browser sign-in callback is invalid")
+		return "", 0, browserSSOState{}, false
+	}
+	token, expiresIn, err := s.exchange(r.Context(), code, state.Verifier)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "sso_exchange_failed", "identity provider token exchange failed")
+		return "", 0, browserSSOState{}, false
+	}
+	s.clearCookie(w, cookieName, "/auth/sso", http.SameSiteLaxMode)
+	return token, expiresIn, state, true
 }
 
 func (s *BrowserSSO) exchange(ctx context.Context, code, verifier string) (string, time.Duration, error) {

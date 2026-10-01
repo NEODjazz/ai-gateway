@@ -315,6 +315,7 @@ class Run:
             ],
             webOrigins=[],
         )
+        realm["clients"][2].update(secret=self.client_secret, redirectUris=[self.gateway + "/auth/sso/callback", self.gateway + "/auth/sso/test/callback"], webOrigins=[])
         realm["clientScopeMappings"]["gateway"].append(
             {"client": "gateway-integration", "roles": ["gateway-user"]}
         )
@@ -331,8 +332,9 @@ class Run:
                 ],
                 "clientRoles": {"gateway": ["gateway-user"]},
             }
-            for name in ("operator", "alice", "bob")
+            for name in ("operator", "alice", "bob", "sso-admin")
         ]
+        realm["users"][-1]["clientRoles"] = {"gateway": ["gateway-admin"]}
         self.kc_name = "ai-gateway-identity-kc-" + self.suffix
         self.container(
             self.kc_name,
@@ -421,7 +423,7 @@ class Run:
                 "BILLING_MANAGEMENT_SHARED_SECRET": self.secret,
                 "DLP_REQUIRED": "false",
                 "AV_REQUIRED": "false",
-                "ADMIN_UI_ENABLED": "false",
+                "ADMIN_UI_ENABLED": "true",
                 "EXACT_CACHE_TTL_SECONDS": "120",
                 "PROVIDER_CREDENTIAL_ENCRYPTION_KEY": self.secret,
                 "PROVIDER_CONTROL_PLANE_POSTGRES_DSN": self.gateway_dsn,
@@ -471,6 +473,69 @@ class Run:
             "PASS real realm, user provisioning and RS256/JWKS authorization",
             flush=True,
         )
+
+    def managed_sso_checks(self):
+        # All credentials and trust changes below are confined to disposable services.
+        headers = {"Authorization": "Bearer " + self.admin_token}
+        status, data, _ = request_http(self.kc + "/admin/realms/gateway-users/users?username=sso-admin&exact=true", headers=headers)
+        check(status == 200 and len(json.loads(data)) == 1, "SSO fixture user missing")
+        subject = json.loads(data)[0]["id"]
+        user = "sso-admin-" + self.suffix
+        self.internal("PUT", "/users/" + user, {"status": "active", "roles": ["admin"], "name": "SSO fixture administrator"})
+        self.internal("PUT", "/jwt-principals", {"issuer": self.issuer, "subject": subject, "audience": "gateway", "user_id": user, "enabled": True, "allowed_models": [], "allowed_tools": []})
+        internal_headers = {"X-Management-Token": self.secret, "X-Request-ID": "sso-fixture", "X-Actor-ID": user, "X-Actor-Credential-ID": "fixture", "X-Actor-Roles": "admin"}
+        status, data, _ = request_http("http://127.0.0.1:8082/internal/v1/keys", {"user_id": user, "roles": ["admin"], "alias": "SSO integration recovery"}, headers=internal_headers)
+        check(status == 201, "SSO fixture admin key creation failed")
+        self.sso_key = json.loads(data)["token"]
+        admin_headers = {"Authorization": "Bearer " + self.sso_key}
+        def api(path, body=None, method=None):
+            status, data, _ = request_http(self.gateway + "/admin/v1/sso/" + path, body, admin_headers, method or ("POST" if body is not None else "GET"))
+            check(status == 200, "managed SSO API failed: " + path + " status=" + str(status))
+            return json.loads(data)
+        view = api("settings")
+        discovery = api("discover", {"issuer": self.issuer})
+        config = dict(discovery, audience="gateway", client_id="gateway-console", redirect_url=self.gateway + "/auth/sso/callback", scopes=["openid", "profile", "email"], roles_claim="resource_access.gateway.roles", role_mappings={"gateway-admin": "admin", "gateway-user": "user"}, session_ttl_seconds=300)
+        view = api("settings", dict(config, expected_revision=view["revision"], client_secret=self.client_secret), "PUT")
+        check("client_secret" not in view["draft"] and "session_key" not in view["draft"], "UI secret redaction failed")
+        ticket = api("test", {"expected_revision": view["revision"]})["start_url"]
+        def browser_login(start):
+            jar = http.cookiejar.CookieJar(policy=LoopbackCookiePolicy())
+            opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+            status, page, _ = request_http(self.gateway + start, opener=opener)
+            check(status == 200, "Gateway SSO redirect failed")
+            form = re.search(r'<form[^>]*id="kc-form-login"[^>]*action="([^\"]+)"', page.decode())
+            check(form is not None, "Gateway SSO Keycloak form missing")
+            status, _, _ = request_http(html.unescape(form.group(1)), urllib.parse.urlencode({"username": "sso-admin", "password": self.password, "credentialId": ""}).encode(), {"Content-Type": "application/x-www-form-urlencoded"}, opener=opener)
+            check(status == 200, "Gateway SSO callback failed: " + str(status))
+            return opener, jar
+        _, jar = browser_login(ticket)
+        check(all(c.name != "ai_gateway_sso_session" for c in jar), "draft test created active session")
+        view = api("settings")
+        check(view["test_status"] == "passed", "real Keycloak test proof missing")
+        view = api("action", {"action": "activate", "expected_revision": view["revision"]})
+        opener, jar = browser_login("/auth/sso/start")
+        check(any(c.name == "ai_gateway_sso_session" for c in jar), "active browser session missing")
+        status, data, _ = request_http(self.gateway + "/admin/v1/session", opener=opener)
+        check(status == 200 and json.loads(data)["user_id"] == user, "managed cookie did not map to admin directory user")
+        check(request_http(self.gateway + "/admin/v1/sso/action", {"action": "disable", "expected_revision": view["revision"]}, opener=opener)[0] == 403, "SSO JWT changed trust without a recovery key")
+        view = api("action", {"action": "rollback", "expected_revision": view["revision"]})
+        check(view["active"] is None, "environment trust rollback failed")
+        view = api("settings", dict(config, expected_revision=view["revision"], client_secret=self.client_secret), "PUT")
+        ticket = api("test", {"expected_revision": view["revision"]})["start_url"]
+        browser_login(ticket)
+        view = api("settings")
+        view = api("action", {"action": "activate", "expected_revision": view["revision"]})
+        opener, jar = browser_login("/auth/sso/start")
+        view = api("action", {"action": "disable", "expected_revision": view["revision"]})
+        check(request_http(self.gateway + "/admin/v1/session", opener=opener)[0] == 401, "disabled browser session retained access")
+        view = api("action", {"action": "rollback", "expected_revision": view["revision"]})
+        check(view["active"]["enabled"], "disable rollback failed")
+        # Remove only the singleton created in this dedicated fixture database;
+        # subsequent key-rotation tests must exercise their original environment TTL.
+        self.sql(self.auth_dsn, "DELETE FROM auth_sso_settings WHERE id=1;")
+        self.sso_config = config
+        self.sso_user = user
+        print("PASS managed SSO encrypted draft/discovery, real Keycloak PKCE test, same-admin proof, activation, browser cookie, key recovery, disable and rollback", flush=True)
 
     def internal(self, method, path, body):
         status, data, _ = request_http(
@@ -1408,6 +1473,7 @@ def main():
     run = Run()
     try:
         run.setup()
+        run.managed_sso_checks()
         run.gateway_checks()
         run.keycloak_checks()
         run.failure_checks()

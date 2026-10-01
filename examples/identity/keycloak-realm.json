@@ -89,7 +89,8 @@
       "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": false,
       "redirectUris": [
-        "https://gateway.example.com/auth/sso/callback"
+        "https://gateway.example.com/auth/sso/callback",
+        "https://gateway.example.com/auth/sso/test/callback"
       ],
       "webOrigins": [
         "https://gateway.example.com"

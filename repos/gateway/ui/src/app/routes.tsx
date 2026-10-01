@@ -40,6 +40,7 @@ const CachePage = lazy(() => import("../pages/CachePage").then((module) => ({ de
 const LoggingPage = lazy(() => import("../pages/LoggingPage").then((module) => ({ default: module.LoggingPage })));
 const RouterSettingsPage = lazy(() => import("../pages/RouterSettingsPage").then((module) => ({ default: module.RouterSettingsPage })));
 const EndpointPage = lazy(() => import("../pages/EndpointPage").then((module) => ({ default: module.EndpointPage })));
+const SSOSettingsPage = lazy(() => import("../pages/SSOSettingsPage").then((module) => ({ default: module.SSOSettingsPage })));
 
 const readOnly = (title: string, description: string, path: string, columns: ResourceConfig["columns"]): ReactNode => <ResourcePage config={{ eyebrow: "Operations", title, description, listPath: path, columns }} />;
 function UsersPage() {
@@ -98,5 +99,5 @@ export const appRoutes: AppRoute[] = [
   { path: "/logging", title: "Logging & alerts", group: "System", element: <LoggingPage />, available: true },
   { path: "/router-settings", title: "Router settings", group: "System", element: <RouterSettingsPage />, available: true },
   { path: "/api-reference", title: "API reference", group: "System", element: <CapabilityPage title="API reference" description="The embedded OpenAPI and Swagger UI are available at /docs/." status="Open /docs/ in a new tab for the interactive contract." available />, available: true, capability: "api_docs" },
-  { path: "/settings", title: "Settings", group: "System", element: <CapabilityPage title="Settings" description="Runtime settings remain environment-managed to preserve auditable deployment configuration." status="Environment-managed configuration" available />, available: true }
+  { path: "/settings", title: "Settings", group: "System", element: <SSOSettingsPage />, available: true }
 ];

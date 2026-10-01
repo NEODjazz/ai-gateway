@@ -203,7 +203,7 @@ func main() {
 	}
 	if cfg.Management.AuthURL != "" && cfg.Management.Secret != "" {
 		authManagement := gateway.NewRemoteManagementClient(cfg.Management.AuthURL, cfg.Management.Secret)
-		handler = handler.WithManagement(authManagement).WithIdentityDirectory(authManagement).WithOrganizations(authManagement)
+		handler = handler.WithManagement(authManagement).WithIdentityDirectory(authManagement).WithOrganizations(authManagement).WithSSOManagement(authManagement)
 	}
 	if cfg.Management.BillingURL != "" && cfg.Management.BillingSecret != "" {
 		billingManagement := gateway.NewRemoteBudgetManagementClient(cfg.Management.BillingURL, cfg.Management.BillingSecret)

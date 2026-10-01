@@ -1,5 +1,12 @@
 # Безопасность и границы данных
 
+[SSO settings в UI](admin-sso-settings.md) используют encrypted PostgreSQL
+document, точные issuer/audience, предварительную directory binding и явные
+role mappings. Активация требует проверочного входа тем же administrator и
+virtual-key session; права directory повторно проверяются перед сменой trust.
+Выбор нового issuer влияет на все JWT clients, поэтому рабочий профиль не
+активируется автоматически при обновлении приложения.
+
 Provisioned OIDC users используют `AUTH_JWT_IDENTITY_MODE=directory`: проверенная
 issuer/subject/audience identity связывается с активным пользователем directory,
 а права, группы и лимиты загружаются при каждой авторизации. Roles должны совпасть

@@ -20,6 +20,7 @@ const managementTokenHeader = "X-Management-Token"
 func registerManagementRoutes(mux *http.ServeMux, module *modules.AuthModule, sharedSecret string) {
 	registerIdentityDirectoryRoutes(mux, module, sharedSecret)
 	registerJWTPrincipalRoutes(mux, module, sharedSecret)
+	registerSSORoutes(mux, module, sharedSecret)
 	mux.HandleFunc("GET /internal/v1/keys", managementAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
 		query := modules.VirtualKeyListQuery{Limit: 100}
 		if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
