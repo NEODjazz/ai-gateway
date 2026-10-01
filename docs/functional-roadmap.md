@@ -10,6 +10,44 @@ OpenWebUI с достоверными правами, лимитами, ownershi
 совместимость каждого провайдера. Запуск реального Keycloak/OpenWebUI и внешних
 провайдеров потребуется при реализации; такой запуск этой оценкой не заменяется.
 
+## Результат реализации P1, 2026-10-01
+
+| Поставка | Статус и доказательства |
+| --- | --- |
+| A. Identity/policy/ownership | Реализовано: opt-in directory JWT, immutable binding, stable credential, текущие grants/membership/organization/limits, изоляция cache/resources/billing; unit и реальные PG regressions |
+| B. Keycloak | Реализовано: secret-free realm/clients/mappers, явный provisioning/roles, реальные rotation/refresh/deprovision/logout/expiry/failure/recovery tests |
+| C. OpenWebUI | Реализовано: System OAuth, Authorization Code + PKCE, server refresh, разные `/openai/models` и `/api/models`, полный JSON/SSE chat, отсутствие session fallback, 401/429 и billing attribution |
+| D. CI/release/local rollout | Обязательные PostgreSQL и real identity jobs прошли в GitHub Actions; релиз 0.3.0 подготовлен. Local rollout ожидает разрешённой очистки Rancher Desktop: node DiskPressure, Pods Pending/Evicted; deployment ещё не обновлён |
+
+Реализация и переход описаны в [профиле Keycloak/OpenWebUI](identity-keycloak-openwebui.md).
+[Сквозной сценарий](../scripts/test-identity-integration.py) использует реальные
+Keycloak 26.3.3, OpenWebUI 0.11.4, Auth/Gateway/Billing и PostgreSQL; provider —
+детерминированный HTTP fixture. Реальные JWT проверяют stable identity после
+refresh, разные grants/quotas/resources/cache и spend attribution. Directory SQL
+failure и недоступность IdP/JWKS закрывают доступ и допускают восстановление.
+Twelve concurrent requests — regression workload, а не production SLO benchmark.
+
+Background Responses/Interactions cancellation ждёт terminal usage перед
+settlement, а queued batch повторно проверяет directory policy; подтверждённый
+отзыв и временная недоступность directory имеют разные результаты. Эти пути и
+повторная доставка billing events проверяются unit/PG regression tests в CI.
+Browser проверка подтверждает реальный login и видимый отказ неназначенного tool.
+OpenWebUI built-in tools требуют явных grants либо отключения для plain chat.
+Пользовательский per-model cache допустим; общий base-model cache выключен.
+
+Прошли `gofmt -w .`, `go vet ./...`, `go test ./...`, `go test -race ./...`,
+`go build ./...` во всех шести modules на Go 1.25.13, обязательные PostgreSQL
+сценарии, 181 UI tests/build, production npm audit, Helm lint/render всех charts
+и OpenAPI/documentation contracts. Уязвимая transitive зависимость brace-expansion
+обновлена отдельно, прямые UI packages и Go dependencies не менялись.
+
+Production IdP trust не включён автоматически. До opt-in нужны рабочие HTTPS
+endpoints, confidential client secrets, источник provisioning и назначенные
+users/bindings. Legacy credentials и fingerprint-owned resources сохраняются;
+массового переноса по email нет. Поставка E расширенного admin browser SSO,
+полный RAG pipeline и внешние cloud/provider interoperability scenarios остаются
+отдельными продолжениями, а не скрыто заявленным результатом этих тестов.
+
 ## Существующая основа
 
 - JWT: RS256/ES256, JWKS, issuer/audience/expiry validation, настраиваемые
@@ -29,7 +67,7 @@ OpenWebUI с достоверными правами, лимитами, ownershi
 
 ## Приоритет P1: identity и права пользователей
 
-Подтверждённые ограничения текущего JWT-пути:
+Подтверждённые ограничения JWT-пути в базовой ревизии `e70d92cc`:
 
 1. [authorizeJWT](../repos/auth/internal/modules/auth.go) заполняет user, team,
    roles и fingerprint токена. Он не загружает directory status, organization,
@@ -294,7 +332,7 @@ tests проверяют это с реальными test services и PostgreSQ
 Этот документ завершает оценку и планирование. Он не заявляет, что перечисленные
 расширения уже реализованы или что live interoperability уже подтверждена.
 
-## Проверки этой оценки
+## Проверки исходной оценки
 
 В базовом исходном коде проверена регистрация и Go definition каждого из 38
 handler families; проверены локальные ссылки документа и отсутствие посторонних
