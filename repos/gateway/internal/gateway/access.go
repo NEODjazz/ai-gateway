@@ -125,6 +125,10 @@ func modelAllowed(model string, grants []string) bool {
 	return false
 }
 
+func requestModelAllowed(req modules.RequestContext, model string) bool {
+	return (!req.ModelAccessRestricted || len(req.AllowedModels) > 0) && modelAllowed(model, req.AllowedModels)
+}
+
 func toolAllowed(tool string, grants []string) bool {
 	return modelAllowed(tool, grants)
 }
@@ -305,7 +309,7 @@ func (h Handler) authorizeTools(w http.ResponseWriter, req modules.RequestContex
 		return false
 	}
 	for _, identifier := range identifiers {
-		if !h.toolAllowed(identifier, req.AllowedTools) {
+		if (req.ToolAccessRestricted && len(req.AllowedTools) == 0) || !h.toolAllowed(identifier, req.AllowedTools) {
 			writeError(w, http.StatusForbidden, "tool_not_allowed", "credential is not allowed to use tool "+strconv.Quote(identifier))
 			return false
 		}
@@ -400,7 +404,7 @@ func (h Handler) authorizeAccess(w http.ResponseWriter, ctx context.Context, req
 }
 
 func (h Handler) authorizeModel(w http.ResponseWriter, req modules.RequestContext, model string) bool {
-	if !modelAllowed(model, req.AllowedModels) {
+	if !requestModelAllowed(req, model) {
 		writeError(w, 403, "model_not_allowed", "credential is not allowed to use model "+strconv.Quote(model))
 		return false
 	}

@@ -24,6 +24,8 @@ func TestCacheIsolationIncludesIdentityAndEffectivePolicy(t *testing.T) {
 			r.Metadata = map[string]string{"provider.modules.anonymizer.mode": "disabled"}
 		}},
 		{"grants", func(r *modules.RequestContext) { r.AllowedTools = []string{"new-tool"} }},
+		{"model restrictions", func(r *modules.RequestContext) { r.ModelAccessRestricted = true }},
+		{"tool restrictions", func(r *modules.RequestContext) { r.ToolAccessRestricted = true }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			changed := base

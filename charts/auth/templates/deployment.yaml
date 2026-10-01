@@ -51,6 +51,10 @@ spec:
               value: {{ .Values.auth.jwt.teamIdClaim | quote }}
             - name: AUTH_JWT_ROLES_CLAIM
               value: {{ .Values.auth.jwt.rolesClaim | quote }}
+            - name: AUTH_JWT_IDENTITY_MODE
+              value: {{ .Values.auth.jwt.identityMode | quote }}
+            - name: AUTH_JWT_ROLE_MAPPINGS_JSON
+              value: {{ .Values.auth.jwt.roleMappings | toJson | quote }}
             - name: AUTH_VIRTUAL_KEYS_JSON
               valueFrom:
                 secretKeyRef:

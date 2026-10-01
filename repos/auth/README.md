@@ -87,6 +87,38 @@ dependency failure rather than as an invalid client credential.
 User, team, and role claims support dot-separated paths for nested OIDC claims.
 The defaults are `sub`, `team_id`, and `roles`.
 
+Set `AUTH_JWT_IDENTITY_MODE=directory` for provisioned end-user authentication.
+This mode requires an issuer, resource audience, persistent Auth PostgreSQL and
+explicit `AUTH_JWT_ROLE_MAPPINGS_JSON`, for example
+`{"gateway-user":"user","gateway-admin":"admin"}`. Only roles from the
+configured claim path are considered; they must also be assigned to the active
+directory user. A `team_admin` role requires a bound team. A present team claim
+must match that binding. Unknown users and unmapped roles are rejected.
+
+Migration `013_jwt_principals.sql` stores operator-managed bindings of verified
+issuer/subject/resource audience to directory user, optional team, grants, tags,
+access groups and RPM/TPM. Every authorization checks current user, team and
+organization status, SCIM deletion state and team membership. Empty model/tool
+grants deny access; use `*` only for explicitly unrestricted access. Zero RPM/TPM
+retains the existing meaning of unlimited for that dimension.
+
+Directory `CredentialID` is a namespaced SHA-256 digest of issuer, audience and
+subject. JWT expiry, token ID and signing key do not change it; `UserID` comes
+from the binding. Virtual-key identity and grants are unchanged. The additive
+internal Auth response fields `model_access_restricted` and
+`tool_access_restricted` let Gateway distinguish empty denied grants from legacy
+unrestricted grants. Roll out the Gateway consumer before enabling directory
+mode on Auth; an older consumer does not enforce these fields.
+
+The default `legacy` mode preserves existing claim-only authentication and token
+fingerprints for compatibility. Switching modes changes ownership/cache/rate
+scope for JWTs. Existing resources are not automatically reassigned: finish or
+export them under the old mode before cutover, or perform an explicitly verified
+owner migration. Rollback to legacy mode restores its previous scope; virtual
+keys are unaffected. Do not enable directory mode until bindings have been
+provisioned. IdP failure or directory failure never falls back to a successful
+JWT authorization.
+
 Environment:
 
 ```text

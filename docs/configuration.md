@@ -342,6 +342,8 @@ Files API возвращает `503`, если `PROVIDER_CONTROL_PLANE_POSTGRES_
 | `AUTH_JWT_USER_ID_CLAIM` | `sub` | Dot-separated claim path |
 | `AUTH_JWT_TEAM_ID_CLAIM` | `team_id` | Dot-separated claim path |
 | `AUTH_JWT_ROLES_CLAIM` | `roles` | Dot-separated claim path |
+| `AUTH_JWT_IDENTITY_MODE` | `legacy` | `directory` требует pre-provisioned issuer/subject/audience binding, active directory и явные grants |
+| `AUTH_JWT_ROLE_MAPPINGS_JSON` | `{}` | Mapping внешних role values в `user`, `developer`, `team_admin`, `admin`; directory mode требует непустой mapping |
 
 Production должен использовать уникальные `AUTH_KEY_HASH_SECRET` и management
 secret, отключённые demo keys и static fallback после миграции ключей.

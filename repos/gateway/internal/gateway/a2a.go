@@ -893,7 +893,7 @@ func (h Handler) authorizeA2ATaskOperation(w http.ResponseWriter, r *http.Reques
 }
 
 func (h Handler) authorizeA2ATaskModel(w http.ResponseWriter, rpcID json.RawMessage, reqCtx modules.RequestContext, model string) bool {
-	if !modelAllowed(model, reqCtx.AllowedModels) || reqCtx.AccessGroupsEvaluated && !modelAllowed(model, reqCtx.AccessGroupModels) {
+	if !requestModelAllowed(reqCtx, model) || reqCtx.AccessGroupsEvaluated && !modelAllowed(model, reqCtx.AccessGroupModels) {
 		h.writeA2AError(w, rpcID, http.StatusForbidden, -32603, "Task access is not allowed")
 		return false
 	}

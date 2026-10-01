@@ -247,7 +247,7 @@ func (h Handler) CallMCPServerTool(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) authorizeMCPConnector(w http.ResponseWriter, req modules.RequestContext, connector string) bool {
-	if !h.mcpConnectorAllowed(connector, req.AllowedTools) {
+	if (req.ToolAccessRestricted && len(req.AllowedTools) == 0) || !h.mcpConnectorAllowed(connector, req.AllowedTools) {
 		writeError(w, http.StatusForbidden, "tool_not_allowed", "credential is not allowed to use this MCP connector")
 		return false
 	}
@@ -264,7 +264,7 @@ func (h Handler) authorizeMCPTool(w http.ResponseWriter, req modules.RequestCont
 		writeError(w, http.StatusForbidden, "mcp_tool_not_registered", "MCP tool is not allowed by the server registry")
 		return false
 	}
-	if !h.mcpToolGrantAllowed(connector, identifier, req.AllowedTools) {
+	if (req.ToolAccessRestricted && len(req.AllowedTools) == 0) || !h.mcpToolGrantAllowed(connector, identifier, req.AllowedTools) {
 		writeError(w, http.StatusForbidden, "tool_not_allowed", "credential is not allowed to use the requested MCP tool")
 		return false
 	}
@@ -277,7 +277,8 @@ func (h Handler) authorizeMCPTool(w http.ResponseWriter, req modules.RequestCont
 
 func (h Handler) mcpToolAllowed(req modules.RequestContext, server MCPServer, connector, tool string) bool {
 	identifier := connector + "#tool:" + tool
-	return mcpToolAllowedByGrants(connector, identifier, server.Tools) &&
+	return (!req.ToolAccessRestricted || len(req.AllowedTools) > 0) &&
+		mcpToolAllowedByGrants(connector, identifier, server.Tools) &&
 		h.mcpToolGrantAllowed(connector, identifier, req.AllowedTools) &&
 		(!req.AccessGroupsEvaluated || h.mcpToolGrantAllowed(connector, identifier, req.AccessGroupTools))
 }

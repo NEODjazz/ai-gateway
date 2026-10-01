@@ -1,5 +1,12 @@
 # Безопасность и границы данных
 
+Provisioned OIDC users используют `AUTH_JWT_IDENTITY_MODE=directory`: проверенная
+issuer/subject/audience identity связывается с активным пользователем directory,
+а права, группы и лимиты загружаются при каждой авторизации. Roles должны совпасть
+с явным mapping и ролями directory. Пустые grants запрещают доступ; идентификатор
+credential стабилен при refresh. Default `legacy` сохраняет старый claims-only
+режим и требует явного переключения для этой политики. См. [Auth](../repos/auth/README.md).
+
 ## Authentication
 
 Клиент передаёт `Authorization: Bearer <credential>`. Gateway отправляет токен

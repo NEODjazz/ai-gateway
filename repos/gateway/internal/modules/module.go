@@ -34,6 +34,8 @@ type RequestContext struct {
 	AccessGroupModels          []string                           `json:"-"`
 	AccessGroupTools           []string                           `json:"-"`
 	AccessGroupsEvaluated      bool                               `json:"-"`
+	ModelAccessRestricted      bool                               `json:"model_access_restricted,omitempty"`
+	ToolAccessRestricted       bool                               `json:"tool_access_restricted,omitempty"`
 	AllowedModels              []string                           `json:"allowed_models,omitempty"`
 	AllowedFallbackModels      []string                           `json:"-"`
 	FallbackPolicyEvaluated    bool                               `json:"-"`

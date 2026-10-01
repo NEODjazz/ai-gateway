@@ -223,6 +223,9 @@ func (h Handler) authorizedModels(w http.ResponseWriter, r *http.Request) ([]ope
 	}
 
 	models := filterModels(h.provider.Models(), reqCtx.AllowedModels)
+	if reqCtx.ModelAccessRestricted && len(reqCtx.AllowedModels) == 0 {
+		models = nil
+	}
 	if reqCtx.AccessGroupsEvaluated {
 		if len(reqCtx.AccessGroupModels) == 0 {
 			models = nil

@@ -25,19 +25,22 @@ import (
 var ErrJWTUnavailable = errors.New("jwt verification unavailable")
 
 type JWTAuthConfig struct {
-	Secret       string
-	Issuer       string
-	Audience     string
-	JWKSURL      string
-	JWKSCacheTTL time.Duration
-	ClockSkew    time.Duration
-	UserIDClaim  string
-	TeamIDClaim  string
-	RolesClaim   string
+	Secret          string
+	Issuer          string
+	Audience        string
+	JWKSURL         string
+	JWKSCacheTTL    time.Duration
+	ClockSkew       time.Duration
+	UserIDClaim     string
+	TeamIDClaim     string
+	RolesClaim      string
+	IdentityMode    string
+	RoleMappings    map[string]string
+	roleMappingsErr error
 }
 
 func JWTAuthConfigFromEnv() JWTAuthConfig {
-	return JWTAuthConfig{
+	config := JWTAuthConfig{
 		Secret:       os.Getenv("AUTH_JWT_SECRET"),
 		Issuer:       strings.TrimSpace(os.Getenv("AUTH_JWT_ISSUER")),
 		Audience:     strings.TrimSpace(os.Getenv("AUTH_JWT_AUDIENCE")),
@@ -47,10 +50,32 @@ func JWTAuthConfigFromEnv() JWTAuthConfig {
 		UserIDClaim:  envString("AUTH_JWT_USER_ID_CLAIM", "sub"),
 		TeamIDClaim:  envString("AUTH_JWT_TEAM_ID_CLAIM", "team_id"),
 		RolesClaim:   envString("AUTH_JWT_ROLES_CLAIM", "roles"),
+		IdentityMode: envString("AUTH_JWT_IDENTITY_MODE", "legacy"),
 	}
+	if raw := strings.TrimSpace(os.Getenv("AUTH_JWT_ROLE_MAPPINGS_JSON")); raw != "" {
+		config.roleMappingsErr = json.Unmarshal([]byte(raw), &config.RoleMappings)
+	}
+	return config
 }
 
 func (c JWTAuthConfig) validate() error {
+	if c.roleMappingsErr != nil {
+		return errors.New("invalid jwt role mappings")
+	}
+	if c.IdentityMode != "legacy" && c.IdentityMode != "directory" {
+		return errors.New("jwt identity mode must be legacy or directory")
+	}
+	if c.IdentityMode == "directory" && (!validJWTIdentityValue(c.Issuer, 2048) || !validJWTIdentityValue(c.Audience, 256) || len(c.RoleMappings) == 0) {
+		return errors.New("directory jwt requires issuer, audience and explicit role mappings")
+	}
+	if len(c.RoleMappings) > 128 {
+		return errors.New("too many jwt role mappings")
+	}
+	for external, role := range c.RoleMappings {
+		if !validJWTIdentityValue(external, 256) || (role != "user" && role != "developer" && role != "admin" && role != "team_admin") {
+			return errors.New("invalid jwt role mapping")
+		}
+	}
 	if c.JWKSURL != "" && (c.Issuer == "" || c.Audience == "") {
 		return errors.New("jwt issuer and audience are required with JWKS")
 	}
@@ -109,6 +134,16 @@ type jwtVerifier struct {
 }
 
 func newJWTVerifier(config JWTAuthConfig) (*jwtVerifier, error) {
+	if config.IdentityMode == "" {
+		config.IdentityMode = "legacy"
+	}
+	if config.RoleMappings != nil {
+		copyMappings := make(map[string]string, len(config.RoleMappings))
+		for external, role := range config.RoleMappings {
+			copyMappings[external] = role
+		}
+		config.RoleMappings = copyMappings
+	}
 	if config.JWKSCacheTTL <= 0 {
 		config.JWKSCacheTTL = 5 * time.Minute
 	}

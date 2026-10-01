@@ -259,8 +259,10 @@ func cacheIsolationScope(req modules.RequestContext) string {
 		Credential, User, Team, Organization                string
 		Roles, Tags, Models, Tools, GroupModels, GroupTools []string
 		GroupsEvaluated                                     bool
+		ModelAccessRestricted                               bool
+		ToolAccessRestricted                                bool
 		Policy                                              map[string]string
-	}{req.CredentialID, req.UserID, req.TeamID, req.OrganizationID, canonical(req.Roles), canonical(req.Tags), canonical(req.AllowedModels), canonical(req.AllowedTools), canonical(req.AccessGroupModels), canonical(req.AccessGroupTools), req.AccessGroupsEvaluated, policy})
+	}{req.CredentialID, req.UserID, req.TeamID, req.OrganizationID, canonical(req.Roles), canonical(req.Tags), canonical(req.AllowedModels), canonical(req.AllowedTools), canonical(req.AccessGroupModels), canonical(req.AccessGroupTools), req.AccessGroupsEvaluated, req.ModelAccessRestricted, req.ToolAccessRestricted, policy})
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
 }

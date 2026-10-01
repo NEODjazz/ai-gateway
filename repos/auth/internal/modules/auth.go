@@ -119,6 +119,15 @@ func (m AuthModule) Ready(ctx context.Context) error {
 			return err
 		}
 	}
+	if m.jwtConfig.IdentityMode == "directory" {
+		store, ok := m.store.(jwtPrincipalStore)
+		if !ok {
+			return ErrJWTDirectoryUnavailable
+		}
+		if err := store.JWTPrincipalsReady(ctx); err != nil {
+			return err
+		}
+	}
 	return m.jwtVerifier.Ready(ctx)
 }
 
@@ -171,7 +180,7 @@ func (m AuthModule) Handle(ctx context.Context, req *RequestContext) error {
 	if err := m.authorizeJWT(ctx, req); err == nil {
 		req.APIKey = ""
 		return nil
-	} else if errors.Is(err, ErrJWTUnavailable) {
+	} else if errors.Is(err, ErrJWTUnavailable) || errors.Is(err, ErrJWTDirectoryUnavailable) {
 		return err
 	}
 
@@ -179,6 +188,7 @@ func (m AuthModule) Handle(ctx context.Context, req *RequestContext) error {
 }
 
 func applyVirtualKey(req *RequestContext, key VirtualKey) {
+	req.ModelAccessRestricted, req.ToolAccessRestricted = false, false
 	req.UserID = key.UserID
 	if req.UserID == "" {
 		req.UserID = "virtual-key:" + credentialFingerprint(req.APIKey)
@@ -196,6 +206,7 @@ func applyVirtualKey(req *RequestContext, key VirtualKey) {
 }
 
 func applyStoredVirtualKey(req *RequestContext, key StoredVirtualKey) {
+	req.ModelAccessRestricted, req.ToolAccessRestricted = false, false
 	req.UserID = key.UserID
 	if req.UserID == "" {
 		req.UserID = "virtual-key:" + key.ID
@@ -219,7 +230,11 @@ func (m AuthModule) authorizeJWT(ctx context.Context, req *RequestContext) error
 	if err != nil {
 		return err
 	}
+	if m.jwtConfig.IdentityMode == "directory" {
+		return m.authorizeJWTPrincipal(ctx, req, claims)
+	}
 
+	req.ModelAccessRestricted, req.ToolAccessRestricted = false, false
 	req.UserID = claims.Subject
 	req.TeamID = claimString(claims.Raw, m.jwtConfig.TeamIDClaim)
 	req.Roles = normalizeRoles(claims, m.jwtConfig.RolesClaim)

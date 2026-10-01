@@ -27,6 +27,9 @@ auth:
     userIdClaim: sub
     teamIdClaim: team_id
     rolesClaim: roles
+    # directory binds verified JWTs to pre-provisioned users and policies.
+    identityMode: legacy
+    roleMappings: {}
   postgres:
     enabled: true
     dsn: postgres://ai_gateway:ai_gateway@ai-gateway-postgres:5432/ai_gateway?sslmode=disable
