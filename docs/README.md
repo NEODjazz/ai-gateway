@@ -46,6 +46,8 @@ package и Helm template.
 
 ## API и разработка
 
+- [Следующий этап](functional-roadmap.md) — требования к Keycloak/OpenWebUI,
+  функциональный inventory, приоритеты, критерии приёмки и трудоёмкость.
 - Каноническая спецификация: [OpenAPI](../repos/gateway/api/openapi.yaml).
 - При `API_DOCS_ENABLED=true`: `/docs/` и `/openapi.yaml` на gateway.
 - Все `/admin/v1/*` операции проходят gateway authentication и RBAC.
