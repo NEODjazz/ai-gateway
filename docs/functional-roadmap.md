@@ -17,7 +17,7 @@ OpenWebUI с достоверными правами, лимитами, ownershi
 | A. Identity/policy/ownership | Реализовано: opt-in directory JWT, immutable binding, stable credential, текущие grants/membership/organization/limits, изоляция cache/resources/billing; unit и реальные PG regressions |
 | B. Keycloak | Реализовано: secret-free realm/clients/mappers, явный provisioning/roles, реальные rotation/refresh/deprovision/logout/expiry/failure/recovery tests |
 | C. OpenWebUI | Реализовано: System OAuth, Authorization Code + PKCE, server refresh, разные `/openai/models` и `/api/models`, полный JSON/SSE chat, отсутствие session fallback, 401/429 и billing attribution |
-| D. CI/release/local rollout | Обязательные PostgreSQL и real identity jobs прошли в GitHub Actions; релизы 0.3.0 и 0.3.1 опубликованы, включая все шесть образов и восемь Helm-пакетов. Local rollout ожидает разрешённой очистки Rancher Desktop: node DiskPressure, Pods Pending/Evicted; deployment ещё не обновлён |
+| D. CI/release/local rollout | Обязательные PostgreSQL и real identity jobs прошли в GitHub Actions; релизы 0.3.0 и 0.3.1 опубликованы. Исправление PostgreSQL chart подготовлено в 0.3.2. Local rollout выполнен: migration 013 применена, все шесть application deployments на 0.3.1 Ready, ingress/UI и Auth management API проверены; Secret data и runtime settings сохранены |
 
 Реализация и переход описаны в [профиле Keycloak/OpenWebUI](identity-keycloak-openwebui.md).
 [Сквозной сценарий](../scripts/test-identity-integration.py) использует реальные
@@ -43,6 +43,15 @@ Gateway остаётся enforcement point даже при устаревшем 
 сценарии, 181 UI tests/build, production npm audit, Helm lint/render всех charts
 и OpenAPI/documentation contracts. Уязвимая transitive зависимость brace-expansion
 обновлена отдельно, прямые UI packages и Go dependencies не менялись.
+
+При local rollout выявлено неверное размещение migration 013 в Helm ConfigMap
+metadata вместо data. Chart исправлен; regression воспроизводит прежний дефект,
+обязательный PG runner требует эту миграцию. Исправленный manifest прошёл strict
+server dry-run Kubernetes, полные Gateway vet/test/build и fresh PostgreSQL/race
+проверки Gateway/Auth/Billing. Существующая local БД получила additive migration
+транзакционно. После разрешённой очистки завершённых fixture containers и старого
+build cache DiskPressure снят; рабочие volumes и Secret data не менялись.
+Local JWT mode сохранён legacy: production trust и provisioning остаются opt-in.
 
 Production IdP trust не включён автоматически. До opt-in нужны рабочие HTTPS
 endpoints, confidential client secrets, источник provisioning и назначенные
