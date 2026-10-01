@@ -137,3 +137,17 @@ AUTH_KEY_HASH_SECRET=separate-random-pepper
 AUTH_STATIC_KEY_FALLBACK_ENABLED=false
 AUTH_DEMO_KEYS_ENABLED=false
 ```
+
+JWT bindings are provisioned through global-admin `PUT /admin/v1/jwt-principals`
+and inspected with paginated `GET /admin/v1/jwt-principals?user_id=...&limit=...&offset=...`.
+The body requires `issuer`, `subject`, `audience`, `user_id`, and `enabled`.
+Optional policy fields are `team_id`, `tags`, `access_group_ids`, `allowed_models`,
+`allowed_tools`, `rate_limit_rpm`, and `rate_limit_tpm`. Zero RPM/TPM means unlimited;
+empty model/tool grants deny. Only explicit `*` grants allow every model/tool.
+The directory user must exist; a team binding requires current membership at
+request time. Provision Users/Groups through the existing directory/SCIM APIs
+before assigning bindings. There is no implicit group synchronization from JWT.
+The same `(issuer, subject, audience)` cannot be reassigned to another user, even
+when disabled; revoke with `enabled=false`. Mutations require the existing audit
+service. The internal Auth endpoints require the management secret and audit
+identity and must not be exposed to end users.

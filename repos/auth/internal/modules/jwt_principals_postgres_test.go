@@ -79,6 +79,43 @@ func TestPostgresJWTPrincipalDirectoryIntegration(t *testing.T) {
 		err := module.Handle(ctx, &req)
 		return req, err
 	}
+
+	// Management updates cannot change an existing principal's directory owner.
+	policy := JWTPrincipalPolicy{Issuer: module.jwtConfig.Issuer, Subject: userID, Audience: module.jwtConfig.Audience, UserID: userID, TeamID: teamID, AllowedModels: []string{"model-a"}, AllowedTools: []string{"read"}, RateLimitRPM: 4, Enabled: true}
+	if _, err := module.PutJWTPrincipal(ctx, policy); err != nil {
+		t.Fatal(err)
+	}
+	page, err := module.ListJWTPrincipals(ctx, userID, 0, 1)
+	if err != nil || page.Total != 1 || len(page.Data) != 1 {
+		t.Fatalf("principal listing failed: %v", err)
+	}
+	page, err = module.ListJWTPrincipals(ctx, userID, 1, 1)
+	if err != nil || page.Total != 1 || len(page.Data) != 0 {
+		t.Fatalf("principal total changed with offset: %v", err)
+	}
+	query(`INSERT INTO users(id,status,roles) VALUES($1,'active',ARRAY['user'])`, userID+"-other")
+	t.Cleanup(func() {
+		_, err := pool.Exec(context.Background(), `DELETE FROM users WHERE id=$1`, userID+"-other")
+		if err != nil {
+			t.Error(err)
+		}
+	})
+	changed := policy
+	changed.UserID = userID + "-other"
+	if _, err := module.PutJWTPrincipal(ctx, changed); !errors.Is(err, ErrDirectoryConflict) {
+		t.Fatalf("owner reassignment accepted: %v", err)
+	}
+	policy.Enabled = false
+	if _, err := module.PutJWTPrincipal(ctx, policy); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := module.PutJWTPrincipal(ctx, changed); !errors.Is(err, ErrDirectoryConflict) {
+		t.Fatalf("disabled owner reassignment accepted: %v", err)
+	}
+	policy.Enabled = true
+	if _, err := module.PutJWTPrincipal(ctx, policy); err != nil {
+		t.Fatal(err)
+	}
 	first, err := authorize()
 	if err != nil || first.UserID != userID || first.TeamID != teamID || first.OrganizationID != orgID || first.RateLimitRPM != 4 || len(first.AllowedModels) != 1 {
 		t.Fatalf("directory binding was not applied: %v", err)

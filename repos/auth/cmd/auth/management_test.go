@@ -136,3 +136,38 @@ func TestInternalManagementListsOnlySafeVirtualKeyMetadata(t *testing.T) {
 		t.Fatalf("invalid sort was accepted: %d", invalidResponse.Code)
 	}
 }
+
+func (s *commandManagementStore) PutJWTPrincipal(_ context.Context, p modules.JWTPrincipalPolicy) (modules.JWTPrincipalPolicy, error) {
+	return p, nil
+}
+func (s *commandManagementStore) ListJWTPrincipals(_ context.Context, _ string, offset, limit int) (modules.JWTPrincipalPage, error) {
+	return modules.JWTPrincipalPage{Data: []modules.JWTPrincipalPolicy{}, Total: 7, Offset: offset, Limit: limit}, nil
+}
+func TestInternalJWTPrincipalManagementProtection(t *testing.T) {
+	store := &commandManagementStore{}
+	module := modules.NewAuthModuleWithStore(true, store, "hash-secret", false)
+	mux := http.NewServeMux()
+	registerManagementRoutes(mux, &module, "internal-secret")
+	for _, test := range []struct {
+		name, body, secret string
+		want               int
+	}{
+		{"no secret", `{}`, "", 401},
+		{"valid", `{"issuer":"https://idp.test/realm","subject":"external","audience":"gateway","user_id":"user-1","enabled":true}`, "internal-secret", 200},
+		{"unknown fields", `{"issuer":"https://idp.test/realm","subject":"external","audience":"gateway","user_id":"user-1","enabled":true,"roles":["admin"]}`, "internal-secret", 400},
+		{"invalid", `{"issuer":"https://idp.test/realm","subject":"external","audience":"gateway","user_id":"user-1","rate_limit_tpm":-1}`, "internal-secret", 400},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodPut, "/internal/v1/jwt-principals", strings.NewReader(test.body))
+			r.Header.Set(managementTokenHeader, test.secret)
+			r.Header.Set("X-Request-ID", "req")
+			r.Header.Set("X-Actor-ID", "operator")
+			r.Header.Set("X-Actor-Credential-ID", "key")
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, r)
+			if w.Code != test.want {
+				t.Fatalf("got %d want %d", w.Code, test.want)
+			}
+		})
+	}
+}

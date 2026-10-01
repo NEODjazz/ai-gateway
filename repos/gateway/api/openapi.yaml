@@ -3479,6 +3479,48 @@ paths:
         '403': {$ref: '#/components/responses/AdminRequired'}
         '404': {$ref: '#/components/responses/NotFound'}
         '503': {$ref: '#/components/responses/ManagementUnavailable'}
+  /admin/v1/jwt-principals:
+    get:
+      operationId: listJWTPrincipals
+      tags: [Identity]
+      summary: List provisioned JWT identity bindings (global admin)
+      parameters:
+        - {name: user_id, in: query, schema: {type: string, maxLength: 256}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 500, default: 100}}
+        - {name: offset, in: query, schema: {type: integer, minimum: 0, default: 0}}
+      responses:
+        '200':
+          description: Bindings including disabled identities with consistent total
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, total, limit, offset]
+                properties:
+                  data: {type: array, items: {$ref: '#/components/schemas/JWTPrincipalPolicy'}}
+                  total: {type: integer}
+                  limit: {type: integer}
+                  offset: {type: integer}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
+    put:
+      operationId: putJWTPrincipal
+      tags: [Identity]
+      summary: Provision or update a JWT policy (global admin)
+      description: issuer/subject/audience identify a stable credential. The bound user cannot be reassigned, including after disabling. Empty model/tool grants deny; '*' is an explicit wildcard. Membership is checked during authorization. Set enabled=false to revoke; deletion is not supported.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/JWTPrincipalPolicy'}
+      responses:
+        '200': {description: Binding saved, content: {application/json: {schema: {$ref: '#/components/schemas/JWTPrincipalPolicy'}}}}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {description: User ownership cannot be reassigned}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
   /admin/v1/users:
     get:
       operationId: listDirectoryUsers
@@ -11023,6 +11065,23 @@ components:
         disabled_at: {type: string, format: date-time}
         last_used_at: {type: string, format: date-time}
         created_at: {type: string, format: date-time}
+    JWTPrincipalPolicy:
+      type: object
+      additionalProperties: false
+      required: [issuer, subject, audience, user_id, enabled]
+      properties:
+        issuer: {type: string, minLength: 1, maxLength: 2048}
+        subject: {type: string, minLength: 1, maxLength: 256}
+        audience: {type: string, minLength: 1, maxLength: 256}
+        user_id: {type: string, minLength: 1, maxLength: 256}
+        team_id: {type: string, maxLength: 256}
+        tags: {type: array, maxItems: 64, items: {type: string, maxLength: 256}}
+        access_group_ids: {type: array, maxItems: 64, items: {type: string, maxLength: 128}}
+        allowed_models: {type: array, maxItems: 64, items: {type: string, maxLength: 256}}
+        allowed_tools: {type: array, maxItems: 64, items: {type: string, maxLength: 256}}
+        rate_limit_rpm: {type: integer, minimum: 0, maximum: 2147483647}
+        rate_limit_tpm: {type: integer, minimum: 0, maximum: 2147483647}
+        enabled: {type: boolean}
     DirectoryUserInput:
       type: object
       additionalProperties: false

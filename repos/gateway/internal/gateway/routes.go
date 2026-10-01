@@ -192,6 +192,8 @@ var gatewayRoutes = []routeDefinition{
 	{RouteContract{http.MethodPost, "/admin/v1/keys/{id}/disable"}, func(h Handler) http.Handler { return http.HandlerFunc(h.DisableVirtualKey) }},
 	{RouteContract{http.MethodPost, "/admin/v1/keys/{id}/enable"}, func(h Handler) http.Handler { return http.HandlerFunc(h.EnableVirtualKey) }},
 	{RouteContract{http.MethodDelete, "/admin/v1/keys/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.RevokeVirtualKey) }},
+	{RouteContract{http.MethodGet, "/admin/v1/jwt-principals"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListJWTPrincipals) }},
+	{RouteContract{http.MethodPut, "/admin/v1/jwt-principals"}, func(h Handler) http.Handler { return http.HandlerFunc(h.PutJWTPrincipal) }},
 	{RouteContract{http.MethodGet, "/admin/v1/users"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListDirectoryUsers) }},
 	{RouteContract{http.MethodPut, "/admin/v1/users/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.PutDirectoryUser) }},
 	{RouteContract{http.MethodGet, "/admin/v1/teams"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListDirectoryTeams) }},

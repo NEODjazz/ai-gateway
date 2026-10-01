@@ -11,6 +11,7 @@ import (
 	"unicode"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 var ErrJWTDirectoryUnavailable = errors.New("jwt identity directory unavailable")
@@ -141,4 +142,103 @@ func (s *PostgresVirtualKeyStore) LookupJWTPrincipal(ctx context.Context, issuer
 		return authorizedJWTPrincipal{}, false, nil
 	}
 	return principal, err == nil, err
+}
+
+// JWTPrincipalPage contains operator-visible policies, including disabled bindings.
+type JWTPrincipalPage struct {
+	Data   []JWTPrincipalPolicy `json:"data"`
+	Total  int                  `json:"total"`
+	Limit  int                  `json:"limit"`
+	Offset int                  `json:"offset"`
+}
+
+type jwtPrincipalManagementStore interface {
+	PutJWTPrincipal(context.Context, JWTPrincipalPolicy) (JWTPrincipalPolicy, error)
+	ListJWTPrincipals(context.Context, string, int, int) (JWTPrincipalPage, error)
+}
+
+func (m AuthModule) PutJWTPrincipal(ctx context.Context, policy JWTPrincipalPolicy) (JWTPrincipalPolicy, error) {
+	if !validJWTIdentityValue(policy.Issuer, 2048) || !validJWTIdentityValue(policy.Subject, 256) || !validJWTIdentityValue(policy.Audience, 256) || !validDirectoryID(policy.UserID) || (policy.TeamID != "" && !validDirectoryID(policy.TeamID)) || !validPolicyStrings(policy.Tags) || !validPolicyStrings(policy.AllowedModels) || !validPolicyStrings(policy.AllowedTools) || !validAccessGroupIDs(policy.AccessGroupIDs) || policy.RateLimitRPM < 0 || policy.RateLimitRPM > 2147483647 || policy.RateLimitTPM < 0 || policy.RateLimitTPM > 2147483647 {
+		return JWTPrincipalPolicy{}, ErrInvalidDirectoryEntry
+	}
+	for _, values := range [][]string{policy.Tags, policy.AllowedModels, policy.AllowedTools} {
+		for _, value := range values {
+			if !validJWTIdentityValue(value, 256) {
+				return JWTPrincipalPolicy{}, ErrInvalidDirectoryEntry
+			}
+		}
+	}
+	store, ok := m.store.(jwtPrincipalManagementStore)
+	if !ok {
+		return JWTPrincipalPolicy{}, ErrJWTDirectoryUnavailable
+	}
+	return store.PutJWTPrincipal(ctx, policy)
+}
+
+func (m AuthModule) ListJWTPrincipals(ctx context.Context, userID string, offset, limit int) (JWTPrincipalPage, error) {
+	if (userID != "" && !validDirectoryID(userID)) || offset < 0 || limit < 1 || limit > 500 {
+		return JWTPrincipalPage{}, ErrInvalidDirectoryEntry
+	}
+	store, ok := m.store.(jwtPrincipalManagementStore)
+	if !ok {
+		return JWTPrincipalPage{}, ErrJWTDirectoryUnavailable
+	}
+	return store.ListJWTPrincipals(ctx, userID, offset, limit)
+}
+
+func (s *PostgresVirtualKeyStore) PutJWTPrincipal(ctx context.Context, p JWTPrincipalPolicy) (JWTPrincipalPolicy, error) {
+	// User ownership is immutable, including after disabling a binding. No delete
+	// endpoint is provided: revocation must not permit later identity reassignment.
+	tag, err := s.pool.Exec(ctx, `INSERT INTO auth_jwt_principals
+ (issuer,subject,audience,user_id,team_id,tags,access_group_ids,allowed_models,allowed_tools,rate_limit_rpm,rate_limit_tpm,enabled)
+ VALUES($1,$2,$3,$4,NULLIF($5,''),$6,$7,$8,$9,$10,$11,$12)
+ ON CONFLICT(issuer,subject,audience) DO UPDATE SET team_id=EXCLUDED.team_id,tags=EXCLUDED.tags,
+ access_group_ids=EXCLUDED.access_group_ids,allowed_models=EXCLUDED.allowed_models,allowed_tools=EXCLUDED.allowed_tools,
+ rate_limit_rpm=EXCLUDED.rate_limit_rpm,rate_limit_tpm=EXCLUDED.rate_limit_tpm,enabled=EXCLUDED.enabled,updated_at=now()
+ WHERE auth_jwt_principals.user_id=EXCLUDED.user_id`, p.Issuer, p.Subject, p.Audience, p.UserID, p.TeamID,
+		nonNilStrings(p.Tags), nonNilStrings(p.AccessGroupIDs), nonNilStrings(p.AllowedModels), nonNilStrings(p.AllowedTools), p.RateLimitRPM, p.RateLimitTPM, p.Enabled)
+	if isPrincipalForeignKeyViolation(err) {
+		return JWTPrincipalPolicy{}, ErrInvalidDirectoryEntry
+	}
+	if err != nil {
+		return JWTPrincipalPolicy{}, err
+	}
+	if tag.RowsAffected() != 1 {
+		return JWTPrincipalPolicy{}, ErrDirectoryConflict
+	}
+	return p, nil
+}
+
+func (s *PostgresVirtualKeyStore) ListJWTPrincipals(ctx context.Context, userID string, offset, limit int) (JWTPrincipalPage, error) {
+	page := JWTPrincipalPage{Data: []JWTPrincipalPolicy{}, Offset: offset, Limit: limit}
+	// A repeatable-read transaction keeps totals and the page consistent.
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return page, err
+	}
+	defer tx.Rollback(ctx)
+	if err = tx.QueryRow(ctx, `SELECT count(*) FROM auth_jwt_principals WHERE ($1='' OR user_id=$1)`, userID).Scan(&page.Total); err != nil {
+		return page, err
+	}
+	rows, err := tx.Query(ctx, `SELECT issuer,subject,audience,user_id,COALESCE(team_id,''),tags,access_group_ids,allowed_models,allowed_tools,rate_limit_rpm,rate_limit_tpm,enabled FROM auth_jwt_principals WHERE ($1='' OR user_id=$1) ORDER BY issuer,audience,subject LIMIT $2 OFFSET $3`, userID, limit, offset)
+	if err != nil {
+		return page, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var p JWTPrincipalPolicy
+		if err = rows.Scan(&p.Issuer, &p.Subject, &p.Audience, &p.UserID, &p.TeamID, &p.Tags, &p.AccessGroupIDs, &p.AllowedModels, &p.AllowedTools, &p.RateLimitRPM, &p.RateLimitTPM, &p.Enabled); err != nil {
+			return page, err
+		}
+		page.Data = append(page.Data, p)
+	}
+	if err = rows.Err(); err != nil {
+		return page, err
+	}
+	return page, tx.Commit(ctx)
+}
+
+func isPrincipalForeignKeyViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23503"
 }
