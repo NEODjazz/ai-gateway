@@ -331,7 +331,7 @@ class Run:
                 ],
                 "clientRoles": {"gateway": ["gateway-user"]},
             }
-            for name in ("alice", "bob")
+            for name in ("operator", "alice", "bob")
         ]
         self.kc_name = "ai-gateway-identity-kc-" + self.suffix
         self.container(
@@ -1014,10 +1014,10 @@ class Run:
             "OPENAI_API_BASE_URLS": "http://" + host + ":" + str(self.gw_port) + "/v1",
             "OPENAI_API_KEYS": "",
             "ENABLE_OLLAMA_API": "false",
-            "ENABLE_BASE_MODELS_CACHE": "false",
+            "ENABLE_BASE_MODELS_CACHE": "true",
             "ENABLE_EVALUATION_ARENA_MODELS": "false",
             "ENABLE_PERSISTENT_CONFIG": "false",
-            "BYPASS_MODEL_ACCESS_CONTROL": "true",
+            "BYPASS_MODEL_ACCESS_CONTROL": "false",
             "OFFLINE_MODE": "true",
             "HF_HUB_OFFLINE": "1",
             "RAG_EMBEDDING_ENGINE": "openai",
@@ -1034,7 +1034,7 @@ class Run:
         self.container(self.ui_name, OPENWEBUI_IMAGE, options)
         wait_ready(self.ui + "/health", seconds=240)
         sessions = {}
-        for name in ("alice", "bob"):
+        for name in ("operator", "alice", "bob"):
             jar = http.cookiejar.CookieJar(policy=LoopbackCookiePolicy())
             opener = urllib.request.build_opener(
                 urllib.request.HTTPCookieProcessor(jar)
@@ -1093,7 +1093,7 @@ class Run:
                 + ",".join(sorted(cookies)),
             )
             sessions[name] = (opener, jar)
-            if name == "alice":
+            if name == "operator":
                 # Pinned version does not read OPENAI_API_CONFIGS from environment.
                 status, _, _ = request_http(
                     self.ui + "/openai/config/update",
@@ -1102,12 +1102,61 @@ class Run:
                         "OPENAI_API_BASE_URLS": [settings["OPENAI_API_BASE_URLS"]],
                         "OPENAI_API_KEYS": [""],
                         "OPENAI_API_CONFIGS": {
-                            "0": {"enable": True, "auth_type": "system_oauth"}
+                            "0": {
+                                "enable": True,
+                                "auth_type": "system_oauth",
+                                "model_ids": ["model-a", "model-b", "model-common"],
+                            }
                         },
                     },
                     opener=opener,
                 )
                 check(status == 200, "System OAuth connection configuration failed")
+        # The UI-only operator owns the static catalog. Inference accounts have
+        # explicit read grants; their OAuth tokens remain the sole Gateway auth.
+        # No user-dependent /v1/models response enters a shared base registry.
+        check(
+            self.authorize(self.token("operator")["access_token"])[0] == 401,
+            "unprovisioned UI operator acquired Gateway access",
+        )
+        local_users = {}
+        for name in ("alice", "bob"):
+            cookies = {cookie.name: cookie.value for cookie in sessions[name][1]}
+            local_users[name] = token_claims(cookies["token"])["id"]
+        for model, names in (
+            ("model-a", ["alice"]),
+            ("model-b", ["bob"]),
+            ("model-common", ["alice", "bob"]),
+        ):
+            status, _, _ = request_http(
+                self.ui + "/api/v1/models/create",
+                {
+                    "id": model,
+                    "name": model,
+                    "base_model_id": None,
+                    "params": {},
+                    "meta": {"capabilities": {"builtin_tools": False}},
+                    "access_grants": [
+                        {
+                            "principal_type": "user",
+                            "principal_id": local_users[name],
+                            "permission": "read",
+                        }
+                        for name in names
+                    ],
+                },
+                opener=sessions["operator"][0],
+            )
+            check(
+                status == 200,
+                "explicit OpenWebUI model ACL provisioning failed: status="
+                + str(status),
+            )
+        check(
+            request_http(self.ui + "/api/models", opener=sessions["operator"][0])[0]
+            == 200,
+            "static catalog initialization failed",
+        )
         for name, model, hidden in (
             ("alice", "model-a", "model-b"),
             ("bob", "model-b", "model-a"),
@@ -1227,6 +1276,50 @@ class Run:
                     + user
                     + "';",
                 )
+        for name, model in (
+            ("alice", "model-a"),
+            ("bob", "model-b"),
+            ("alice", "model-a"),
+        ):
+            request = {
+                "model": model,
+                "messages": [{"role": "user", "content": "interleaved fixture"}],
+                "params": {"function_calling": "legacy"},
+            }
+            check(
+                request_http(
+                    self.ui + "/api/chat/completions", request, opener=sessions[name][0]
+                )[0]
+                == 200,
+                "another user replaced the active model registry",
+            )
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+            statuses = list(
+                executor.map(
+                    lambda name: request_http(
+                        self.ui + "/api/chat/completions",
+                        {
+                            "model": "model-a" if name == "alice" else "model-b",
+                            "messages": [
+                                {"role": "user", "content": "parallel UI fixture"}
+                            ],
+                            "params": {"function_calling": "legacy"},
+                        },
+                        opener=sessions[name][0],
+                    )[0],
+                    ["alice", "bob"] * 3,
+                )
+            )
+        check(
+            all(status == 200 for status in statuses),
+            "parallel user chats changed model registry or OAuth identity",
+        )
+        for name, model in (("alice", "model-a"), ("bob", "model-b")):
+            opener, jar = sessions[name]
+            request = {
+                "model": model,
+                "messages": [{"role": "user", "content": "missing session fixture"}],
+            }
             # Losing only the OAuth session must not use a connection-wide key.
             for cookie in list(jar):
                 if cookie.name == "oauth_session_id":
@@ -1249,7 +1342,7 @@ class Run:
             )
             check(count == "1", "OpenWebUI refresh split billing identity")
         print(
-            "PASS OpenWebUI v0.11.4 real authorization-code/PKCE, System OAuth, per-user model cache, JSON/SSE, refresh billing and 401/429/missing-session denial",
+            "PASS OpenWebUI v0.11.4 real authorization-code/PKCE, System OAuth, explicit catalog/ACL, per-user model cache, interleaved/parallel JSON/SSE, refresh billing and 401/429/missing-session denial",
             flush=True,
         )
         if os.getenv("IDENTITY_BROWSER_READY_FILE"):

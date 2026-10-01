@@ -33,7 +33,10 @@ settlement, а queued batch повторно проверяет directory policy
 повторная доставка billing events проверяются unit/PG regression tests в CI.
 Browser проверка подтверждает реальный login и видимый отказ неназначенного tool.
 OpenWebUI built-in tools требуют явных grants либо отключения для plain chat.
-Пользовательский per-model cache допустим; общий base-model cache выключен.
+Для OpenWebUI 0.11.4 используется статический operator-owned registry и
+пользовательские UI ACL: разные OAuth-зависимые каталоги не заменяют общий
+registry. Чередующиеся и параллельные чаты получают разрешённые модели;
+Gateway остаётся enforcement point даже при устаревшем внешнем ACL.
 
 Прошли `gofmt -w .`, `go vet ./...`, `go test ./...`, `go test -race ./...`,
 `go build ./...` во всех шести modules на Go 1.25.13, обязательные PostgreSQL

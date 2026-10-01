@@ -91,13 +91,34 @@ refresh tokens не должны попадать в browser JavaScript, лог�
 эти режимы не обеспечивают выбранный per-user flow. Ошибка/отсутствие OAuth
 session не должна переключать connection на privileged shared key.
 
-Сохраняйте `ENABLE_BASE_MODELS_CACHE=false`: общий base-model cache внешнего
-интерфейса не должен подменять пользовательские каталоги. Для проверенного
-обычного chat-сценария отключён evaluation arena; в Controls → Function Calling
-выбран **Legacy**, чтобы OpenWebUI не добавлял built-in tools автоматически.
-Для Native режима явно назначьте нужные имена tools в Gateway binding или
-отключите built-in tools в model capabilities OpenWebUI. Gateway отклоняет весь
-запрос, если в нём есть неназначенный tool; не расширяйте grants до `*` ради входа.
+В OpenWebUI 0.11.4 per-user OpenAI model cache исправлен, но основной model
+registry остаётся общим: после загрузки разных каталогов второй пользователь
+может вызвать у первого `400 Model not found` даже для разрешённой модели.
+Проверенный профиль поэтому использует **стабильный каталог connection**:
+
+1. Оператор OpenWebUI задаёт явные `model_ids` в System OAuth connection.
+   Это имена согласованных моделей; shared API key по-прежнему отсутствует.
+2. Отдельный UI operator создаёт Workspace Models для этих ID и назначает
+   явные `read` access grants пользователям/группам OpenWebUI. Оператор владеет
+   записями; inference users не получают ownership всех моделей.
+3. Используйте `BYPASS_MODEL_ACCESS_CONTROL=false`,
+   `ENABLE_BASE_MODELS_CACHE=true` и выключенный evaluation arena для данного
+   сценария. Shared base registry содержит только статические operator-approved
+   ID, а видимый список фильтруется ACL каждого пользователя. Никогда не кладите
+   JWT-зависимый ответ Gateway `/v1/models` в этот общий cache.
+4. Согласуйте UI ACL с directory grants и поддерживайте оба назначения при
+   provisioning. Наличие модели/устаревшего ACL в OpenWebUI не разрешает execution:
+   Gateway проверяет актуальную directory policy самостоятельно.
+5. Для plain chat отключите `builtin_tools` в model capabilities либо выберите
+   Controls → Function Calling → **Legacy**. Для Native режима явно назначьте
+   нужные tools в Gateway binding. Gateway отклоняет весь запрос с неназначенным
+   tool; не расширяйте grants до `*` ради входа.
+
+UI operator не обязан иметь inference principal в Gateway. Integration fixture
+проверяет, что такой непровиженный оператор не получает inference-доступ только
+потому, что может настраивать внешний UI. Два inference users имеют отдельные
+OAuth sessions и ACL; чередующиеся и параллельные чаты проверены без перезагрузки
+каталога между вызовами. Это configuration profile, без патча внешнего продукта.
 
 Gateway не принимает `X-OpenWebUI-*`, request `user` или metadata как identity.
 Проверяйте `/v1/models` для каждого пользователя и прямой вызов скрытой модели.
