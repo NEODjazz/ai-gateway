@@ -6,9 +6,9 @@
 OpenWebUI с достоверными правами, лимитами, ownership и billing. Переписывание
 сервисов и расширение каталога без конкретного потребителя в этот этап не входят.
 
-Это оценка исходного кода и контрактов. Наличие handler не доказывает полную
-совместимость каждого провайдера. Запуск реального Keycloak/OpenWebUI и внешних
-провайдеров потребуется при реализации; такой запуск этой оценкой не заменяется.
+Разделы требований ниже фиксируют оценку базовой ревизии. Результаты реализации
+и сквозных проверок приведены отдельно. Наличие handler и успешный fixture-тест
+не доказывают полную совместимость каждой внешней модели или провайдера.
 
 ## Результат реализации P1, 2026-10-01
 
@@ -17,7 +17,11 @@ OpenWebUI с достоверными правами, лимитами, ownershi
 | A. Identity/policy/ownership | Реализовано: opt-in directory JWT, immutable binding, stable credential, текущие grants/membership/organization/limits, изоляция cache/resources/billing; unit и реальные PG regressions |
 | B. Keycloak | Реализовано: secret-free realm/clients/mappers, явный provisioning/roles, реальные rotation/refresh/deprovision/logout/expiry/failure/recovery tests |
 | C. OpenWebUI | Реализовано: System OAuth, Authorization Code + PKCE, server refresh, разные `/openai/models` и `/api/models`, полный JSON/SSE chat, отсутствие session fallback, 401/429 и billing attribution |
-| D. CI/release/local rollout | Обязательные PostgreSQL и real identity jobs прошли в GitHub Actions; релизы 0.3.0 и 0.3.1 опубликованы. Исправление PostgreSQL chart подготовлено в 0.3.2. Local rollout выполнен: migration 013 применена, все шесть application deployments на 0.3.1 Ready, ingress/UI и Auth management API проверены; Secret data и runtime settings сохранены |
+| D. CI/release/local rollout | Обязательные PostgreSQL и real identity jobs прошли в GitHub Actions; [релиз 0.3.2](https://github.com/NEODjazz/ai-gateway/releases/tag/v0.3.2) опубликован со всеми шестью образами и восемью Helm-пакетами. Local rollout выполнен: migration 013 применена, шесть application deployments на 0.3.2 и все девять deployments Ready, ingress/UI и Auth management API проверены; Secret data и runtime settings сохранены |
+
+Поставки A–D завершены. [Release workflow](https://github.com/NEODjazz/ai-gateway/actions/runs/36914315449)
+и оба CI runs релизного commit завершились успешно. Опубликованный PostgreSQL
+chart содержит проверенный SQL в ConfigMap data и прошёл strict server dry-run.
 
 Реализация и переход описаны в [профиле Keycloak/OpenWebUI](identity-keycloak-openwebui.md).
 [Сквозной сценарий](../scripts/test-identity-integration.py) использует реальные
@@ -52,6 +56,10 @@ server dry-run Kubernetes, полные Gateway vet/test/build и fresh PostgreS
 транзакционно. После разрешённой очистки завершённых fixture containers и старого
 build cache DiskPressure снят; рабочие volumes и Secret data не менялись.
 Local JWT mode сохранён legacy: production trust и provisioning остаются opt-in.
+Local rollout обновил images/version Deployment и migration ConfigMap.
+Существующий Helm release state не перезаписывался: его values содержали
+устаревший provider Secret. Перед следующим Helm upgrade оператору нужно
+согласовать актуальные Secret references/values; live Secret data сохранены.
 
 Production IdP trust не включён автоматически. До opt-in нужны рабочие HTTPS
 endpoints, confidential client secrets, источник provisioning и назначенные
