@@ -24,6 +24,7 @@ type JWTPrincipalPolicy struct {
 	Subject        string   `json:"subject"`
 	Audience       string   `json:"audience"`
 	UserID         string   `json:"user_id"`
+	OrganizationID string   `json:"organization_id,omitempty"`
 	TeamID         string   `json:"team_id,omitempty"`
 	Tags           []string `json:"tags,omitempty"`
 	AccessGroupIDs []string `json:"access_group_ids,omitempty"`
@@ -36,8 +37,8 @@ type JWTPrincipalPolicy struct {
 
 type authorizedJWTPrincipal struct {
 	JWTPrincipalPolicy
-	OrganizationID string
-	Roles          []string
+	Roles             []string
+	OrganizationRoles []string
 }
 
 type jwtPrincipalStore interface {
@@ -79,10 +80,7 @@ func (m AuthModule) authorizeJWTPrincipal(ctx context.Context, req *RequestConte
 	roles := make([]string, 0)
 	for _, external := range claimStrings(claims.Raw, m.jwtConfig.RolesClaim) {
 		role := m.jwtConfig.RoleMappings[external]
-		if role != "" && slices.Contains(principal.Roles, role) && !slices.Contains(roles, role) {
-			if role == "team_admin" && principal.TeamID == "" {
-				continue
-			}
+		if role != "" && principalRoleApproved(principal, role) && !slices.Contains(roles, role) {
 			roles = append(roles, role)
 		}
 	}
@@ -123,7 +121,7 @@ func (s *PostgresVirtualKeyStore) JWTPrincipalsReady(ctx context.Context) error 
 	if s == nil || s.pool == nil {
 		return ErrJWTDirectoryUnavailable
 	}
-	if err := s.pool.QueryRow(ctx, `SELECT to_regclass('public.auth_jwt_principals') IS NOT NULL`).Scan(&exists); err != nil || !exists {
+	if err := s.pool.QueryRow(ctx, `SELECT to_regclass('public.auth_jwt_principals') IS NOT NULL AND to_regclass('public.auth_organization_memberships') IS NOT NULL AND EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='auth_jwt_principals' AND column_name='organization_id')`).Scan(&exists); err != nil || !exists {
 		return ErrJWTDirectoryUnavailable
 	}
 	return nil
@@ -137,19 +135,21 @@ func (s *PostgresVirtualKeyStore) LookupJWTPrincipal(ctx context.Context, issuer
 	err := s.pool.QueryRow(ctx, `
 		SELECT p.issuer,p.subject,p.audience,p.user_id,COALESCE(p.team_id,''),
 		       p.tags,p.access_group_ids,p.allowed_models,p.allowed_tools,p.rate_limit_rpm,p.rate_limit_tpm,p.enabled,
-		       COALESCE(ot.organization_id,''),u.roles
+		       COALESCE(p.organization_id,''),u.roles,COALESCE(om.roles,'{}')
 		FROM auth_jwt_principals p JOIN users u ON u.id=p.user_id
 		LEFT JOIN auth_teams t ON t.id=p.team_id
 		LEFT JOIN auth_team_memberships tm ON tm.team_id=p.team_id AND tm.user_id=p.user_id
 		LEFT JOIN auth_organization_teams ot ON ot.team_id=p.team_id
-		LEFT JOIN auth_organizations o ON o.id=ot.organization_id
+		LEFT JOIN auth_organizations o ON o.id=p.organization_id
+		LEFT JOIN auth_organization_memberships om ON om.organization_id=p.organization_id AND om.user_id=p.user_id
 		WHERE p.issuer=$1 AND p.subject=$2 AND p.audience=$3 AND p.enabled
 		  AND u.status='active' AND u.scim_deleted_at IS NULL
 		  AND (p.team_id IS NULL OR (t.status='active' AND t.scim_deleted_at IS NULL AND tm.user_id IS NOT NULL))
-		  AND (ot.organization_id IS NULL OR o.status='active')`, issuer, subject, audience).Scan(
+		  AND (p.organization_id IS NULL OR (o.status='active' AND (om.status='active' OR (om.user_id IS NULL AND ot.organization_id=p.organization_id))))
+		  AND (p.team_id IS NULL OR ot.organization_id IS NOT DISTINCT FROM p.organization_id)`, issuer, subject, audience).Scan(
 		&principal.Issuer, &principal.Subject, &principal.Audience, &principal.UserID, &principal.TeamID,
 		&principal.Tags, &principal.AccessGroupIDs, &principal.AllowedModels, &principal.AllowedTools,
-		&principal.RateLimitRPM, &principal.RateLimitTPM, &principal.Enabled, &principal.OrganizationID, &principal.Roles)
+		&principal.RateLimitRPM, &principal.RateLimitTPM, &principal.Enabled, &principal.OrganizationID, &principal.Roles, &principal.OrganizationRoles)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return authorizedJWTPrincipal{}, false, nil
 	}
@@ -170,7 +170,7 @@ type jwtPrincipalManagementStore interface {
 }
 
 func (m AuthModule) PutJWTPrincipal(ctx context.Context, policy JWTPrincipalPolicy) (JWTPrincipalPolicy, error) {
-	if !validJWTIdentityValue(policy.Issuer, 2048) || !validJWTIdentityValue(policy.Subject, 256) || !validJWTIdentityValue(policy.Audience, 256) || !validDirectoryID(policy.UserID) || (policy.TeamID != "" && !validDirectoryID(policy.TeamID)) || !validPolicyStrings(policy.Tags) || !validPolicyStrings(policy.AllowedModels) || !validPolicyStrings(policy.AllowedTools) || !validAccessGroupIDs(policy.AccessGroupIDs) || policy.RateLimitRPM < 0 || policy.RateLimitRPM > 2147483647 || policy.RateLimitTPM < 0 || policy.RateLimitTPM > 2147483647 {
+	if !validJWTIdentityValue(policy.Issuer, 2048) || !validJWTIdentityValue(policy.Subject, 256) || !validJWTIdentityValue(policy.Audience, 256) || !validDirectoryID(policy.UserID) || (policy.OrganizationID != "" && !validDirectoryID(policy.OrganizationID)) || (policy.TeamID != "" && !validDirectoryID(policy.TeamID)) || !validPolicyStrings(policy.Tags) || !validPolicyStrings(policy.AllowedModels) || !validPolicyStrings(policy.AllowedTools) || !validAccessGroupIDs(policy.AccessGroupIDs) || policy.RateLimitRPM < 0 || policy.RateLimitRPM > 2147483647 || policy.RateLimitTPM < 0 || policy.RateLimitTPM > 2147483647 {
 		return JWTPrincipalPolicy{}, ErrInvalidDirectoryEntry
 	}
 	for _, values := range [][]string{policy.Tags, policy.AllowedModels, policy.AllowedTools} {
@@ -199,16 +199,26 @@ func (m AuthModule) ListJWTPrincipals(ctx context.Context, userID string, offset
 }
 
 func (s *PostgresVirtualKeyStore) PutJWTPrincipal(ctx context.Context, p JWTPrincipalPolicy) (JWTPrincipalPolicy, error) {
-	// User ownership is immutable, including after disabling a binding. No delete
+	// User and tenant ownership are immutable, including after disabling a binding. No delete
 	// endpoint is provided: revocation must not permit later identity reassignment.
+	if p.TeamID != "" {
+		var org string
+		if err := s.pool.QueryRow(ctx, `SELECT COALESCE((SELECT organization_id FROM auth_organization_teams WHERE team_id=$1),'')`, p.TeamID).Scan(&org); err != nil {
+			return JWTPrincipalPolicy{}, err
+		}
+		if p.OrganizationID != "" && p.OrganizationID != org {
+			return JWTPrincipalPolicy{}, ErrInvalidDirectoryEntry
+		}
+		p.OrganizationID = org
+	}
 	tag, err := s.pool.Exec(ctx, `INSERT INTO auth_jwt_principals
- (issuer,subject,audience,user_id,team_id,tags,access_group_ids,allowed_models,allowed_tools,rate_limit_rpm,rate_limit_tpm,enabled)
- VALUES($1,$2,$3,$4,NULLIF($5,''),$6,$7,$8,$9,$10,$11,$12)
+ (issuer,subject,audience,user_id,team_id,tags,access_group_ids,allowed_models,allowed_tools,rate_limit_rpm,rate_limit_tpm,enabled,organization_id)
+ VALUES($1,$2,$3,$4,NULLIF($5,''),$6,$7,$8,$9,$10,$11,$12,NULLIF($13,''))
  ON CONFLICT(issuer,subject,audience) DO UPDATE SET team_id=EXCLUDED.team_id,tags=EXCLUDED.tags,
  access_group_ids=EXCLUDED.access_group_ids,allowed_models=EXCLUDED.allowed_models,allowed_tools=EXCLUDED.allowed_tools,
  rate_limit_rpm=EXCLUDED.rate_limit_rpm,rate_limit_tpm=EXCLUDED.rate_limit_tpm,enabled=EXCLUDED.enabled,updated_at=now()
- WHERE auth_jwt_principals.user_id=EXCLUDED.user_id`, p.Issuer, p.Subject, p.Audience, p.UserID, p.TeamID,
-		nonNilStrings(p.Tags), nonNilStrings(p.AccessGroupIDs), nonNilStrings(p.AllowedModels), nonNilStrings(p.AllowedTools), p.RateLimitRPM, p.RateLimitTPM, p.Enabled)
+ WHERE auth_jwt_principals.user_id=EXCLUDED.user_id AND auth_jwt_principals.organization_id IS NOT DISTINCT FROM EXCLUDED.organization_id`, p.Issuer, p.Subject, p.Audience, p.UserID, p.TeamID,
+		nonNilStrings(p.Tags), nonNilStrings(p.AccessGroupIDs), nonNilStrings(p.AllowedModels), nonNilStrings(p.AllowedTools), p.RateLimitRPM, p.RateLimitTPM, p.Enabled, p.OrganizationID)
 	if isPrincipalForeignKeyViolation(err) {
 		return JWTPrincipalPolicy{}, ErrInvalidDirectoryEntry
 	}
@@ -232,14 +242,14 @@ func (s *PostgresVirtualKeyStore) ListJWTPrincipals(ctx context.Context, userID 
 	if err = tx.QueryRow(ctx, `SELECT count(*) FROM auth_jwt_principals WHERE ($1='' OR user_id=$1)`, userID).Scan(&page.Total); err != nil {
 		return page, err
 	}
-	rows, err := tx.Query(ctx, `SELECT issuer,subject,audience,user_id,COALESCE(team_id,''),tags,access_group_ids,allowed_models,allowed_tools,rate_limit_rpm,rate_limit_tpm,enabled FROM auth_jwt_principals WHERE ($1='' OR user_id=$1) ORDER BY issuer,audience,subject LIMIT $2 OFFSET $3`, userID, limit, offset)
+	rows, err := tx.Query(ctx, `SELECT issuer,subject,audience,user_id,COALESCE(team_id,''),tags,access_group_ids,allowed_models,allowed_tools,rate_limit_rpm,rate_limit_tpm,enabled,COALESCE(organization_id,'') FROM auth_jwt_principals WHERE ($1='' OR user_id=$1) ORDER BY issuer,audience,subject LIMIT $2 OFFSET $3`, userID, limit, offset)
 	if err != nil {
 		return page, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var p JWTPrincipalPolicy
-		if err = rows.Scan(&p.Issuer, &p.Subject, &p.Audience, &p.UserID, &p.TeamID, &p.Tags, &p.AccessGroupIDs, &p.AllowedModels, &p.AllowedTools, &p.RateLimitRPM, &p.RateLimitTPM, &p.Enabled); err != nil {
+		if err = rows.Scan(&p.Issuer, &p.Subject, &p.Audience, &p.UserID, &p.TeamID, &p.Tags, &p.AccessGroupIDs, &p.AllowedModels, &p.AllowedTools, &p.RateLimitRPM, &p.RateLimitTPM, &p.Enabled, &p.OrganizationID); err != nil {
 			return page, err
 		}
 		page.Data = append(page.Data, p)
@@ -306,7 +316,7 @@ func (m AuthModule) ReauthorizeJWTPrincipal(ctx context.Context, req *RequestCon
 				break
 			}
 		}
-		if mapped && slices.Contains(p.Roles, role) && !slices.Contains(roles, role) && (role != "team_admin" || p.TeamID != "") {
+		if mapped && principalRoleApproved(p, role) && !slices.Contains(roles, role) {
 			roles = append(roles, role)
 		}
 	}

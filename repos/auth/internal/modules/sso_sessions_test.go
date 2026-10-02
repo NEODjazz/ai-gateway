@@ -81,6 +81,40 @@ func browserIdentityFixture(t *testing.T) (AuthModule, *fakeJWTPrincipalStore, *
 func browserIdentityClaims(profile *SSOProfile, nonce string) map[string]any {
 	return map[string]any{"iss": profile.Issuer, "aud": profile.ClientID, "sub": "external-subject", "roles": []string{"gateway-admin"}, "iat": time.Now().Unix(), "exp": time.Now().Add(5 * time.Minute).Unix(), "nonce": nonce}
 }
+
+func TestSSOServerSessionPinsOrganizationAndReloadsScopedApproval(t *testing.T) {
+	m, directory, _, profile, key := browserIdentityFixture(t)
+	profile.RoleMappings = map[string]string{"organization-admin": "org_admin"}
+	state, revision, err := m.sso.Load(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.Active = profile
+	if err = m.sso.save(t.Context(), revision, state); err != nil {
+		t.Fatal(err)
+	}
+	directory.principal.Roles = []string{"org_admin"}
+	directory.principal.OrganizationRoles = []string{"org_admin"}
+	nonce := strings.Repeat("n", 43)
+	claims := browserIdentityClaims(profile, nonce)
+	claims["roles"] = []string{"organization-admin"}
+	session, err := m.CreateSSOBrowserSession(t.Context(), SSOBrowserLogin{ProfileID: profile.ID, Token: signRS256JWT(t, "browser", key, claims), Nonce: nonce})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = m.Handle(t.Context(), &RequestContext{APIKey: session.Token}); err != nil {
+		t.Fatal(err)
+	}
+	directory.principal.OrganizationID = "org-b"
+	if err = m.Handle(t.Context(), &RequestContext{APIKey: session.Token}); !errors.Is(err, ErrUnauthorized) {
+		t.Fatal("browser session changed tenant", err)
+	}
+	directory.principal.OrganizationID = "org-a"
+	directory.principal.OrganizationRoles = []string{"user"}
+	if err = m.Handle(t.Context(), &RequestContext{APIKey: session.Token}); !errors.Is(err, ErrUnauthorized) {
+		t.Fatal("global directory role bypassed removed approval", err)
+	}
+}
 func TestSSOIDTokenValidationIsIndependentAndRejectsInvalidClaims(t *testing.T) {
 	module, _, _, profile, key := browserIdentityFixture(t)
 	nonce := strings.Repeat("n", 43)

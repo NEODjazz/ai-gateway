@@ -3861,6 +3861,37 @@ paths:
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/AdminRequired'}
         '503': {$ref: '#/components/responses/ManagementUnavailable'}
+  /admin/v1/organizations/{id}/members:
+    get:
+      operationId: listOrganizationMemberships
+      tags: [Organizations]
+      summary: List explicit organization membership approvals (global administrator)
+      parameters:
+        - {$ref: '#/components/parameters/OrganizationID'}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 500, default: 100}}
+        - {name: offset, in: query, schema: {type: integer, minimum: 0, maximum: 1000000, default: 0}}
+      responses:
+        '200': {description: Memberships, content: {application/json: {schema: {$ref: '#/components/schemas/OrganizationMembershipPage'}}}}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
+  /admin/v1/organizations/{id}/members/{user_id}:
+    put:
+      operationId: putOrganizationMembership
+      tags: [Organizations]
+      summary: Approve or disable organization membership (global administrator)
+      parameters:
+        - {$ref: '#/components/parameters/OrganizationID'}
+        - {name: user_id, in: path, required: true, schema: {type: string, minLength: 1, maxLength: 256}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/OrganizationMembershipInput'}}}}
+      responses:
+        '200': {description: Membership saved, content: {application/json: {schema: {$ref: '#/components/schemas/OrganizationMembership'}}}}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
   /admin/v1/organizations/{id}/teams/{team_id}:
     put:
       operationId: putOrganizationTeam
@@ -11550,6 +11581,7 @@ components:
         subject: {type: string, minLength: 1, maxLength: 256}
         audience: {type: string, minLength: 1, maxLength: 256}
         user_id: {type: string, minLength: 1, maxLength: 256}
+        organization_id: {type: string, maxLength: 256, description: Immutable tenant ownership; inferred from team on creation when omitted}
         team_id: {type: string, maxLength: 256}
         tags: {type: array, maxItems: 64, items: {type: string, maxLength: 256}}
         access_group_ids: {type: array, maxItems: 64, items: {type: string, maxLength: 128}}
@@ -11558,6 +11590,33 @@ components:
         rate_limit_rpm: {type: integer, minimum: 0, maximum: 2147483647}
         rate_limit_tpm: {type: integer, minimum: 0, maximum: 2147483647}
         enabled: {type: boolean}
+    OrganizationMembershipInput:
+      type: object
+      additionalProperties: false
+      required: [roles, status]
+      properties:
+        organization_id: {type: string, maxLength: 256, description: Path value takes precedence}
+        user_id: {type: string, maxLength: 256, description: Path value takes precedence}
+        roles: {type: array, minItems: 1, maxItems: 3, uniqueItems: true, items: {type: string, enum: [user, developer, org_admin]}}
+        status: {type: string, enum: [active, disabled]}
+    OrganizationMembership:
+      type: object
+      required: [organization_id, user_id, roles, status, created_at, updated_at]
+      properties:
+        organization_id: {type: string}
+        user_id: {type: string}
+        roles: {type: array, items: {type: string, enum: [user, developer, org_admin]}}
+        status: {type: string, enum: [active, disabled]}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    OrganizationMembershipPage:
+      type: object
+      required: [data, total, limit, offset]
+      properties:
+        data: {type: array, items: {$ref: '#/components/schemas/OrganizationMembership'}}
+        total: {type: integer, minimum: 0}
+        limit: {type: integer, minimum: 1, maximum: 500}
+        offset: {type: integer, minimum: 0, maximum: 1000000}
     DirectoryUserInput:
       type: object
       additionalProperties: false

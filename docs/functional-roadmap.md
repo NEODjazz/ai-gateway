@@ -377,8 +377,15 @@ browser client audience и resource audience разделены. Требует�
 Unit/race и полный PostgreSQL integration suite прошли; реальный Keycloak
 callback, logout/replay, rollback, независимость API и OpenWebUI проверены.
 Environment-only legacy browser flow остаётся переходным контрактом, описанным
-в [SSO настройках](admin-sso-settings.md). Tenant boundary, org admin, несколько
-connections/API issuers и новый UI находятся в следующем этапе этого Goal.
+в [SSO настройках](admin-sso-settings.md).
+
+Следующий этап добавляет [явное членство и tenant identity](organization-identity.md):
+роль `org_admin` требует approval именно в организации binding, user/organization
+ownership JWT principal закреплены, sessions и durable jobs повторно проверяют
+актуальные права. Migration 016 не назначает административные роли и не переносит
+ресурсы; старые tenant-bound sessions требуют нового входа. Делегированные
+resource permissions/UI, проверенный выбор tenant, несколько connections/API
+issuers и новый SSO UI ещё не завершены.
 
 Основа этой дополнительной оценки — код Gateway на commit `4ded04d1`.
 Ниже перечислены требования следующего этапа, а не уже реализованные возможности.

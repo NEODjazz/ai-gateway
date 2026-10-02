@@ -72,7 +72,7 @@ func (c JWTAuthConfig) validate() error {
 		return errors.New("too many jwt role mappings")
 	}
 	for external, role := range c.RoleMappings {
-		if !validJWTIdentityValue(external, 256) || (role != "user" && role != "developer" && role != "admin" && role != "team_admin") {
+		if !validJWTIdentityValue(external, 256) || (role != "user" && role != "developer" && role != "admin" && role != "team_admin" && role != "org_admin") {
 			return errors.New("invalid jwt role mapping")
 		}
 	}

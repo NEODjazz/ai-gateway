@@ -63,6 +63,8 @@ func (s *PostgresVirtualKeyStore) Lookup(ctx context.Context, tokenHash string) 
 		  AND NOT EXISTS (SELECT 1 FROM users u WHERE u.id=auth_virtual_keys.user_id AND u.status<>'active')
 		  AND NOT EXISTS (SELECT 1 FROM auth_teams t WHERE t.id=auth_virtual_keys.team_id AND t.status<>'active')
 		  AND NOT EXISTS (SELECT 1 FROM auth_organizations o WHERE o.id=auth_virtual_keys.organization_id AND o.status<>'active')
+		  AND NOT EXISTS (SELECT 1 FROM auth_organization_memberships om WHERE om.organization_id=auth_virtual_keys.organization_id AND om.user_id=auth_virtual_keys.user_id AND om.status<>'active')
+		  AND (NOT ('org_admin'=ANY(roles)) OR EXISTS (SELECT 1 FROM auth_organization_memberships om WHERE om.organization_id=auth_virtual_keys.organization_id AND om.user_id=auth_virtual_keys.user_id AND om.status='active' AND 'org_admin'=ANY(om.roles)))
 		  AND (expires_at IS NULL OR expires_at > now())
 		RETURNING id, alias, tags, COALESCE(user_id, ''), COALESCE(team_id, ''), COALESCE(organization_id, ''), roles, access_group_ids, allowed_models, allowed_tools,
 		          rate_limit_rpm, rate_limit_tpm, rotation_family_id,
@@ -87,14 +89,15 @@ func (s *PostgresVirtualKeyStore) Ready(ctx context.Context) error {
 	if err := s.pool.Ping(ctx); err != nil {
 		return errors.New("auth postgres is unavailable")
 	}
-	var migrationExists, toolsColumnExists, metadataColumnExists, directoryTableExists, ownershipColumnExists, accessGroupsColumnExists bool
+	var migrationExists, toolsColumnExists, metadataColumnExists, directoryTableExists, ownershipColumnExists, accessGroupsColumnExists, organizationMembershipsExist bool
 	if err := s.pool.QueryRow(ctx, `
 		SELECT to_regclass('public.auth_virtual_keys') IS NOT NULL,
 		       EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='auth_virtual_keys' AND column_name='allowed_tools'),
 		       EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='auth_virtual_keys' AND column_name='disabled_at'),
 		       to_regclass('public.auth_team_memberships') IS NOT NULL,
 		       EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='auth_virtual_keys' AND column_name='organization_id'),
-		       EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='auth_virtual_keys' AND column_name='access_group_ids')`).Scan(&migrationExists, &toolsColumnExists, &metadataColumnExists, &directoryTableExists, &ownershipColumnExists, &accessGroupsColumnExists); err != nil || !migrationExists || !toolsColumnExists || !metadataColumnExists || !directoryTableExists || !ownershipColumnExists || !accessGroupsColumnExists {
+		       EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='auth_virtual_keys' AND column_name='access_group_ids'),
+		       to_regclass('public.auth_organization_memberships') IS NOT NULL`).Scan(&migrationExists, &toolsColumnExists, &metadataColumnExists, &directoryTableExists, &ownershipColumnExists, &accessGroupsColumnExists, &organizationMembershipsExist); err != nil || !migrationExists || !toolsColumnExists || !metadataColumnExists || !directoryTableExists || !ownershipColumnExists || !accessGroupsColumnExists || !organizationMembershipsExist {
 		return errors.New("auth virtual-key migration is not applied")
 	}
 	return nil

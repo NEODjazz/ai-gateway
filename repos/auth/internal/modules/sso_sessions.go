@@ -9,7 +9,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"slices"
 	"strings"
 	"time"
 )
@@ -29,12 +28,13 @@ type SSOBrowserSession struct {
 }
 
 type storedSSOSession struct {
-	Epoch     string      `json:"epoch"`
-	ProfileID string      `json:"profile_id"`
-	Identity  JWTIdentity `json:"identity"`
-	UserID    string      `json:"user_id"`
-	Roles     []string    `json:"roles"`
-	ExpiresAt int64       `json:"expires_at"`
+	Epoch          string      `json:"epoch"`
+	ProfileID      string      `json:"profile_id"`
+	Identity       JWTIdentity `json:"identity"`
+	UserID         string      `json:"user_id"`
+	OrganizationID string      `json:"organization_id,omitempty"`
+	Roles          []string    `json:"roles"`
+	ExpiresAt      int64       `json:"expires_at"`
 }
 
 type ssoSessionStore interface {
@@ -144,7 +144,7 @@ func (m AuthModule) CreateSSOBrowserSession(ctx context.Context, login SSOBrowse
 	token := ssoSessionPrefix + random
 	hash, _ := ssoSessionHash(token)
 	epoch := sha256.Sum256([]byte(state.Active.SessionKey))
-	session := storedSSOSession{Epoch: hex.EncodeToString(epoch[:]), ProfileID: state.Active.ID, Identity: *req.JWTIdentity, UserID: req.UserID, Roles: req.Roles, ExpiresAt: m.sso.now().Add(time.Duration(state.Active.SessionTTLSeconds) * time.Second).Unix()}
+	session := storedSSOSession{Epoch: hex.EncodeToString(epoch[:]), ProfileID: state.Active.ID, Identity: *req.JWTIdentity, UserID: req.UserID, OrganizationID: req.OrganizationID, Roles: req.Roles, ExpiresAt: m.sso.now().Add(time.Duration(state.Active.SessionTTLSeconds) * time.Second).Unix()}
 	plain, err := json.Marshal(session)
 	if err != nil {
 		return SSOBrowserSession{}, ErrSSOUnavailable
@@ -212,7 +212,7 @@ func (m AuthModule) authorizeSSOSessionHash(ctx context.Context, req *RequestCon
 	if err != nil {
 		return ErrJWTDirectoryUnavailable
 	}
-	if !found || !principal.Enabled || principal.UserID != session.UserID || principal.Issuer != session.Identity.Issuer || principal.Subject != session.Identity.Subject || principal.Audience != session.Identity.Audience {
+	if !found || !principal.Enabled || principal.UserID != session.UserID || principal.OrganizationID != session.OrganizationID || principal.Issuer != session.Identity.Issuer || principal.Subject != session.Identity.Subject || principal.Audience != session.Identity.Audience {
 		return ErrUnauthorized
 	}
 	roles := []string{}
@@ -221,7 +221,7 @@ func (m AuthModule) authorizeSSOSessionHash(ctx context.Context, req *RequestCon
 		for _, target := range profile.RoleMappings {
 			mapped = mapped || target == role
 		}
-		if mapped && slices.Contains(principal.Roles, role) && (role != "team_admin" || principal.TeamID != "") {
+		if mapped && principalRoleApproved(principal, role) {
 			roles = append(roles, role)
 		}
 	}

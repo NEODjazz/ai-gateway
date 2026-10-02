@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"slices"
 	"strings"
 )
 
@@ -183,6 +184,9 @@ func (m AuthModule) Handle(ctx context.Context, req *RequestContext) error {
 	}
 	if m.staticFallback {
 		if key, ok := m.virtualKeys[credentialFingerprint(req.APIKey)]; ok {
+			if slices.Contains(key.Roles, "org_admin") {
+				return ErrUnauthorized
+			}
 			applyVirtualKey(req, key)
 			return nil
 		}
@@ -279,10 +283,14 @@ func (m AuthModule) authorizeJWTConfigured(ctx context.Context, req *RequestCont
 		return m.authorizeJWTPrincipal(ctx, req, claims)
 	}
 
+	roles := normalizeRoles(claims, m.jwtConfig.RolesClaim)
+	if slices.Contains(roles, "org_admin") {
+		return ErrUnauthorized
+	}
 	req.ModelAccessRestricted, req.ToolAccessRestricted = false, false
 	req.UserID = claims.Subject
 	req.TeamID = claimString(claims.Raw, m.jwtConfig.TeamIDClaim)
-	req.Roles = normalizeRoles(claims, m.jwtConfig.RolesClaim)
+	req.Roles = roles
 	req.CredentialID = credentialFingerprint(req.APIKey)
 	if req.Metadata == nil {
 		req.Metadata = map[string]string{}

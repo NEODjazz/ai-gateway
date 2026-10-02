@@ -63,7 +63,7 @@ func writePrincipalFailure(w http.ResponseWriter, err error) {
 	case errors.Is(err, modules.ErrInvalidDirectoryEntry):
 		http.Error(w, "invalid principal policy", http.StatusBadRequest)
 	case errors.Is(err, modules.ErrDirectoryConflict):
-		http.Error(w, "principal user ownership is immutable", http.StatusConflict)
+		http.Error(w, "principal user and organization ownership are immutable", http.StatusConflict)
 	default:
 		http.Error(w, "identity directory unavailable", http.StatusServiceUnavailable)
 	}

@@ -63,8 +63,8 @@ func TestPostgresJWTPrincipalDirectoryIntegration(t *testing.T) {
 	query(`INSERT INTO auth_organizations(id,name,status) VALUES($1,$1,'active')`, orgID)
 	query(`INSERT INTO auth_team_memberships(team_id,user_id) VALUES($1,$2)`, teamID, userID)
 	query(`INSERT INTO auth_organization_teams(organization_id,team_id) VALUES($1,$2)`, orgID, teamID)
-	query(`INSERT INTO auth_jwt_principals(issuer,subject,audience,user_id,team_id,allowed_models,allowed_tools,rate_limit_rpm)
-		VALUES($1,$2,$3,$2,$4,ARRAY['model-a'],ARRAY['read'],4)`, module.jwtConfig.Issuer, userID, module.jwtConfig.Audience, teamID)
+	query(`INSERT INTO auth_jwt_principals(issuer,subject,audience,user_id,team_id,organization_id,allowed_models,allowed_tools,rate_limit_rpm)
+		VALUES($1,$2,$3,$2,$4,$5,ARRAY['model-a'],ARRAY['read'],4)`, module.jwtConfig.Issuer, userID, module.jwtConfig.Audience, teamID, orgID)
 	t.Cleanup(func() {
 		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()

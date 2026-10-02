@@ -32,8 +32,9 @@ func directoryJWTModule(t *testing.T) (AuthModule, *fakeJWTPrincipalStore, map[s
 	module.jwtVerifier.now = func() time.Time { return time.Unix(1000, 0) }
 	store := &fakeJWTPrincipalStore{found: true, principal: authorizedJWTPrincipal{
 		JWTPrincipalPolicy: JWTPrincipalPolicy{Issuer: module.jwtConfig.Issuer, Audience: "gateway", Subject: "external-subject", UserID: "directory-user", TeamID: "team-a", Tags: []string{"regulated"}, AccessGroupIDs: []string{"group-a"}, AllowedModels: []string{"model-a"}, AllowedTools: []string{"read"}, RateLimitRPM: 7, RateLimitTPM: 100, Enabled: true},
-		OrganizationID:     "org-a", Roles: []string{"user"},
+		Roles:              []string{"user"},
 	}}
+	store.principal.OrganizationID = "org-a"
 	module.store = store
 	claims := map[string]any{"iss": module.jwtConfig.Issuer, "aud": []string{"openwebui", "gateway"}, "sub": "external-subject", "exp": 2000,
 		"resource_access": map[string]any{"gateway": map[string]any{"roles": []string{"gateway-user"}}}}

@@ -12,6 +12,7 @@ type JWTPrincipalPolicy struct {
 	Subject        string   `json:"subject"`
 	Audience       string   `json:"audience"`
 	UserID         string   `json:"user_id"`
+	OrganizationID string   `json:"organization_id,omitempty"`
 	TeamID         string   `json:"team_id,omitempty"`
 	Tags           []string `json:"tags,omitempty"`
 	AccessGroupIDs []string `json:"access_group_ids,omitempty"`
