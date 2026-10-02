@@ -99,17 +99,18 @@ func TestSSOSettingsRequireGlobalAdminAuditAndKeyForTrustChanges(t *testing.T) {
 	}
 }
 func TestSSOManagedProfileChangesCookieTrustAndFailsClosed(t *testing.T) {
-	profile := &PrivateSSOProfile{SSOProfileConfig: SSOProfileConfig{AuthorizationURL: "https://idp.example/authorize", TokenURL: "https://idp.example/token", ClientID: "console", RedirectURL: "https://gateway.example/auth/sso/callback", SessionTTLSeconds: 3600}, Enabled: true, SessionKey: base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("k", 32)))}
+	handle := "agsso_" + strings.Repeat("s", 43)
+	profile := &PrivateSSOProfile{ID: "active", SSOProfileConfig: SSOProfileConfig{AuthorizationURL: "https://idp.example/authorize", TokenURL: "https://idp.example/token", ClientID: "console", RedirectURL: "https://gateway.example/auth/sso/callback", SessionTTLSeconds: 3600}, Enabled: true, SessionKey: base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("k", 32)))}
 	client := &ssoClientStub{active: profile}
 	sso, err := profile.browser(false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	sealed, err := sso.seal(browserSSOSessionCookie, browserSSOSession{Token: "valid", ExpiresAt: time.Now().Add(time.Hour).Unix()})
+	sealed, err := sso.seal(browserSSOSessionCookie, browserSSOSession{Token: handle, ExpiresAt: time.Now().Add(time.Hour).Unix()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{&browserSSOAuthModule{token: "valid"}}), modelsProvider{}).WithSSOManagement(client))
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{&browserSSOAuthModule{token: handle}}), modelsProvider{}).WithSSOManagement(client))
 	request := func(header string) int {
 		r := httptest.NewRequest("GET", "/admin/v1/session", nil)
 		r.AddCookie(&http.Cookie{Name: browserSSOSessionCookie, Value: sealed})
@@ -131,7 +132,7 @@ func TestSSOManagedProfileChangesCookieTrustAndFailsClosed(t *testing.T) {
 	if request("") != 503 {
 		t.Fatal("profile outage failed open")
 	}
-	if request("Bearer valid") != 200 {
+	if request("Bearer "+handle) != 200 {
 		t.Fatal("explicit API key blocked by stale cookie or SSO outage")
 	}
 	w := httptest.NewRecorder()

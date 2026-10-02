@@ -352,14 +352,21 @@ The console session endpoint validates the bearer credential through the normal
 auth pipeline and returns only safe identity/scope metadata plus explicit UI
 capabilities. It never echoes the bearer token or provider credentials.
 
-Browser SSO can use an OAuth 2.0 or OIDC authorization-code client whose access
-token is accepted by the configured auth service. Enable it with
-`ADMIN_SSO_ENABLED`, set the authorization and token URLs, client ID, exact
-callback URL and a random `ADMIN_SSO_SESSION_KEY` of at least 32 bytes. A client
-secret is optional for public PKCE clients. The gateway keeps the access token
-in an encrypted HttpOnly Strict same-site cookie, caps its lifetime at the
-shorter of the provider expiry and `ADMIN_SSO_SESSION_TTL_SECONDS`, and validates
-it through the normal auth pipeline before creating the browser session.
+Browser SSO uses a managed OIDC connection configured in Settings → Single
+sign-on. Browser identity requires a verified ID token with issuer/client
+audience, signature, nonce and lifetime checks, plus explicit directory approval.
+The HttpOnly cookie holds an encrypted random server-session handle. PostgreSQL
+stores only its hash and encrypted minimal identity; upstream tokens are not
+persisted. Current directory and organization approvals are checked on each
+request. API resource JWT trust is configured independently.
+
+Compatibility: environment-only `ADMIN_SSO_*` browser profiles no longer enable
+login or accept cookies containing upstream access tokens. Create, test and
+activate a managed connection using an administrator recovery key before relying
+on browser sign-in. `/auth/sso/config` reports `migration_required=true` when a
+legacy profile remains configured without an active managed connection. Existing
+API JWT settings and virtual keys remain valid; no configuration or data is
+silently migrated.
 
 SCIM 2.0 user and group provisioning is available under `/scim/v2`. The base
 path and discovery endpoints expose the implemented resources, exact

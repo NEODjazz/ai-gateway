@@ -15,14 +15,11 @@ import (
 	"net/url"
 	"strings"
 	"time"
-
-	"ai-gateway-gateway/internal/modules"
 )
 
 const (
 	browserSSOStateCookie   = "ai_gateway_sso_state"
 	browserSSOSessionCookie = "ai_gateway_sso_session"
-	browserSSOMaxTokenBytes = 2800
 )
 
 type BrowserSSOConfig struct {
@@ -123,7 +120,7 @@ func (h Handler) GetBrowserSSOConfig(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 503, "sso_unavailable", "Browser sign-in is unavailable.")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"enabled": sso != nil, "start_url": "/auth/sso/start"})
+	writeJSON(w, http.StatusOK, map[string]any{"enabled": sso != nil, "start_url": "/auth/sso/start", "migration_required": sso == nil && h.browserSSO != nil})
 }
 
 func (h Handler) StartBrowserSSO(w http.ResponseWriter, r *http.Request) {
@@ -200,41 +197,31 @@ func (h Handler) CompleteBrowserSSO(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	token, expiresIn, state, ok := h.browserSSO.callbackToken(w, r, browserSSOStateCookie)
+	token, _, state, ok := h.browserSSO.callbackToken(w, r, browserSSOStateCookie)
 	if !ok {
 		return
 	}
-	ttl := min(h.browserSSO.config.SessionTTL, expiresIn)
-	if h.browserSSO.config.ProfileID != "" {
-		client, available := h.ssoManagement.(SSOSessionManagementClient)
-		if !available {
-			writeSSOFailure(w, nil)
-			return
-		}
-		session, err := client.CreateSSOBrowserSession(r.Context(), ssoServiceAudit(r), SSOBrowserLogin{ProfileID: state.ProfileID, Token: token, Nonce: state.Nonce, AccessToken: state.AccessToken})
-		if err != nil {
-			var managed *ManagementError
-			if errors.As(err, &managed) && managed.Status == 403 {
-				writeError(w, 401, "unauthorized", "Browser identity is not authorized.")
-				return
-			}
-			writeSSOFailure(w, err)
-			return
-		}
-		ttl = time.Unix(session.ExpiresAt, 0).Sub(h.browserSSO.now())
-		if ttl <= 0 || ttl > h.browserSSO.config.SessionTTL || !strings.HasPrefix(session.Token, "agsso_") || len(session.Token) != 49 {
-			writeSSOFailure(w, nil)
-			return
-		}
-		token = session.Token
-	} else {
-		// Legacy environment profiles remain available during managed migration.
-		req := modules.RequestContext{APIKey: token, RequestID: requestID(r)}
-		if err := h.pipeline.Run(r.Context(), &req); err != nil {
-			writeError(w, 401, "unauthorized", "identity provider credential is not authorized")
-			return
-		}
+	client, available := h.ssoManagement.(SSOSessionManagementClient)
+	if !available || h.browserSSO.config.ProfileID == "" {
+		writeSSOFailure(w, nil)
+		return
 	}
+	session, err := client.CreateSSOBrowserSession(r.Context(), ssoServiceAudit(r), SSOBrowserLogin{ProfileID: state.ProfileID, Token: token, Nonce: state.Nonce, AccessToken: state.AccessToken})
+	if err != nil {
+		var managed *ManagementError
+		if errors.As(err, &managed) && managed.Status == 403 {
+			writeError(w, 401, "unauthorized", "Browser identity is not authorized.")
+			return
+		}
+		writeSSOFailure(w, err)
+		return
+	}
+	ttl := time.Unix(session.ExpiresAt, 0).Sub(h.browserSSO.now())
+	if ttl <= 0 || ttl > h.browserSSO.config.SessionTTL || !validBrowserSessionHandle(session.Token) {
+		writeSSOFailure(w, nil)
+		return
+	}
+	token = session.Token
 	sealed, err := h.browserSSO.seal(browserSSOSessionCookie, browserSSOSession{Token: token, ExpiresAt: h.browserSSO.now().Add(ttl).Unix()})
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "sso_unavailable", "browser sign-in is unavailable")
@@ -286,7 +273,7 @@ func (s *BrowserSSO) callbackToken(w http.ResponseWriter, r *http.Request, cooki
 		writeError(w, http.StatusBadRequest, "invalid_sso_state", "browser sign-in state is invalid")
 		return "", 0, browserSSOState{}, false
 	}
-	if s.config.ProfileID != "" && (state.ProfileID != s.config.ProfileID || len(state.Nonce) != 43) {
+	if s.config.ProfileID == "" || state.ProfileID != s.config.ProfileID || len(state.Nonce) != 43 {
 		writeError(w, 400, "invalid_sso_state", "browser sign-in state is invalid")
 		return "", 0, browserSSOState{}, false
 	}
@@ -339,16 +326,10 @@ func (s *BrowserSSO) exchangeTokens(ctx context.Context, code, verifier string) 
 	if decoder.Decode(&payload) != nil || decoder.Decode(&struct{}{}) != io.EOF || len(payload.AccessToken) > 32<<10 || !strings.EqualFold(payload.TokenType, "Bearer") || payload.ExpiresIn < 1 || payload.ExpiresIn > 86400 {
 		return "", 0, "", errors.New("token endpoint returned an invalid response")
 	}
-	if s.config.ProfileID != "" {
-		if payload.IDToken == "" || len(payload.IDToken) > 32<<10 {
-			return "", 0, "", errors.New("token endpoint omitted a valid ID token")
-		}
-		return payload.IDToken, time.Duration(payload.ExpiresIn) * time.Second, payload.AccessToken, nil
+	if payload.IDToken == "" || len(payload.IDToken) > 32<<10 {
+		return "", 0, "", errors.New("token endpoint omitted a valid ID token")
 	}
-	if payload.AccessToken == "" || len(payload.AccessToken) > browserSSOMaxTokenBytes {
-		return "", 0, "", errors.New("token endpoint returned an invalid access token")
-	}
-	return payload.AccessToken, time.Duration(payload.ExpiresIn) * time.Second, payload.AccessToken, nil
+	return payload.IDToken, time.Duration(payload.ExpiresIn) * time.Second, payload.AccessToken, nil
 }
 
 func (s *BrowserSSO) authorizeRequest(r *http.Request) *http.Request {
@@ -360,7 +341,7 @@ func (s *BrowserSSO) authorizeRequest(r *http.Request) *http.Request {
 		return r
 	}
 	var session browserSSOSession
-	if s.open(browserSSOSessionCookie, cookie.Value, &session) != nil || session.ExpiresAt < s.now().Unix() || session.Token == "" {
+	if s.open(browserSSOSessionCookie, cookie.Value, &session) != nil || session.ExpiresAt <= s.now().Unix() || s.config.ProfileID == "" || !validBrowserSessionHandle(session.Token) {
 		return r
 	}
 	clone := r.Clone(r.Context())
@@ -442,4 +423,12 @@ func (s *BrowserSSO) cookiePurpose(purpose string) string {
 		return purpose
 	}
 	return purpose + "\x00" + s.config.ConnectionID
+}
+
+func validBrowserSessionHandle(token string) bool {
+	if !strings.HasPrefix(token, "agsso_") || len(token) != 49 {
+		return false
+	}
+	raw, err := base64.RawURLEncoding.Strict().DecodeString(strings.TrimPrefix(token, "agsso_"))
+	return err == nil && len(raw) == 32
 }

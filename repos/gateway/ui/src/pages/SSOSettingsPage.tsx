@@ -122,7 +122,7 @@ function SSOConnectionEditor({ connection, onChanged }: { connection: Connection
       <section className="form-card" aria-label="SSO status">
         <h2>{connection.name} · Current configuration</h2>
         <p>Organization: <strong>{connection.organization_id || "Platform"}</strong>. This binding cannot be changed after creation.</p>
-        <p>{settings.active ? settings.active.enabled ? `Browser SSO enabled: ${settings.active.issuer}` : "Managed browser SSO disabled" : connection.id === "default" ? "No managed configuration. Existing environment settings remain in use." : "This connection is not active. Save a draft and complete a test sign-in before activation."}</p>
+        <p>{settings.active ? settings.active.enabled ? `Browser SSO enabled: ${settings.active.issuer}` : "Managed browser SSO disabled" : connection.id === "default" ? "No managed browser configuration. Save a draft and test sign-in before activation. API trust remains unchanged." : "This connection is not active. Save a draft and complete a test sign-in before activation."}</p>
         <p>Test status: <strong>{settings.test_status === "passed" && !verified ? "expired" : settings.test_status}</strong>{settings.test_expires_at ? ` · expires ${new Date(settings.test_expires_at * 1000).toLocaleString()}` : ""}</p>
         <p>Signed in as: <strong>{session?.user_id || "Unknown user"}</strong>. The test principal must map to this internal user and have approved directory roles. Organization-bound tests also require approved org_admin membership in this organization.</p>
         {!settings.key_session && <p role="note">Sign in with an administrator virtual key to activate, disable or roll back SSO.</p>}

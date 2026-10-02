@@ -332,6 +332,18 @@ paths:
                 properties:
                   enabled: {type: boolean}
                   start_url: {type: string, const: /auth/sso/start}
+                  migration_required:
+                    type: boolean
+                    description: An environment-only browser profile remains configured without active managed browser trust; API JWT is unchanged
+                  connections:
+                    type: array
+                    maxItems: 17
+                    items:
+                      allOf:
+                        - {$ref: '#/components/schemas/SSOConnection'}
+                        - type: object
+                          properties:
+                            start_url: {type: string, description: Local connection-specific OIDC sign-in URL}
   /auth/sso/start:
     get:
       operationId: startBrowserSSO
@@ -8850,7 +8862,13 @@ components:
         capabilities:
           type: array
           uniqueItems: true
-          items: {type: string, enum: [admin, api_docs, inference, team_directory, organization_reports, organization_keys]}
+          items: {type: string, enum: [admin, api_docs, inference, team_directory]}
+        organization_capabilities:
+          type: array
+          maxItems: 2
+          uniqueItems: true
+          description: Optional organization-scoped UI permissions; existing capabilities enum remains unchanged
+          items: {type: string, enum: [organization_reports, organization_keys]}
     AuditEvent:
       type: object
       additionalProperties: false

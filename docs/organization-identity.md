@@ -108,7 +108,9 @@ organization and effective policy. This does not grant organization administrato
 access to another user's files or jobs.
 
 The console exposes organization reports and read-only key metadata through
-separate `organization_reports` and `organization_keys` capabilities. They require
+optional `organization_capabilities` (`organization_reports`, `organization_keys`)
+in `/admin/v1/session`; the existing `capabilities` response enum remains unchanged.
+They require
 both verified `org_admin` and a pinned organization. The role does not confer
 platform configuration, directory approval or budget mutation access.
 

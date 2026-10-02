@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -36,6 +37,8 @@ func (m *browserSSOAuthModule) Handle(_ context.Context, request *modules.Reques
 
 func TestBrowserSSOUsesPKCEAndEncryptedSessionCookie(t *testing.T) {
 	const accessToken = "signed-access-token"
+	const idToken = "signed-id-token"
+	handle := "agsso_" + base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("s", 32)))
 	var challenge string
 	var identity *httptest.Server
 	identity = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -50,7 +53,7 @@ func TestBrowserSSOUsesPKCEAndEncryptedSessionCookie(t *testing.T) {
 		if r.Form.Get("grant_type") != "authorization_code" || r.Form.Get("code") != "authorization-code" || r.Form.Get("client_id") != "console" || base64.RawURLEncoding.EncodeToString(digest[:]) != challenge {
 			t.Errorf("invalid token exchange: %+v", r.Form)
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"access_token": accessToken, "token_type": "Bearer", "expires_in": 3600})
+		_ = json.NewEncoder(w).Encode(map[string]any{"id_token": idToken, "access_token": accessToken, "token_type": "Bearer", "expires_in": 3600})
 	}))
 	defer identity.Close()
 
@@ -61,7 +64,9 @@ func TestBrowserSSOUsesPKCEAndEncryptedSessionCookie(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{&browserSSOAuthModule{token: accessToken}}), modelsProvider{}).WithBrowserSSO(sso))
+	profile := &PrivateSSOProfile{ID: "active", Enabled: true, SessionKey: base64.RawURLEncoding.EncodeToString(sso.config.SessionKey), SSOProfileConfig: SSOProfileConfig{AuthorizationURL: sso.config.AuthorizationURL, TokenURL: sso.config.TokenURL, ClientID: sso.config.ClientID, RedirectURL: sso.config.RedirectURL, SessionTTLSeconds: 3600}}
+	client := &ssoSessionClientStub{ssoClientStub: &ssoClientStub{active: profile}, session: SSOBrowserSession{Token: handle, ExpiresAt: time.Now().Add(55 * time.Minute).Unix()}}
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{&browserSSOAuthModule{token: handle}}), modelsProvider{}).WithSSOManagement(client))
 
 	start := httptest.NewRecorder()
 	handler.ServeHTTP(start, httptest.NewRequest(http.MethodGet, "/auth/sso/start", nil))
@@ -85,6 +90,9 @@ func TestBrowserSSOUsesPKCEAndEncryptedSessionCookie(t *testing.T) {
 	handler.ServeHTTP(callback, callbackRequest)
 	if callback.Code != http.StatusFound || callback.Header().Get("Location") != "/ui/" {
 		t.Fatalf("callback status=%d location=%s body=%s", callback.Code, callback.Header().Get("Location"), callback.Body.String())
+	}
+	if client.login.Token != idToken || client.login.AccessToken != accessToken || len(client.login.Nonce) != 43 {
+		t.Fatal("browser identity did not use ID token and verified nonce")
 	}
 	var sessionCookie *http.Cookie
 	for _, cookie := range callback.Result().Cookies() {
@@ -110,7 +118,8 @@ func TestBrowserSSORejectsTamperedStateAndSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{&browserSSOAuthModule{token: "valid"}}), modelsProvider{}).WithBrowserSSO(sso))
+	profile := &PrivateSSOProfile{ID: "active", Enabled: true, SessionKey: base64.RawURLEncoding.EncodeToString(sso.config.SessionKey), SSOProfileConfig: SSOProfileConfig{AuthorizationURL: sso.config.AuthorizationURL, TokenURL: sso.config.TokenURL, ClientID: sso.config.ClientID, RedirectURL: sso.config.RedirectURL, SessionTTLSeconds: 3600}}
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{&browserSSOAuthModule{token: "valid"}}), modelsProvider{}).WithSSOManagement(&ssoClientStub{active: profile}))
 	callback := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/auth/sso/callback?state=state&code=code", nil)
 	request.AddCookie(&http.Cookie{Name: browserSSOStateCookie, Value: "tampered"})
@@ -158,5 +167,84 @@ func TestBrowserSSOTokenExchangeDoesNotFollowRedirect(t *testing.T) {
 	}
 	if _, _, err := sso.exchange(context.Background(), "fixture-code", "fixture-verifier"); err == nil || forwarded.Load() != 0 {
 		t.Fatal("token exchange forwarded credentials to a redirected endpoint")
+	}
+}
+
+func TestEnvironmentBrowserSSOCannotAuthorizeUsingAPITrust(t *testing.T) {
+	sso, err := NewBrowserSSO(BrowserSSOConfig{AuthorizationURL: "https://identity.example/authorize", TokenURL: "https://identity.example/token", ClientID: "console", RedirectURL: "https://gateway.example/auth/sso/callback", SessionKey: []byte(strings.Repeat("k", 32))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, managed := range []bool{false, true} {
+		t.Run(fmt.Sprint(managed), func(t *testing.T) {
+			h := NewHandler(modules.NewPipeline([]modules.Module{&browserSSOAuthModule{token: "resource-access-token"}}), modelsProvider{}).WithBrowserSSO(sso)
+			if managed {
+				h = h.WithSSOManagement(&ssoClientStub{})
+			}
+			handler := Routes(h)
+			config := httptest.NewRecorder()
+			handler.ServeHTTP(config, httptest.NewRequest("GET", "/auth/sso/config", nil))
+			if config.Code != 200 || !strings.Contains(config.Body.String(), `"enabled":false`) || !strings.Contains(config.Body.String(), `"migration_required":true`) {
+				t.Fatalf("legacy browser enabled: %d %s", config.Code, config.Body.String())
+			}
+			for _, path := range []string{"/auth/sso/start", "/auth/sso/callback?state=fixture&code=fixture"} {
+				w := httptest.NewRecorder()
+				handler.ServeHTTP(w, httptest.NewRequest("GET", path, nil))
+				if w.Code != 404 {
+					t.Fatalf("legacy flow allowed: %s %d", path, w.Code)
+				}
+			}
+			cookie, err := sso.seal(browserSSOSessionCookie, browserSSOSession{Token: "resource-access-token", ExpiresAt: time.Now().Add(time.Hour).Unix()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			request := httptest.NewRequest("GET", "/admin/v1/session", nil)
+			request.AddCookie(&http.Cookie{Name: browserSSOSessionCookie, Value: cookie})
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, request)
+			if w.Code != 401 {
+				t.Fatalf("legacy resource token cookie authorized: %d", w.Code)
+			}
+			request = httptest.NewRequest("GET", "/admin/v1/session", nil)
+			request.Header.Set("Authorization", "Bearer resource-access-token")
+			w = httptest.NewRecorder()
+			handler.ServeHTTP(w, request)
+			if w.Code != 200 {
+				t.Fatalf("API resource trust changed: %d", w.Code)
+			}
+		})
+	}
+}
+
+func TestBrowserSSORejectsAccessTokenOnlyExchange(t *testing.T) {
+	identity := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "valid-resource-token", "token_type": "Bearer", "expires_in": 3600})
+	}))
+	t.Cleanup(identity.Close)
+	sso, err := NewBrowserSSO(BrowserSSOConfig{ProfileID: "active", AuthorizationURL: identity.URL + "/authorize", TokenURL: identity.URL + "/token", ClientID: "console", RedirectURL: "http://localhost/auth/sso/callback", SessionKey: []byte(strings.Repeat("k", 32))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err = sso.exchangeTokens(t.Context(), "fixture-code", "fixture-verifier"); err == nil {
+		t.Fatal("access token substituted for ID token")
+	}
+}
+
+func TestManagedCookieRequiresOpaqueServerHandleAndCurrentLifetime(t *testing.T) {
+	sso, err := NewBrowserSSO(BrowserSSOConfig{ProfileID: "active", AuthorizationURL: "https://identity.example/authorize", TokenURL: "https://identity.example/token", ClientID: "console", RedirectURL: "https://gateway.example/auth/sso/callback", SessionKey: []byte(strings.Repeat("k", 32))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sso.now = func() time.Time { return time.Unix(1000, 0) }
+	for _, session := range []browserSSOSession{{Token: "api-resource-token", ExpiresAt: 2000}, {Token: "agsso_" + strings.Repeat("?", 43), ExpiresAt: 2000}, {Token: "agsso_" + strings.Repeat("s", 43), ExpiresAt: 1000}} {
+		sealed, err := sso.seal(browserSSOSessionCookie, session)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request := httptest.NewRequest("GET", "/admin/v1/session", nil)
+		request.AddCookie(&http.Cookie{Name: browserSSOSessionCookie, Value: sealed})
+		if authorized := sso.authorizeRequest(request); authorized.Header.Get("Authorization") != "" {
+			t.Fatal("upstream, malformed or expired cookie gained authorization")
+		}
 	}
 }

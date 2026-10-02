@@ -17,6 +17,7 @@ export type AdminSession = {
   allowed_models: string[];
   allowed_tools: string[];
   capabilities: ConsoleCapability[];
+  organization_capabilities?: ("organization_reports" | "organization_keys")[];
 };
 
 type AuthValue = {
@@ -53,7 +54,9 @@ export function AuthProvider({ children }: PropsWithChildren) {
   }, []);
   const validate = useCallback(async (candidate: string) => {
     const candidateClient = new APIClient(() => candidate === browserSSOMarker ? "" : candidate);
-    return candidateClient.request<AdminSession>("/admin/v1/session");
+    const identity = await candidateClient.request<AdminSession>("/admin/v1/session");
+    const scopedCapabilities = (identity.organization_capabilities || []).filter((capability) => ["organization_reports", "organization_keys"].includes(capability));
+    return { ...identity, capabilities: [...identity.capabilities, ...scopedCapabilities] };
   }, []);
   const restoreSession = useCallback(async () => {
     if (!token) return;

@@ -125,7 +125,7 @@ Virtual keys сохраняют независимый доступ. При об
 
 **Disable browser SSO** отключает browser login и cookies, сохраняя JWT trust для
 других клиентов. **Roll back** восстанавливает один предыдущий managed profile;
-rollback первой активации возвращает environment browser configuration.
+rollback первой активации отключает managed browser login; API trust сохраняется.
 Хранится только один предыдущий профиль, а не полная история. При недоступности
 Auth/БД или неверном encryption key JWT/cookie вход закрывается. Virtual key не
 зависит от SSO profile и позволяет восстановить настройку при исправном Auth;
@@ -133,8 +133,8 @@ stored keys также требуют доступной БД. Полный от
 механизмом. Logout удаляет cookie даже при сбое Auth; если server-side revocation
 не удалось, возвращает ошибку вместо подтверждения отзыва.
 
-Без managed active profile прежние environment SSO/JWT настройки продолжают
-использоваться. Новый профиль хранится AES-GCM encrypted в одной bounded строке
+Без managed active profile browser login отключен; прежние API JWT настройки
+продолжают использоваться независимо. Новый профиль хранится AES-GCM encrypted в одной bounded строке
 `auth_sso_settings`: active, previous, draft и одна test attempt. JWKS verifier
 cache для отдельного API trust хранит один verifier на реплику. Browser
 ID-token verifier используется во время login; сессии не требуют JWKS при
@@ -266,3 +266,16 @@ The sign-in page lists enabled connections with their organization. Each choice
 starts a fresh OIDC login; choosing a connection never grants membership or
 changes the organization of an existing API credential. API trust and recovery
 virtual keys remain independent.
+
+## Compatibility: legacy browser profile migration
+
+Environment-only `ADMIN_SSO_*` browser authorization is retired. It previously
+used API resource access tokens for browser identity and stored them in encrypted
+cookies. Those cookies no longer authorize console requests. Environment/API JWT
+configuration is retained for API clients; it does not supply browser trust.
+Configure an independent managed connection, bind an approved principal, complete
+its sign-in test and activate using a platform administrator virtual key.
+`/auth/sso/config` exposes `migration_required=true` for an inactive legacy profile.
+Rolling back the first activation disables browser sign-in; it never restores
+resource-token browser fallback. No secrets, directory records or API keys are
+migrated or deleted automatically.

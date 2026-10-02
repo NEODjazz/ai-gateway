@@ -8,7 +8,7 @@ import { OrganizationMembers } from "./OrganizationMembers";
 import { LogsPage } from "./LogsPage";
 import { App } from "../app/App";
 
-const orgSession = { user_id: "operator", organization_id: "org-a", roles: ["org_admin"], capabilities: ["api_docs", "inference", "organization_reports", "organization_keys"], allowed_models: [], allowed_tools: [] };
+const orgSession = { user_id: "operator", organization_id: "org-a", roles: ["org_admin"], capabilities: ["api_docs", "inference"], organization_capabilities: ["organization_reports", "organization_keys"], allowed_models: [], allowed_tools: [] };
 const json = (value: unknown) => new Response(JSON.stringify(value), { headers: { "Content-Type": "application/json" } });
 function Gate({ children }: PropsWithChildren) { const { session, restoreSession } = useAuth(); useEffect(() => { void restoreSession(); }, [restoreSession]); return session ? children : null; }
 function show(child: React.ReactNode, path = "/") { sessionStorage.setItem("ai-gateway.admin-token", "fixture"); return render(<MemoryRouter initialEntries={[path]}><AuthProvider><Gate>{child}</Gate></AuthProvider></MemoryRouter>); }

@@ -70,7 +70,7 @@ func TestOrganizationConsoleCapabilitiesRequirePinnedOrganization(t *testing.T) 
 		role, organization string
 		allowed            bool
 	}{{"org_admin", "org-a", true}, {"org_admin", "", false}, {"user", "org-a", false}, {"team_admin", "org-a", false}} {
-		capabilities := consoleCapabilitiesForIdentity([]string{test.role}, test.organization)
+		capabilities := organizationConsoleCapabilities([]string{test.role}, test.organization)
 		for _, capability := range []string{"organization_reports", "organization_keys"} {
 			found := false
 			for _, actual := range capabilities {
@@ -87,5 +87,15 @@ func TestOrganizationConsoleCapabilitiesRequirePinnedOrganization(t *testing.T) 
 				t.Fatal("organization role received platform capability")
 			}
 		}
+	}
+}
+
+func TestOrganizationSessionKeepsLegacyCapabilityEnumStable(t *testing.T) {
+	handler := Routes(organizationReportHandler("org-a", "org_admin"))
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, httptest.NewRequest("GET", "/admin/v1/session", nil))
+	body := w.Body.String()
+	if w.Code != 200 || !strings.Contains(body, `"capabilities":["api_docs","inference"]`) || !strings.Contains(body, `"organization_capabilities":["organization_keys","organization_reports"]`) {
+		t.Fatalf("session capability compatibility lost: %d %s", w.Code, body)
 	}
 }

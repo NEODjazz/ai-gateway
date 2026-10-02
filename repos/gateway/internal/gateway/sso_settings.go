@@ -346,7 +346,7 @@ func (p *PrivateSSOProfile) browser(test bool) (*BrowserSSO, error) {
 }
 func (h Handler) resolveBrowserSSO(r *http.Request) (*BrowserSSO, error) {
 	if h.ssoManagement == nil {
-		return h.browserSSO, nil
+		return nil, nil
 	}
 	selected, err := h.withRequestSSOConnection(r)
 	if err != nil {
@@ -361,10 +361,13 @@ func (h Handler) resolveBrowserSSO(r *http.Request) (*BrowserSSO, error) {
 		return nil, err
 	}
 	if profile == nil {
-		return h.browserSSO, nil
+		return nil, nil
 	}
 	if !profile.Enabled {
 		return nil, nil
+	}
+	if profile.ID == "" {
+		return nil, errors.New("browser SSO profile identity is missing")
 	}
 	browser, err := profile.browser(false)
 	if browser != nil && id != "" && id != "default" {
