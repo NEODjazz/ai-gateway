@@ -367,156 +367,106 @@ Keycloak/OpenWebUI interoperability в этой документальной о�
 а не доказательство уже работающей внешней интеграции. Deployment и настройки
 авторизации этой оценкой не изменены.
 
-## SSO и доступ нескольких организаций: оценка 2026-10-02
+## SSO и доступ нескольких организаций: результат P1/P2, 2026-10-02
 
-Статус реализации: первый этап managed browser SSO отделяет API trust, проверяет
-ID token/nonce/PKCE и использует bounded PostgreSQL sessions с revocation и
-актуальными directory grants. Старое managed API trust переносится с CAS;
-browser client audience и resource audience разделены. Требуется migration 015
-и повторная binding/test для managed профилей прежнего access-token flow.
-Unit/race и полный PostgreSQL integration suite прошли; реальный Keycloak
-callback, logout/replay, rollback, независимость API и OpenWebUI проверены.
-Environment-only legacy browser flow остаётся переходным контрактом, описанным
-в [SSO настройках](admin-sso-settings.md).
+Согласованные P1/P2 реализованы. Browser OIDC, API JWT и tenant authorization
+имеют независимые настройки и проверяемые границы. Настройка доверия остаётся
+операцией platform admin с recovery virtual key, CAS и обязательным audit.
+Organization administrator не может менять issuer, credentials или собственные
+approvals. Deployment этим этапом не обновляется.
 
-Следующий этап добавляет [явное членство и tenant identity](organization-identity.md):
-роль `org_admin` требует approval именно в организации binding, user/organization
-ownership JWT principal закреплены, sessions и durable jobs повторно проверяют
-актуальные права. Migration 016 не назначает административные роли и не переносит
-ресурсы; старые tenant-bound sessions требуют нового входа. Делегированные
-resource permissions/UI, проверенный выбор tenant, несколько connections/API
-issuers и новый SSO UI ещё не завершены. Реестр browser connections уже реализован
-с отдельными CAS revisions/proofs/rollback, encrypted metadata binding и
-проверкой organization ID token/session. Требуется migration 017; default
-connection и API trust сохраняются. Connection management/login UI — следующий этап. Usage и request logs доступны `org_admin`
-только с принудительным organization scope в Gateway и повторной проверкой Billing;
-detail lookup использует tenant predicate, чужие/unassigned события дают 404.
-Список ключей `org_admin` использует только explicit organization ownership;
-User/Organization ключа закреплены при update/rotation, team проверяется внутри
-организации. UI сохраняет все ownership dimensions и не выводит tenant из team.
-
-Основа этой дополнительной оценки — код Gateway на commit `4ded04d1`.
-Ниже перечислены требования следующего этапа, а не уже реализованные возможности.
-Browser SSO, доверие API JWT и изоляция организаций — отдельные контракты; наличие
-нескольких организаций в directory само по себе не означает несколько SSO
-подключений или полную изоляцию всех management endpoints.
-
-### Подтверждённое состояние
-
-| Область | Текущее поведение | Требуемое изменение |
+| Требование | Реализованное поведение | Проверка |
 | --- | --- | --- |
-| Browser SSO и API JWT | `SSOManager.JWTModule` заменяет глобальный issuer/audience/role policy активным SSO-профилем; выключение browser login сохраняет это доверие | Независимые browser connections и API JWT trust; редактирование browser login не меняет доступ API-клиентов |
-| Хранение SSO | PostgreSQL singleton содержит один active/draft/previous profile и одну test attempt | Несколько bounded connections при потребности в нескольких IdP/организациях; независимые revision, proof и rollback |
-| OIDC endpoints | Validator и discovery требуют один origin для issuer, authorization, token и JWKS | Trusted discovery/presets с явной endpoint policy, допускающей разные доверенные hosts; сохранить HTTPS, SSRF и redirect protections |
-| Browser identity | Callback использует access token; необходим JWT для Gateway resource audience, ID token отдельно не обрабатывается | Browser OIDC identity через проверенный ID token и локальную сессию; API по-прежнему проверяет resource access token |
-| Сессии | Encrypted cookie содержит access token до 2800 байт; lifetime ограничен token expiry, refresh отсутствует | Bounded server-side sessions с revocation и проверкой актуального directory; refresh только по отдельному требованию |
-| UI настройки | Один generic form, role mappings в JSON, ручная binding точного subject; draft/test/activate/disable/rollback есть | Provider presets, визуальные mappings, безопасная диагностика identity и список подключений при их появлении |
-| Организации | Organizations/teams, organization budget/spend и organization в cache isolation существуют | Явно определить Organization как tenant boundary и проверить каждый management/data endpoint до объявления полной изоляции |
-| Principal и права | Namespace `issuer + subject + audience`, approved directory roles и team binding уже есть; global admin и scoped team admin | Сохранить namespace и актуальные права; добавить отдельный org admin и проверяемый выбор доступной организации/команды |
-| Ownership ресурсов | Files и связанные owner-scoped APIs используют user + credential; смена organization при тех же значениях не меняет owner key | До добавления переключения tenant определить tenant namespace и совместимый переход для существующих ресурсов |
+| P1: независимые browser OIDC и API JWT | Проверенный ID token, nonce/PKCE, локальные opaque PostgreSQL sessions; browser disable/rollback не меняет API trust | Auth/Gateway regression и PostgreSQL integration; реальный Keycloak callback и отзыв |
+| P1: Organization как tenant boundary | Immutable principal/key organization; explicit membership и `org_admin`; server-side scopes для Usage, logs и keys; credentials/models и управление billing остаются platform-only | Endpoint permission matrix, foreign-owner lifecycle regressions, реальные PostgreSQL/ClickHouse и два OIDC realms |
+| P2: несколько connections/issuers | Отдельные bounded browser connections и API issuer registry; exact issuer/audience/organization, encrypted state, собственные draft/test/activate/disable/rollback | CAS/cross-replica PostgreSQL tests, одинаковые `sub`/`kid`, ошибки подписи и недоступность directory/JWKS |
+| P2: понятный UI | Entra/Keycloak/Generic presets, визуальные role/group mappings, проверенная identity, таблица connections и отдельная API issuer форма | UI component tests, typecheck/build и browser QA основных SSO/organization страниц |
 
-Последняя строка описывает ограничение будущего переключения контекста, а не
-доказанную утечку между текущими пользователями. Namespace JWT principals уже
-различает одинаковые subjects разных issuers. Изоляцию новых сценариев нельзя
-считать подтверждённой только на основании directory, budgets или cache keys.
+### Контракт и совместимость
 
-Источники текущего контракта: [SSO настройки](admin-sso-settings.md),
-[profile validation и JWT trust](../repos/auth/internal/modules/sso_settings.go),
-[discovery](../repos/auth/internal/modules/sso_discovery.go),
-[browser callback/session](../repos/gateway/internal/gateway/browser_sso.go),
-[principal policy](../repos/auth/internal/modules/jwt_principals.go),
-[directory authorization](../repos/gateway/internal/gateway/identity_directory.go),
-[cache isolation](../repos/gateway/internal/provider/cache.go),
-[resource ownership](../repos/gateway/internal/gateway/files.go) и
+Browser login использует client audience; API access token использует resource
+audience. Непроверенный `iss` выбирает только заранее зарегистрированную запись,
+но никогда не определяет URL для discovery. ID token с browser nonce не принимается
+как API bearer. Primary API environment trust сохраняется отдельно. Для
+дополнительных API issuers обязательны approved principal и directory grants;
+HMAC и автоматическое создание пользователей через этот registry не поддерживаются.
+
+Environment-only browser fallback закрыт: старую browser конфигурацию необходимо
+перенести в managed draft, проверить и активировать. Browser cookies прежнего
+access-token flow требуют повторного входа. Auth migrations
+`015_sso_sessions.sql`, `016_organization_memberships.sql`,
+`017_sso_connections.sql` и `018_api_issuers.sql` применяются до обновления Auth;
+readiness проверяет обязательное хранилище. Migration не выдаёт `org_admin`
+автоматически и не перемещает tenant-owned ресурсы.
+
+Organization определяется approved principal binding и актуальным membership.
+Выбор другого подключения запускает новый проверенный login; UI label, email,
+claim или заголовок не дают право выбрать чужую организацию. Один пользователь
+может иметь несколько approvals, но каждая identity закреплена за конкретным
+issuer/client и организацией. Сохранённые jobs повторно проверяют действующий
+principal и grants; disable issuer/membership отзывает соответствующий доступ.
+
+Resource ownership сохраняет совместимый `credential + user` namespace.
+Immutable tenant привязка credential не позволяет переносить его между
+организациями. Для другой организации необходим отдельно approved principal/key
+и отдельный credential namespace. Старые files/jobs не мигрируют автоматически;
+`org_admin` не обходит personal ownership. Полная матрица опубликована в
+[контракте organization identity](organization-identity.md).
+
+### Настройка и ограничения ресурсов
+
+В **Settings** доступны browser connections и **Manage API JWT issuers**.
+Browser таблица показывает `Name / Provider / Organization / Issuer / Status /
+Last test`. Org approvals находятся в **Organizations → Organization approvals**.
+Organization administrators видят scoped Usage/request logs и read-only keys.
+Проверенная identity содержит минимальные issuer/subject/audience, organization
+и сопоставленные roles; JWT, client secret и полный claims payload не выводятся.
+Диагностика не заменяет same-operator proof и directory approval.
+
+Browser connections и дополнительные API issuers имеют лимит 16 записей каждый
+(совместимый default browser connection сохраняется отдельно). Immutable metadata
+шифруется вместе с конфигурацией с domain separation и authenticated binding через
+`CREDENTIAL_ENCRYPTION_KEY`. State ограничен 64 KiB; revision CAS предотвращает
+потерю concurrent edits. Test proof действует не более пяти минут и не дольше
+проверенного token expiry. Активация повторно проверяет текущие approvals.
+Unknown issuer, ambiguous audience, нечитаемое состояние и неподтверждённая
+identity отвергаются.
+
+Server sessions ограничены глобально и на пользователя/профиль; logout отзывает
+серверную запись до очистки browser identity. UI показывает ошибку и retry, если
+сервер не подтвердил logout. JWKS caches разделены по issuer/profile и имеют
+лимиты key count и payload; сетевое обновление не удерживает общий cache lock.
+Disable browser connection и disable API issuer остаются независимыми действиями.
+
+### Выполненные проверки
+
+- `gofmt`, `go vet ./...`, `go test ./...`, `go test -race ./...` и `go build ./...`
+  выполнены для изменённых Auth, Gateway и Billing modules на Go 1.25.13.
+- Обязательный PostgreSQL suite проверяет migrations, CAS между replicas,
+  encrypted metadata, session/lifecycle revocation, approvals и tenant attribution.
+  Эти сценарии выполняются на реальной тестовой БД в CI.
+- Реальный ClickHouse integration применяет production migrations и проверяет
+  tenant Usage totals, detail, grouped logs, pagination и SQL parameters, включая
+  одинаковый request ID и unassigned события. Добавлен обязательный CI job.
+- Identity integration использует два настоящих Keycloak realms с одинаковым
+  external subject, раздельные API/browser audiences и две организации одного
+  пользователя. Проверены независимый отзыв browser/API trust, membership
+  deprovisioning, foreign files/keys и реальный OpenWebUI PKCE/API flow.
+  Каждый run получает отдельные тестовые базы и очищает только свои fixtures.
+- UI typecheck, полный component suite и production build выполнены. Regression
+  coverage включает mapping validation, proof expiry, stale async results,
+  write-only test token, logout failure/retry и tenant role choices.
+
+Реальный Microsoft Entra tenant не проверялся: presets и endpoint/claim validation
+покрыты deterministic tests. SAML, JIT provisioning, external directory group
+lookup, refresh sessions, IdP logout и same-credential tenant switching не входят
+в согласованные P1/P2 и требуют отдельного бизнес-требования.
+
+Реализация и доказательства: [SSO настройки](admin-sso-settings.md),
+[browser connections](../repos/auth/internal/modules/sso_connections.go),
+[API issuers](../repos/auth/internal/modules/api_issuers.go),
+[browser sessions](../repos/gateway/internal/gateway/browser_sso.go),
+[permission regressions](../repos/gateway/internal/gateway/organization_permissions_test.go),
+[ClickHouse integration](../repos/billing/internal/modules/organization_clickhouse_integration_test.go),
+[реальная identity integration](../scripts/test-identity-integration.py) и
 [SSO UI](../repos/gateway/ui/src/pages/SSOSettingsPage.tsx).
-
-### Порядок реализации
-
-1. **P1: разделить browser SSO и API JWT trust.** Отдельные настройки client
-   audience и resource audience. Проверять signature, issuer, audience, expiry,
-   nonce и привязку authorization code к PKCE flow; ID token не принимать как
-   API bearer access token. Сессия хранит bounded internal identity/session ID,
-   а актуальные grants берутся из directory. Нечитаемая конфигурация, неизвестный
-   issuer и недоступный источник актуальных прав не дают расширенного доступа.
-   Миграция сохраняет существующий API trust явно, без скрытой смены issuer.
-2. **P1 в выбранном multi-organization этапе: определить tenant boundary.**
-   Использовать существующие Organization IDs. Проверять server-side membership
-   при каждом выборе org/team; email domain, заголовок или пользовательский body
-   не назначают tenant и права. Сначала составить endpoint/permission matrix для
-   providers/credentials, models, keys, directory, logs/usage/export, budgets,
-   files/vector stores/async resources. Определить ownership migration и доступ
-   к старым ресурсам до включения переключения контекста.
-3. **P2: несколько SSO connections и API issuers по реальной потребности.**
-   Connection имеет ID, provider type, organization binding, точный issuer,
-   client ID, endpoints, mappings и собственный lifecycle. API issuer registry
-   имеет отдельные audiences и правила claims. Unknown issuer отвергается;
-   неподтверждённый `iss` нельзя превращать в URL для сетевого discovery.
-   Entra trust перечисляет конкретные разрешённые directories. JWKS кеши
-   разделяются по issuer, а не только по `kid`; cardinality и memory bounded.
-   PostgreSQL CAS/test/activate/disable/rollback выполняются на уровне connection.
-   Шифрование использует `CREDENTIAL_ENCRYPTION_KEY` с domain separation и
-   привязкой к connection/organization. Отключение browser connection и отзыв
-   API issuer — разные явные действия.
-4. **P2: org admin и понятный UI.** Делегированному администратору доступны только
-   разрешённые операции своей organization. Сначала внедрить presets Microsoft
-   Entra, Keycloak и Generic OIDC с copyable callback URLs. Добавление других
-   presets требует подтверждённого callback/token контракта. Показать таблицу
-   `Name / Provider / Organization / Issuer / Status / Last test` при нескольких
-   connections. Внутри формы: connection, mappings, проверка, activation; active
-   и draft различимы, JSON остаётся advanced editor. Mapping rows показывают
-   внешний claim/group и внутреннюю роль, без автоматической выдачи admin.
-   Диагностика после проверенного login показывает только минимальные
-   issuer/subject/audience и результат сопоставления, без JWT/secret payloads.
-   Она помогает создать binding, но не заменяет обязательный same-admin proof
-   для activation. Login и context selector показывают только допустимые
-   варианты; callback state связывает connection, organization и revision.
-
-Порядок зависимостей: разделение trust → tenant/permission contract → connections
-и org admin → расширение UI. UI presets и визуальные mappings можно поставлять
-раньше, если они честно отражают ограничения существующего runtime.
-
-Сохранить существующие защиты: write-only secrets, общий configuration encryption
-key, CAS, same-admin proof с повторной directory проверкой, durable audit,
-independent admin virtual-key recovery и fail-closed. JIT provisioning с
-одобрением доступа, SAML, external directory group lookup, refresh sessions и
-IdP logout — отдельные P3 по бизнес-потребности. Автоматическое объединение
-accounts по email и permissive fallback к другому issuer не входят в план.
-
-### Обязательные критерии проверки
-
-- Изменение/disable/rollback browser connection не меняет API trust. Opaque
-  access token не мешает browser login с корректным ID token; некорректные
-  signature/nonce/audience/issuer и replay отвергаются. Разные доверенные hosts
-  проходят endpoint policy; произвольные URL и redirects её не обходят.
-- Два issuers с одинаковыми `sub` и `kid`, две organizations и пользователь
-  с несколькими memberships сохраняют правильную identity. Нельзя выбрать
-  чужую organization/team, подделать claim/header context или повысить роль.
-- Cross-organization проверки покрывают credentials/models/keys, cache,
-  resources/jobs, request logs/Usage/CSV и budget/spend attribution. Существующий
-  ownership не переходит другому tenant при migration или смене контекста.
-- Session revocation/logout, deprovisioning, directory/JWKS/DB outage и
-  concurrent connection edits проверены regression tests. Sessions, connections,
-  JWKS и lifecycle state имеют лимиты и определённую failure/eviction policy.
-- PostgreSQL integration на реальной test DB проверяет migrations, CAS,
-  cross-replica lifecycle и policy enforcement в CI. Изменения concurrency
-  проходят race detector. UI tests покрывают errors, stale async responses,
-  mapping validation, keyboard lifecycle и отсутствие секретов.
-- Два тестовых OIDC realms проверяют end-to-end federation. Native Entra
-  совместимость объявляется только после отдельной проверки реального tenant;
-  deterministic unit tests не зависят от IdP, интернета и пользовательских keys.
-
-В этой оценке временные Go overlay audit tests воспроизвели split-origin
-rejection, смену API trust managed SSO-профилем и текущий owner scope. Они вместе
-с выбранными существующими SSO/JWT/browser regressions успешно выполнены через
-`go test -race -count=1` в Auth и Gateway. Временные файлы не включены в репозиторий.
-Новые постоянные regression tests обязательны в каждом implementation commit.
-Реальный multi-IdP login и PostgreSQL integration для предлагаемых изменений
-не выполнялись: сами изменения пока не реализованы. Runtime, UI, deployment,
-credentials и правила доступа этой оценкой не изменены.
-
-Дополнительно выполнены `gofmt -w .`, `go vet ./...`, `go test ./...` и
-`go build ./...` во всех шести Go modules на Go 1.25.13; все команды успешны,
-форматирование не изменило Go-код. Локальные ссылки нового раздела и
-`git diff --check` проверены. Полный race suite всех modules, UI component/browser
-tests и container build в этой документальной оценке не запускались;
-race detector применён к перечисленным Auth/Gateway audit и regression tests.

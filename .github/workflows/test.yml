@@ -152,6 +152,39 @@ jobs:
       - name: Apply migrations and run required database scenarios
         run: bash scripts/test-postgres-integration.sh
 
+  organization-reporting-integration:
+    name: ClickHouse organization reporting integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      clickhouse:
+        image: clickhouse/clickhouse-server:24.8-alpine
+        env:
+          CLICKHOUSE_USER: integration
+          # Disposable fixture credentials, never deployment credentials.
+          CLICKHOUSE_PASSWORD: integration-only-test-password
+          CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+        ports:
+          - 8123:8123
+        options: >-
+          --health-cmd "clickhouse-client --user integration --password integration-only-test-password --query 'SELECT 1'"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      CLICKHOUSE_INTEGRATION_REQUIRED: "true"
+      BILLING_CLICKHOUSE_TEST_URL: http://127.0.0.1:8123
+      BILLING_CLICKHOUSE_TEST_USERNAME: integration
+      BILLING_CLICKHOUSE_TEST_PASSWORD: integration-only-test-password
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: repos/billing/go.mod
+      - name: Verify tenant Usage, detail, groups and pagination on real ClickHouse
+        working-directory: repos/billing
+        run: go test -race -count=1 -run TestClickHouseOrganizationReportingIsolationIntegration ./internal/modules
+
   identity-integration:
     name: Keycloak and OpenWebUI identity integration
     runs-on: ubuntu-latest

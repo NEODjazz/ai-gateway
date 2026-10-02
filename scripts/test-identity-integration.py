@@ -214,14 +214,14 @@ class Run:
             target=self.provider.serve_forever, daemon=True
         )
         self.provider_thread.start()
-        self.auth_dsn = os.environ["AUTH_POSTGRES_TEST_DSN"]
-        self.billing_dsn = os.environ["BILLING_POSTGRES_TEST_DSN"]
-        self.gateway_admin_dsn = os.environ["CONTROL_PLANE_POSTGRES_TEST_DSN"]
-        parsed = urllib.parse.urlsplit(self.gateway_admin_dsn)
-        self.gateway_database = "identity_gateway_" + self.suffix
-        self.gateway_dsn = urllib.parse.urlunsplit(
-            parsed._replace(path="/" + self.gateway_database)
-        )
+        self.fixture_databases = []
+        for service, env_key in (("auth", "AUTH_POSTGRES_TEST_DSN"), ("billing", "BILLING_POSTGRES_TEST_DSN"), ("gateway", "CONTROL_PLANE_POSTGRES_TEST_DSN")):
+            admin_dsn = os.environ[env_key]
+            database = "identity_" + service + "_" + self.suffix
+            parsed = urllib.parse.urlsplit(admin_dsn)
+            setattr(self, service + "_admin_dsn", admin_dsn)
+            setattr(self, service + "_database", database)
+            setattr(self, service + "_dsn", urllib.parse.urlunsplit(parsed._replace(path="/" + database)))
 
     @staticmethod
     def command(args, **kwargs):
@@ -273,9 +273,12 @@ class Run:
             with socket.socket() as sock:
                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 sock.bind(("127.0.0.1", port))
-        self.sql(
-            self.gateway_admin_dsn, "CREATE DATABASE " + self.gateway_database + ";"
-        )
+        # Every service gets a new fixture database. A failed encrypted-settings
+        # test cannot contaminate another run that generates a different key.
+        for service in ("auth", "billing", "gateway"):
+            admin_dsn, database = getattr(self, service + "_admin_dsn"), getattr(self, service + "_database")
+            self.sql(admin_dsn, "CREATE DATABASE " + database + ";")
+            self.fixture_databases.append((admin_dsn, database))
         # Database mutation is restricted to explicitly supplied disposable DSNs.
         for module, dsn in (("auth", self.auth_dsn), ("billing", self.billing_dsn)):
             for migration in sorted(
@@ -541,12 +544,93 @@ class Run:
         jar.set_cookie(saved_cookie)
         check(request_http(self.gateway + "/admin/v1/session", opener=opener)[0] == 401, "logged out server session replay accepted")
         check(self.authorize(self.token("alice")["access_token"])[0] == 200, "browser lifecycle changed API JWT trust")
+        self.federation_checks(user, admin_headers, browser_login, config)
+        for name in ("alice", "bob"):
+            self.tokens[name] = self.token(name)
         # Remove only the singleton created in this dedicated fixture database;
         # subsequent key-rotation tests must exercise their original environment TTL.
         self.sql(self.auth_dsn, "DELETE FROM auth_sso_settings WHERE id=1;")
         self.sso_config = config
         self.sso_user = user
         print("PASS managed SSO encrypted draft/discovery, real Keycloak PKCE test, same-admin proof, activation, browser cookie, key recovery, disable and rollback", flush=True)
+
+    def federation_checks(self, user, admin_headers, browser_login, base_config):
+        # Two disposable realms intentionally issue the same external subject.
+        # Their signatures and tenant approvals still belong to separate namespaces.
+        ids = ["federation-" + self.suffix + "-" + str(n) for n in (1, 2)]
+        def control(path, body=None, method=None, expected=(200,)):
+            status, data, _ = request_http(self.gateway + "/admin/v1/" + path, body, admin_headers, method)
+            check(status in expected, "federation control operation failed: " + path + " status=" + str(status))
+            return json.loads(data)
+        realms = []
+        try:
+            for connection in ids:
+                org = "org-" + connection
+                control("organizations/" + org, {"name": org, "status": "active"}, "PUT")
+                control("organizations/" + org + "/members/" + user, {"roles": ["org_admin", "user"], "status": "active"}, "PUT")
+                realm = json.loads((ROOT / "examples/identity/keycloak-realm.json").read_text())
+                realm.update(realm=connection, sslRequired="none", accessTokenLifespan=300)
+                console = realm["clients"][2]
+                console.update(secret=self.client_secret, redirectUris=[self.gateway + "/auth/sso/callback", self.gateway + "/auth/sso/test/callback"], webOrigins=[])
+                api_client = copy.deepcopy(realm["clients"][1])
+                api_client.update(clientId="gateway-integration", secret=self.client_secret, directAccessGrantsEnabled=True)
+                # This mapper is confined to test realms; no deployment/config is changed.
+                shared_subject = {"name": "fixture shared subject", "protocol": "openid-connect", "protocolMapper": "oidc-hardcoded-claim-mapper", "config": {"claim.name": "sub", "claim.value": "same-federated-subject", "jsonType.label": "String", "id.token.claim": "true", "access.token.claim": "true"}}
+                console["protocolMappers"].append(copy.deepcopy(shared_subject))
+                api_client["protocolMappers"].append(copy.deepcopy(shared_subject))
+                realm["clients"].append(api_client)
+                realm["clientScopeMappings"]["gateway"].append({"client": "gateway-integration", "roles": ["gateway-admin"]})
+                realm["users"] = [{"username": "sso-admin", "enabled": True, "email": "sso-admin@example.test", "emailVerified": True, "firstName": "SSO", "lastName": "Integration", "credentials": [{"type": "password", "value": self.password, "temporary": False}], "clientRoles": {"gateway": ["gateway-admin"]}}]
+                status, _, _ = request_http(self.kc + "/admin/realms", realm, {"Authorization": "Bearer " + self.admin_token})
+                check(status == 201, "federation test realm creation failed")
+                issuer = self.kc + "/realms/" + connection
+                status, data, _ = request_http(issuer + "/protocol/openid-connect/token", urllib.parse.urlencode({"grant_type": "password", "client_id": "gateway-integration", "client_secret": self.client_secret, "username": "sso-admin", "password": self.password, "scope": "openid email profile"}).encode(), {"Content-Type": "application/x-www-form-urlencoded"})
+                check(status == 200, "federation resource token grant failed")
+                token = json.loads(data)["access_token"]
+                check(token_claims(token)["sub"] == "same-federated-subject", "federation shared subject fixture failed")
+                for audience in ("gateway", "gateway-console"):
+                    control("jwt-principals", {"issuer": issuer, "subject": "same-federated-subject", "audience": audience, "user_id": user, "organization_id": org, "enabled": True, "allowed_models": ["model-common"], "allowed_tools": ["read"]}, "PUT")
+                view = control("api-issuers", {"id": connection, "name": connection, "organization_id": org, "issuer": issuer, "audience": "gateway", "jwks_url": issuer + "/protocol/openid-connect/certs", "roles_claim": "resource_access.gateway.roles", "role_mappings": {"gateway-admin": "org_admin"}})
+                view = control("api-issuers/" + connection + "/test", {"expected_revision": view["revision"], "token": token})
+                view = control("api-issuers/" + connection + "/action", {"action": "activate", "expected_revision": view["revision"]})
+                control("sso/connections", {"id": connection, "name": connection, "provider": "keycloak", "organization_id": org}, expected=(201,))
+                config = dict(base_config, organization_id=org, issuer=issuer, jwks_url=issuer + "/protocol/openid-connect/certs", authorization_url=issuer + "/protocol/openid-connect/auth", token_url=issuer + "/protocol/openid-connect/token", role_mappings={"gateway-admin": "org_admin"})
+                config["audience"] = config["client_id"] = "gateway-console"
+                current = control("sso/settings?connection=" + connection)
+                current = control("sso/settings?connection=" + connection, dict(config, expected_revision=current["revision"], client_secret=self.client_secret), "PUT")
+                start = control("sso/test?connection=" + connection, {"expected_revision": current["revision"]})["start_url"]
+                browser_login(start)
+                current = control("sso/settings?connection=" + connection)
+                current = control("sso/action?connection=" + connection, {"action": "activate", "expected_revision": current["revision"]})
+                opener, jar = browser_login("/auth/sso/start?connection=" + connection)
+                status, data, _ = request_http(self.gateway + "/admin/v1/session", opener=opener)
+                identity = json.loads(data)
+                check(status == 200 and identity["organization_id"] == org and identity["roles"] == ["org_admin"] and "admin" not in identity["capabilities"], "federation browser crossed tenant or gained platform role")
+                status, api_identity, _ = self.authorize(token)
+                api_identity = json.loads(api_identity)
+                check(status == 200 and api_identity["organization_id"] == org and api_identity["user_id"] == user, "federation API identity crossed tenant")
+                check(request_http(self.gateway + "/admin/v1/sso/connections", opener=opener)[0] == 403, "tenant browser gained platform settings")
+                realms.append({"id": connection, "org": org, "token": token, "opener": opener, "browser_view": current, "api_view": view, "identity": api_identity})
+            a, b = realms
+            check(a["identity"]["credential_id"] != b["identity"]["credential_id"], "same subject collapsed separate API issuers")
+            boundary = "federation-test-boundary"
+            payload = ("--" + boundary + '\r\nContent-Disposition: form-data; name="purpose"\r\n\r\nuser_data\r\n--' + boundary + '\r\nContent-Disposition: form-data; name="file"; filename="tenant.txt"\r\nContent-Type: text/plain\r\n\r\nfixture\r\n--' + boundary + "--\r\n").encode()
+            status, data, _ = request_http(self.gateway + "/v1/files", payload, {"Authorization": "Bearer " + a["token"], "Content-Type": "multipart/form-data; boundary=" + boundary})
+            check(status == 200, "federation owner file creation failed")
+            file_id = json.loads(data)["id"]
+            check(request_http(self.gateway + "/v1/files/" + file_id, headers={"Authorization": "Bearer " + b["token"], "X-Organization-ID": a["org"]})[0] == 404, "same-user cross-organization file leaked")
+            check(request_http(self.gateway + "/admin/v1/keys?organization_id=" + b["org"], opener=a["opener"])[0] == 403, "foreign organization selection accepted")
+            control("sso/action?connection=" + a["id"], {"action": "disable", "expected_revision": a["browser_view"]["revision"]})
+            check(request_http(self.gateway + "/admin/v1/session", opener=a["opener"])[0] == 401, "disabled tenant browser remained active")
+            check(self.authorize(a["token"])[0] == 200 and request_http(self.gateway + "/admin/v1/session", opener=b["opener"])[0] == 200, "browser disable changed independent API or connection")
+            control("api-issuers/" + a["id"] + "/action", {"action": "disable", "expected_revision": a["api_view"]["revision"]})
+            check(self.authorize(a["token"])[0] == 401 and self.authorize(b["token"])[0] == 200, "API revocation leaked between issuers")
+            control("organizations/" + b["org"] + "/members/" + user, {"roles": ["org_admin", "user"], "status": "disabled"}, "PUT")
+            check(self.authorize(b["token"])[0] == 401 and request_http(self.gateway + "/admin/v1/session", opener=b["opener"])[0] == 401, "directory deprovisioning left tenant identity active")
+            print("PASS two real OIDC realms with the same subject, separate API/browser trust, organization approvals, cross-tenant files and independent revocation", flush=True)
+        finally:
+            quoted = ",".join("'" + value + "'" for value in ids)
+            self.sql(self.auth_dsn, "DELETE FROM auth_sso_connections WHERE id IN (" + quoted + "); DELETE FROM auth_api_issuers WHERE id IN (" + quoted + ");")
 
     def internal(self, method, path, body):
         status, data, _ = request_http(
@@ -1463,6 +1547,11 @@ class Run:
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
+        for admin_dsn, database in reversed(self.fixture_databases):
+            try:
+                self.sql(admin_dsn, "DROP DATABASE " + database + ";")
+            except Exception:
+                print("WARN disposable identity database cleanup failed", file=sys.stderr)
         for log in self.logs:
             log.close()
         self.provider.shutdown()

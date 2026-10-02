@@ -120,11 +120,11 @@ platform configuration, directory approval or budget mutation access.
 | --- | --- | --- |
 | Provider credentials, providers, deployment/model configuration | Platform administration only | `organization_permissions_test.go` covers every published platform management route, including forged actor headers |
 | Inference model catalog | Current principal's approved model grants; no credential material | Existing model authorization and catalog tests |
-| Organization/team membership, principal bindings, SSO settings | Platform approvals; no self-elevation through `org_admin` | Endpoint permission matrix and organization principal PostgreSQL regressions |
+| Organization/team membership, principal bindings, SSO settings and API issuer trust | Platform approvals; no self-elevation through `org_admin` | Endpoint permission matrix and organization principal PostgreSQL regressions |
 | Virtual keys | Explicit tenant-owned metadata only; mutations/financial expansion require platform admin | Strict page and total predicates, immutable user/tenant, PostgreSQL update/rotation regressions |
 | Files, skills, vector stores, containers, conversations | Personal credential ownership within the fixed tenant identity; `org_admin` does not bypass ownership | Owner-scoped lifecycle tests; same-user separate-tenant credential file read/content/list/delete regression |
 | Responses, batches, fine-tuning, videos, assistant runs, A2A | Credential-owned lifecycle; workers reauthorize current pinned identity and grants | Resource lifecycle/foreign-owner tests and durable principal reauthorization regressions |
-| Usage, request logs and CSV input | Authenticated organization predicate on Gateway and Billing | Forced scopes, foreign filters rejected, storage-scoped detail and grouped totals tests |
+| Usage, request logs and CSV input | Authenticated organization predicate on Gateway and Billing | Forced scopes, foreign filters rejected, storage-scoped detail and grouped totals tests, real ClickHouse isolation integration |
 | Budgets, billing administration and logging/export destinations | Platform administration only; organization spend reports remain scoped | Platform endpoint matrix; budget enforcement and organization attribution PostgreSQL tests |
 
 Resource ownership remains based on `credential + user` for compatibility. This
