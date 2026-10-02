@@ -7,9 +7,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -289,5 +291,25 @@ func TestManagedBrowserSSOUsesIDTokenAndOpaqueServerSession(t *testing.T) {
 	handler.ServeHTTP(logout, r)
 	if logout.Code != 503 || len(logout.Result().Cookies()) != 1 {
 		t.Fatal("logout hid revocation failure or retained cookie")
+	}
+}
+
+func TestSSOVerifiedIdentityApprovalSurvivesAuthProxy(t *testing.T) {
+	for _, approved := range []bool{false, true} {
+		t.Run(fmt.Sprint(approved), func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				writeJSON(w, http.StatusOK, map[string]any{"revision": 1, "verified_identity": map[string]any{"issuer": "https://identity.example", "subject": "verified-subject", "audience": "console", "user_id": "", "roles": []string{}, "verified_at": 1, "approved": approved}})
+			}))
+			t.Cleanup(server.Close)
+			client := NewRemoteManagementClient(server.URL, "fixture-shared")
+			view, err := client.GetSSOSettings(context.Background(), ManagementAudit{ActorID: "admin", Roles: []string{"admin"}})
+			if err != nil || view.VerifiedIdentity == nil || view.VerifiedIdentity.Approved != approved {
+				t.Fatalf("approval lost: %+v err=%v", view, err)
+			}
+			body, err := json.Marshal(view)
+			if err != nil || !strings.Contains(string(body), `"approved":`+strconv.FormatBool(approved)) {
+				t.Fatalf("approval omitted from browser view: %s err=%v", body, err)
+			}
+		})
 	}
 }

@@ -216,7 +216,7 @@ API clients continue to present their independent resource tokens.
 Unit/browser tests cover tampered routing hints before code exchange, unknown
 connections, independent proof/revisions, server sessions and disable behavior.
 PostgreSQL tests cover replica CAS, bounded concurrent admission and ciphertext
-binding. UI connection management and provider presets are the next delivery.
+binding. The UI provides connection management and provider presets.
 
 ## Role/group mappings and verified identity metadata
 
@@ -237,3 +237,32 @@ to obtain the exact verified subject before saving a principal binding. Invalid
 signature, issuer, audience, nonce or token lifetime returns no preview. A new
 draft/test clears the old preview. Raw tokens, email/group claims, session handles
 and policy digests are never returned.
+
+## Connection management in the console
+
+Open **Settings → Single sign-on**. The connections table displays Name, Provider,
+Organization, Issuer, Status and Last test. Select Configure to edit only that
+connection. Switching clears unsaved client secrets and ignores older loads.
+Add connection accepts an exact existing organization ID or an empty platform
+binding; server validation rejects unknown/disabled organizations. Metadata is
+immutable, so a new tenant needs its own connection.
+
+Entra presets require a specific tenant GUID and configure the v2 issuer and
+`roles` / `groups` claims. Keycloak presets configure the realm issuer and
+`realm_access.roles` / `groups` paths. Generic OIDC supports explicit issuer and
+claim paths. Apply a preset, discover endpoints, review mappings and save the
+draft. Group claims must be configured by the identity provider; omitted or
+over-limit group claims do not trigger an implicit directory fetch. Presets do
+not grant permissions or bypass endpoint validation.
+
+Visual role/group rows use exact external values and approved Gateway roles.
+Incomplete or duplicate rows block saving. Organization-bound editors exclude
+platform `admin` and `team_admin`. Advanced JSON remains available. After a test,
+the verified identity section distinguishes cryptographic verification from
+directory approval. Use verified subject explicitly fills the binding form;
+saving a binding still requires an approved directory user and pinned tenant.
+
+The sign-in page lists enabled connections with their organization. Each choice
+starts a fresh OIDC login; choosing a connection never grants membership or
+changes the organization of an existing API credential. API trust and recovery
+virtual keys remain independent.

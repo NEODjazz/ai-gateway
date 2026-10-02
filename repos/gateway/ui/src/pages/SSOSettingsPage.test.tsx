@@ -7,7 +7,10 @@ import { SSOSettingsPage } from "./SSOSettingsPage";
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json" } });
 const profile = { issuer: "https://idp.example", audience: "console", client_id: "console", authorization_url: "https://idp.example/authorize", token_url: "https://idp.example/token", jwks_url: "https://idp.example/jwks", redirect_url: "https://gateway.example/auth/sso/callback", scopes: ["openid", "profile"], roles_claim: "roles", role_mappings: { "gateway-admin": "admin" }, session_ttl_seconds: 3600, client_secret_configured: true };
 const settings = { revision: 1, active: null, draft: profile, can_rollback: false, test_status: "not_started", key_session: true };
-function show() { sessionStorage.setItem("ai-gateway.admin-token", "fixture"); return render(<MemoryRouter><AuthProvider><SSOSettingsPage /></AuthProvider></MemoryRouter>); }
+function show() {
+  const impl = vi.mocked(globalThis.fetch).getMockImplementation()!;
+  vi.mocked(globalThis.fetch).mockImplementation((url, options) => String(url).endsWith("/sso/connections") ? Promise.resolve(json({ data: [{ id: "default", name: "Default", provider: "oidc", ...settings }] })) : impl(url, options));
+  sessionStorage.setItem("ai-gateway.admin-token", "fixture"); return render(<MemoryRouter><AuthProvider><SSOSettingsPage /></AuthProvider></MemoryRouter>); }
 
 describe("SSOSettingsPage", () => {
 	it("saves the browser client audience independently of legacy API audience and explains independent trust", async () => {
@@ -79,6 +82,7 @@ describe("SSOSettingsPage", () => {
     show(); await screen.findByDisplayValue(profile.issuer);
     await userEvent.click(screen.getByRole("button", { name: "Discover endpoints" }));
     await screen.findByDisplayValue(profile.issuer + "/new-token");
+    await userEvent.click(screen.getByText("Advanced role mappings"));
     await userEvent.clear(screen.getByLabelText("Role mappings (JSON)"));
     await userEvent.type(screen.getByLabelText("Role mappings (JSON)"), "invalid-json");
     await userEvent.click(screen.getByRole("button", { name: "Save draft" }));

@@ -1,4 +1,5 @@
 import { createContext, type PropsWithChildren, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { loginConnections, type LoginConnection } from "./ssoConnections";
 import { APIClient } from "../api/client";
 
 const storageKey = "ai-gateway.admin-token";
@@ -24,6 +25,7 @@ type AuthValue = {
   client: APIClient;
   signIn: (token: string) => Promise<void>;
   restoreSession: () => Promise<void>;
+  ssoConnections: LoginConnection[];
   ssoEnabled: boolean;
   ssoChecking: boolean;
   hasCapability: (capability: ConsoleCapability) => boolean;
@@ -35,6 +37,7 @@ const AuthContext = createContext<AuthValue | null>(null);
 export function AuthProvider({ children }: PropsWithChildren) {
   const [token, setToken] = useState(() => sessionStorage.getItem(storageKey) || "");
   const [session, setSession] = useState<AdminSession | null>(null);
+  const [ssoConnections, setSSOConnections] = useState<LoginConnection[]>([]);
   const [ssoEnabled, setSSOEnabled] = useState(false);
   const [ssoChecking, setSSOChecking] = useState(() => !token && window.location.pathname.startsWith("/ui"));
   const ssoDiscoveryStarted = useRef(false);
@@ -65,9 +68,11 @@ export function AuthProvider({ children }: PropsWithChildren) {
     }
     ssoDiscoveryStarted.current = true;
     void fetch("/auth/sso/config", { headers: { Accept: "application/json" } })
-      .then(async (response) => response.ok ? response.json() as Promise<{ enabled?: boolean }> : { enabled: false })
+      .then(async (response) => response.ok ? response.json() as Promise<{ enabled?: boolean; connections?: unknown }> : { enabled: false })
       .then(async (config) => {
         if (!active) return;
+        const choices = loginConnections("connections" in config ? config.connections : undefined);
+        setSSOConnections(choices);
         setSSOEnabled(Boolean(config.enabled));
         if (!config.enabled || token) return;
         try {
@@ -96,11 +101,12 @@ export function AuthProvider({ children }: PropsWithChildren) {
       setToken(normalized);
     },
     restoreSession,
+    ssoConnections,
     ssoEnabled,
     ssoChecking,
     hasCapability: (capability) => Boolean(session?.capabilities.includes(capability)),
     signOut
-  }), [restoreSession, session, signOut, ssoChecking, ssoEnabled, token, validate]);
+  }), [restoreSession, session, signOut, ssoChecking, ssoEnabled, ssoConnections, token, validate]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 

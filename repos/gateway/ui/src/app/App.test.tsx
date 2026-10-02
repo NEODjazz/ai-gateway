@@ -94,6 +94,17 @@ describe("App", () => {
     expect(screen.getByLabelText("Gateway bearer token")).toBeInTheDocument();
   });
 
+  it("offers organization-bound connections and leaves authorization to a fresh OIDC sign-in", async () => {
+    history.replaceState({}, "", "/ui/");
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => String(input) === "/auth/sso/config"
+      ? new Response(JSON.stringify({ enabled: true, connections: [{ id: "tenant-a", name: "Company A", provider: "entra", organization_id: "org-a", start_url: "https://untrusted.example" }, { id: "default", name: "Platform", provider: "oidc" }] }), { status: 200 })
+      : new Response(JSON.stringify({ error: { message: "No browser session" } }), { status: 401 }));
+    render(<AuthProvider><App /></AuthProvider>);
+    expect(await screen.findByRole("link", { name: "Continue with Company A · org-a" })).toHaveAttribute("href", "/auth/sso/start?connection=tenant-a");
+    expect(screen.getByRole("link", { name: "Continue with Platform · Platform" })).toHaveAttribute("href", "/auth/sso/start?connection=default");
+    expect(sessionStorage.getItem("ai-gateway.admin-token")).toBeNull();
+  });
+
   it("signs out from the shared layout", async () => {
     sessionStorage.setItem("ai-gateway.admin-token", "token");
     history.replaceState({}, "", "/ui/settings");

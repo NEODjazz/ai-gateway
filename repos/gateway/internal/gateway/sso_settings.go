@@ -406,4 +406,5 @@ type SSOVerifiedIdentity struct {
 	OrganizationID string   `json:"organization_id,omitempty"`
 	Roles          []string `json:"roles"`
 	VerifiedAt     int64    `json:"verified_at"`
+	Approved       bool     `json:"approved"`
 }
