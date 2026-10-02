@@ -64,6 +64,7 @@ func (s *PostgresVirtualKeyStore) Lookup(ctx context.Context, tokenHash string) 
 		  AND NOT EXISTS (SELECT 1 FROM auth_teams t WHERE t.id=auth_virtual_keys.team_id AND t.status<>'active')
 		  AND NOT EXISTS (SELECT 1 FROM auth_organizations o WHERE o.id=auth_virtual_keys.organization_id AND o.status<>'active')
 		  AND NOT EXISTS (SELECT 1 FROM auth_organization_memberships om WHERE om.organization_id=auth_virtual_keys.organization_id AND om.user_id=auth_virtual_keys.user_id AND om.status<>'active')
+		  AND (organization_id IS NULL OR team_id IS NULL OR EXISTS(SELECT 1 FROM auth_organization_teams ot WHERE ot.organization_id=auth_virtual_keys.organization_id AND ot.team_id=auth_virtual_keys.team_id))
 		  AND (NOT ('org_admin'=ANY(roles)) OR EXISTS (SELECT 1 FROM auth_organization_memberships om WHERE om.organization_id=auth_virtual_keys.organization_id AND om.user_id=auth_virtual_keys.user_id AND om.status='active' AND 'org_admin'=ANY(om.roles)))
 		  AND (expires_at IS NULL OR expires_at > now())
 		RETURNING id, alias, tags, COALESCE(user_id, ''), COALESCE(team_id, ''), COALESCE(organization_id, ''), roles, access_group_ids, allowed_models, allowed_tools,
@@ -113,6 +114,9 @@ func (s *PostgresVirtualKeyStore) Create(ctx context.Context, key StoredVirtualK
 	if key.ID == "" || (key.UserID == "" && key.TeamID == "" && key.OrganizationID == "") || tokenHash == "" {
 		return errors.New("virtual key id, owner, and token hash are required")
 	}
+	if err := validateVirtualKeyOrganization(ctx, s.pool, key); err != nil {
+		return err
+	}
 	family := key.RotationFamily
 	if family == "" {
 		family = key.ID
@@ -147,7 +151,7 @@ func (s *PostgresVirtualKeyStore) ListPage(ctx context.Context, query VirtualKey
 	if query.SortOrder == "asc" {
 		order = "ASC"
 	}
-	const filteredKeys = `
+	filteredKeys := `
 		FROM auth_virtual_keys k
 		WHERE ($1='' OR k.alias ILIKE '%' || $1 || '%')
 		  AND ($2='' OR k.organization_id=$2
@@ -164,6 +168,12 @@ func (s *PostgresVirtualKeyStore) ListPage(ctx context.Context, query VirtualKey
 		       WHEN 'expired' THEN k.revoked_at IS NULL AND k.disabled_at IS NULL AND k.expires_at IS NOT NULL AND k.expires_at<=now()
 		       WHEN 'non_revoked' THEN k.revoked_at IS NULL
 		       ELSE false END)`
+	if query.StrictOrganization {
+		if query.OrganizationID == "" {
+			return VirtualKeyPage{}, ErrInvalidVirtualKey
+		}
+		filteredKeys += " AND k.organization_id=$2"
+	}
 	args := []any{query.Search, query.OrganizationID, query.TeamID, query.UserID, query.KeyID, nonNilStrings(query.AccessGroupIDs), query.Status}
 	var total int
 	if err := s.pool.QueryRow(ctx, "SELECT count(*) "+filteredKeys, args...).Scan(&total); err != nil {
@@ -198,9 +208,23 @@ func (s *PostgresVirtualKeyStore) ListPage(ctx context.Context, query VirtualKey
 }
 
 func (s *PostgresVirtualKeyStore) Update(ctx context.Context, id string, key StoredVirtualKey) (bool, error) {
+	if err := validateVirtualKeyOrganization(ctx, s.pool, key); err != nil {
+		return false, err
+	}
+	var user, org string
+	err := s.pool.QueryRow(ctx, `SELECT COALESCE(user_id,''),COALESCE(organization_id,'') FROM auth_virtual_keys WHERE id=$1 AND revoked_at IS NULL`, id).Scan(&user, &org)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if user != key.UserID || org != key.OrganizationID {
+		return false, fmt.Errorf("%w: user and organization ownership are immutable", ErrInvalidVirtualKey)
+	}
 	result, err := s.pool.Exec(ctx, `UPDATE auth_virtual_keys SET alias=$2, description=$3, tags=$4, user_id=NULLIF($5,''),
 		team_id=NULLIF($6,''), organization_id=NULLIF($7,''), roles=$8, access_group_ids=$9, allowed_models=$10, allowed_tools=$11, rate_limit_rpm=$12,
-		rate_limit_tpm=$13, expires_at=$14 WHERE id=$1 AND revoked_at IS NULL`, id, key.Alias, key.Description,
+		rate_limit_tpm=$13, expires_at=$14 WHERE id=$1 AND revoked_at IS NULL AND user_id IS NOT DISTINCT FROM NULLIF($5,'') AND organization_id IS NOT DISTINCT FROM NULLIF($7,'')`, id, key.Alias, key.Description,
 		nonNilStrings(key.Tags), key.UserID, key.TeamID, key.OrganizationID, nonNilStrings(key.Roles), nonNilStrings(key.AccessGroupIDs),
 		nonNilStrings(key.AllowedModels), nonNilStrings(key.AllowedTools), key.RateLimitRPM, key.RateLimitTPM, key.ExpiresAt)
 	return result.RowsAffected() == 1, err
@@ -226,15 +250,21 @@ func (s *PostgresVirtualKeyStore) Rotate(ctx context.Context, oldID string, repl
 		return err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	var family string
-	if err := tx.QueryRow(ctx, `SELECT rotation_family_id FROM auth_virtual_keys WHERE id=$1 AND revoked_at IS NULL FOR UPDATE`, oldID).Scan(&family); err != nil {
+	var family, user, org string
+	if err := tx.QueryRow(ctx, `SELECT rotation_family_id,COALESCE(user_id,''),COALESCE(organization_id,'') FROM auth_virtual_keys WHERE id=$1 AND revoked_at IS NULL FOR UPDATE`, oldID).Scan(&family, &user, &org); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrVirtualKeyNotFound
 		}
 		return err
 	}
+	if user != replacement.UserID || org != replacement.OrganizationID {
+		return fmt.Errorf("%w: user and organization ownership are immutable", ErrInvalidVirtualKey)
+	}
 	if replacement.ID == "" || (replacement.UserID == "" && replacement.TeamID == "" && replacement.OrganizationID == "") || tokenHash == "" {
 		return errors.New("replacement key id, owner, and token hash are required")
+	}
+	if err := validateVirtualKeyOrganization(ctx, tx, replacement); err != nil {
+		return err
 	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO auth_virtual_keys
@@ -257,4 +287,22 @@ func nonNilStrings(values []string) []string {
 		return []string{}
 	}
 	return values
+}
+
+type virtualKeyOrganizationDB interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
+
+func validateVirtualKeyOrganization(ctx context.Context, db virtualKeyOrganizationDB, key StoredVirtualKey) error {
+	if key.OrganizationID == "" || key.TeamID == "" {
+		return nil
+	}
+	var matches bool
+	if err := db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM auth_organization_teams WHERE organization_id=$1 AND team_id=$2)`, key.OrganizationID, key.TeamID).Scan(&matches); err != nil {
+		return err
+	}
+	if !matches {
+		return fmt.Errorf("%w: team must belong to key organization", ErrInvalidVirtualKey)
+	}
+	return nil
 }

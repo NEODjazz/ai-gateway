@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -50,6 +51,16 @@ func registerManagementRoutes(mux *http.ServeMux, module *modules.AuthModule, sh
 		query.Status = r.URL.Query().Get("status")
 		query.SortBy = r.URL.Query().Get("sort_by")
 		query.SortOrder = r.URL.Query().Get("sort_order")
+		roles := strings.Split(r.Header.Get("X-Actor-Roles"), ",")
+		if slices.Contains(roles, "org_admin") && !slices.Contains(roles, "admin") {
+			org := r.Header.Get("X-Actor-Organization-ID")
+			if org == "" || (query.OrganizationID != "" && query.OrganizationID != org) {
+				http.Error(w, "authenticated organization required", http.StatusForbidden)
+				return
+			}
+			query.OrganizationID = org
+			query.StrictOrganization = true
+		}
 		page, err := module.ListVirtualKeysPage(r.Context(), query)
 		if errors.Is(err, modules.ErrInvalidVirtualKey) {
 			http.Error(w, "invalid virtual key list query", http.StatusBadRequest)
@@ -61,7 +72,7 @@ func registerManagementRoutes(mux *http.ServeMux, module *modules.AuthModule, sh
 		}
 		writeManagementJSON(w, http.StatusOK, page)
 	}))
-	mux.HandleFunc("POST /internal/v1/keys", managementAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /internal/v1/keys", managementKeyMutationAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
 		spec, ok := decodeManagedVirtualKey(w, r)
 		if !ok {
 			return
@@ -78,7 +89,7 @@ func registerManagementRoutes(mux *http.ServeMux, module *modules.AuthModule, sh
 		logManagementAction(r, "virtual_key.create", issued.ID)
 		writeManagementJSON(w, http.StatusCreated, issued)
 	}))
-	mux.HandleFunc("POST /internal/v1/keys/{id}/rotate", managementAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /internal/v1/keys/{id}/rotate", managementKeyMutationAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
 		spec, ok := decodeManagedVirtualKey(w, r)
 		if !ok {
 			return
@@ -99,7 +110,7 @@ func registerManagementRoutes(mux *http.ServeMux, module *modules.AuthModule, sh
 		logManagementAction(r, "virtual_key.rotate", issued.ID)
 		writeManagementJSON(w, http.StatusCreated, issued)
 	}))
-	mux.HandleFunc("PUT /internal/v1/keys/{id}", managementAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("PUT /internal/v1/keys/{id}", managementKeyMutationAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
 		spec, ok := decodeManagedVirtualKey(w, r)
 		if !ok {
 			return
@@ -129,7 +140,7 @@ func registerManagementRoutes(mux *http.ServeMux, module *modules.AuthModule, sh
 		{"POST /internal/v1/keys/{id}/enable", false, "virtual_key.enable"},
 	} {
 		route := route
-		mux.HandleFunc(route.pattern, managementAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
+		mux.HandleFunc(route.pattern, managementKeyMutationAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
 			updated, err := module.SetVirtualKeyDisabled(r.Context(), r.PathValue("id"), route.disabled)
 			if err != nil {
 				http.Error(w, "virtual key status update failed", http.StatusServiceUnavailable)
@@ -143,7 +154,7 @@ func registerManagementRoutes(mux *http.ServeMux, module *modules.AuthModule, sh
 			w.WriteHeader(http.StatusNoContent)
 		}))
 	}
-	mux.HandleFunc("DELETE /internal/v1/keys/{id}", managementAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("DELETE /internal/v1/keys/{id}", managementKeyMutationAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
 		revoked, err := module.RevokeVirtualKey(r.Context(), r.PathValue("id"))
 		if err != nil {
 			http.Error(w, "virtual key revocation failed", http.StatusServiceUnavailable)

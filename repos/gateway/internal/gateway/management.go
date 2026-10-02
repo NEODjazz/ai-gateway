@@ -221,7 +221,7 @@ func managementCall[Request any, Response any](ctx context.Context, client *Remo
 }
 
 func (h Handler) ListVirtualKeys(w http.ResponseWriter, r *http.Request) {
-	req, ok := h.authorizeAdmin(w, r)
+	req, ok := h.authorizeOrganizationReports(w, r)
 	if !ok {
 		return
 	}
@@ -260,6 +260,17 @@ func (h Handler) ListVirtualKeys(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "expand must be financials")
 		return
 	}
+	if !hasRole(req.Roles, "admin") {
+		if filter.OrganizationID != "" && filter.OrganizationID != req.OrganizationID {
+			writeError(w, http.StatusForbidden, "forbidden", "key scope must match the authenticated organization")
+			return
+		}
+		if expand != "" {
+			writeError(w, http.StatusForbidden, "forbidden", "financial expansion requires platform administrator")
+			return
+		}
+		filter.OrganizationID = req.OrganizationID
+	}
 	audit := managementAudit(req)
 	pager, supportsPage := h.management.(interface {
 		ListVirtualKeysPage(context.Context, ManagementAudit, VirtualKeyListFilter) (VirtualKeyPage, error)
@@ -270,10 +281,22 @@ func (h Handler) ListVirtualKeys(w http.ResponseWriter, r *http.Request) {
 			writeManagementFailure(w, err)
 			return
 		}
+		if !hasRole(req.Roles, "admin") {
+			for _, key := range page.Data {
+				if key.OrganizationID != req.OrganizationID {
+					writeError(w, http.StatusBadGateway, "management_failed", "key service returned an invalid organization scope")
+					return
+				}
+			}
+		}
 		if expand == "financials" && !h.expandKeyFinancials(w, r, audit, &page) {
 			return
 		}
 		writeJSON(w, http.StatusOK, page)
+		return
+	}
+	if !hasRole(req.Roles, "admin") {
+		writeError(w, http.StatusServiceUnavailable, "management_unavailable", "scoped key pagination is not configured")
 		return
 	}
 	keys, err := h.management.ListVirtualKeys(r.Context(), audit, filter.Limit)

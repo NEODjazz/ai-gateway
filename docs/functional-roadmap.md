@@ -388,6 +388,9 @@ resource permissions/UI, проверенный выбор tenant, нескол�
 issuers и новый SSO UI ещё не завершены. Usage и request logs доступны `org_admin`
 только с принудительным organization scope в Gateway и повторной проверкой Billing;
 detail lookup использует tenant predicate, чужие/unassigned события дают 404.
+Список ключей `org_admin` использует только explicit organization ownership;
+User/Organization ключа закреплены при update/rotation, team проверяется внутри
+организации. UI сохраняет все ownership dimensions и не выводит tenant из team.
 
 Основа этой дополнительной оценки — код Gateway на commit `4ded04d1`.
 Ниже перечислены требования следующего этапа, а не уже реализованные возможности.

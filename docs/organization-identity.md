@@ -79,6 +79,34 @@ query; foreign and unassigned events return 404. A backend without scoped detail
 support returns 503 rather than falling back to global lookup. Platform `admin`
 retains its existing global reporting contract.
 
+## Virtual keys
+
+Verified `org_admin` can list safe metadata only for keys whose explicit
+`organization_id` matches its identity. Auth applies the same predicate to the
+page and total. A user's membership in multiple organizations or a team match
+does not expose foreign/unscoped keys. Gateway checks returned ownership and
+refuses a backend without scoped pagination. Global platform-admin filters keep
+their existing affiliation search behavior.
+
+Key mutations and financial expansion remain platform-admin operations. Auth also
+rejects delegated mutation attempts on the authenticated service channel. Update
+and rotation now require the original user and organization, including an empty
+organization. Rotation rejection leaves the original credential valid. To grant
+another tenant or user access, create a separate key. This intentionally tightens
+the previous management contract that permitted ownership edits.
+
+For an organization-owned key with a team, the team must belong to that
+organization on create/update/rotate and authentication. Removing or reassigning
+the team denies the existing key; it cannot transfer its tenant. Existing invalid
+organization/team pairs require an operator to correct the team in the same
+organization. No migration silently assigns user-only or unscoped keys to a tenant.
+
+File/job owner namespaces continue to use the authenticated user and credential.
+Pinning identity ownership prevents tenant transfer of those namespaces while
+preserving existing data. Cache scopes additionally include the authenticated
+organization and effective policy. This does not grant organization administrators
+access to another user's files or jobs.
+
 Delegated organization management UI, verified tenant selection, remaining
 per-resource permission checks, and multiple connections remain separate
 implementation stages; the role does not confer global configuration or budget

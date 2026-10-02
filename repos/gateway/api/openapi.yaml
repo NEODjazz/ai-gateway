@@ -3514,7 +3514,7 @@ paths:
       operationId: listVirtualKeys
       tags: [Virtual keys]
       summary: List virtual key metadata
-      description: Requires the `admin` role. Returns policy and lifecycle metadata only; plaintext tokens and token hashes are never exposed.
+      description: Platform admin may list global metadata. A verified org_admin can list only keys explicitly owned by its authenticated organization, with scoped pagination; user or team affiliation alone does not expose a key. Financial expansion requires platform admin. Plaintext tokens and token hashes are never exposed.
       parameters:
         - name: limit
           in: query
@@ -3591,7 +3591,7 @@ paths:
       operationId: rotateVirtualKey
       tags: [Virtual keys]
       summary: Rotate a virtual key
-      description: Creates a linked replacement and revokes the previous key atomically.
+      description: Creates a linked replacement and revokes the previous key atomically. User and organization ownership must match the existing key; a team must belong to the key organization. Requires platform admin.
       parameters:
         - $ref: '#/components/parameters/VirtualKeyID'
       requestBody:
@@ -3622,6 +3622,7 @@ paths:
       operationId: updateVirtualKey
       tags: [Virtual keys]
       summary: Update a virtual key policy without changing its secret
+      description: User and organization ownership are immutable. A team must belong to the key organization. Create a separate key for another identity or tenant. Requires platform admin.
       parameters: [{$ref: '#/components/parameters/VirtualKeyID'}]
       requestBody:
         required: true
