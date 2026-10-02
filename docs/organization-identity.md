@@ -111,3 +111,25 @@ Delegated organization management UI, verified tenant selection, remaining
 per-resource permission checks, and multiple connections remain separate
 implementation stages; the role does not confer global configuration or budget
 mutation access.
+
+## Permission and resource boundary
+
+| Surface | Organization administrator contract | Enforcement / regression evidence |
+| --- | --- | --- |
+| Provider credentials, providers, deployment/model configuration | Platform administration only | `organization_permissions_test.go` covers every published platform management route, including forged actor headers |
+| Inference model catalog | Current principal's approved model grants; no credential material | Existing model authorization and catalog tests |
+| Organization/team membership, principal bindings, SSO settings | Platform approvals; no self-elevation through `org_admin` | Endpoint permission matrix and organization principal PostgreSQL regressions |
+| Virtual keys | Explicit tenant-owned metadata only; mutations/financial expansion require platform admin | Strict page and total predicates, immutable user/tenant, PostgreSQL update/rotation regressions |
+| Files, skills, vector stores, containers, conversations | Personal credential ownership within the fixed tenant identity; `org_admin` does not bypass ownership | Owner-scoped lifecycle tests; same-user separate-tenant credential file read/content/list/delete regression |
+| Responses, batches, fine-tuning, videos, assistant runs, A2A | Credential-owned lifecycle; workers reauthorize current pinned identity and grants | Resource lifecycle/foreign-owner tests and durable principal reauthorization regressions |
+| Usage, request logs and CSV input | Authenticated organization predicate on Gateway and Billing | Forced scopes, foreign filters rejected, storage-scoped detail and grouped totals tests |
+| Budgets, billing administration and logging/export destinations | Platform administration only; organization spend reports remain scoped | Platform endpoint matrix; budget enforcement and organization attribution PostgreSQL tests |
+
+Resource ownership remains based on `credential + user` for compatibility. This
+is safe under the enforced immutable principal/key tenant contract: one credential
+cannot be moved into another organization. A second tenant requires a separate
+approved issuer/client principal or key and therefore another resource namespace.
+Changing headers or selecting an organization label cannot switch ownership.
+There is no cross-tenant resource sharing or automatic migration of existing files
+and jobs. A future same-credential context switch would require a separately
+versioned owner namespace and explicit migration; it is not supported here.
