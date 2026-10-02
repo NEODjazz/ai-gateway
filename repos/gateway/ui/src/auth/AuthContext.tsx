@@ -31,7 +31,9 @@ type AuthValue = {
   ssoChecking: boolean;
   hasCapability: (capability: ConsoleCapability) => boolean;
   prepareSSOSignIn: () => void;
-  signOut: () => void;
+  signOut: () => Promise<void>;
+  signingOut: boolean;
+  signOutError: string;
 };
 
 const AuthContext = createContext<AuthValue | null>(null);
@@ -43,15 +45,35 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const [ssoEnabled, setSSOEnabled] = useState(false);
   const [ssoChecking, setSSOChecking] = useState(() => !token && window.location.pathname.startsWith("/ui"));
   const ssoDiscoveryStarted = useRef(false);
+  const identityGeneration = useRef(0);
+  const logoutInFlight = useRef<Promise<void> | null>(null);
+  const [signingOut, setSigningOut] = useState(false);
+  const [signOutError, setSignOutError] = useState("");
   const prepareSSOSignIn = useCallback(() => {
+    identityGeneration.current++;
+    setSignOutError("");
     sessionStorage.removeItem(storageKey); setSession(null); setToken("");
   }, []);
   const signOut = useCallback(() => {
-    sessionStorage.removeItem(storageKey);
-    setSession(null);
-    setToken("");
-    void fetch("/auth/sso/logout", { method: "POST" }).catch(() => undefined);
-  }, []);
+    if (logoutInFlight.current) return logoutInFlight.current;
+    const generation = identityGeneration.current;
+    setSigningOut(true);
+    setSignOutError("");
+    const operation = (async () => {
+      try {
+        const response = await fetch("/auth/sso/logout", { method: "POST", signal: AbortSignal.timeout(10000) });
+        if (!response.ok) throw new Error("logout failed");
+        if (generation === identityGeneration.current) prepareSSOSignIn();
+      } catch {
+        if (generation === identityGeneration.current) setSignOutError("Server sign out could not be confirmed. Retry sign out.");
+      } finally {
+        logoutInFlight.current = null;
+        setSigningOut(false);
+      }
+    })();
+    logoutInFlight.current = operation;
+    return operation;
+  }, [prepareSSOSignIn]);
   const validate = useCallback(async (candidate: string) => {
     const candidateClient = new APIClient(() => candidate === browserSSOMarker ? "" : candidate);
     const identity = await candidateClient.request<AdminSession>("/admin/v1/session");
@@ -60,13 +82,15 @@ export function AuthProvider({ children }: PropsWithChildren) {
   }, []);
   const restoreSession = useCallback(async () => {
     if (!token) return;
-    setSession(await validate(token));
+    const generation = identityGeneration.current;
+    const identity = await validate(token);
+    if (generation === identityGeneration.current) setSession(identity);
   }, [token, validate]);
   useEffect(() => {
-    const expired = () => signOut();
+    const expired = () => prepareSSOSignIn();
     window.addEventListener("control-plane-session-expired", expired);
     return () => window.removeEventListener("control-plane-session-expired", expired);
-  }, [signOut]);
+  }, [prepareSSOSignIn]);
   useEffect(() => {
     let active = true;
     if (ssoDiscoveryStarted.current || !window.location.pathname.startsWith("/ui")) {
@@ -74,6 +98,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
       return () => { active = false; };
     }
     ssoDiscoveryStarted.current = true;
+    const generation = identityGeneration.current;
     void fetch("/auth/sso/config", { headers: { Accept: "application/json" } })
       .then(async (response) => response.ok ? response.json() as Promise<{ enabled?: boolean; connections?: unknown }> : { enabled: false })
       .then(async (config) => {
@@ -84,7 +109,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
         if (!config.enabled || token) return;
         try {
           const authenticated = await validate("");
-          if (!active) return;
+          if (!active || generation !== identityGeneration.current) return;
           sessionStorage.setItem(storageKey, browserSSOMarker);
           setToken(browserSSOMarker);
           setSession(authenticated);
@@ -102,7 +127,10 @@ export function AuthProvider({ children }: PropsWithChildren) {
     client: new APIClient(() => token === browserSSOMarker ? "" : token),
     signIn: async (next) => {
       const normalized = next.trim().replace(/^Bearer\s+/i, "");
+      const generation = ++identityGeneration.current;
       const authenticated = await validate(normalized);
+      if (generation !== identityGeneration.current) return;
+      setSignOutError("");
       sessionStorage.setItem(storageKey, normalized);
       setSession(authenticated);
       setToken(normalized);
@@ -113,8 +141,10 @@ export function AuthProvider({ children }: PropsWithChildren) {
     ssoChecking,
     hasCapability: (capability) => Boolean(session?.capabilities.includes(capability)),
     prepareSSOSignIn,
-    signOut
-  }), [restoreSession, session, signOut, ssoChecking, ssoEnabled, ssoConnections, token, validate, prepareSSOSignIn]);
+    signOut,
+    signingOut,
+    signOutError
+  }), [restoreSession, session, signOut, ssoChecking, ssoEnabled, ssoConnections, token, validate, prepareSSOSignIn, signingOut, signOutError]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 

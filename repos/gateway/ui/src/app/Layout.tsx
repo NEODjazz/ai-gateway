@@ -8,7 +8,7 @@ import { appRoutes, canAccessRoute } from "./routes";
 import { navigationGroups, navigationIcon } from "./navigation";
 
 export function Layout() {
-  const { session, signOut, ssoConnections, prepareSSOSignIn } = useAuth();
+  const { session, signOut, signingOut, signOutError, ssoConnections, prepareSSOSignIn } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
   const [compact, setCompact] = useState(false);
@@ -38,6 +38,6 @@ export function Layout() {
     onChangeCompact={setCompact}
     collapseTitle="Collapse navigation"
     expandTitle="Expand navigation"
-    renderFooter={({ compact: footerCompact }) => footerCompact ? <button className="gravity-sidebar-signout-compact" aria-label="Sign out" title="Sign out" onClick={signOut}>↪</button> : <div className="sidebar-footer"><div className="sidebar-account"><strong>{session?.user_id || session?.credential_alias || "Authenticated user"}</strong><small>{session?.roles.join(", ") || "gateway credential"}{session?.organization_id ? ` · Organization: ${session.organization_id}` : ""}{session?.team_id ? ` · ${session.team_id}` : ""}</small></div>{ssoConnections.length > 0 && <details><summary>Switch organization / connection</summary>{ssoConnections.map((connection) => <p key={connection.id}><a href={loginConnectionURL(connection)} onClick={prepareSSOSignIn}>{connection.name} · {connection.organization_id || "Platform"}</a></p>)}<small>Requires a fresh identity and organization verification.</small></details>}<a href="/docs/" target="_blank" rel="noreferrer">API docs ↗</a><button className="secondary" onClick={signOut}>Sign out</button></div>}
-  /></nav><PageLayout.Content><main className="content"><Outlet /></main></PageLayout.Content></PageLayout>;
+    renderFooter={({ compact: footerCompact }) => footerCompact ? <button className="gravity-sidebar-signout-compact" aria-label="Sign out" title="Sign out" disabled={signingOut} onClick={() => void signOut()}>↪</button> : <div className="sidebar-footer"><div className="sidebar-account"><strong>{session?.user_id || session?.credential_alias || "Authenticated user"}</strong><small>{session?.roles.join(", ") || "gateway credential"}{session?.organization_id ? ` · Organization: ${session.organization_id}` : ""}{session?.team_id ? ` · ${session.team_id}` : ""}</small></div>{ssoConnections.length > 0 && <details><summary>Switch organization / connection</summary>{ssoConnections.map((connection) => <p key={connection.id}><a href={loginConnectionURL(connection)} onClick={prepareSSOSignIn}>{connection.name} · {connection.organization_id || "Platform"}</a></p>)}<small>Requires a fresh identity and organization verification.</small></details>}<a href="/docs/" target="_blank" rel="noreferrer">API docs ↗</a><button className="secondary" disabled={signingOut} onClick={() => void signOut()}>Sign out</button></div>}
+  /></nav><PageLayout.Content><main className="content">{signOutError && <p role="alert">{signOutError} <button disabled={signingOut} onClick={() => void signOut()}>Retry sign out</button></p>}<Outlet /></main></PageLayout.Content></PageLayout>;
 }
