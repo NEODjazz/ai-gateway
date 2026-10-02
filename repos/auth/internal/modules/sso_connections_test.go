@@ -216,3 +216,30 @@ func TestSSOConnectionSessionUsesRootStoreAndRevokesIndependently(t *testing.T) 
 		t.Fatal("connection disabled default login", err)
 	}
 }
+
+func TestDefaultSSOConnectionPublishesActualOrganization(t *testing.T) {
+	manager, _ := connectionFixture(t)
+	config := testSSOConfig()
+	config.OrganizationID = "org-a"
+	config.RoleMappings = map[string]string{"owners": "org_admin"}
+	if _, err := manager.SaveDraft(t.Context(), SSODraftInput{SSOProfileConfig: config}); err != nil {
+		t.Fatal(err)
+	}
+	views, err := manager.Connections(t.Context())
+	if err != nil || len(views) != 1 || views[0].OrganizationID != "org-a" {
+		t.Fatal("default draft tenant mislabeled", err)
+	}
+	state, revision, err := manager.Load(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.Active = state.Draft
+	state.Draft = nil
+	if err = manager.save(t.Context(), revision, state); err != nil {
+		t.Fatal(err)
+	}
+	views, err = manager.Connections(t.Context())
+	if err != nil || len(views) != 1 || views[0].OrganizationID != "org-a" {
+		t.Fatal("default active tenant mislabeled", err)
+	}
+}

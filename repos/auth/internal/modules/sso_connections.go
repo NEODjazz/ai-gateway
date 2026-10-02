@@ -127,6 +127,15 @@ func (m *SSOManager) Connections(ctx context.Context) ([]SSOConnectionView, erro
 		if err != nil {
 			return nil, err
 		}
+		// The compatible default profile may already pin an organization.
+		// Publish its actual scope rather than labeling it as platform-wide.
+		if connection.ID == "default" {
+			if view.Active != nil {
+				connection.OrganizationID = view.Active.OrganizationID
+			} else if view.Draft != nil {
+				connection.OrganizationID = view.Draft.OrganizationID
+			}
+		}
 		views = append(views, SSOConnectionView{SSOConnection: connection, SSOSettingsView: view})
 	}
 	return views, nil
