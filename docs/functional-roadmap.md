@@ -366,3 +366,131 @@ Keycloak/OpenWebUI interoperability в этой документальной о�
 Это обязательные проверки соответствующих изменений на этапе реализации,
 а не доказательство уже работающей внешней интеграции. Deployment и настройки
 авторизации этой оценкой не изменены.
+
+## SSO и доступ нескольких организаций: оценка 2026-10-02
+
+Основа этой дополнительной оценки — код Gateway на commit `4ded04d1`.
+Ниже перечислены требования следующего этапа, а не уже реализованные возможности.
+Browser SSO, доверие API JWT и изоляция организаций — отдельные контракты; наличие
+нескольких организаций в directory само по себе не означает несколько SSO
+подключений или полную изоляцию всех management endpoints.
+
+### Подтверждённое состояние
+
+| Область | Текущее поведение | Требуемое изменение |
+| --- | --- | --- |
+| Browser SSO и API JWT | `SSOManager.JWTModule` заменяет глобальный issuer/audience/role policy активным SSO-профилем; выключение browser login сохраняет это доверие | Независимые browser connections и API JWT trust; редактирование browser login не меняет доступ API-клиентов |
+| Хранение SSO | PostgreSQL singleton содержит один active/draft/previous profile и одну test attempt | Несколько bounded connections при потребности в нескольких IdP/организациях; независимые revision, proof и rollback |
+| OIDC endpoints | Validator и discovery требуют один origin для issuer, authorization, token и JWKS | Trusted discovery/presets с явной endpoint policy, допускающей разные доверенные hosts; сохранить HTTPS, SSRF и redirect protections |
+| Browser identity | Callback использует access token; необходим JWT для Gateway resource audience, ID token отдельно не обрабатывается | Browser OIDC identity через проверенный ID token и локальную сессию; API по-прежнему проверяет resource access token |
+| Сессии | Encrypted cookie содержит access token до 2800 байт; lifetime ограничен token expiry, refresh отсутствует | Bounded server-side sessions с revocation и проверкой актуального directory; refresh только по отдельному требованию |
+| UI настройки | Один generic form, role mappings в JSON, ручная binding точного subject; draft/test/activate/disable/rollback есть | Provider presets, визуальные mappings, безопасная диагностика identity и список подключений при их появлении |
+| Организации | Organizations/teams, organization budget/spend и organization в cache isolation существуют | Явно определить Organization как tenant boundary и проверить каждый management/data endpoint до объявления полной изоляции |
+| Principal и права | Namespace `issuer + subject + audience`, approved directory roles и team binding уже есть; global admin и scoped team admin | Сохранить namespace и актуальные права; добавить отдельный org admin и проверяемый выбор доступной организации/команды |
+| Ownership ресурсов | Files и связанные owner-scoped APIs используют user + credential; смена organization при тех же значениях не меняет owner key | До добавления переключения tenant определить tenant namespace и совместимый переход для существующих ресурсов |
+
+Последняя строка описывает ограничение будущего переключения контекста, а не
+доказанную утечку между текущими пользователями. Namespace JWT principals уже
+различает одинаковые subjects разных issuers. Изоляцию новых сценариев нельзя
+считать подтверждённой только на основании directory, budgets или cache keys.
+
+Источники текущего контракта: [SSO настройки](admin-sso-settings.md),
+[profile validation и JWT trust](../repos/auth/internal/modules/sso_settings.go),
+[discovery](../repos/auth/internal/modules/sso_discovery.go),
+[browser callback/session](../repos/gateway/internal/gateway/browser_sso.go),
+[principal policy](../repos/auth/internal/modules/jwt_principals.go),
+[directory authorization](../repos/gateway/internal/gateway/identity_directory.go),
+[cache isolation](../repos/gateway/internal/provider/cache.go),
+[resource ownership](../repos/gateway/internal/gateway/files.go) и
+[SSO UI](../repos/gateway/ui/src/pages/SSOSettingsPage.tsx).
+
+### Порядок реализации
+
+1. **P1: разделить browser SSO и API JWT trust.** Отдельные настройки client
+   audience и resource audience. Проверять signature, issuer, audience, expiry,
+   nonce и привязку authorization code к PKCE flow; ID token не принимать как
+   API bearer access token. Сессия хранит bounded internal identity/session ID,
+   а актуальные grants берутся из directory. Нечитаемая конфигурация, неизвестный
+   issuer и недоступный источник актуальных прав не дают расширенного доступа.
+   Миграция сохраняет существующий API trust явно, без скрытой смены issuer.
+2. **P1 в выбранном multi-organization этапе: определить tenant boundary.**
+   Использовать существующие Organization IDs. Проверять server-side membership
+   при каждом выборе org/team; email domain, заголовок или пользовательский body
+   не назначают tenant и права. Сначала составить endpoint/permission matrix для
+   providers/credentials, models, keys, directory, logs/usage/export, budgets,
+   files/vector stores/async resources. Определить ownership migration и доступ
+   к старым ресурсам до включения переключения контекста.
+3. **P2: несколько SSO connections и API issuers по реальной потребности.**
+   Connection имеет ID, provider type, organization binding, точный issuer,
+   client ID, endpoints, mappings и собственный lifecycle. API issuer registry
+   имеет отдельные audiences и правила claims. Unknown issuer отвергается;
+   неподтверждённый `iss` нельзя превращать в URL для сетевого discovery.
+   Entra trust перечисляет конкретные разрешённые directories. JWKS кеши
+   разделяются по issuer, а не только по `kid`; cardinality и memory bounded.
+   PostgreSQL CAS/test/activate/disable/rollback выполняются на уровне connection.
+   Шифрование использует `CREDENTIAL_ENCRYPTION_KEY` с domain separation и
+   привязкой к connection/organization. Отключение browser connection и отзыв
+   API issuer — разные явные действия.
+4. **P2: org admin и понятный UI.** Делегированному администратору доступны только
+   разрешённые операции своей organization. Сначала внедрить presets Microsoft
+   Entra, Keycloak и Generic OIDC с copyable callback URLs. Добавление других
+   presets требует подтверждённого callback/token контракта. Показать таблицу
+   `Name / Provider / Organization / Issuer / Status / Last test` при нескольких
+   connections. Внутри формы: connection, mappings, проверка, activation; active
+   и draft различимы, JSON остаётся advanced editor. Mapping rows показывают
+   внешний claim/group и внутреннюю роль, без автоматической выдачи admin.
+   Диагностика после проверенного login показывает только минимальные
+   issuer/subject/audience и результат сопоставления, без JWT/secret payloads.
+   Она помогает создать binding, но не заменяет обязательный same-admin proof
+   для activation. Login и context selector показывают только допустимые
+   варианты; callback state связывает connection, organization и revision.
+
+Порядок зависимостей: разделение trust → tenant/permission contract → connections
+и org admin → расширение UI. UI presets и визуальные mappings можно поставлять
+раньше, если они честно отражают ограничения существующего runtime.
+
+Сохранить существующие защиты: write-only secrets, общий configuration encryption
+key, CAS, same-admin proof с повторной directory проверкой, durable audit,
+independent admin virtual-key recovery и fail-closed. JIT provisioning с
+одобрением доступа, SAML, external directory group lookup, refresh sessions и
+IdP logout — отдельные P3 по бизнес-потребности. Автоматическое объединение
+accounts по email и permissive fallback к другому issuer не входят в план.
+
+### Обязательные критерии проверки
+
+- Изменение/disable/rollback browser connection не меняет API trust. Opaque
+  access token не мешает browser login с корректным ID token; некорректные
+  signature/nonce/audience/issuer и replay отвергаются. Разные доверенные hosts
+  проходят endpoint policy; произвольные URL и redirects её не обходят.
+- Два issuers с одинаковыми `sub` и `kid`, две organizations и пользователь
+  с несколькими memberships сохраняют правильную identity. Нельзя выбрать
+  чужую organization/team, подделать claim/header context или повысить роль.
+- Cross-organization проверки покрывают credentials/models/keys, cache,
+  resources/jobs, request logs/Usage/CSV и budget/spend attribution. Существующий
+  ownership не переходит другому tenant при migration или смене контекста.
+- Session revocation/logout, deprovisioning, directory/JWKS/DB outage и
+  concurrent connection edits проверены regression tests. Sessions, connections,
+  JWKS и lifecycle state имеют лимиты и определённую failure/eviction policy.
+- PostgreSQL integration на реальной test DB проверяет migrations, CAS,
+  cross-replica lifecycle и policy enforcement в CI. Изменения concurrency
+  проходят race detector. UI tests покрывают errors, stale async responses,
+  mapping validation, keyboard lifecycle и отсутствие секретов.
+- Два тестовых OIDC realms проверяют end-to-end federation. Native Entra
+  совместимость объявляется только после отдельной проверки реального tenant;
+  deterministic unit tests не зависят от IdP, интернета и пользовательских keys.
+
+В этой оценке временные Go overlay audit tests воспроизвели split-origin
+rejection, смену API trust managed SSO-профилем и текущий owner scope. Они вместе
+с выбранными существующими SSO/JWT/browser regressions успешно выполнены через
+`go test -race -count=1` в Auth и Gateway. Временные файлы не включены в репозиторий.
+Новые постоянные regression tests обязательны в каждом implementation commit.
+Реальный multi-IdP login и PostgreSQL integration для предлагаемых изменений
+не выполнялись: сами изменения пока не реализованы. Runtime, UI, deployment,
+credentials и правила доступа этой оценкой не изменены.
+
+Дополнительно выполнены `gofmt -w .`, `go vet ./...`, `go test ./...` и
+`go build ./...` во всех шести Go modules на Go 1.25.13; все команды успешны,
+форматирование не изменило Go-код. Локальные ссылки нового раздела и
+`git diff --check` проверены. Полный race suite всех modules, UI component/browser
+tests и container build в этой документальной оценке не запускались;
+race detector применён к перечисленным Auth/Gateway audit и regression tests.
