@@ -27,7 +27,9 @@ UI выбирает существующие IDs из списков. API нам
 
 Без `PROVIDER_CONTROL_PLANE_POSTGRES_DSN` управление process-local; encryption
 key генерируется на процесс и подходит только для разработки. С DSN gateway
-требует стабильный `PROVIDER_CREDENTIAL_ENCRYPTION_KEY` минимум из 16 символов.
+требует стабильный `CREDENTIAL_ENCRYPTION_KEY` минимум из 16 байт для существующих установок; используйте 32+ байта
+для общего ключа Gateway/Auth и managed SSO. Существующее значение не меняйте при
+переименовании переменной. См. [совместимость ключей](admin-sso-settings.md#совместимость-ключей).
 
 Providers, encrypted Credentials, Deployments, Model Groups, model catalog,
 guardrails/attachments, tags, projects/access groups, MCP, agent/tool policies и

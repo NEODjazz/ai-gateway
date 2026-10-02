@@ -29,7 +29,7 @@ OpenAPI, а не в этом документе.
 | `RESPONSES_AFFINITY_TTL_SECONDS` | `3600` | Affinity для `previous_response_id` |
 | `RESPONSES_OWNERSHIP_TTL_SECONDS` | `2592000` | Срок хранения неизменяемой привязки сохраняемого Response к владельцу и deployment; требует Redis |
 | `PROVIDER_CONTROL_PLANE_POSTGRES_DSN` | пусто | Durable versioned admin state |
-| `PROVIDER_CREDENTIAL_ENCRYPTION_KEY` | ephemeral без DSN | AES-GCM key; с DSN требуется минимум 16 символов |
+| `CREDENTIAL_ENCRYPTION_KEY` | ephemeral без DSN | Общий ключ provider credentials, MCP, logging, A2A и managed SSO; 32+ байта для SSO, legacy control plane требует 16+ |
 | `PROVIDER_CONTROL_PLANE_REFRESH_SECONDS` | `1` | Poll durable revision |
 | `REDIS_ADDR` | пусто | Shared cache/rate/circuit/affinity/monitor state |
 | `REDIS_DB` | `0` | Redis DB |
@@ -413,3 +413,12 @@ encryption keys и shared secrets в Git. Изменение encryption key бе
 
 Для directory JWT/Keycloak и внешнего пользовательского OpenWebUI см.
 [профиль identity](identity-keycloak-openwebui.md).
+
+`CREDENTIAL_ENCRYPTION_KEY` передаётся Gateway и Auth с одинаковым значением.
+`PROVIDER_CREDENTIAL_ENCRYPTION_KEY` — deprecated alias только при отсутствии нового
+имени; конфликт значений останавливает запуск. `AUTH_KEY_HASH_SECRET` не заменяется.
+Для Helm используйте `credentialEncryption.existingSecret` / `secretKey` в обоих
+releases. Существующее `gateway.controlPlane.credentialEncryptionKey` поддерживается
+как deprecated inline alias. Переименование не меняет ciphertext; ротация самого
+значения требует миграции всех зашифрованных конфигураций. Перенос старого SSO
+описан в [SSO settings](admin-sso-settings.md#совместимость-ключей).

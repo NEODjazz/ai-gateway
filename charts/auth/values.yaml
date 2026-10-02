@@ -1,3 +1,10 @@
+# Use the same existing Secret in the gateway and auth releases (32+ bytes).
+# Inline key is for encrypted values sources only; prefer existingSecret.
+credentialEncryption:
+  existingSecret: ""
+  secretKey: CREDENTIAL_ENCRYPTION_KEY
+  key: ""
+
 image:
   repository: ghcr.io/neodjazz/ai-gateway-auth
   # Defaults to Chart.appVersion when empty.

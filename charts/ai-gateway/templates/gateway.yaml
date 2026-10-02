@@ -198,12 +198,26 @@ spec:
                   name: {{ include "ai-gateway.providerSecretName" . }}
                   key: PROVIDER_CONTROL_PLANE_POSTGRES_DSN
                   optional: true
+            {{- $credentialKey := include "ai-gateway.credentialEncryptionKey" . }}
+            - name: CREDENTIAL_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  {{- if .Values.credentialEncryption.existingSecret }}
+                  name: {{ .Values.credentialEncryption.existingSecret | quote }}
+                  key: {{ required "credentialEncryption.secretKey is required" .Values.credentialEncryption.secretKey | quote }}
+                  {{- else }}
+                  name: {{ include "ai-gateway.providerSecretName" . }}
+                  key: CREDENTIAL_ENCRYPTION_KEY
+                  optional: true
+                  {{- end }}
+            {{- if not .Values.credentialEncryption.existingSecret }}
             - name: PROVIDER_CREDENTIAL_ENCRYPTION_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ include "ai-gateway.providerSecretName" . }}
                   key: PROVIDER_CREDENTIAL_ENCRYPTION_KEY
                   optional: true
+            {{- end }}
             - name: REDIS_ADDR
               value: {{ .Values.gateway.redis.addr | quote }}
             - name: REDIS_DB

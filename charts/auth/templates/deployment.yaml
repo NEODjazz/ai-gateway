@@ -67,6 +67,19 @@ spec:
                 secretKeyRef:
                   name: {{ include "auth.fullname" . }}
                   key: postgres-dsn
+            {{- $credentialKey := include "auth.credentialEncryptionKey" . }}
+            {{- if or .Values.credentialEncryption.existingSecret $credentialKey }}
+            - name: CREDENTIAL_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  {{- if .Values.credentialEncryption.existingSecret }}
+                  name: {{ .Values.credentialEncryption.existingSecret | quote }}
+                  key: {{ required "credentialEncryption.secretKey is required" .Values.credentialEncryption.secretKey | quote }}
+                  {{- else }}
+                  name: {{ include "auth.fullname" . }}
+                  key: CREDENTIAL_ENCRYPTION_KEY
+                  {{- end }}
+            {{- end }}
             - name: AUTH_KEY_HASH_SECRET
               valueFrom:
                 secretKeyRef:

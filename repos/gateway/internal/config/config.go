@@ -243,10 +243,9 @@ func Load() Config {
 	var conversationErr error
 	var a2aTaskErr error
 	controlPlaneDSN := strings.TrimSpace(os.Getenv("PROVIDER_CONTROL_PLANE_POSTGRES_DSN"))
-	credentialKey := os.Getenv("PROVIDER_CREDENTIAL_ENCRYPTION_KEY")
-	var controlPlaneErr error
+	credentialKey, controlPlaneErr := credentialEncryptionKeyFromEnv()
 	if controlPlaneDSN != "" && len(credentialKey) < 16 {
-		controlPlaneErr = errors.New("provider credential encryption key must be at least 16 characters when control plane persistence is enabled")
+		controlPlaneErr = errors.Join(controlPlaneErr, errors.New("CREDENTIAL_ENCRYPTION_KEY must be at least 16 bytes when control plane persistence is enabled"))
 	}
 	if semanticTTL > 0 && (semanticURL == "" || semanticModel == "") {
 		semanticErr = errors.New("semantic cache embedding url and model are required when enabled")
@@ -744,4 +743,18 @@ func envFloat(key string, fallback float64) float64 {
 		return fallback
 	}
 	return parsed
+}
+
+// credentialEncryptionKeyFromEnv accepts the old name during rolling upgrades.
+// Conflicting values must not silently switch the key protecting persisted data.
+func credentialEncryptionKeyFromEnv() (string, error) {
+	key, configured := os.LookupEnv("CREDENTIAL_ENCRYPTION_KEY")
+	legacy := os.Getenv("PROVIDER_CREDENTIAL_ENCRYPTION_KEY")
+	if !configured {
+		return legacy, nil
+	}
+	if legacy != "" && key != legacy {
+		return "", errors.New("CREDENTIAL_ENCRYPTION_KEY conflicts with deprecated PROVIDER_CREDENTIAL_ENCRYPTION_KEY")
+	}
+	return key, nil
 }

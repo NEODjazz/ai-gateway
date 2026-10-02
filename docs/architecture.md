@@ -468,7 +468,7 @@ HTTP_ADDR=:8080
 DEFAULT_PROVIDER=azure-open-ai
 PROVIDERS_JSON=[...]
 PROVIDER_CONTROL_PLANE_POSTGRES_DSN=postgres://ai_gateway:...@ai-gateway-postgres:5432/ai_gateway?sslmode=disable
-PROVIDER_CREDENTIAL_ENCRYPTION_KEY=<stable-secret-at-least-16-characters>
+CREDENTIAL_ENCRYPTION_KEY=<shared-stable-secret-at-least-32-bytes>
 PROVIDER_CONTROL_PLANE_REFRESH_SECONDS=1
 
 AUTH_REQUIRED=true

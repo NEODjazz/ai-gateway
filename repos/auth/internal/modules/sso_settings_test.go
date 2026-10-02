@@ -285,3 +285,166 @@ func TestSSODiscoveryValidatesIssuerEndpointsAndPKCE(t *testing.T) {
 		}
 	}
 }
+
+func TestSSOSharedKeyMigrationAndReadOnlyLegacy(t *testing.T) {
+	ctx := context.Background()
+	master, legacy := strings.Repeat("m", 32), strings.Repeat("h", 32)
+	store := &memorySSOSettings{}
+	old, err := NewSSOManager(store, legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := SSOSettingsState{SchemaVersion: 1, Active: &SSOProfile{SSOProfileConfig: testSSOConfig(), ID: "active-profile", Enabled: true, ClientSecret: "fixture-client-secret", SessionKey: "fixture-session-key"}, Previous: &SSOProfile{ID: "previous-profile"}, CanRollback: true, Attempt: &SSOAttempt{ActorID: "admin", Status: "passed"}}
+	if err := old.save(ctx, 0, state); err != nil {
+		t.Fatal(err)
+	}
+	original := bytes.Clone(store.payload)
+	reader, err := newRuntimeSSOManager(store, "", legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	read, revision, err := reader.Load(ctx)
+	if err != nil || revision != 1 || read.Active.ID != state.Active.ID {
+		t.Fatal("legacy trust unavailable without master key")
+	}
+	if err := reader.save(ctx, revision, state); !errors.Is(err, ErrSSOUnavailable) {
+		t.Fatal("legacy hash secret used for new encryption")
+	}
+	if _, err := reader.View(ctx); !errors.Is(err, ErrSSOUnavailable) {
+		t.Fatal("writable settings advertised without master key")
+	}
+	if !bytes.Equal(original, store.payload) {
+		t.Fatal("read-only legacy load changed ciphertext")
+	}
+	manager, err := newRuntimeSSOManager(store, master, legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, revision, err := manager.Load(ctx)
+	if err != nil || revision != 2 {
+		t.Fatal("legacy settings not rewrapped")
+	}
+	before, _ := json.Marshal(state)
+	after, _ := json.Marshal(got)
+	if !bytes.Equal(before, after) {
+		t.Fatal("migration changed SSO identities, sessions or verification state")
+	}
+	if bytes.Equal(original, store.payload) || bytes.Contains(store.payload, []byte(state.Active.ClientSecret)) {
+		t.Fatal("migration failed to encrypt with new key")
+	}
+	canonical, err := NewSSOManager(store, master)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, revision, err := canonical.Load(ctx); err != nil || revision != 2 {
+		t.Fatal("new key cannot read migrated settings")
+	}
+	if _, _, err := old.Load(ctx); !errors.Is(err, ErrSSOUnavailable) {
+		t.Fatal("hash secret still decrypts migrated data")
+	}
+	if _, _, err := reader.Load(ctx); !errors.Is(err, ErrSSOUnavailable) {
+		t.Fatal("missing master key silently lost active SSO")
+	}
+	if _, revision, err := manager.Load(ctx); err != nil || revision != 2 {
+		t.Fatal("migration repeated")
+	}
+}
+
+// An administrator edits the old revision just before the migration CAS.
+type conflictingSSOMigrationStore struct {
+	*memorySSOSettings
+	replacement []byte
+	once        sync.Once
+}
+
+func (s *conflictingSSOMigrationStore) SaveSSOSettings(ctx context.Context, revision int64, payload []byte) error {
+	s.once.Do(func() {
+		s.mu.Lock()
+		s.revision++
+		s.payload = bytes.Clone(s.replacement)
+		s.mu.Unlock()
+	})
+	return s.memorySSOSettings.SaveSSOSettings(ctx, revision, payload)
+}
+
+func TestSSOMigrationPreservesConcurrentEdit(t *testing.T) {
+	ctx := context.Background()
+	oldKey, newKey := strings.Repeat("h", 32), strings.Repeat("m", 32)
+	initial, replacement := &memorySSOSettings{}, &memorySSOSettings{}
+	for _, store := range []*memorySSOSettings{initial, replacement} {
+		manager, err := NewSSOManager(store, oldKey)
+		if err != nil {
+			t.Fatal(err)
+		}
+		id := "old"
+		if store == replacement {
+			id = "concurrent-edit"
+		}
+		if err := manager.save(ctx, 0, SSOSettingsState{SchemaVersion: 1, Draft: &SSOProfile{ID: id}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store := &conflictingSSOMigrationStore{memorySSOSettings: initial, replacement: replacement.payload}
+	manager, err := newRuntimeSSOManager(store, newKey, oldKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, revision, err := manager.Load(ctx)
+	if err != nil || revision != 3 || state.Draft.ID != "concurrent-edit" {
+		t.Fatal("migration overwrote concurrent settings")
+	}
+}
+
+func TestSSOSharedKeyUnavailableFailsClosed(t *testing.T) {
+	ctx := context.Background()
+	store := &memorySSOSettings{}
+	manager, err := newRuntimeSSOManager(store, "", "short-hash-fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, revision, err := manager.Load(ctx); err != nil || revision != 0 {
+		t.Fatal("empty store broke existing env configuration")
+	}
+	if err := manager.save(ctx, 0, SSOSettingsState{SchemaVersion: 1}); !errors.Is(err, ErrSSOUnavailable) {
+		t.Fatal("missing key accepted for encryption")
+	}
+	if _, err := newRuntimeSSOManager(store, "short-master", strings.Repeat("h", 32)); !errors.Is(err, ErrSSOUnavailable) {
+		t.Fatal("short master accepted")
+	}
+	store.revision, store.payload = 1, []byte("invalid-ciphertext")
+	if _, _, err := manager.Load(ctx); !errors.Is(err, ErrSSOUnavailable) {
+		t.Fatal("corruption ignored")
+	}
+	if _, err := manager.JWTModule(ctx, AuthModule{}); !errors.Is(err, ErrJWTUnavailable) {
+		t.Fatal("unreadable active settings fell back to env JWT trust")
+	}
+}
+
+func TestNewSSOSettingsUseOnlySharedEncryptionKey(t *testing.T) {
+	ctx := context.Background()
+	master, hash := strings.Repeat("m", 32), strings.Repeat("h", 32)
+	store := &memorySSOSettings{}
+	writer, err := newRuntimeSSOManager(store, master, hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret := "fixture-new-sso-secret"
+	if _, err := writer.SaveDraft(ctx, SSODraftInput{SSOProfileConfig: testSSOConfig(), ClientSecret: &secret}); err != nil {
+		t.Fatal(err)
+	}
+	reader, err := newRuntimeSSOManager(store, master, strings.Repeat("different-hash", 3))
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, revision, err := reader.Load(ctx)
+	if err != nil || revision != 1 || state.Draft.ClientSecret != secret {
+		t.Fatal("SSO encryption depends on virtual-key hash secret")
+	}
+	old, err := NewSSOManager(store, hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := old.Load(ctx); !errors.Is(err, ErrSSOUnavailable) {
+		t.Fatal("new SSO document encrypted with hash secret")
+	}
+}

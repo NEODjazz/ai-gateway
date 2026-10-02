@@ -98,57 +98,107 @@ type SSOSettingsStore interface {
 }
 
 type SSOManager struct {
-	store SSOSettingsStore
-	aead  cipher.AEAD
-	now   func() time.Time
-	mu    sync.Mutex
+	store      SSOSettingsStore
+	aead       cipher.AEAD
+	legacyAEAD cipher.AEAD
+	now        func() time.Time
+	mu         sync.Mutex
 	// Only the active verifier is retained. Candidate verifiers are request local.
 	profileID string
 	verifier  *jwtVerifier
 }
 
 func NewSSOManager(store SSOSettingsStore, key string) (*SSOManager, error) {
-	if store == nil || len(key) < 32 {
+	if len(key) < 32 {
 		return nil, ErrSSOUnavailable
 	}
+	return newRuntimeSSOManager(store, key, "")
+}
+
+// Legacy hash-key encryption is read only. Rewrap existing settings using CAS
+// when the shared configuration key becomes available; never change identities
+// or session keys and never overwrite a concurrent administrator's edit.
+func newRuntimeSSOManager(store SSOSettingsStore, key, legacyKey string) (*SSOManager, error) {
+	if store == nil || key != "" && len(key) < 32 {
+		return nil, ErrSSOUnavailable
+	}
+	manager := &SSOManager{store: store, now: time.Now}
+	var err error
+	if key != "" {
+		manager.aead, err = ssoSettingsCipher(key)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if len(legacyKey) >= 32 && legacyKey != key {
+		manager.legacyAEAD, err = ssoSettingsCipher(legacyKey)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return manager, nil
+}
+
+func ssoSettingsCipher(key string) (cipher.AEAD, error) {
 	digest := sha256.Sum256([]byte("ai-gateway/sso-settings/v1\x00" + key))
 	block, err := aes.NewCipher(digest[:])
 	if err != nil {
 		return nil, err
 	}
-	aead, err := cipher.NewGCM(block)
-	if err != nil {
-		return nil, err
+	return cipher.NewGCM(block)
+}
+
+func decryptSSOSettings(aead cipher.AEAD, payload []byte) ([]byte, error) {
+	if aead == nil || len(payload) < aead.NonceSize() {
+		return nil, ErrSSOUnavailable
 	}
-	return &SSOManager{store: store, aead: aead, now: time.Now}, nil
+	return aead.Open(nil, payload[:aead.NonceSize()], payload[aead.NonceSize():], []byte("sso-settings/v1"))
 }
 
 func (m *SSOManager) Load(ctx context.Context) (SSOSettingsState, int64, error) {
 	if m == nil {
 		return SSOSettingsState{}, 0, ErrSSOUnavailable
 	}
-	revision, payload, err := m.store.LoadSSOSettings(ctx)
-	if err != nil {
-		return SSOSettingsState{}, 0, ErrSSOUnavailable
+	for attempt := 0; attempt < 3; attempt++ {
+		revision, payload, err := m.store.LoadSSOSettings(ctx)
+		if err != nil {
+			return SSOSettingsState{}, 0, ErrSSOUnavailable
+		}
+		if revision == 0 && len(payload) == 0 {
+			return SSOSettingsState{SchemaVersion: 1}, 0, nil
+		}
+		if revision < 1 || len(payload) > 64<<10 {
+			return SSOSettingsState{}, 0, ErrSSOUnavailable
+		}
+		plain, err := decryptSSOSettings(m.aead, payload)
+		legacy := err != nil
+		if legacy {
+			plain, err = decryptSSOSettings(m.legacyAEAD, payload)
+		}
+		if err != nil {
+			return SSOSettingsState{}, 0, ErrSSOUnavailable
+		}
+		var state SSOSettingsState
+		if json.Unmarshal(plain, &state) != nil || state.SchemaVersion != 1 {
+			return SSOSettingsState{}, 0, ErrSSOUnavailable
+		}
+		if legacy && m.aead != nil {
+			if err := m.save(ctx, revision, state); errors.Is(err, ErrSSOConflict) {
+				continue
+			} else if err != nil {
+				return SSOSettingsState{}, 0, ErrSSOUnavailable
+			}
+			revision++
+		}
+		return state, revision, nil
 	}
-	if revision == 0 && len(payload) == 0 {
-		return SSOSettingsState{SchemaVersion: 1}, 0, nil
-	}
-	if revision < 1 || len(payload) < m.aead.NonceSize() || len(payload) > 64<<10 {
-		return SSOSettingsState{}, 0, ErrSSOUnavailable
-	}
-	plain, err := m.aead.Open(nil, payload[:m.aead.NonceSize()], payload[m.aead.NonceSize():], []byte("sso-settings/v1"))
-	if err != nil {
-		return SSOSettingsState{}, 0, ErrSSOUnavailable
-	}
-	var state SSOSettingsState
-	if json.Unmarshal(plain, &state) != nil || state.SchemaVersion != 1 {
-		return SSOSettingsState{}, 0, ErrSSOUnavailable
-	}
-	return state, revision, nil
+	return SSOSettingsState{}, 0, ErrSSOUnavailable
 }
 
 func (m *SSOManager) save(ctx context.Context, revision int64, state SSOSettingsState) error {
+	if m == nil || m.aead == nil {
+		return ErrSSOUnavailable
+	}
 	if revision < 0 || revision == math.MaxInt64 {
 		return ErrSSOConfiguration
 	}
@@ -172,6 +222,9 @@ func publicSSOProfile(profile *SSOProfile) *SSOProfileView {
 }
 
 func (m *SSOManager) View(ctx context.Context) (SSOSettingsView, error) {
+	if m == nil || m.aead == nil {
+		return SSOSettingsView{}, ErrSSOUnavailable
+	}
 	state, revision, err := m.Load(ctx)
 	if err != nil {
 		return SSOSettingsView{}, err

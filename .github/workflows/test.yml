@@ -254,6 +254,10 @@ jobs:
       - name: Render chart
         run: helm template "${{ matrix.chart }}" "charts/${{ matrix.chart }}" --namespace ai-gateway > /dev/null
 
+      - name: Verify shared credential encryption configuration
+        if: matrix.chart == 'ai-gateway'
+        run: python3 scripts/test-credential-encryption-charts.py
+
       - name: Verify gateway integer environment rendering
         if: matrix.chart == 'ai-gateway'
         shell: bash

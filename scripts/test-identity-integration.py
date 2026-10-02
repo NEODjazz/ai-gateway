@@ -187,6 +187,7 @@ class Run:
                     "AUTH_",
                     "BILLING_",
                     "PROVIDER_",
+                    "CREDENTIAL_",
                     "MODEL_",
                     "ADMIN_SSO_",
                     "DLP_",
@@ -200,6 +201,7 @@ class Run:
         self.env["GOTOOLCHAIN"] = os.getenv("GOTOOLCHAIN", "auto")
         self.processes, self.containers, self.logs = [], [], []
         self.secret = secrets.token_urlsafe(32)
+        self.credential_key = secrets.token_urlsafe(32)
         self.password = secrets.token_urlsafe(32)
         self.client_secret = secrets.token_urlsafe(32)
         self.kc_port, self.gw_port, self.ui_port = free_port(), free_port(), free_port()
@@ -379,6 +381,7 @@ class Run:
             "AUTH_POSTGRES_KEYS_ENABLED": "true",
             "AUTH_POSTGRES_DSN": self.auth_dsn,
             "AUTH_KEY_HASH_SECRET": self.secret,
+            "CREDENTIAL_ENCRYPTION_KEY": self.credential_key,
             "AUTH_STATIC_KEY_FALLBACK_ENABLED": "false",
             "AUTH_DEMO_KEYS_ENABLED": "false",
             "AUTH_JWT_IDENTITY_MODE": "directory",
@@ -425,7 +428,7 @@ class Run:
                 "AV_REQUIRED": "false",
                 "ADMIN_UI_ENABLED": "true",
                 "EXACT_CACHE_TTL_SECONDS": "120",
-                "PROVIDER_CREDENTIAL_ENCRYPTION_KEY": self.secret,
+                "CREDENTIAL_ENCRYPTION_KEY": self.credential_key,
                 "PROVIDER_CONTROL_PLANE_POSTGRES_DSN": self.gateway_dsn,
                 "PROVIDERS_JSON": json.dumps(
                     [

@@ -10,15 +10,52 @@ access token, например Microsoft Entra ID или Keycloak. Service princ
 - Auth использует PostgreSQL; сначала примените additive migration
   `repos/auth/migrations/postgres/014_sso_settings.sql`, затем обновляйте Auth.
   Миграция также включена в `charts/postgres` ConfigMap **data**.
-- `AUTH_KEY_HASH_SECRET` должен содержать минимум 32 байта. Из него с отдельным
-  domain separator выводится AES-GCM key для SSO secrets. Все реплики Auth должны
-  иметь одинаковое значение. Смена этого ключа требует отдельной миграции
-  зашифрованного документа; простая замена делает сохранённый профиль нечитаемым.
+- `CREDENTIAL_ENCRYPTION_KEY` должен содержать минимум 32 байта. Gateway и все
+  реплики Auth используют одинаковое значение для шифрования конфигурации.
+  Ключи AES-GCM для SSO, MCP, logging и A2A выводятся с отдельными domain separators;
+  существующий формат provider credentials сохранён.
+  `AUTH_KEY_HASH_SECRET` остаётся независимым ключом хеширования virtual keys;
+  его нельзя менять при переименовании encryption key.
 - Gateway имеет настроенные Auth management URL/shared secret и durable audit.
   Internal management endpoints не должны публиковаться через ingress.
 - Сохраните рабочий virtual key с ролью `admin`, принадлежащий внутреннему
   пользователю, который будет проверять SSO. Активация, отключение и rollback
   доступны только из такой key session; SSO session не может менять доверие IdP.
+
+В обоих Helm releases укажите один существующий Secret в том же namespace:
+
+```yaml
+credentialEncryption:
+  existingSecret: ai-gateway-config-encryption
+  secretKey: CREDENTIAL_ENCRYPTION_KEY
+```
+
+Secret создаётся отдельно через ваш механизм управления секретами. Для переноса
+существующего provider Secret можно временно указать его прежнее имя поля в
+`secretKey`: значение ключа остаётся тем же, а переменная процесса уже называется
+`CREDENTIAL_ENCRYPTION_KEY`. Inline `credentialEncryption.key` предназначен только
+для зашифрованного values source; его нельзя совмещать с `existingSecret`.
+
+## Совместимость ключей
+
+Старое имя `PROVIDER_CREDENTIAL_ENCRYPTION_KEY` принимается как deprecated alias
+при отсутствии нового. Два разных значения запрещены: процесс не должен молча
+переключить ключ уже сохранённых данных. Простое переименование с тем же значением
+сохраняет provider credentials, MCP, logging и A2A без перешифрования.
+
+SSO-документ предыдущей версии мог быть зашифрован через `AUTH_KEY_HASH_SECRET`.
+После задания общего ключа Auth читает такой документ старым ключом и автоматически
+перешифровывает с revision CAS. Active/previous/draft, proof, profile IDs и session
+keys сохраняются; concurrent edit перечитывается, а не перезаписывается. Сохраните
+прежний hash secret для этого перехода. До задания общего ключа старый SSO-профиль
+можно читать, но нельзя записывать новый; UI настройки возвращает unavailable.
+Нечитаемый существующий документ закрывает JWT/SSO вход без fallback на env trust.
+Пустая таблица сохраняет прежние environment JWT настройки.
+
+Это перенос со старого источника SSO-ключа, а не механизм произвольной ротации
+общего ключа. Его замена новым значением требует отдельного переноса всех
+зашифрованных конфигураций. Уже обновлённые данные старые версии Auth не прочитают:
+обновляйте все реплики согласованно и сохраняйте резервную копию БД.
 
 ## Конфигурация
 

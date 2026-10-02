@@ -134,6 +134,8 @@ AUTH_JWT_ROLES_CLAIM=roles
 AUTH_POSTGRES_KEYS_ENABLED=true
 AUTH_POSTGRES_DSN=postgres://ai_gateway:password@postgres:5432/ai_gateway
 AUTH_KEY_HASH_SECRET=separate-random-pepper
+# Same existing 32+ byte encryption key as Gateway; inject through your Secret store.
+CREDENTIAL_ENCRYPTION_KEY=<shared-configuration-encryption-key>
 AUTH_STATIC_KEY_FALLBACK_ENABLED=false
 AUTH_DEMO_KEYS_ENABLED=false
 ```
@@ -166,3 +168,11 @@ work is settled even after revocation. A cancellation request alone never
 releases the reservation. The management secret must be configured in both
 services for directory background jobs; missing configuration fails closed.
 Legacy key/JWT jobs retain their existing behavior during opt-in migration.
+
+Managed SSO uses `CREDENTIAL_ENCRYPTION_KEY` (at least 32 bytes), shared with
+Gateway. `AUTH_KEY_HASH_SECRET` remains the independent virtual-key hash secret.
+Keep both values stable. Existing SSO documents encrypted with the hash secret
+are rewrapped with CAS when the shared encryption key is configured; all replicas
+must be upgraded together. Without the shared key, legacy SSO is read only.
+See [SSO configuration](../../docs/admin-sso-settings.md) for Helm Secret references
+and migration requirements.

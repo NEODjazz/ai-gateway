@@ -109,4 +109,37 @@ func TestPostgresSSOSettingsEncryptionAndReplicaCAS(t *testing.T) {
 	if err != nil || revision != 2 || state.Draft.ClientSecret != secret {
 		t.Fatal("replica used stale settings")
 	}
+	// Existing rows encrypted with the old hash secret migrate once across replicas.
+	newKey := strings.Repeat("n", 32)
+	var migrants []*SSOManager
+	for i := 0; i < 2; i++ {
+		manager, err := newRuntimeSSOManager(store, newKey, strings.Repeat("k", 32))
+		if err != nil {
+			t.Fatal(err)
+		}
+		migrants = append(migrants, manager)
+	}
+	for _, manager := range migrants {
+		wg.Add(1)
+		go func(m *SSOManager) {
+			defer wg.Done()
+			state, revision, err := m.Load(ctx)
+			if err != nil || revision != 3 || state.Draft.ClientSecret != secret {
+				t.Error("replica migration failed")
+			}
+		}(manager)
+	}
+	wg.Wait()
+	canonical, err := NewSSOManager(store, newKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	migrated, revision, err := canonical.Load(ctx)
+	if err != nil || revision != 3 || migrated.Draft.ID != state.Draft.ID || migrated.Draft.SessionKey != state.Draft.SessionKey {
+		t.Fatal("migration changed identity or cookie key")
+	}
+	if _, _, err := first.Load(ctx); !errors.Is(err, ErrSSOUnavailable) {
+		t.Fatal("old key still reads migrated settings")
+	}
+
 }

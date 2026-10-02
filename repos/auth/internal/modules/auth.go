@@ -31,7 +31,7 @@ func NewAuthModule(required bool) AuthModule {
 	module := AuthModule{
 		required: required, jwtConfig: jwtConfig, jwtVerifier: verifier, virtualKeys: VirtualKeysFromEnv(),
 		keyHashSecret: settings.KeyHashSecret, staticFallback: settings.StaticKeyFallback,
-		demoKeys: settings.DemoKeysEnabled, initErr: jwtErr,
+		demoKeys: settings.DemoKeysEnabled, initErr: errors.Join(jwtErr, settings.credentialEncryptionErr),
 	}
 	if settings.PostgresKeysEnabled {
 		if settings.KeyHashSecret == "" {
@@ -42,7 +42,9 @@ func NewAuthModule(required bool) AuthModule {
 		module.store = store
 		module.initErr = errors.Join(module.initErr, storeErr)
 		if storeErr == nil {
-			module.sso, _ = NewSSOManager(store, settings.KeyHashSecret)
+			var ssoErr error
+			module.sso, ssoErr = newRuntimeSSOManager(store, settings.CredentialEncryptionKey, settings.KeyHashSecret)
+			module.initErr = errors.Join(module.initErr, ssoErr)
 		}
 	}
 	return module

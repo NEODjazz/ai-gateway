@@ -143,7 +143,7 @@ func writeSSOFailure(w http.ResponseWriter, err error) {
 			return
 		}
 	}
-	writeError(w, 503, "sso_unavailable", "Managed SSO requires PostgreSQL migration 014 and AUTH_KEY_HASH_SECRET of at least 32 bytes; check Auth availability.")
+	writeError(w, 503, "sso_unavailable", "Managed SSO requires PostgreSQL migration 014 and CREDENTIAL_ENCRYPTION_KEY of at least 32 bytes; check Auth availability.")
 }
 func (h Handler) GetSSOSettings(w http.ResponseWriter, r *http.Request) {
 	req, ok := h.authorizeDirectory(w, r, "__global__")

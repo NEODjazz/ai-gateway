@@ -68,11 +68,12 @@ kubectl get pods -n ai-gateway
 Default values содержат development secrets и примеры provider endpoints.
 Перед установкой подготовьте отдельный values-файл: замените shared secrets,
 PostgreSQL/ClickHouse credentials, `AUTH_KEY_HASH_SECRET`, provider credentials
-и `PROVIDER_CREDENTIAL_ENCRYPTION_KEY`; выключите demo/static auth fallback.
+и `CREDENTIAL_ENCRYPTION_KEY`; выключите demo/static auth fallback.
 
 Для постоянного control plane настройте
 `gateway.controlPlane.postgresDsn` и стабильный encryption key длиной не менее
-16 символов. Gateway завершит startup при недоступном PostgreSQL, неверном
+32 байта, одинаковый в Gateway и Auth через
+`credentialEncryption.existingSecret` / `secretKey`. Gateway завершит startup при недоступном PostgreSQL, неверном
 snapshot или невозможности расшифровать сохранённый secret.
 
 ## Доступ без port-forward
