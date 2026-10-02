@@ -130,6 +130,7 @@ type jwtVerifier struct {
 	keys               map[string]verificationKey
 	fetchedAt          time.Time
 	lastRefreshAttempt time.Time
+	refresh            *jwtKeyRefresh
 	now                func() time.Time
 }
 
@@ -247,28 +248,62 @@ func (v *jwtVerifier) key(ctx context.Context, keyID, algorithm string) (any, er
 	return key.key, nil
 }
 
+// A refresh result is immutable after done closes. Waiters share one bounded
+// network operation and can cancel without acquiring a network-held mutex.
+type jwtKeyRefresh struct {
+	done chan struct{}
+	keys map[string]verificationKey
+	err  error
+}
+
 func (v *jwtVerifier) keysForVerification(ctx context.Context, force bool) (map[string]verificationKey, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrJWTUnavailable, err)
+	}
 	v.mu.Lock()
-	defer v.mu.Unlock()
 	now := v.now()
 	if len(v.keys) > 0 && !force && now.Sub(v.fetchedAt) < v.config.JWKSCacheTTL {
-		return cloneVerificationKeys(v.keys), nil
+		keys := cloneVerificationKeys(v.keys)
+		v.mu.Unlock()
+		return keys, nil
+	}
+	if flight := v.refresh; flight != nil {
+		v.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("%w: %w", ErrJWTUnavailable, ctx.Err())
+		case <-flight.done:
+			return cloneVerificationKeys(flight.keys), flight.err
+		}
 	}
 	if force && len(v.keys) > 0 && now.Sub(v.lastRefreshAttempt) < 5*time.Second {
-		return cloneVerificationKeys(v.keys), nil
+		keys := cloneVerificationKeys(v.keys)
+		v.mu.Unlock()
+		return keys, nil
 	}
 	if force {
 		v.lastRefreshAttempt = now
 	}
+	flight := &jwtKeyRefresh{done: make(chan struct{})}
+	v.refresh = flight
+	v.mu.Unlock()
 	keys, err := v.fetchKeys(ctx)
+	v.mu.Lock()
 	if err != nil {
 		if !force && len(v.keys) > 0 && now.Sub(v.fetchedAt) < v.config.JWKSCacheTTL {
-			return cloneVerificationKeys(v.keys), nil
+			flight.keys = cloneVerificationKeys(v.keys)
+		} else {
+			flight.err = fmt.Errorf("%w: %w", ErrJWTUnavailable, err)
 		}
-		return nil, fmt.Errorf("%w: %v", ErrJWTUnavailable, err)
+	} else {
+		v.keys, v.fetchedAt = keys, now
+		flight.keys = keys
 	}
-	v.keys, v.fetchedAt = keys, now
-	return cloneVerificationKeys(keys), nil
+	v.refresh = nil
+	close(flight.done)
+	result := cloneVerificationKeys(flight.keys)
+	v.mu.Unlock()
+	return result, flight.err
 }
 
 func (v *jwtVerifier) fetchKeys(ctx context.Context) (map[string]verificationKey, error) {
