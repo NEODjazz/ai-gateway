@@ -5430,6 +5430,15 @@ components:
     SSOProfileConfig:
       type: object
       properties:
+        groups_claim:
+          type: string
+          maxLength: 128
+        group_mappings:
+          type: object
+          maxProperties: 64
+          additionalProperties:
+            type: string
+            enum: [admin, org_admin, team_admin, user, developer]
         organization_id:
           type: string
           maxLength: 256
@@ -5494,6 +5503,15 @@ components:
     SSODraftInput:
       type: object
       properties:
+        groups_claim:
+          type: string
+          maxLength: 128
+        group_mappings:
+          type: object
+          maxProperties: 64
+          additionalProperties:
+            type: string
+            enum: [admin, org_admin, team_admin, user, developer]
         organization_id:
           type: string
           maxLength: 256
@@ -5569,6 +5587,15 @@ components:
     SSOProfileView:
       type: object
       properties:
+        groups_claim:
+          type: string
+          maxLength: 128
+        group_mappings:
+          type: object
+          maxProperties: 64
+          additionalProperties:
+            type: string
+            enum: [admin, org_admin, team_admin, user, developer]
         organization_id:
           type: string
           maxLength: 256
@@ -5637,9 +5664,39 @@ components:
       - scopes
       - role_mappings
       - session_ttl_seconds
+    SSOVerifiedIdentity:
+      type: object
+      additionalProperties: false
+      description: Metadata from a cryptographically verified ID token; approved is separate directory and same-administrator proof
+      properties:
+        issuer:
+          type: string
+        subject:
+          type: string
+        audience:
+          type: string
+        user_id:
+          type: string
+        organization_id:
+          type: string
+        roles:
+          type: array
+          items:
+            type: string
+        verified_at:
+          type: integer
+        approved:
+          type: boolean
+      required: [issuer, subject, audience, user_id, roles, verified_at, approved]
     SSOSettingsView:
       type: object
       properties:
+        last_test_at:
+          type: integer
+        last_test_status:
+          type: string
+        verified_identity:
+          $ref: '#/components/schemas/SSOVerifiedIdentity'
         revision:
           type: integer
           minimum: 0

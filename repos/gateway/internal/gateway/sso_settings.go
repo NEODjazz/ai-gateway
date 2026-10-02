@@ -24,6 +24,8 @@ type SSOProfileConfig struct {
 	Scopes            []string          `json:"scopes"`
 	RolesClaim        string            `json:"roles_claim"`
 	RoleMappings      map[string]string `json:"role_mappings"`
+	GroupsClaim       string            `json:"groups_claim,omitempty"`
+	GroupMappings     map[string]string `json:"group_mappings,omitempty"`
 	SessionTTLSeconds int               `json:"session_ttl_seconds"`
 }
 type SSOProfileView struct {
@@ -33,13 +35,16 @@ type SSOProfileView struct {
 	ClientSecretConfigured bool   `json:"client_secret_configured"`
 }
 type SSOSettingsView struct {
-	Revision      int64           `json:"revision"`
-	Active        *SSOProfileView `json:"active"`
-	Draft         *SSOProfileView `json:"draft"`
-	CanRollback   bool            `json:"can_rollback"`
-	TestStatus    string          `json:"test_status"`
-	TestExpiresAt int64           `json:"test_expires_at,omitempty"`
-	KeySession    bool            `json:"key_session"`
+	LastTestAt       int64                `json:"last_test_at,omitempty"`
+	LastTestStatus   string               `json:"last_test_status,omitempty"`
+	VerifiedIdentity *SSOVerifiedIdentity `json:"verified_identity,omitempty"`
+	Revision         int64                `json:"revision"`
+	Active           *SSOProfileView      `json:"active"`
+	Draft            *SSOProfileView      `json:"draft"`
+	CanRollback      bool                 `json:"can_rollback"`
+	TestStatus       string               `json:"test_status"`
+	TestExpiresAt    int64                `json:"test_expires_at,omitempty"`
+	KeySession       bool                 `json:"key_session"`
 }
 type SSODraftInput struct {
 	SSOProfileConfig
@@ -391,4 +396,14 @@ func ssoAuditTarget(r *http.Request) string {
 		return "browser-sso"
 	}
 	return "browser-sso/" + id
+}
+
+type SSOVerifiedIdentity struct {
+	Issuer         string   `json:"issuer"`
+	Subject        string   `json:"subject"`
+	Audience       string   `json:"audience"`
+	UserID         string   `json:"user_id"`
+	OrganizationID string   `json:"organization_id,omitempty"`
+	Roles          []string `json:"roles"`
+	VerifiedAt     int64    `json:"verified_at"`
 }

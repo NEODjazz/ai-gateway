@@ -43,63 +43,90 @@ type ssoSessionStore interface {
 	RevokeSSOSession(context.Context, string) error
 }
 
-// Verify the browser client's ID token independently of API resource trust.
+// Verify browser tokens separately from directory approval so an administrator
+// can inspect bounded verified identity metadata without granting access.
 func (m AuthModule) verifySSOIdentity(ctx context.Context, profile *SSOProfile, login SSOBrowserLogin) (RequestContext, error) {
-	req := RequestContext{}
-	if profile == nil || profile.ID != login.ProfileID || len(login.Nonce) != 43 {
-		return req, ErrUnauthorized
+	claims, err := m.verifySSOClaims(ctx, profile, login)
+	if err != nil {
+		return RequestContext{}, err
 	}
-	cfg := profile.jwtConfig()
+	return m.authorizeSSOClaims(ctx, profile, claims)
+}
+
+// Verify the browser client's ID token independently of API resource trust.
+func (m AuthModule) verifySSOClaims(ctx context.Context, profile *SSOProfile, login SSOBrowserLogin) (jwtClaims, error) {
+	if profile == nil || profile.ID != login.ProfileID || len(login.Nonce) != 43 {
+		return jwtClaims{}, ErrUnauthorized
+	}
+	cfg := profile.browserJWTConfig()
 	cfg.Audience = profile.ClientID
 	verifier, err := newJWTVerifier(cfg)
 	if err != nil {
-		return req, ErrSSOConfiguration
+		return jwtClaims{}, ErrSSOConfiguration
 	}
 	claims, err := verifier.Verify(ctx, login.Token)
 	if err != nil {
 		if errors.Is(err, ErrJWTUnavailable) {
-			return req, ErrSSOUnavailable
+			return jwtClaims{}, ErrSSOUnavailable
 		}
-		return req, ErrUnauthorized
+		return jwtClaims{}, ErrUnauthorized
 	}
 	subject, ok := claims.Raw["sub"].(string)
 	if !ok || !validJWTIdentityValue(subject, 256) || subject != claims.Subject {
-		return req, ErrUnauthorized
+		return jwtClaims{}, ErrUnauthorized
 	}
 	nonce, validNonce := claims.Raw["nonce"].(string)
 	if !validNonce || subtle.ConstantTimeCompare([]byte(nonce), []byte(login.Nonce)) != 1 {
-		return req, ErrUnauthorized
+		return jwtClaims{}, ErrUnauthorized
 	}
 	issued, ok := claims.Raw["iat"].(float64)
 	now := m.sso.now().Unix()
 	if !ok || issued != float64(int64(issued)) || issued < float64(now-300) || issued > float64(now+30) {
-		return req, ErrUnauthorized
+		return jwtClaims{}, ErrUnauthorized
 	}
 	azp := ""
 	if raw, exists := claims.Raw["azp"]; exists {
 		value, valid := raw.(string)
 		if !valid || !validJWTIdentityValue(value, 512) {
-			return req, ErrUnauthorized
+			return jwtClaims{}, ErrUnauthorized
 		}
 		azp = value
 	}
 	audiences, _ := claims.Audience.([]any)
 	if azp != "" && azp != profile.ClientID || len(audiences) > 1 && azp != profile.ClientID {
-		return req, ErrUnauthorized
+		return jwtClaims{}, ErrUnauthorized
 	}
 	if raw, exists := claims.Raw["at_hash"]; exists {
 		hash, valid := raw.(string)
 		if !valid || hash == "" {
-			return req, ErrUnauthorized
+			return jwtClaims{}, ErrUnauthorized
 		}
 		digest := sha256.Sum256([]byte(login.AccessToken))
 		expected := base64.RawURLEncoding.EncodeToString(digest[:16])
 		if login.AccessToken == "" || subtle.ConstantTimeCompare([]byte(hash), []byte(expected)) != 1 {
-			return req, ErrUnauthorized
+			return jwtClaims{}, ErrUnauthorized
 		}
 	}
+	return claims, nil
+}
+func (m AuthModule) authorizeSSOClaims(ctx context.Context, profile *SSOProfile, claims jwtClaims) (RequestContext, error) {
+	req := RequestContext{}
+	cfg := profile.browserJWTConfig()
+	cfg.Audience = profile.ClientID
+	mapped, err := profile.mappedBrowserRoles(claims.Raw)
+	if err != nil {
+		return req, err
+	}
+	cfg.RolesClaim = "gateway_verified_browser_roles"
+	cfg.RoleMappings = map[string]string{}
+	for _, value := range mapped {
+		role := value.(string)
+		cfg.RoleMappings[role] = role
+	}
+	// This internal claim is overwritten after signature/nonce/audience checks.
+	claims.Raw[cfg.RolesClaim] = mapped
 	candidate := m
-	candidate.jwtConfig, candidate.jwtVerifier, candidate.sso = cfg, verifier, nil
+	candidate.jwtConfig, candidate.jwtVerifier, candidate.sso = cfg, nil, nil
 	if err := candidate.authorizeJWTPrincipal(ctx, &req, claims); err != nil {
 		return req, err
 	}
@@ -219,11 +246,7 @@ func (m AuthModule) authorizeSSOSessionHash(ctx context.Context, req *RequestCon
 	}
 	roles := []string{}
 	for _, role := range session.Roles {
-		mapped := false
-		for _, target := range profile.RoleMappings {
-			mapped = mapped || target == role
-		}
-		if mapped && principalRoleApproved(principal, role) {
+		if profile.allowsBrowserRole(role) && principalRoleApproved(principal, role) {
 			roles = append(roles, role)
 		}
 	}

@@ -39,6 +39,8 @@ type SSOProfileConfig struct {
 	Scopes            []string          `json:"scopes"`
 	RolesClaim        string            `json:"roles_claim"`
 	RoleMappings      map[string]string `json:"role_mappings"`
+	GroupsClaim       string            `json:"groups_claim,omitempty"`
+	GroupMappings     map[string]string `json:"group_mappings,omitempty"`
 	SessionTTLSeconds int               `json:"session_ttl_seconds"`
 }
 
@@ -66,12 +68,15 @@ type SSODraftInput struct {
 }
 
 type SSOSettingsView struct {
-	Revision      int64           `json:"revision"`
-	Active        *SSOProfileView `json:"active"`
-	Draft         *SSOProfileView `json:"draft"`
-	CanRollback   bool            `json:"can_rollback"`
-	TestStatus    string          `json:"test_status"`
-	TestExpiresAt int64           `json:"test_expires_at,omitempty"`
+	LastTestAt       int64                `json:"last_test_at,omitempty"`
+	LastTestStatus   string               `json:"last_test_status,omitempty"`
+	VerifiedIdentity *SSOVerifiedIdentity `json:"verified_identity,omitempty"`
+	Revision         int64                `json:"revision"`
+	Active           *SSOProfileView      `json:"active"`
+	Draft            *SSOProfileView      `json:"draft"`
+	CanRollback      bool                 `json:"can_rollback"`
+	TestStatus       string               `json:"test_status"`
+	TestExpiresAt    int64                `json:"test_expires_at,omitempty"`
 }
 
 type SSOAttempt struct {
@@ -86,7 +91,10 @@ type SSOAttempt struct {
 }
 
 type SSOSettingsState struct {
-	SchemaVersion int `json:"schema_version"`
+	LastTestAt       int64                `json:"last_test_at,omitempty"`
+	LastTestStatus   string               `json:"last_test_status,omitempty"`
+	VerifiedIdentity *SSOVerifiedIdentity `json:"verified_identity,omitempty"`
+	SchemaVersion    int                  `json:"schema_version"`
 	// Existing managed API trust is captured once when upgrading an old document.
 	// Browser lifecycle operations never modify this independent configuration.
 	APITrustSeparated bool              `json:"api_trust_separated"`
@@ -250,7 +258,7 @@ func (m *SSOManager) View(ctx context.Context) (SSOSettingsView, error) {
 	if err != nil {
 		return SSOSettingsView{}, err
 	}
-	view := SSOSettingsView{Revision: revision, Active: publicSSOProfile(state.Active), Draft: publicSSOProfile(state.Draft), CanRollback: state.CanRollback, TestStatus: "not_started"}
+	view := SSOSettingsView{LastTestAt: state.LastTestAt, LastTestStatus: state.LastTestStatus, VerifiedIdentity: state.VerifiedIdentity, Revision: revision, Active: publicSSOProfile(state.Active), Draft: publicSSOProfile(state.Draft), CanRollback: state.CanRollback, TestStatus: "not_started"}
 	if state.Attempt != nil {
 		view.TestStatus, view.TestExpiresAt = state.Attempt.Status, state.Attempt.ExpiresAt
 		if state.Attempt.ExpiresAt <= m.now().Unix() {
@@ -274,10 +282,15 @@ func (p SSOProfileConfig) Validate() error {
 		if !validJWTIdentityValue(p.OrganizationID, 256) {
 			return ErrSSOConfiguration
 		}
-		for _, role := range p.RoleMappings {
+		for _, role := range p.browserJWTConfig().RoleMappings {
 			if role == "admin" || role == "team_admin" {
 				return ErrSSOConfiguration
 			}
+		}
+	}
+	for external := range p.GroupMappings {
+		if !validJWTIdentityValue(external, 256) {
+			return ErrSSOConfiguration
 		}
 	}
 	issuer, ok := ssoEndpoint(p.Issuer)
@@ -306,10 +319,10 @@ func (p SSOProfileConfig) Validate() error {
 			return ErrSSOConfiguration
 		}
 	}
-	if !validJWTIdentityValue(p.RolesClaim, 256) || len(p.RoleMappings) == 0 {
+	if !validJWTIdentityValue(p.RolesClaim, 256) || len(p.RoleMappings)+len(p.GroupMappings) == 0 || len(p.GroupMappings) > 64 || (len(p.GroupMappings) > 0 && !validJWTIdentityValue(p.GroupsClaim, 128)) {
 		return ErrSSOConfiguration
 	}
-	return p.jwtConfig().validate()
+	return p.browserJWTConfig().validate()
 }
 
 func validSSOEndpointOrigins(origins []string) bool {
@@ -396,7 +409,7 @@ func (m *SSOManager) SaveDraft(ctx context.Context, input SSODraftInput) (SSOSet
 		return SSOSettingsView{}, err
 	}
 	state.Draft = &SSOProfile{SSOProfileConfig: input.SSOProfileConfig, ID: id, Enabled: true, ClientSecret: secret, SessionKey: key}
-	state.Attempt = nil
+	state.Attempt, state.VerifiedIdentity = nil, nil
 	if err := m.save(ctx, revision, state); err != nil {
 		return SSOSettingsView{}, err
 	}
@@ -419,6 +432,7 @@ func (m *SSOManager) StartTest(ctx context.Context, expectedRevision int64, acto
 		return "", err
 	}
 	digest := sha256.Sum256([]byte(ticket))
+	state.VerifiedIdentity = nil
 	state.Attempt = &SSOAttempt{TicketHash: hex.EncodeToString(digest[:]), ActorID: actor, ExpiresAt: m.now().Add(5 * time.Minute).Unix(), Status: "running"}
 	return ticket, m.save(ctx, revision, state)
 }

@@ -49,15 +49,24 @@ func (m AuthModule) VerifySSOTest(ctx context.Context, profileID, ticket, token 
 	if len(nonce) == 2 {
 		login.AccessToken = nonce[1]
 	}
-	req, err := m.verifySSOIdentity(ctx, state.Draft, login)
+	claims, err := m.verifySSOClaims(ctx, state.Draft, login)
+	state.VerifiedIdentity = nil
+	req := RequestContext{}
+	if err == nil {
+		state.VerifiedIdentity = &SSOVerifiedIdentity{Issuer: claims.Issuer, Subject: claims.Subject, Audience: state.Draft.ClientID, Roles: []string{}, VerifiedAt: m.sso.now().Unix()}
+		req, err = m.authorizeSSOClaims(ctx, state.Draft, claims)
+	}
 	if err != nil || req.UserID != state.Attempt.ActorID || !m.validSSOTestAdmin(ctx, state.Draft, req) || req.JWTIdentity == nil {
 		state.Attempt.Status = "failed"
+		state.LastTestAt, state.LastTestStatus = m.sso.now().Unix(), "failed"
 		if saveErr := m.sso.save(ctx, revision, state); saveErr != nil {
 			return saveErr
 		}
 		return ErrUnauthorized
 	}
 	state.Attempt.Status = "passed"
+	state.LastTestAt, state.LastTestStatus = m.sso.now().Unix(), "passed"
+	state.VerifiedIdentity = &SSOVerifiedIdentity{Issuer: req.JWTIdentity.Issuer, Subject: req.JWTIdentity.Subject, Audience: req.JWTIdentity.Audience, UserID: req.UserID, OrganizationID: req.OrganizationID, Roles: slices.Clone(req.Roles), VerifiedAt: m.sso.now().Unix(), Approved: true}
 	state.Attempt.UserID, state.Attempt.CredentialID = req.UserID, req.CredentialID
 	state.Attempt.Roles, state.Attempt.Identity = req.Roles, req.JWTIdentity
 	return m.sso.save(ctx, revision, state)
@@ -78,7 +87,7 @@ func (m AuthModule) ChangeSSO(ctx context.Context, action string, expectedRevisi
 			return SSOSettingsView{}, ErrSSOConfiguration
 		}
 		candidate := m
-		candidate.sso, candidate.jwtConfig = nil, state.Draft.jwtConfig()
+		candidate.sso, candidate.jwtConfig = nil, state.Draft.browserJWTConfig()
 		candidate.jwtConfig.Audience = state.Draft.ClientID
 		req := RequestContext{UserID: attempt.UserID, CredentialID: attempt.CredentialID, Roles: attempt.Roles, OrganizationID: state.Draft.OrganizationID, JWTIdentity: attempt.Identity}
 		if err := candidate.ReauthorizeJWTPrincipal(ctx, &req); err != nil {
@@ -111,7 +120,7 @@ func (m AuthModule) ChangeSSO(ctx context.Context, action string, expectedRevisi
 			profile.SessionKey = key
 			state.Active = &profile
 		}
-		state.Draft, state.Attempt = nil, nil
+		state.Draft, state.Attempt, state.VerifiedIdentity = nil, nil, nil
 	default:
 		return SSOSettingsView{}, ErrSSOConfiguration
 	}

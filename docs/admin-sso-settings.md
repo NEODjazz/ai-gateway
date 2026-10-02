@@ -217,3 +217,23 @@ Unit/browser tests cover tampered routing hints before code exchange, unknown
 connections, independent proof/revisions, server sessions and disable behavior.
 PostgreSQL tests cover replica CAS, bounded concurrent admission and ciphertext
 binding. UI connection management and provider presets are the next delivery.
+
+## Role/group mappings and verified identity metadata
+
+Browser profiles may configure `groups_claim` (a nested claim path) and bounded
+`group_mappings` in addition to `roles_claim` / `role_mappings`. Both sources map
+only values from the verified ID token. Their role targets are intersected with
+current directory/organization approvals; mapping a group never creates a user,
+membership or platform permission. Malformed claim values are rejected. Group
+claims omitted by an IdP, including group-overage indirections, do not authorize
+access through an implicit directory lookup.
+
+Settings expose `last_test_at`, `last_test_status` and `verified_identity`.
+Identity metadata contains only issuer, subject, client audience, verification
+time and, after approval, internal user/organization and effective roles.
+`approved=false` means the ID token was checked but directory/same-admin approval
+failed; it cannot activate SSO or create a server session. This allows an operator
+to obtain the exact verified subject before saving a principal binding. Invalid
+signature, issuer, audience, nonce or token lifetime returns no preview. A new
+draft/test clears the old preview. Raw tokens, email/group claims, session handles
+and policy digests are never returned.
