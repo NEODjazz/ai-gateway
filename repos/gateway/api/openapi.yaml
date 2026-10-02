@@ -4813,7 +4813,7 @@ paths:
       operationId: getUsageReport
       tags: [Usage]
       summary: Get aggregated usage and spend
-      description: Returns final request outcomes aggregated by currency, day, public or upstream model, provider, endpoint, credential tag, and customer scope. Mixed currencies are never summed together.
+      description: Returns final request outcomes aggregated by currency, day, public or upstream model, provider, endpoint, credential tag, and customer scope. Mixed currencies are never summed together. A verified org_admin is restricted to its authenticated organization; conflicting or narrower customer scopes are rejected. Platform admin retains global reporting.
       parameters:
         - name: days
           in: query
@@ -4864,7 +4864,7 @@ paths:
       operationId: getCustomerUsageReport
       tags: [Customers]
       summary: Get usage and spend for one customer scope
-      description: Aggregates metadata-only final outcomes for an organization, user, team, or non-secret virtual-key ID. Scope values are passed to ClickHouse as typed parameters.
+      description: Aggregates metadata-only final outcomes for an organization, user, team, or non-secret virtual-key ID. Scope values are passed to ClickHouse as typed parameters. A verified org_admin may request only its own organization scope.
       parameters:
         - {name: scope_type, in: path, required: true, schema: {type: string, enum: [key, user, team, organization]}}
         - {name: scope_id, in: path, required: true, schema: {type: string, minLength: 1, maxLength: 256}}
@@ -4880,7 +4880,7 @@ paths:
       operationId: listRequestLogs
       tags: [Observability]
       summary: List inference request outcomes
-      description: Returns bounded metadata-only final outcomes. Prompts, responses, raw provider errors, credentials, and upstream URLs are never returned.
+      description: Returns bounded metadata-only final outcomes. Prompts, responses, raw provider errors, credentials, and upstream URLs are never returned. Verified org_admin queries always include their authenticated organization, including cursor pagination; another organization filter is forbidden.
       parameters:
         - {name: days, in: query, schema: {type: integer, minimum: 1, maximum: 90, default: 7}}
         - {name: from, in: query, description: Custom UTC window start; must be paired with to and span at most 90 days, schema: {type: string, format: date-time}}
@@ -4918,7 +4918,7 @@ paths:
       operationId: listRequestLogGroups
       tags: [Observability]
       summary: Aggregate inference outcomes by session or trace
-      description: Aggregates the complete bounded query window in ClickHouse. Spend is grouped separately by currency and content fields are never read or returned.
+      description: Aggregates the complete bounded query window in ClickHouse. Spend is grouped separately by currency and content fields are never read or returned. Verified org_admin queries aggregate only their authenticated organization, including shared session or trace IDs.
       parameters:
         - {name: dimension, in: query, required: true, schema: {type: string, enum: [session, trace]}}
         - {name: days, in: query, schema: {type: integer, minimum: 1, maximum: 90, default: 7}}
@@ -4954,6 +4954,7 @@ paths:
       operationId: getRequestLogSettings
       tags: [Observability]
       summary: Get request-log privacy and retention settings
+      description: Available to platform admin and verified org_admin. This endpoint returns retention metadata without global request data.
       responses:
         '200':
           description: Effective request-log settings
@@ -4968,6 +4969,7 @@ paths:
       operationId: getRequestLog
       tags: [Observability]
       summary: Get one inference request outcome
+      description: Verified org_admin detail queries include the authenticated organization in the database predicate. Events in other organizations and unassigned events return 404.
       parameters:
         - name: request_id
           in: path

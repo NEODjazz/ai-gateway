@@ -385,7 +385,9 @@ ownership JWT principal закреплены, sessions и durable jobs повт�
 актуальные права. Migration 016 не назначает административные роли и не переносит
 ресурсы; старые tenant-bound sessions требуют нового входа. Делегированные
 resource permissions/UI, проверенный выбор tenant, несколько connections/API
-issuers и новый SSO UI ещё не завершены.
+issuers и новый SSO UI ещё не завершены. Usage и request logs доступны `org_admin`
+только с принудительным organization scope в Gateway и повторной проверкой Billing;
+detail lookup использует tenant predicate, чужие/unassigned события дают 404.
 
 Основа этой дополнительной оценки — код Gateway на commit `4ded04d1`.
 Ниже перечислены требования следующего этапа, а не уже реализованные возможности.

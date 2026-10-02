@@ -63,7 +63,23 @@ because their encrypted records do not yet pin an organization. API issuer trust
 is unchanged. Existing unscoped identity bindings do not automatically adopt an
 organization when their team is later assigned: establish a new explicit binding.
 
-This is the identity approval foundation. Delegated organization management UI,
-verified tenant selection, per-resource permission checks, and multiple connections
-remain separate implementation stages; the role does not confer global management
-access.
+## Organization reports
+
+Verified `org_admin` may read `/admin/v1/usage/report`, its own
+`/admin/v1/customers/organization/{id}/usage`, request-log lists/groups/detail,
+and retention metadata. Gateway always supplies the authenticated organization to
+Billing. Billing independently constrains the query using service-authenticated
+actor metadata. Public actor/organization headers cannot override it. Conflicting
+organization filters and user/team/key customer scopes return 403; the latter are
+not a substitute for a tenant filter when identities span organizations.
+
+Report totals, grouped data, pagination, and CSV input therefore share the same
+tenant predicate. Single-event detail also filters organization in the storage
+query; foreign and unassigned events return 404. A backend without scoped detail
+support returns 503 rather than falling back to global lookup. Platform `admin`
+retains its existing global reporting contract.
+
+Delegated organization management UI, verified tenant selection, remaining
+per-resource permission checks, and multiple connections remain separate
+implementation stages; the role does not confer global configuration or budget
+mutation access.

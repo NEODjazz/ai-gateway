@@ -87,11 +87,12 @@ type VirtualKeyPage struct {
 }
 
 type ManagementAudit struct {
-	RequestID    string
-	ActorID      string
-	CredentialID string
-	TeamID       string
-	Roles        []string
+	RequestID      string
+	ActorID        string
+	CredentialID   string
+	TeamID         string
+	OrganizationID string
+	Roles          []string
 }
 
 type ManagementClient interface {
@@ -200,7 +201,8 @@ func managementCall[Request any, Response any](ctx context.Context, client *Remo
 	httpRequest.Header.Set("X-Actor-ID", audit.ActorID)
 	httpRequest.Header.Set("X-Actor-Credential-ID", audit.CredentialID)
 	httpRequest.Header.Set("X-Actor-Team-ID", audit.TeamID)
-	httpRequest.Header.Set("X-Actor-Roles", strings.Join(audit.Roles, ","))
+	httpRequest.Header.Set("X-Actor-Organization-ID", audit.OrganizationID)
+	httpRequest.Header.Set("X-Actor-Roles", managementRoleHeader(audit.Roles))
 	response, err := client.client.Do(httpRequest)
 	if err != nil {
 		return result, err
@@ -577,7 +579,20 @@ func decodeManagedVirtualKey(w http.ResponseWriter, r *http.Request) (ManagedVir
 }
 
 func managementAudit(req modules.RequestContext) ManagementAudit {
-	return ManagementAudit{RequestID: req.RequestID, ActorID: req.UserID, CredentialID: req.CredentialID, TeamID: req.TeamID, Roles: append([]string(nil), req.Roles...)}
+	return ManagementAudit{RequestID: req.RequestID, ActorID: req.UserID, CredentialID: req.CredentialID, TeamID: req.TeamID, OrganizationID: req.OrganizationID, Roles: append([]string(nil), req.Roles...)}
+}
+
+// Only exact gateway roles may cross the privileged service boundary. Arbitrary
+// role strings containing delimiters must not manufacture an admin header.
+func managementRoleHeader(roles []string) string {
+	accepted := make([]string, 0, len(roles))
+	for _, role := range roles {
+		switch role {
+		case "admin", "org_admin", "team_admin", "user", "developer":
+			accepted = append(accepted, role)
+		}
+	}
+	return strings.Join(accepted, ",")
 }
 
 func hasRole(roles []string, expected string) bool {
