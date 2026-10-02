@@ -279,3 +279,48 @@ its sign-in test and activate using a platform administrator virtual key.
 Rolling back the first activation disables browser sign-in; it never restores
 resource-token browser fallback. No secrets, directory records or API keys are
 migrated or deleted automatically.
+
+## Independent API issuer registry
+
+Browser connections do not configure API access-token trust. The primary
+`AUTH_JWT_*` configuration and any explicitly preserved legacy API trust retain
+existing behavior. Platform administrators can additionally manage at most 16
+API issuer entries through `/admin/v1/api-issuers`. Each entry pins an immutable
+ID, name, Organization, exact issuer and resource audience. Moving to another
+identity namespace requires a separate entry and explicit principal approval.
+Migration `018_api_issuers.sql` is required when the shared configuration
+key enables the registry.
+
+The registry uses separate encrypted PostgreSQL rows, CAS revisions and an
+AEAD domain bound to immutable metadata under `CREDENTIAL_ENCRYPTION_KEY`.
+Only JWKS signed RS256/ES256 access tokens and directory identity mode are
+supported for these entries. The configured JWKS URL must use the issuer origin;
+HTTP is allowed only for loopback testing. Role mappings cannot assign platform
+administrator roles in an Organization-bound entry. A browser client audience
+cannot also be registered as an API audience. Issuers from unverified token
+claims select an explicitly configured entry; they never become discovery URLs.
+Tokens matching several configured resource audiences are rejected as ambiguous.
+
+Creating or changing API trust requires an administrator virtual key and durable
+Gateway audit. PUT `/admin/v1/api-issuers/{id}` saves a draft with
+`expected_revision`, `jwks_url`, `roles_claim` and `role_mappings`. POST
+`/{id}/test` verifies a bounded resource `token` against that draft and the
+operator's current approved principal. The token is write-only and never stored;
+only the internal authorization proof is encrypted at rest. An Organization-bound
+proof also requires an approved `org_admin` membership for the same platform
+operator. The proof expires at the earlier of token expiry and five minutes.
+POST `/{id}/action` accepts `activate`, `disable` or `rollback` with the expected
+revision; activation rechecks current directory approvals. Disabling an API
+issuer also denies reauthorization of its durable jobs, without disabling a
+browser connection or another API issuer. Saving a new draft invalidates its
+old test proof. A stale revision produces 409; malformed/expired trust produces
+400; failed identity approval produces 403; inaccessible configuration/directory
+produces 503.
+
+JWKS caches are separated by entry and active profile, with at most 16 registry
+verifiers plus the primary verifier. Candidate test verifiers are request-local;
+revoked/replaced profiles are evicted when configuration is loaded. Each verifier
+retains at most 64 keys and bounds the response to 1 MiB. Refresh network I/O
+runs outside its cache lock; concurrent refreshes share one result and canceled
+waiters can leave. Additional IdP availability is checked on the relevant API
+request rather than polling all IdPs during readiness.

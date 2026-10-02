@@ -7,13 +7,30 @@ import (
 
 func (m AuthModule) SSOManager() *SSOManager { return m.sso }
 
-func (m AuthModule) SaveSSODraft(ctx context.Context, input SSODraftInput) (SSOSettingsView, error) {
+func (m AuthModule) browserNamespaceAvailable(ctx context.Context, profile SSOProfileConfig) error {
 	api, err := m.currentJWTModule(ctx)
 	if err != nil {
-		return SSOSettingsView{}, err
+		return err
 	}
-	if api.jwtConfig.Issuer == input.Issuer && api.jwtConfig.Audience == input.ClientID {
-		return SSOSettingsView{}, ErrSSOConfiguration
+	if api.jwtConfig.Issuer == profile.Issuer && api.jwtConfig.Audience == profile.ClientID {
+		return ErrSSOConfiguration
+	}
+	if m.apiIssuers != nil {
+		rows, _, err := m.apiIssuers.rows(ctx)
+		if err != nil {
+			return err
+		}
+		for _, row := range rows {
+			if row.Issuer == profile.Issuer && row.Audience == profile.ClientID {
+				return ErrSSOConfiguration
+			}
+		}
+	}
+	return nil
+}
+func (m AuthModule) SaveSSODraft(ctx context.Context, input SSODraftInput) (SSOSettingsView, error) {
+	if err := m.browserNamespaceAvailable(ctx, input.SSOProfileConfig); err != nil {
+		return SSOSettingsView{}, err
 	}
 	return m.sso.SaveDraft(ctx, input)
 }
@@ -86,8 +103,12 @@ func (m AuthModule) ChangeSSO(ctx context.Context, action string, expectedRevisi
 		if state.Draft == nil || attempt == nil || attempt.Status != "passed" || attempt.ExpiresAt <= m.sso.now().Unix() || attempt.ActorID != actor || attempt.UserID != actor {
 			return SSOSettingsView{}, ErrSSOConfiguration
 		}
+		if err := m.browserNamespaceAvailable(ctx, state.Draft.SSOProfileConfig); err != nil {
+			return SSOSettingsView{}, err
+		}
 		candidate := m
 		candidate.sso, candidate.jwtConfig = nil, state.Draft.browserJWTConfig()
+		candidate.apiIssuers = nil
 		candidate.jwtConfig.Audience = state.Draft.ClientID
 		req := RequestContext{UserID: attempt.UserID, CredentialID: attempt.CredentialID, Roles: attempt.Roles, OrganizationID: state.Draft.OrganizationID, JWTIdentity: attempt.Identity}
 		if err := candidate.ReauthorizeJWTPrincipal(ctx, &req); err != nil {
@@ -109,6 +130,11 @@ func (m AuthModule) ChangeSSO(ctx context.Context, action string, expectedRevisi
 	case "rollback":
 		if !state.CanRollback {
 			return SSOSettingsView{}, ErrSSOConfiguration
+		}
+		if state.Previous != nil {
+			if err := m.browserNamespaceAvailable(ctx, state.Previous.SSOProfileConfig); err != nil {
+				return SSOSettingsView{}, err
+			}
 		}
 		state.Active, state.Previous = state.Previous, state.Active
 		if state.Active != nil {

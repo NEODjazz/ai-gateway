@@ -43,6 +43,128 @@ tags:
 security:
   - bearerAuth: []
 paths:
+  /admin/v1/api-issuers:
+    get:
+      operationId: listAPIIssuers
+      tags: [Identity]
+      summary: listAPIIssuers
+      responses:
+        '200':
+          description: At most 16 independent API issuers; primary API environment trust is unchanged
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  key_session: {type: boolean}
+                  data:
+                    type: array
+                    maxItems: 16
+                    items: {$ref: '#/components/schemas/APIIssuerView'}
+        '403': {description: "Platform administrator required"}
+        '503': {description: "Auth, encryption or migration unavailable"}
+    post:
+      operationId: createAPIIssuer
+      tags: [Identity]
+      summary: createAPIIssuer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/APIIssuerCreate'
+      responses:
+        '200':
+          description: Redacted API trust configuration; resource tokens are never returned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIIssuerView'
+        '400': {description: "Invalid configuration, inactive organization, expired test or limit reached"}
+        '403': {description: "Platform administrator recovery key and approved same-operator proof required"}
+        '409': {description: "Revision conflict or duplicate issuer and audience"}
+        '503': {description: "Auth, directory, audit, encryption or migration unavailable"}
+  /admin/v1/api-issuers/{id}:
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema: {type: string, minLength: 1, maxLength: 64, pattern: '^[a-z0-9_-]+$'}
+    put:
+      operationId: saveAPIIssuerDraft
+      tags: [Identity]
+      summary: saveAPIIssuerDraft
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/APIIssuerDraftInput'
+      responses:
+        '200':
+          description: Redacted API trust configuration; resource tokens are never returned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIIssuerView'
+        '400': {description: "Invalid configuration, inactive organization, expired test or limit reached"}
+        '403': {description: "Platform administrator recovery key and approved same-operator proof required"}
+        '409': {description: "Revision conflict or duplicate issuer and audience"}
+        '503': {description: "Auth, directory, audit, encryption or migration unavailable"}
+  /admin/v1/api-issuers/{id}/test:
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema: {type: string, minLength: 1, maxLength: 64, pattern: '^[a-z0-9_-]+$'}
+    post:
+      operationId: testAPIIssuer
+      tags: [Identity]
+      summary: testAPIIssuer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/APIIssuerTestInput'
+      responses:
+        '200':
+          description: Redacted API trust configuration; resource tokens are never returned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIIssuerView'
+        '400': {description: "Invalid configuration, inactive organization, expired test or limit reached"}
+        '403': {description: "Platform administrator recovery key and approved same-operator proof required"}
+        '409': {description: "Revision conflict or duplicate issuer and audience"}
+        '503': {description: "Auth, directory, audit, encryption or migration unavailable"}
+  /admin/v1/api-issuers/{id}/action:
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema: {type: string, minLength: 1, maxLength: 64, pattern: '^[a-z0-9_-]+$'}
+    post:
+      operationId: changeAPIIssuer
+      tags: [Identity]
+      summary: changeAPIIssuer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SSOActionInput'
+      responses:
+        '200':
+          description: Redacted API trust configuration; resource tokens are never returned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIIssuerView'
+        '400': {description: "Invalid configuration, inactive organization, expired test or limit reached"}
+        '403': {description: "Platform administrator recovery key and approved same-operator proof required"}
+        '409': {description: "Revision conflict or duplicate issuer and audience"}
+        '503': {description: "Auth, directory, audit, encryption or migration unavailable"}
   /admin/v1/sso/connections:
     get:
       operationId: listSSOConnections
@@ -5407,6 +5529,78 @@ components:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
   schemas:
+    APIIssuerCreate:
+      type: object
+      additionalProperties: false
+      required: [id, name, issuer, audience, jwks_url, roles_claim, role_mappings]
+      properties:
+        id: {type: string, minLength: 1, maxLength: 64, pattern: '^[a-z0-9_-]+$'}
+        name: {type: string, minLength: 1, maxLength: 128}
+        organization_id: {type: string, maxLength: 256}
+        issuer: {type: string, format: uri, maxLength: 2048}
+        audience: {type: string, minLength: 1, maxLength: 256}
+        jwks_url: {type: string, format: uri, maxLength: 2048}
+        roles_claim: {type: string, minLength: 1, maxLength: 256}
+        role_mappings:
+          type: object
+          minProperties: 1
+          maxProperties: 128
+          additionalProperties: {type: string, enum: [user, developer, admin, team_admin, org_admin]}
+    APIIssuerDraftInput:
+      type: object
+      additionalProperties: false
+      required: [expected_revision, jwks_url, roles_claim, role_mappings]
+      properties:
+        expected_revision: {type: integer, format: int64, minimum: 1}
+        jwks_url: {type: string, format: uri, maxLength: 2048}
+        roles_claim: {type: string, minLength: 1, maxLength: 256}
+        role_mappings:
+          type: object
+          minProperties: 1
+          maxProperties: 128
+          additionalProperties: {type: string, enum: [user, developer, admin, team_admin, org_admin]}
+    APIIssuerTestInput:
+      type: object
+      additionalProperties: false
+      required: [expected_revision, token]
+      properties:
+        expected_revision: {type: integer, format: int64, minimum: 1}
+        token: {type: string, minLength: 1, maxLength: 32768, writeOnly: true}
+    APIIssuerProfile:
+      type: object
+      required: [id, enabled, jwks_url, roles_claim, role_mappings]
+      properties:
+        id: {type: string}
+        enabled: {type: boolean}
+        jwks_url: {type: string, format: uri, maxLength: 2048}
+        roles_claim: {type: string, minLength: 1, maxLength: 256}
+        role_mappings:
+          type: object
+          minProperties: 1
+          maxProperties: 128
+          additionalProperties: {type: string, enum: [user, developer, admin, team_admin, org_admin]}
+    APIIssuerView:
+      type: object
+      required: [id, name, issuer, audience, revision, active, draft, can_rollback]
+      properties:
+        id: {type: string, minLength: 1, maxLength: 64, pattern: '^[a-z0-9_-]+$'}
+        name: {type: string, minLength: 1, maxLength: 128}
+        organization_id: {type: string, maxLength: 256}
+        issuer: {type: string, format: uri, maxLength: 2048}
+        audience: {type: string, minLength: 1, maxLength: 256}
+        revision: {type: integer, format: int64, minimum: 1}
+        active:
+          anyOf:
+          - {$ref: '#/components/schemas/APIIssuerProfile'}
+          - {type: 'null'}
+        draft:
+          anyOf:
+          - {$ref: '#/components/schemas/APIIssuerProfile'}
+          - {type: 'null'}
+        can_rollback: {type: boolean}
+        last_test_at: {type: integer, format: int64}
+        last_test_status: {type: string, enum: [passed, failed]}
+        test_expires_at: {type: integer, format: int64}
     SSOConnection:
       type: object
       additionalProperties: false

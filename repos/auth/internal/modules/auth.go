@@ -13,16 +13,19 @@ import (
 )
 
 type AuthModule struct {
-	required       bool
-	jwtConfig      JWTAuthConfig
-	jwtVerifier    *jwtVerifier
-	virtualKeys    map[string]VirtualKey
-	store          VirtualKeyStore
-	keyHashSecret  string
-	staticFallback bool
-	demoKeys       bool
-	initErr        error
-	sso            *SSOManager
+	required          bool
+	jwtConfig         JWTAuthConfig
+	jwtVerifier       *jwtVerifier
+	virtualKeys       map[string]VirtualKey
+	store             VirtualKeyStore
+	keyHashSecret     string
+	staticFallback    bool
+	demoKeys          bool
+	initErr           error
+	sso               *SSOManager
+	apiIssuers        *APIIssuerManager
+	jwtOrganizationID string
+	apiConnectionID   string
 }
 
 func NewAuthModule(required bool) AuthModule {
@@ -46,6 +49,10 @@ func NewAuthModule(required bool) AuthModule {
 			var ssoErr error
 			module.sso, ssoErr = newRuntimeSSOManager(store, settings.CredentialEncryptionKey, settings.KeyHashSecret)
 			module.initErr = errors.Join(module.initErr, ssoErr)
+			if len(settings.CredentialEncryptionKey) >= 32 {
+				module.apiIssuers, ssoErr = newAPIIssuerManager(store, settings.CredentialEncryptionKey)
+				module.initErr = errors.Join(module.initErr, ssoErr)
+			}
 		}
 	}
 	return module
@@ -152,7 +159,30 @@ func (m AuthModule) Ready(ctx context.Context) error {
 			return err
 		}
 	}
-	return current.jwtVerifier.Ready(ctx)
+	if err = current.jwtVerifier.Ready(ctx); err != nil {
+		return err
+	}
+	if m.apiIssuers != nil {
+		rows, states, err := m.apiIssuers.rows(ctx)
+		if err != nil {
+			return err
+		}
+		for i := range rows {
+			p := states[i].Active
+			if p == nil || !p.Enabled {
+				continue
+			}
+			store, ok := m.store.(jwtPrincipalStore)
+			if !ok {
+				return ErrJWTDirectoryUnavailable
+			}
+			// Additional issuer network failures are request-local. Readiness checks
+			// durable configuration and directory storage without polling every IdP.
+			return store.JWTPrincipalsReady(ctx)
+		}
+	}
+
+	return nil
 }
 
 func (m AuthModule) Close() {
@@ -257,11 +287,21 @@ func applyStoredVirtualKey(req *RequestContext, key StoredVirtualKey) {
 }
 
 func (m AuthModule) authorizeJWT(ctx context.Context, req *RequestContext) error {
-	current, err := m.currentJWTModule(ctx)
+	hint, err := unverifiedAPIRouting(req.APIKey)
+	if err != nil {
+		return ErrUnauthorized
+	}
+	current, err := m.apiJWTModule(ctx, hint.Issuer, hint.Audience, "")
 	if err != nil {
 		return err
 	}
-	return current.authorizeJWTConfigured(ctx, req)
+	if err = current.authorizeJWTConfigured(ctx, req); err != nil {
+		return err
+	}
+	if req.JWTIdentity != nil {
+		req.JWTIdentity.ConnectionID = current.apiConnectionID
+	}
+	return nil
 }
 
 func (m AuthModule) currentJWTModule(ctx context.Context) (AuthModule, error) {

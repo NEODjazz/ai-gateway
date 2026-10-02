@@ -127,6 +127,7 @@ func (m AuthModule) authorizeSSOClaims(ctx context.Context, profile *SSOProfile,
 	claims.Raw[cfg.RolesClaim] = mapped
 	candidate := m
 	candidate.jwtConfig, candidate.jwtVerifier, candidate.sso = cfg, nil, nil
+	candidate.apiIssuers = nil
 	if err := candidate.authorizeJWTPrincipal(ctx, &req, claims); err != nil {
 		return req, err
 	}

@@ -71,7 +71,7 @@ func (m AuthModule) authorizeJWTPrincipal(ctx context.Context, req *RequestConte
 	if err != nil {
 		return fmt.Errorf("%w: principal lookup failed", ErrJWTDirectoryUnavailable)
 	}
-	if !found || !principal.Enabled || principal.UserID == "" || principal.Issuer != claims.Issuer || principal.Subject != claims.Subject || principal.Audience != m.jwtConfig.Audience {
+	if (m.jwtOrganizationID != "" && principal.OrganizationID != m.jwtOrganizationID) || !found || !principal.Enabled || principal.UserID == "" || principal.Issuer != claims.Issuer || principal.Subject != claims.Subject || principal.Audience != m.jwtConfig.Audience {
 		return ErrUnauthorized
 	}
 	if team := claimString(claims.Raw, m.jwtConfig.TeamIDClaim); team != "" && team != principal.TeamID {
@@ -285,10 +285,17 @@ func (m AuthModule) ReauthorizeJWTPrincipal(ctx context.Context, req *RequestCon
 		}
 		return nil
 	}
-	if m.sso != nil {
-		current, err := m.currentJWTModule(ctx)
+	if m.sso != nil || m.apiIssuers != nil {
+		ref := req.JWTIdentity
+		if ref == nil {
+			return ErrUnauthorized
+		}
+		current, err := m.apiJWTModule(ctx, ref.Issuer, ref.Audience, ref.ConnectionID)
 		if err != nil {
 			return err
+		}
+		if ref.ConnectionID == "" && current.apiConnectionID != "" {
+			return ErrUnauthorized
 		}
 		return current.ReauthorizeJWTPrincipal(ctx, req)
 	}
