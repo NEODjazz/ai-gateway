@@ -36,6 +36,7 @@ def parse_migrations(rendered: str) -> dict[str, str]:
         "007_gateway_control_plane.sql",
         "013_jwt_principals.sql",
         "014_sso_settings.sql",
+        "015_sso_sessions.sql",
         "036_gateway_vector_store_chunking.sql",
         "037_gateway_conversations.sql",
         "038_gateway_conversation_background.sql",

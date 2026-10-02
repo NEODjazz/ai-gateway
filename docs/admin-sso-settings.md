@@ -1,15 +1,16 @@
 # Настройка browser SSO в UI
 
 Администратор открывает **System → Settings → Single sign-on**. Browser login
-использует OIDC authorization code с PKCE S256. Поддерживаются IdP с RS256/ES256
-access token, например Microsoft Entra ID или Keycloak. Service principal для
+использует OIDC authorization code с PKCE S256 и nonce. Managed SSO проверяет
+RS256/ES256 ID token для browser client, независимо от resource access tokens API. Service principal для
 доступа к Azure inference настраивается отдельно в Providers / Credentials.
 
 ## Подготовка
 
 - Auth использует PostgreSQL; сначала примените additive migration
-  `repos/auth/migrations/postgres/014_sso_settings.sql`, затем обновляйте Auth.
-  Миграция также включена в `charts/postgres` ConfigMap **data**.
+  `repos/auth/migrations/postgres/014_sso_settings.sql` и
+  `repos/auth/migrations/postgres/015_sso_sessions.sql`, затем обновляйте Auth.
+  Миграции также включены в `charts/postgres` ConfigMap **data**.
 - `CREDENTIAL_ENCRYPTION_KEY` должен содержать минимум 32 байта. Gateway и все
   реплики Auth используют одинаковое значение для шифрования конфигурации.
   Ключи AES-GCM для SSO, MCP, logging и A2A выводятся с отдельными domain separators;
@@ -61,14 +62,19 @@ keys сохраняются; concurrent edit перечитывается, а н
 
 1. Введите точный issuer. **Discover endpoints** загружает authorization endpoint,
    token endpoint и JWKS. Discovery не выполняет вход и не активирует профиль.
-   Issuer и эти endpoints должны иметь один origin. Используйте HTTPS; HTTP
+   Endpoints должны иметь origin issuer либо быть явно перечислены в
+   **Trusted additional endpoint origins** (не более восьми origins без paths).
+   Discovery не добавляет разрешения автоматически; redirects при token/JWKS
+   загрузке не выполняются. Используйте HTTPS; HTTP
    outbound допускается только для `localhost`, `127.0.0.1` и `::1` в тестах.
-2. Укажите client ID, **audience access token** и scopes, включая `openid`.
-   Audience ресурса может отличаться от client ID приложения browser login.
-   Для Entra используйте tenant-specific v2 issuer и scope зарегистрированного
-   Gateway API с v2 access tokens (`requestedAccessTokenVersion: 2`). Версия и
-   issuer должны совпадать с реально выдаваемым access token. Claim `roles`
-   должен присутствовать именно в access token.
+2. Укажите browser client ID и scopes, включая `openid`. Audience ID token и
+   directory binding автоматически равен client ID; resource audience API
+   настраивается независимо. Для Entra используйте конкретный tenant-specific
+   v2 issuer и app roles browser-приложения в ID token. Для Keycloak mapper ролей
+   browser client должен иметь `id.token.claim: true` (пример в
+   `examples/identity/keycloak-realm.json`). Opaque access token допустим:
+   он не является browser identity и не сохраняется в сессии. Если ID token
+   содержит `at_hash`, он сверяется с полученным access token.
 3. Укажите roles claim path и явную карту внешних ролей в `user`, `developer`,
    `team_admin`, `admin`. Для Keycloak профиль использует
    `resource_access.gateway.roles`; для Entra app roles обычно `roles`.
@@ -87,7 +93,7 @@ keys сохраняются; concurrent edit перечитывается, а н
 
 В **Users** предварительно создайте active пользователя и назначьте approved
 roles. Форма **Bind identity to a Gateway user** привязывает точные
-`issuer + sub + audience` к internal user ID. Email не используется для привязки,
+`issuer + sub + browser client ID` к internal user ID. Email не используется для привязки,
 автоматического создания пользователей и назначения ролей нет. Ownership
 существующего subject неизменяем. Пустые allowed models/tools запрещают inference
 и tools; для доступа к моделям выдайте явные grants. Изменение существующей
@@ -96,7 +102,7 @@ roles. Форма **Bind identity to a Gateway user** привязывает т�
 Нажмите **Test sign-in**, войдите в открывшейся вкладке как тот же internal user,
 которому принадлежит текущий admin key, и вернитесь к **Refresh test status**.
 Проверка имеет срок пять минут и требует актуальную роль `admin`, подписанный
-access token, точные issuer/audience и действующую directory binding. Тест не
+ID token, nonce, точные issuer/client audience и действующую directory binding. Тест не
 создаёт активную browser session и не заменяет текущий вход администратора.
 
 После статуса `passed` нажмите **Activate SSO**. При активации Auth повторно
@@ -106,30 +112,52 @@ access token, точные issuer/audience и действующую directory b
 
 ## Действие на систему и восстановление
 
-Активация меняет JWT issuer, audience и role policy **для всего Gateway**, включая
-inference и внешние приложения. В текущем контракте поддерживается один issuer;
-multi-issuer federation отсутствует. Virtual keys сохраняют независимый доступ.
+Browser SSO и API JWT trust независимы. Активация, отключение и rollback browser
+профиля не меняют issuer, audience и role policy API-клиентов. В текущем API
+контракте поддерживается один issuer; multi-issuer federation отсутствует.
+Virtual keys сохраняют независимый доступ. При обновлении уже сохранённой managed
+конфигурации её прежнее глобальное API trust один раз копируется в отдельную
+зашифрованную настройку с revision CAS. Это сохраняет действующих API-клиентов;
+последующие изменения browser профиля не меняют эту настройку. Новые установки
+используют environment API JWT trust независимо от browser профиля.
 Все Auth/Gateway реплики читают общий PostgreSQL document; настройки не требуют
 рестарта или правки ConfigMap после подготовки runtime dependencies.
 
 **Disable browser SSO** отключает browser login и cookies, сохраняя JWT trust для
 других клиентов. **Roll back** восстанавливает один предыдущий managed profile;
-rollback первой активации возвращает environment JWT/browser configuration.
+rollback первой активации возвращает environment browser configuration.
 Хранится только один предыдущий профиль, а не полная история. При недоступности
 Auth/БД или неверном encryption key JWT/cookie вход закрывается. Virtual key не
 зависит от SSO profile и позволяет восстановить настройку при исправном Auth;
 stored keys также требуют доступной БД. Полный отказ Auth не обходится этим
-механизмом. Logout работает и при сбое Auth.
+механизмом. Logout удаляет cookie даже при сбое Auth; если server-side revocation
+не удалось, возвращает ошибку вместо подтверждения отзыва.
 
 Без managed active profile прежние environment SSO/JWT настройки продолжают
 использоваться. Новый профиль хранится AES-GCM encrypted в одной bounded строке
 `auth_sso_settings`: active, previous, draft и одна test attempt. JWKS verifier
-cache хранит один активный профиль на реплику, сетевой I/O выполняется вне lock.
+cache для отдельного API trust хранит один verifier на реплику. Browser
+ID-token verifier используется во время login; сессии не требуют JWKS при
+каждом запросе.
 
-Сессия использует encrypted HttpOnly cookie с bounded lifetime и лимитом access
-token 2800 байт; refresh token не хранится. Время входа ограничено меньшим из
-configured TTL и token expiry. При истечении нужен повторный вход; oversized token
-отклоняется. SAML, refresh sessions и автоматический JIT provisioning сюда не входят.
+Managed сессия использует encrypted HttpOnly cookie с случайным opaque handle.
+В PostgreSQL сохраняются только hash handle и зашифрованная минимальная identity;
+ID/access/refresh tokens не сохраняются. Lifetime равен configured TTL (60–86400
+секунд) и не зависит от оставшегося времени ID/access token. Directory grants
+и approved roles проверяются при каждом запросе. Logout отзывает session во
+всех репликах; disable/смена профиля закрывают вход. Rollback меняет session key
+и не восстанавливает старые сессии. Background jobs также перепроверяют сессию.
+
+Admission сериализован между репликами: до 10000 сессий суммарно, 1000 на профиль,
+16 на пользователя. Истекшие записи удаляются при admission; заполнение активными
+сессиями возвращает unavailable. Nonce replay state хранится 10 минут отдельно
+от sessions, в пределах 20000 записей, поэтому logout не разрешает повторный
+callback. ID token должен быть выдан не ранее пяти минут назад. Старый
+environment-only browser flow временно сохраняет прежний access-token контракт;
+для нового ID-token/session flow перенесите настройку в managed UI. Существующий
+managed профиль нужно пересохранить с client audience и повторить binding/test;
+прежняя API binding не заменяется автоматически. SAML, refresh sessions и
+автоматический JIT provisioning сюда не входят.
 
 ## Проверки
 
@@ -142,7 +170,5 @@ API-key recovery, cookie rotation, outage fail-closed и отсутствие se
 disable и rollback на отдельной тестовой БД; этот сценарий входит в CI.
 
 Контракты IdP: [Microsoft OIDC endpoints](https://learn.microsoft.com/en-us/entra/identity-platform/v2-protocols-oidc),
-[Microsoft access token claims](https://learn.microsoft.com/en-us/entra/identity-platform/access-token-claims-reference).
-[Версия access token](https://learn.microsoft.com/en-us/entra/identity-platform/access-tokens)
-задаётся зарегистрированным API.
+[Microsoft ID token claims](https://learn.microsoft.com/en-us/entra/identity-platform/id-token-claims-reference).
 Реальный Entra tenant в локальных проверках не использовался.

@@ -369,6 +369,17 @@ Keycloak/OpenWebUI interoperability в этой документальной о�
 
 ## SSO и доступ нескольких организаций: оценка 2026-10-02
 
+Статус реализации: первый этап managed browser SSO отделяет API trust, проверяет
+ID token/nonce/PKCE и использует bounded PostgreSQL sessions с revocation и
+актуальными directory grants. Старое managed API trust переносится с CAS;
+browser client audience и resource audience разделены. Требуется migration 015
+и повторная binding/test для managed профилей прежнего access-token flow.
+Unit/race и полный PostgreSQL integration suite прошли; реальный Keycloak
+callback, logout/replay, rollback, независимость API и OpenWebUI проверены.
+Environment-only legacy browser flow остаётся переходным контрактом, описанным
+в [SSO настройках](admin-sso-settings.md). Tenant boundary, org admin, несколько
+connections/API issuers и новый UI находятся в следующем этапе этого Goal.
+
 Основа этой дополнительной оценки — код Gateway на commit `4ded04d1`.
 Ниже перечислены требования следующего этапа, а не уже реализованные возможности.
 Browser SSO, доверие API JWT и изоляция организаций — отдельные контракты; наличие

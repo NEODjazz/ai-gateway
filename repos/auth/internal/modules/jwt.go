@@ -162,7 +162,7 @@ func newJWTVerifier(config JWTAuthConfig) (*jwtVerifier, error) {
 	if err := config.validate(); err != nil {
 		return nil, err
 	}
-	return &jwtVerifier{config: config, client: &http.Client{Timeout: 5 * time.Second}, keys: map[string]verificationKey{}, now: time.Now}, nil
+	return &jwtVerifier{config: config, client: &http.Client{Timeout: 5 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, keys: map[string]verificationKey{}, now: time.Now}, nil
 }
 
 func (v *jwtVerifier) Ready(ctx context.Context) error {

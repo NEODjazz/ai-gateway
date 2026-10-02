@@ -12,6 +12,7 @@ import (
 )
 
 type SSOProfileConfig struct {
+	EndpointOrigins   []string          `json:"endpoint_origins,omitempty"`
 	Issuer            string            `json:"issuer"`
 	Audience          string            `json:"audience"`
 	JWKSURL           string            `json:"jwks_url"`
@@ -75,10 +76,37 @@ type PrivateSSOTest struct {
 	} `json:"attempt"`
 }
 type SSOTestVerification struct {
-	ProfileID string `json:"profile_id"`
-	Ticket    string `json:"ticket"`
-	Token     string `json:"token"`
+	ProfileID   string `json:"profile_id"`
+	Ticket      string `json:"ticket"`
+	Token       string `json:"token"`
+	Nonce       string `json:"nonce"`
+	AccessToken string `json:"access_token,omitempty"`
 }
+type SSOBrowserLogin struct {
+	ProfileID   string `json:"profile_id"`
+	Token       string `json:"token"`
+	Nonce       string `json:"nonce"`
+	AccessToken string `json:"access_token,omitempty"`
+}
+type SSOBrowserSession struct {
+	Token     string `json:"token"`
+	ExpiresAt int64  `json:"expires_at"`
+}
+type SSOSessionManagementClient interface {
+	CreateSSOBrowserSession(context.Context, ManagementAudit, SSOBrowserLogin) (SSOBrowserSession, error)
+	RevokeSSOBrowserSession(context.Context, ManagementAudit, string) error
+}
+
+func (c *RemoteManagementClient) CreateSSOBrowserSession(ctx context.Context, audit ManagementAudit, input SSOBrowserLogin) (SSOBrowserSession, error) {
+	return managementCall[SSOBrowserLogin, SSOBrowserSession](ctx, c, http.MethodPost, "/internal/v1/sso/sessions", audit, input)
+}
+func (c *RemoteManagementClient) RevokeSSOBrowserSession(ctx context.Context, audit ManagementAudit, token string) error {
+	_, err := managementCall[map[string]string, struct {
+		Revoked bool `json:"revoked"`
+	}](ctx, c, http.MethodPost, "/internal/v1/sso/sessions/revoke", audit, map[string]string{"token": token})
+	return err
+}
+
 type SSOManagementClient interface {
 	GetSSOSettings(context.Context, ManagementAudit) (SSOSettingsView, error)
 	SaveSSODraft(context.Context, ManagementAudit, SSODraftInput) (SSOSettingsView, error)
@@ -184,7 +212,8 @@ func (h Handler) DiscoverSSO(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var input struct {
-		Issuer string `json:"issuer"`
+		Issuer          string   `json:"issuer"`
+		EndpointOrigins []string `json:"endpoint_origins,omitempty"`
 	}
 	if !decodeDirectoryJSON(w, r, &input) {
 		return
@@ -193,12 +222,29 @@ func (h Handler) DiscoverSSO(w http.ResponseWriter, r *http.Request) {
 		writeSSOFailure(w, nil)
 		return
 	}
-	metadata, err := h.ssoManagement.DiscoverSSO(r.Context(), managementAudit(req), input.Issuer)
+	var metadata SSODiscovery
+	var err error
+	if len(input.EndpointOrigins) > 0 {
+		client, ok := h.ssoManagement.(interface {
+			DiscoverSSOWithOrigins(context.Context, ManagementAudit, string, []string) (SSODiscovery, error)
+		})
+		if !ok {
+			writeSSOFailure(w, nil)
+			return
+		}
+		metadata, err = client.DiscoverSSOWithOrigins(r.Context(), managementAudit(req), input.Issuer, input.EndpointOrigins)
+	} else {
+		metadata, err = h.ssoManagement.DiscoverSSO(r.Context(), managementAudit(req), input.Issuer)
+	}
 	if err != nil {
 		writeSSOFailure(w, err)
 		return
 	}
 	writeJSON(w, 200, metadata)
+}
+
+func (c *RemoteManagementClient) DiscoverSSOWithOrigins(ctx context.Context, audit ManagementAudit, issuer string, origins []string) (SSODiscovery, error) {
+	return managementCall[map[string]any, SSODiscovery](ctx, c, http.MethodPost, "/internal/v1/sso/discover", audit, map[string]any{"issuer": issuer, "endpoint_origins": origins})
 }
 func (h Handler) StartSSOTest(w http.ResponseWriter, r *http.Request) {
 	req, ok := h.authorizeDirectory(w, r, "__global__")
@@ -270,7 +316,7 @@ func (p *PrivateSSOProfile) browser(test bool) (*BrowserSSO, error) {
 	if test {
 		redirect = strings.TrimSuffix(redirect, "/auth/sso/callback") + "/auth/sso/test/callback"
 	}
-	return NewBrowserSSO(BrowserSSOConfig{AuthorizationURL: p.AuthorizationURL, TokenURL: p.TokenURL, ClientID: p.ClientID, ClientSecret: p.ClientSecret, RedirectURL: redirect, Scopes: p.Scopes, SessionKey: key, SessionTTL: time.Duration(p.SessionTTLSeconds) * time.Second})
+	return NewBrowserSSO(BrowserSSOConfig{ProfileID: p.ID, AuthorizationURL: p.AuthorizationURL, TokenURL: p.TokenURL, ClientID: p.ClientID, ClientSecret: p.ClientSecret, RedirectURL: redirect, Scopes: p.Scopes, SessionKey: key, SessionTTL: time.Duration(p.SessionTTLSeconds) * time.Second})
 }
 func (h Handler) resolveBrowserSSO(r *http.Request) (*BrowserSSO, error) {
 	if h.ssoManagement == nil {

@@ -125,6 +125,19 @@ func (m AuthModule) Ready(ctx context.Context) error {
 			return err
 		}
 	}
+	if m.sso != nil {
+		state, _, err := m.sso.Load(ctx)
+		if err != nil {
+			return err
+		}
+		if state.Active != nil && state.Active.Enabled {
+			if store, ok := m.sso.store.(interface{ SSOSessionsReady(context.Context) error }); ok {
+				if err := store.SSOSessionsReady(ctx); err != nil {
+					return err
+				}
+			}
+		}
+	}
 	current, err := m.currentJWTModule(ctx)
 	if err != nil {
 		return err
@@ -154,6 +167,9 @@ func (m AuthModule) Handle(ctx context.Context, req *RequestContext) error {
 	req.JWTIdentity = nil
 	if strings.TrimSpace(req.APIKey) == "" {
 		return ErrUnauthorized
+	}
+	if strings.HasPrefix(req.APIKey, ssoSessionPrefix) {
+		return m.authorizeSSOBrowserSession(ctx, req)
 	}
 	if m.store != nil {
 		key, found, err := m.store.Lookup(ctx, credentialLookupHash(req.APIKey, m.keyHashSecret))
@@ -255,6 +271,9 @@ func (m AuthModule) authorizeJWTConfigured(ctx context.Context, req *RequestCont
 	claims, err := m.jwtVerifier.Verify(ctx, req.APIKey)
 	if err != nil {
 		return err
+	}
+	if _, browserToken := claims.Raw["nonce"]; browserToken {
+		return ErrUnauthorized
 	}
 	if m.jwtConfig.IdentityMode == "directory" {
 		return m.authorizeJWTPrincipal(ctx, req, claims)

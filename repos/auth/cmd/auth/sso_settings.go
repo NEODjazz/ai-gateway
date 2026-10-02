@@ -29,7 +29,7 @@ func registerSSORoutes(mux *http.ServeMux, module *modules.AuthModule, secret st
 		if !decodeManagementJSON(w, r, &input) {
 			return
 		}
-		view, err := module.SSOManager().SaveDraft(r.Context(), input)
+		view, err := module.SaveSSODraft(r.Context(), input)
 		if err == nil {
 			logManagementAction(r, "sso.draft.save", "browser-sso")
 		}
@@ -37,12 +37,13 @@ func registerSSORoutes(mux *http.ServeMux, module *modules.AuthModule, secret st
 	}))
 	mux.HandleFunc("POST /internal/v1/sso/discover", admin(func(w http.ResponseWriter, r *http.Request) {
 		var input struct {
-			Issuer string `json:"issuer"`
+			Issuer          string   `json:"issuer"`
+			EndpointOrigins []string `json:"endpoint_origins,omitempty"`
 		}
 		if !decodeManagementJSON(w, r, &input) {
 			return
 		}
-		metadata, err := modules.DiscoverSSO(r.Context(), input.Issuer)
+		metadata, err := modules.DiscoverSSO(r.Context(), input.Issuer, input.EndpointOrigins)
 		writeSSOResult(w, metadata, err)
 	}))
 	mux.HandleFunc("POST /internal/v1/sso/test", admin(func(w http.ResponseWriter, r *http.Request) {
@@ -89,18 +90,40 @@ func registerSSORoutes(mux *http.ServeMux, module *modules.AuthModule, secret st
 	}))
 	mux.HandleFunc("POST /internal/v1/sso/verify-test", managementAuthorized(secret, func(w http.ResponseWriter, r *http.Request) {
 		var input struct {
-			ProfileID string `json:"profile_id"`
-			Ticket    string `json:"ticket"`
-			Token     string `json:"token"`
+			ProfileID   string `json:"profile_id"`
+			Ticket      string `json:"ticket"`
+			Token       string `json:"token"`
+			Nonce       string `json:"nonce"`
+			AccessToken string `json:"access_token,omitempty"`
 		}
 		if !decodeManagementJSON(w, r, &input) {
 			return
 		}
-		err := module.VerifySSOTest(r.Context(), input.ProfileID, input.Ticket, input.Token)
+		err := module.VerifySSOTest(r.Context(), input.ProfileID, input.Ticket, input.Token, input.Nonce, input.AccessToken)
 		if err == nil {
 			logManagementAction(r, "sso.test.passed", "browser-sso")
 		}
 		writeSSOResult(w, map[string]bool{"verified": err == nil}, err)
+	}))
+	mux.HandleFunc("POST /internal/v1/sso/sessions", managementAuthorized(secret, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		var input modules.SSOBrowserLogin
+		if !decodeManagementJSON(w, r, &input) {
+			return
+		}
+		session, err := module.CreateSSOBrowserSession(r.Context(), input)
+		writeSSOResult(w, session, err)
+	}))
+	mux.HandleFunc("POST /internal/v1/sso/sessions/revoke", managementAuthorized(secret, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		var input struct {
+			Token string `json:"token"`
+		}
+		if !decodeManagementJSON(w, r, &input) {
+			return
+		}
+		err := module.RevokeSSOBrowserSession(r.Context(), input.Token)
+		writeSSOResult(w, map[string]bool{"revoked": err == nil}, err)
 	}))
 }
 

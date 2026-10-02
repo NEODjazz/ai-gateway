@@ -27,6 +27,7 @@ var (
 
 // SSOProfileConfig contains public configuration, never client/session secrets.
 type SSOProfileConfig struct {
+	EndpointOrigins   []string          `json:"endpoint_origins,omitempty"`
 	Issuer            string            `json:"issuer"`
 	Audience          string            `json:"audience"`
 	JWKSURL           string            `json:"jwks_url"`
@@ -84,12 +85,16 @@ type SSOAttempt struct {
 }
 
 type SSOSettingsState struct {
-	SchemaVersion int         `json:"schema_version"`
-	Active        *SSOProfile `json:"active,omitempty"`
-	Previous      *SSOProfile `json:"previous,omitempty"`
-	Draft         *SSOProfile `json:"draft,omitempty"`
-	CanRollback   bool        `json:"can_rollback"`
-	Attempt       *SSOAttempt `json:"attempt,omitempty"`
+	SchemaVersion int `json:"schema_version"`
+	// Existing managed API trust is captured once when upgrading an old document.
+	// Browser lifecycle operations never modify this independent configuration.
+	APITrustSeparated bool              `json:"api_trust_separated"`
+	APITrust          *SSOProfileConfig `json:"api_trust,omitempty"`
+	Active            *SSOProfile       `json:"active,omitempty"`
+	Previous          *SSOProfile       `json:"previous,omitempty"`
+	Draft             *SSOProfile       `json:"draft,omitempty"`
+	CanRollback       bool              `json:"can_rollback"`
+	Attempt           *SSOAttempt       `json:"attempt,omitempty"`
 }
 
 type SSOSettingsStore interface {
@@ -165,7 +170,7 @@ func (m *SSOManager) Load(ctx context.Context) (SSOSettingsState, int64, error) 
 			return SSOSettingsState{}, 0, ErrSSOUnavailable
 		}
 		if revision == 0 && len(payload) == 0 {
-			return SSOSettingsState{SchemaVersion: 1}, 0, nil
+			return SSOSettingsState{SchemaVersion: 1, APITrustSeparated: true}, 0, nil
 		}
 		if revision < 1 || len(payload) > 64<<10 {
 			return SSOSettingsState{}, 0, ErrSSOUnavailable
@@ -182,7 +187,15 @@ func (m *SSOManager) Load(ctx context.Context) (SSOSettingsState, int64, error) 
 		if json.Unmarshal(plain, &state) != nil || state.SchemaVersion != 1 {
 			return SSOSettingsState{}, 0, ErrSSOUnavailable
 		}
-		if legacy && m.aead != nil {
+		migrateTrust := !state.APITrustSeparated
+		if migrateTrust {
+			if state.Active != nil {
+				config := state.Active.SSOProfileConfig
+				state.APITrust = &config
+			}
+			state.APITrustSeparated = true
+		}
+		if (legacy || migrateTrust) && m.aead != nil {
 			if err := m.save(ctx, revision, state); errors.Is(err, ErrSSOConflict) {
 				continue
 			} else if err != nil {
@@ -253,9 +266,12 @@ func (p SSOProfileConfig) Validate() error {
 	if !ok || !validJWTIdentityValue(p.Audience, 256) || !validJWTIdentityValue(p.ClientID, 512) {
 		return ErrSSOConfiguration
 	}
+	if !validSSOEndpointOrigins(p.EndpointOrigins) {
+		return ErrSSOConfiguration
+	}
 	for _, endpoint := range []string{p.JWKSURL, p.AuthorizationURL, p.TokenURL} {
 		u, valid := ssoEndpoint(endpoint)
-		if !valid || u.Scheme != issuer.Scheme || !strings.EqualFold(u.Host, issuer.Host) {
+		if !valid || !trustedSSOEndpoint(issuer, u, p.EndpointOrigins) {
 			return ErrSSOConfiguration
 		}
 	}
@@ -278,6 +294,32 @@ func (p SSOProfileConfig) Validate() error {
 	return p.jwtConfig().validate()
 }
 
+func validSSOEndpointOrigins(origins []string) bool {
+	if len(origins) > 8 {
+		return false
+	}
+	for _, raw := range origins {
+		u, ok := ssoEndpoint(raw)
+		if !ok || u.Path != "" && u.Path != "/" {
+			return false
+		}
+	}
+	return true
+}
+
+func trustedSSOEndpoint(issuer, endpoint *url.URL, origins []string) bool {
+	if issuer.Scheme == endpoint.Scheme && strings.EqualFold(issuer.Host, endpoint.Host) {
+		return true
+	}
+	for _, raw := range origins {
+		u, ok := ssoEndpoint(raw)
+		if ok && u.Scheme == endpoint.Scheme && strings.EqualFold(u.Host, endpoint.Host) {
+			return true
+		}
+	}
+	return false
+}
+
 func (p SSOProfileConfig) jwtConfig() JWTAuthConfig {
 	return JWTAuthConfig{Issuer: p.Issuer, Audience: p.Audience, JWKSURL: p.JWKSURL, JWKSCacheTTL: 5 * time.Minute, ClockSkew: 30 * time.Second, UserIDClaim: "sub", RolesClaim: p.RolesClaim, IdentityMode: "directory", RoleMappings: p.RoleMappings}
 }
@@ -293,6 +335,9 @@ func ssoRandom() (string, error) {
 func (m *SSOManager) SaveDraft(ctx context.Context, input SSODraftInput) (SSOSettingsView, error) {
 	if err := input.SSOProfileConfig.Validate(); err != nil {
 		return SSOSettingsView{}, err
+	}
+	if input.Audience != input.ClientID {
+		return SSOSettingsView{}, ErrSSOConfiguration
 	}
 	state, revision, err := m.Load(ctx)
 	if err != nil {
@@ -370,22 +415,28 @@ func (m *SSOManager) JWTModule(ctx context.Context, base AuthModule) (AuthModule
 	if err != nil {
 		return base, ErrJWTUnavailable
 	}
-	if state.Active == nil {
+	if state.APITrust == nil {
 		base.sso = nil
 		return base, nil
 	}
-	if state.Active.Validate() != nil {
+	if state.APITrust.Validate() != nil {
 		return base, ErrJWTUnavailable
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.profileID != state.Active.ID || m.verifier == nil {
-		verifier, err := newJWTVerifier(state.Active.jwtConfig())
+	payload, err := json.Marshal(state.APITrust)
+	if err != nil {
+		return base, ErrJWTUnavailable
+	}
+	digest := sha256.Sum256(payload)
+	trustID := hex.EncodeToString(digest[:])
+	if m.profileID != trustID || m.verifier == nil {
+		verifier, err := newJWTVerifier(state.APITrust.jwtConfig())
 		if err != nil {
 			return base, ErrJWTUnavailable
 		}
-		m.profileID, m.verifier = state.Active.ID, verifier
+		m.profileID, m.verifier = trustID, verifier
 	}
-	base.jwtConfig, base.jwtVerifier, base.sso = state.Active.jwtConfig(), m.verifier, nil
+	base.jwtConfig, base.jwtVerifier, base.sso = state.APITrust.jwtConfig(), m.verifier, nil
 	return base, nil
 }

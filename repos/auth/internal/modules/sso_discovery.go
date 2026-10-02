@@ -16,7 +16,17 @@ type SSODiscovery struct {
 	JWKSURL          string `json:"jwks_url"`
 }
 
-func DiscoverSSO(ctx context.Context, issuer string) (SSODiscovery, error) {
+func DiscoverSSO(ctx context.Context, issuer string, allowed ...[]string) (SSODiscovery, error) {
+	origins := []string{}
+	if len(allowed) > 1 {
+		return SSODiscovery{}, ErrSSOConfiguration
+	}
+	if len(allowed) == 1 {
+		origins = allowed[0]
+	}
+	if !validSSOEndpointOrigins(origins) {
+		return SSODiscovery{}, ErrSSOConfiguration
+	}
 	u, valid := ssoEndpoint(issuer)
 	if !valid {
 		return SSODiscovery{}, ErrSSOConfiguration
@@ -58,7 +68,7 @@ func DiscoverSSO(ctx context.Context, issuer string) (SSODiscovery, error) {
 	for _, raw := range []string{metadata.Authorization, metadata.Token, metadata.JWKS} {
 		endpoint, ok := ssoEndpoint(raw)
 		original, _ := ssoEndpoint(issuer)
-		if !ok || endpoint.Scheme != original.Scheme || !strings.EqualFold(endpoint.Host, original.Host) {
+		if !ok || !trustedSSOEndpoint(original, endpoint, origins) {
 			return SSODiscovery{}, ErrSSOConfiguration
 		}
 	}

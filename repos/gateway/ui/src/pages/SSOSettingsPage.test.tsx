@@ -5,11 +5,24 @@ import { AuthProvider } from "../auth/AuthContext";
 import { SSOSettingsPage } from "./SSOSettingsPage";
 
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json" } });
-const profile = { issuer: "https://idp.example", audience: "gateway", client_id: "console", authorization_url: "https://idp.example/authorize", token_url: "https://idp.example/token", jwks_url: "https://idp.example/jwks", redirect_url: "https://gateway.example/auth/sso/callback", scopes: ["openid", "profile"], roles_claim: "roles", role_mappings: { "gateway-admin": "admin" }, session_ttl_seconds: 3600, client_secret_configured: true };
+const profile = { issuer: "https://idp.example", audience: "console", client_id: "console", authorization_url: "https://idp.example/authorize", token_url: "https://idp.example/token", jwks_url: "https://idp.example/jwks", redirect_url: "https://gateway.example/auth/sso/callback", scopes: ["openid", "profile"], roles_claim: "roles", role_mappings: { "gateway-admin": "admin" }, session_ttl_seconds: 3600, client_secret_configured: true };
 const settings = { revision: 1, active: null, draft: profile, can_rollback: false, test_status: "not_started", key_session: true };
 function show() { sessionStorage.setItem("ai-gateway.admin-token", "fixture"); return render(<MemoryRouter><AuthProvider><SSOSettingsPage /></AuthProvider></MemoryRouter>); }
 
 describe("SSOSettingsPage", () => {
+	it("saves the browser client audience independently of legacy API audience and explains independent trust", async () => {
+		let body: Record<string, unknown> | undefined;
+		vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, options) => {
+			if (options?.method === "PUT") { body = JSON.parse(String(options.body)); return json(settings); }
+			return json({ ...settings, draft: { ...profile, audience: "legacy-api-resource" } });
+		});
+		show(); await screen.findByDisplayValue(profile.issuer);
+		expect(screen.getByText(/Browser SSO settings are independent of API JWT trust/)).toBeInTheDocument();
+		await userEvent.type(screen.getByLabelText("Trusted additional endpoint origins"), "https://tokens.example, https://keys.example");
+		await userEvent.click(screen.getByRole("button", { name: "Save draft" }));
+		await waitFor(() => expect(body?.audience).toBe(profile.client_id));
+		expect(body?.endpoint_origins).toEqual(["https://tokens.example", "https://keys.example"]);
+	});
   it("disables activation as soon as the verification proof expires", async () => {
     vi.useFakeTimers();
     let view: ReturnType<typeof show> | undefined;
@@ -99,7 +112,7 @@ describe("SSOSettingsPage", () => {
     await userEvent.type(within(form).getByLabelText("Internal user ID"), "admin-user");
     await userEvent.type(within(form).getByLabelText("IdP subject (sub)"), "immutable-subject");
     await userEvent.click(within(form).getByRole("button", { name: "Save principal binding" }));
-    await waitFor(() => expect(binding).toEqual({ issuer: profile.issuer, audience: "gateway", subject: "immutable-subject", user_id: "admin-user", enabled: true, allowed_models: [], allowed_tools: [] }));
+    await waitFor(() => expect(binding).toEqual({ issuer: profile.issuer, audience: "console", subject: "immutable-subject", user_id: "admin-user", enabled: true, allowed_models: [], allowed_tools: [] }));
   });
   it("shows backend failures without a false configured state", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(json({ error: { message: "Auth unavailable" } }, 503));

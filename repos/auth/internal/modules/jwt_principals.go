@@ -259,6 +259,22 @@ func isPrincipalForeignKeyViolation(err error) bool {
 // management channel. Its identity and roles come from a previously authorized
 // durable job, never from a public request header or provider metadata.
 func (m AuthModule) ReauthorizeJWTPrincipal(ctx context.Context, req *RequestContext) error {
+	if ref := req.JWTIdentity; ref != nil && ref.SessionHash != "" {
+		if len(ref.SessionHash) != 64 || ref.ConnectionID == "" || m.sso == nil {
+			return ErrUnauthorized
+		}
+		if _, err := hex.DecodeString(ref.SessionHash); err != nil {
+			return ErrUnauthorized
+		}
+		fresh := RequestContext{}
+		if err := m.authorizeSSOSessionHash(ctx, &fresh, ref.SessionHash); err != nil {
+			return err
+		}
+		if fresh.UserID != req.UserID || fresh.CredentialID != req.CredentialID || fresh.JWTIdentity.ConnectionID != ref.ConnectionID || fresh.JWTIdentity.Issuer != ref.Issuer || fresh.JWTIdentity.Subject != ref.Subject || fresh.JWTIdentity.Audience != ref.Audience || fresh.JWTIdentity.PolicyDigest != ref.PolicyDigest || !slices.Equal(fresh.Roles, req.Roles) {
+			return ErrUnauthorized
+		}
+		return nil
+	}
 	if m.sso != nil {
 		current, err := m.currentJWTModule(ctx)
 		if err != nil {

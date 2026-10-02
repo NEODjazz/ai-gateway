@@ -41,7 +41,7 @@ func (s *memorySSOSettings) SaveSSOSettings(_ context.Context, revision int64, p
 	return nil
 }
 func testSSOConfig() SSOProfileConfig {
-	return SSOProfileConfig{Issuer: "https://idp.example/tenant", Audience: "gateway", JWKSURL: "https://idp.example/jwks", AuthorizationURL: "https://idp.example/authorize", TokenURL: "https://idp.example/token", ClientID: "console", RedirectURL: "https://gateway.example/auth/sso/callback", Scopes: []string{"openid", "profile"}, RolesClaim: "roles", RoleMappings: map[string]string{"gateway-admin": "admin", "gateway-user": "user"}, SessionTTLSeconds: 3600}
+	return SSOProfileConfig{Issuer: "https://idp.example/tenant", Audience: "console", JWKSURL: "https://idp.example/jwks", AuthorizationURL: "https://idp.example/authorize", TokenURL: "https://idp.example/token", ClientID: "console", RedirectURL: "https://gateway.example/auth/sso/callback", Scopes: []string{"openid", "profile"}, RolesClaim: "roles", RoleMappings: map[string]string{"gateway-admin": "admin", "gateway-user": "user"}, SessionTTLSeconds: 3600}
 }
 func testSSOManager(t *testing.T) (*SSOManager, *memorySSOSettings) {
 	t.Helper()
@@ -174,6 +174,7 @@ func TestSSOTestActivationDirectoryRevocationAndRollback(t *testing.T) {
 	store.principal.Issuer = config.Issuer
 	store.principal.Roles = []string{"admin"}
 	module.sso = manager
+	store.principal.Audience = config.ClientID
 	view, err := manager.SaveDraft(ctx, SSODraftInput{SSOProfileConfig: config})
 	if err != nil {
 		t.Fatal(err)
@@ -185,9 +186,10 @@ func TestSSOTestActivationDirectoryRevocationAndRollback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	claims := map[string]any{"iss": config.Issuer, "aud": "gateway", "sub": "external-subject", "roles": []string{"gateway-admin"}, "exp": time.Now().Add(time.Hour).Unix()}
+	nonce := strings.Repeat("n", 43)
+	claims := map[string]any{"iat": time.Now().Unix(), "nonce": nonce, "iss": config.Issuer, "aud": config.ClientID, "sub": "external-subject", "roles": []string{"gateway-admin"}, "exp": time.Now().Add(time.Hour).Unix()}
 	token := signRS256JWT(t, "test", key, claims)
-	if err := module.VerifySSOTest(ctx, view.Draft.ID, ticket, token); !errors.Is(err, ErrUnauthorized) {
+	if err := module.VerifySSOTest(ctx, view.Draft.ID, ticket, token, nonce); !errors.Is(err, ErrUnauthorized) {
 		t.Fatal("another admin's proof accepted")
 	}
 	view, _ = manager.View(ctx)
@@ -195,10 +197,10 @@ func TestSSOTestActivationDirectoryRevocationAndRollback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := module.VerifySSOTest(ctx, view.Draft.ID, ticket, token); err != nil {
+	if err := module.VerifySSOTest(ctx, view.Draft.ID, ticket, token, nonce); err != nil {
 		t.Fatal(err)
 	}
-	if err := module.VerifySSOTest(ctx, view.Draft.ID, ticket, token); !errors.Is(err, ErrSSOConfiguration) {
+	if err := module.VerifySSOTest(ctx, view.Draft.ID, ticket, token, nonce); !errors.Is(err, ErrSSOConfiguration) {
 		t.Fatal("proof replay accepted")
 	}
 	view, _ = manager.View(ctx)
@@ -215,8 +217,8 @@ func TestSSOTestActivationDirectoryRevocationAndRollback(t *testing.T) {
 		t.Fatal("activation state invalid")
 	}
 	req := RequestContext{APIKey: token}
-	if err := module.Handle(ctx, &req); err != nil || req.UserID != "directory-user" {
-		t.Fatalf("managed JWT rejected: %v", err)
+	if err := module.Handle(ctx, &req); !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("browser configuration changed independent API JWT trust: %v", err)
 	}
 	var wg sync.WaitGroup
 	for range 8 {
@@ -233,8 +235,8 @@ func TestSSOTestActivationDirectoryRevocationAndRollback(t *testing.T) {
 	if err != nil || view.Active.Enabled {
 		t.Fatal("disable failed")
 	}
-	if err := module.Handle(ctx, &RequestContext{APIKey: token}); err != nil {
-		t.Fatal("browser disable revoked inference JWT trust")
+	if err := module.Handle(ctx, &RequestContext{APIKey: token}); !errors.Is(err, ErrUnauthorized) {
+		t.Fatal("browser disable changed independent API JWT trust")
 	}
 	view, err = module.ChangeSSO(ctx, "rollback", view.Revision, "directory-user")
 	if err != nil || !view.Active.Enabled {
@@ -324,6 +326,9 @@ func TestSSOSharedKeyMigrationAndReadOnlyLegacy(t *testing.T) {
 	if err != nil || revision != 2 {
 		t.Fatal("legacy settings not rewrapped")
 	}
+	state.APITrustSeparated = true
+	config := state.Active.SSOProfileConfig
+	state.APITrust = &config
 	before, _ := json.Marshal(state)
 	after, _ := json.Marshal(got)
 	if !bytes.Equal(before, after) {
@@ -446,5 +451,102 @@ func TestNewSSOSettingsUseOnlySharedEncryptionKey(t *testing.T) {
 	}
 	if _, _, err := old.Load(ctx); !errors.Is(err, ErrSSOUnavailable) {
 		t.Fatal("new SSO document encrypted with hash secret")
+	}
+}
+
+func TestBrowserSSOLifecycleDoesNotReplaceAPITrust(t *testing.T) {
+	ctx := context.Background()
+	manager, _ := testSSOManager(t)
+	base := AuthModule{jwtConfig: JWTAuthConfig{Issuer: "https://api.example", Audience: "api-resource", IdentityMode: "legacy"}}
+	for _, enabled := range []bool{true, false} {
+		state := SSOSettingsState{SchemaVersion: 1, APITrustSeparated: true, Active: &SSOProfile{SSOProfileConfig: testSSOConfig(), ID: "browser", Enabled: enabled}}
+		_, revision, err := manager.Load(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := manager.save(ctx, revision, state); err != nil {
+			t.Fatal(err)
+		}
+		current, err := manager.JWTModule(ctx, base)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if current.jwtConfig.Issuer != base.jwtConfig.Issuer || current.jwtConfig.Audience != base.jwtConfig.Audience {
+			t.Fatal("browser profile replaced API trust")
+		}
+	}
+}
+
+func TestLegacySSOAPITrustMigrationIsIndependentAndIdempotent(t *testing.T) {
+	ctx := context.Background()
+	manager, store := testSSOManager(t)
+	config := testSSOConfig()
+	old := SSOSettingsState{SchemaVersion: 1, Active: &SSOProfile{SSOProfileConfig: config, ID: "legacy", Enabled: false}}
+	if err := manager.save(ctx, 0, old); err != nil {
+		t.Fatal(err)
+	}
+	current, err := manager.JWTModule(ctx, AuthModule{})
+	if err != nil || current.jwtConfig.Issuer != config.Issuer || current.jwtConfig.Audience != config.Audience {
+		t.Fatalf("legacy API trust changed during upgrade: %v", err)
+	}
+	state, revision, err := manager.Load(ctx)
+	if err != nil || revision != 2 || !state.APITrustSeparated || state.APITrust == nil {
+		t.Fatal("migration did not persist separate trust")
+	}
+	state.Active.SSOProfileConfig.Issuer = "https://other.example"
+	state.Active.JWKSURL = "https://other.example/jwks"
+	state.Active.AuthorizationURL = "https://other.example/authorize"
+	state.Active.TokenURL = "https://other.example/token"
+	state.Active.Audience = "browser-resource"
+	if err := manager.save(ctx, revision, state); err != nil {
+		t.Fatal(err)
+	}
+	current, err = manager.JWTModule(ctx, AuthModule{})
+	if err != nil || current.jwtConfig.Issuer != config.Issuer || current.jwtConfig.Audience != config.Audience {
+		t.Fatal("editing browser changed captured API trust")
+	}
+	_, revision, err = manager.Load(ctx)
+	if err != nil || revision != 3 || store.revision != 3 {
+		t.Fatal("migration repeated")
+	}
+}
+
+func TestSSOAllowsOnlyExplicitSplitOrigins(t *testing.T) {
+	profile := testSSOConfig()
+	profile.Issuer = "https://accounts.example"
+	profile.AuthorizationURL = profile.Issuer + "/authorize"
+	profile.TokenURL = "https://tokens.example/token"
+	profile.JWKSURL = "https://keys.example/jwks"
+	if profile.Validate() == nil {
+		t.Fatal("unapproved cross-origin endpoints accepted")
+	}
+	profile.EndpointOrigins = []string{"https://tokens.example", "https://keys.example"}
+	if err := profile.Validate(); err != nil {
+		t.Fatal("explicitly approved endpoints rejected", err)
+	}
+	profile.EndpointOrigins = []string{"https://tokens.example.evil", "https://keys.example"}
+	if profile.Validate() == nil {
+		t.Fatal("host suffix allowed foreign endpoint")
+	}
+	profile.EndpointOrigins = []string{"https://tokens.example/path", "https://keys.example"}
+	if profile.Validate() == nil {
+		t.Fatal("path accepted as trusted origin")
+	}
+	profile.EndpointOrigins = []string{"http://tokens.example", "https://keys.example"}
+	if profile.Validate() == nil {
+		t.Fatal("insecure origin accepted")
+	}
+}
+
+func TestSSOClientAudienceCannotOverlapAPIResourceAudience(t *testing.T) {
+	manager, _ := testSSOManager(t)
+	profile := testSSOConfig()
+	module := AuthModule{sso: manager, jwtConfig: profile.jwtConfig()}
+	if _, err := module.SaveSSODraft(t.Context(), SSODraftInput{SSOProfileConfig: profile}); !errors.Is(err, ErrSSOConfiguration) {
+		t.Fatal("browser client overlaps API resource trust")
+	}
+	module.jwtConfig.Audience = "api-resource"
+	if _, err := module.SaveSSODraft(t.Context(), SSODraftInput{SSOProfileConfig: profile}); err != nil {
+		t.Fatal("independent browser audience rejected", err)
 	}
 }

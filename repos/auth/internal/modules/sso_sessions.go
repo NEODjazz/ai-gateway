@@ -1,0 +1,256 @@
+package modules
+
+import (
+	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"slices"
+	"strings"
+	"time"
+)
+
+const ssoSessionPrefix = "agsso_"
+
+type SSOBrowserLogin struct {
+	ProfileID   string `json:"profile_id"`
+	Token       string `json:"token"`
+	Nonce       string `json:"nonce"`
+	AccessToken string `json:"access_token,omitempty"`
+}
+
+type SSOBrowserSession struct {
+	Token     string `json:"token"`
+	ExpiresAt int64  `json:"expires_at"`
+}
+
+type storedSSOSession struct {
+	Epoch     string      `json:"epoch"`
+	ProfileID string      `json:"profile_id"`
+	Identity  JWTIdentity `json:"identity"`
+	UserID    string      `json:"user_id"`
+	Roles     []string    `json:"roles"`
+	ExpiresAt int64       `json:"expires_at"`
+}
+
+type ssoSessionStore interface {
+	CreateSSOSession(context.Context, string, string, string, string, int64, []byte) error
+	LoadSSOSession(context.Context, string, int64) ([]byte, error)
+	RevokeSSOSession(context.Context, string) error
+}
+
+// Verify the browser client's ID token independently of API resource trust.
+func (m AuthModule) verifySSOIdentity(ctx context.Context, profile *SSOProfile, login SSOBrowserLogin) (RequestContext, error) {
+	req := RequestContext{}
+	if profile == nil || profile.ID != login.ProfileID || len(login.Nonce) != 43 {
+		return req, ErrUnauthorized
+	}
+	cfg := profile.jwtConfig()
+	cfg.Audience = profile.ClientID
+	verifier, err := newJWTVerifier(cfg)
+	if err != nil {
+		return req, ErrSSOConfiguration
+	}
+	claims, err := verifier.Verify(ctx, login.Token)
+	if err != nil {
+		if errors.Is(err, ErrJWTUnavailable) {
+			return req, ErrSSOUnavailable
+		}
+		return req, ErrUnauthorized
+	}
+	subject, ok := claims.Raw["sub"].(string)
+	if !ok || !validJWTIdentityValue(subject, 256) || subject != claims.Subject {
+		return req, ErrUnauthorized
+	}
+	nonce, validNonce := claims.Raw["nonce"].(string)
+	if !validNonce || subtle.ConstantTimeCompare([]byte(nonce), []byte(login.Nonce)) != 1 {
+		return req, ErrUnauthorized
+	}
+	issued, ok := claims.Raw["iat"].(float64)
+	now := m.sso.now().Unix()
+	if !ok || issued != float64(int64(issued)) || issued < float64(now-300) || issued > float64(now+30) {
+		return req, ErrUnauthorized
+	}
+	azp := ""
+	if raw, exists := claims.Raw["azp"]; exists {
+		value, valid := raw.(string)
+		if !valid || !validJWTIdentityValue(value, 512) {
+			return req, ErrUnauthorized
+		}
+		azp = value
+	}
+	audiences, _ := claims.Audience.([]any)
+	if azp != "" && azp != profile.ClientID || len(audiences) > 1 && azp != profile.ClientID {
+		return req, ErrUnauthorized
+	}
+	if raw, exists := claims.Raw["at_hash"]; exists {
+		hash, valid := raw.(string)
+		if !valid || hash == "" {
+			return req, ErrUnauthorized
+		}
+		digest := sha256.Sum256([]byte(login.AccessToken))
+		expected := base64.RawURLEncoding.EncodeToString(digest[:16])
+		if login.AccessToken == "" || subtle.ConstantTimeCompare([]byte(hash), []byte(expected)) != 1 {
+			return req, ErrUnauthorized
+		}
+	}
+	candidate := m
+	candidate.jwtConfig, candidate.jwtVerifier, candidate.sso = cfg, verifier, nil
+	if err := candidate.authorizeJWTPrincipal(ctx, &req, claims); err != nil {
+		return req, err
+	}
+	return req, nil
+}
+
+func ssoSessionHash(token string) (string, bool) {
+	if !strings.HasPrefix(token, ssoSessionPrefix) || len(token) != len(ssoSessionPrefix)+43 {
+		return "", false
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(token, ssoSessionPrefix))
+	if err != nil || len(raw) != 32 {
+		return "", false
+	}
+	digest := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(digest[:]), true
+}
+
+func (m AuthModule) CreateSSOBrowserSession(ctx context.Context, login SSOBrowserLogin) (SSOBrowserSession, error) {
+	if m.sso == nil || m.sso.aead == nil {
+		return SSOBrowserSession{}, ErrSSOUnavailable
+	}
+	state, _, err := m.sso.Load(ctx)
+	if err != nil {
+		return SSOBrowserSession{}, err
+	}
+	if state.Active == nil || !state.Active.Enabled {
+		return SSOBrowserSession{}, ErrUnauthorized
+	}
+	req, err := m.verifySSOIdentity(ctx, state.Active, login)
+	if err != nil {
+		return SSOBrowserSession{}, err
+	}
+	store, ok := m.sso.store.(ssoSessionStore)
+	if !ok {
+		return SSOBrowserSession{}, ErrSSOUnavailable
+	}
+	random, err := ssoRandom()
+	if err != nil {
+		return SSOBrowserSession{}, err
+	}
+	token := ssoSessionPrefix + random
+	hash, _ := ssoSessionHash(token)
+	epoch := sha256.Sum256([]byte(state.Active.SessionKey))
+	session := storedSSOSession{Epoch: hex.EncodeToString(epoch[:]), ProfileID: state.Active.ID, Identity: *req.JWTIdentity, UserID: req.UserID, Roles: req.Roles, ExpiresAt: m.sso.now().Add(time.Duration(state.Active.SessionTTLSeconds) * time.Second).Unix()}
+	plain, err := json.Marshal(session)
+	if err != nil {
+		return SSOBrowserSession{}, ErrSSOUnavailable
+	}
+	nonce := make([]byte, m.sso.aead.NonceSize())
+	if _, err := rand.Read(nonce); err != nil {
+		return SSOBrowserSession{}, ErrSSOUnavailable
+	}
+	payload := m.sso.aead.Seal(nonce, nonce, plain, []byte("sso-session/v1\x00"+hash))
+	loginDigest := sha256.Sum256([]byte(state.Active.Issuer + "\x00" + state.Active.ClientID + "\x00" + login.Nonce))
+	if err := store.CreateSSOSession(ctx, hash, hex.EncodeToString(loginDigest[:]), session.ProfileID, session.UserID, session.ExpiresAt, payload); err != nil {
+		return SSOBrowserSession{}, err
+	}
+	return SSOBrowserSession{Token: token, ExpiresAt: session.ExpiresAt}, nil
+}
+
+func (m AuthModule) authorizeSSOBrowserSession(ctx context.Context, req *RequestContext) error {
+	hash, ok := ssoSessionHash(req.APIKey)
+	if !ok {
+		return ErrUnauthorized
+	}
+	return m.authorizeSSOSessionHash(ctx, req, hash)
+}
+
+func (m AuthModule) authorizeSSOSessionHash(ctx context.Context, req *RequestContext, hash string) error {
+	if m.sso == nil || m.sso.aead == nil {
+		return ErrSSOUnavailable
+	}
+	store, ok := m.sso.store.(ssoSessionStore)
+	if !ok {
+		return ErrSSOUnavailable
+	}
+	payload, err := store.LoadSSOSession(ctx, hash, m.sso.now().Unix())
+	if err != nil {
+		return err
+	}
+	if len(payload) < m.sso.aead.NonceSize() || len(payload) > 8192 {
+		return ErrUnauthorized
+	}
+	plain, err := m.sso.aead.Open(nil, payload[:m.sso.aead.NonceSize()], payload[m.sso.aead.NonceSize():], []byte("sso-session/v1\x00"+hash))
+	if err != nil {
+		return ErrUnauthorized
+	}
+	var session storedSSOSession
+	if json.Unmarshal(plain, &session) != nil || session.ExpiresAt <= m.sso.now().Unix() {
+		return ErrUnauthorized
+	}
+	state, _, err := m.sso.Load(ctx)
+	if err != nil {
+		return err
+	}
+	profile := state.Active
+	if profile == nil || !profile.Enabled || profile.ID != session.ProfileID || profile.Issuer != session.Identity.Issuer || profile.ClientID != session.Identity.Audience {
+		return ErrUnauthorized
+	}
+	epoch := sha256.Sum256([]byte(profile.SessionKey))
+	if session.Epoch != hex.EncodeToString(epoch[:]) {
+		return ErrUnauthorized
+	}
+	directory, ok := m.store.(jwtPrincipalStore)
+	if !ok {
+		return ErrJWTDirectoryUnavailable
+	}
+	principal, found, err := directory.LookupJWTPrincipal(ctx, session.Identity.Issuer, session.Identity.Subject, session.Identity.Audience)
+	if err != nil {
+		return ErrJWTDirectoryUnavailable
+	}
+	if !found || !principal.Enabled || principal.UserID != session.UserID || principal.Issuer != session.Identity.Issuer || principal.Subject != session.Identity.Subject || principal.Audience != session.Identity.Audience {
+		return ErrUnauthorized
+	}
+	roles := []string{}
+	for _, role := range session.Roles {
+		mapped := false
+		for _, target := range profile.RoleMappings {
+			mapped = mapped || target == role
+		}
+		if mapped && slices.Contains(principal.Roles, role) && (role != "team_admin" || principal.TeamID != "") {
+			roles = append(roles, role)
+		}
+	}
+	if len(roles) == 0 {
+		return ErrUnauthorized
+	}
+	if err := applyJWTPrincipal(req, principal, roles); err != nil {
+		return err
+	}
+	req.JWTIdentity.ConnectionID, req.JWTIdentity.SessionHash = profile.ID, hash
+	req.Metadata["auth.method"] = "browser_sso"
+	req.APIKey = ""
+	return nil
+}
+
+func (m AuthModule) RevokeSSOBrowserSession(ctx context.Context, token string) error {
+	hash, ok := ssoSessionHash(token)
+	if !ok {
+		return ErrUnauthorized
+	}
+	if m.sso == nil {
+		return ErrSSOUnavailable
+	}
+	store, ok := m.sso.store.(ssoSessionStore)
+	if !ok {
+		return ErrSSOUnavailable
+	}
+	if err := store.RevokeSSOSession(ctx, hash); err != nil {
+		return errors.Join(ErrSSOUnavailable, err)
+	}
+	return nil
+}

@@ -68,7 +68,7 @@ func (h Handler) CompleteBrowserSSOTest(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	err = h.ssoManagement.VerifySSOTest(r.Context(), ssoServiceAudit(r), SSOTestVerification{ProfileID: state.ProfileID, Ticket: state.TestTicket, Token: token})
+	err = h.ssoManagement.VerifySSOTest(r.Context(), ssoServiceAudit(r), SSOTestVerification{ProfileID: state.ProfileID, Ticket: state.TestTicket, Token: token, Nonce: state.Nonce, AccessToken: state.AccessToken})
 	if err != nil {
 		writeSSOFailure(w, err)
 		return

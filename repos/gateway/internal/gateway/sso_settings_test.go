@@ -148,7 +148,7 @@ func TestSSODraftTestUsesPKCEAndNeverCreatesSession(t *testing.T) {
 		if r.Form.Get("redirect_uri") != "http://ai-gateway.localhost/auth/sso/test/callback" || base64.RawURLEncoding.EncodeToString(digest[:]) != challenge {
 			t.Error("test PKCE or callback mismatch")
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "fixture-jwt", "token_type": "Bearer", "expires_in": 300})
+		_ = json.NewEncoder(w).Encode(map[string]any{"id_token": "fixture-jwt", "access_token": "opaque-access", "token_type": "Bearer", "expires_in": 300})
 	}))
 	defer identity.Close()
 	profile := &PrivateSSOProfile{ID: "draft-1", Enabled: true, SessionKey: base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("k", 32))), SSOProfileConfig: SSOProfileConfig{AuthorizationURL: identity.URL + "/authorize", TokenURL: identity.URL + "/token", RedirectURL: "http://ai-gateway.localhost/auth/sso/callback", ClientID: "console"}}
@@ -204,5 +204,90 @@ func TestSSOManagementWireRedactsSecrets(t *testing.T) {
 	encoded, _ := json.Marshal(view)
 	if strings.Contains(string(encoded), "hidden-") {
 		t.Fatal("private fields returned to admin UI")
+	}
+}
+
+type ssoSessionClientStub struct {
+	*ssoClientStub
+	login   SSOBrowserLogin
+	session SSOBrowserSession
+	revoked string
+}
+
+func (s *ssoSessionClientStub) CreateSSOBrowserSession(_ context.Context, _ ManagementAudit, login SSOBrowserLogin) (SSOBrowserSession, error) {
+	s.login = login
+	return s.session, s.err
+}
+func (s *ssoSessionClientStub) RevokeSSOBrowserSession(_ context.Context, _ ManagementAudit, token string) error {
+	s.revoked = token
+	return s.err
+}
+
+func TestManagedBrowserSSOUsesIDTokenAndOpaqueServerSession(t *testing.T) {
+	var nonce string
+	identity := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"id_token": "signed-browser-id-token", "access_token": "opaque-access-token", "token_type": "Bearer", "expires_in": 60})
+	}))
+	defer identity.Close()
+	profile := &PrivateSSOProfile{ID: "connection-1", Enabled: true, SessionKey: base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("k", 32))), SSOProfileConfig: SSOProfileConfig{AuthorizationURL: identity.URL + "/authorize", TokenURL: identity.URL + "/token", ClientID: "console", RedirectURL: "http://localhost/auth/sso/callback", SessionTTLSeconds: 3600}}
+	handle := "agsso_" + base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("s", 32)))
+	client := &ssoSessionClientStub{ssoClientStub: &ssoClientStub{active: profile}, session: SSOBrowserSession{Token: handle, ExpiresAt: time.Now().Add(55 * time.Minute).Unix()}}
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{&browserSSOAuthModule{token: handle}}), modelsProvider{}).WithSSOManagement(client))
+	start := httptest.NewRecorder()
+	handler.ServeHTTP(start, httptest.NewRequest("GET", "/auth/sso/start", nil))
+	if start.Code != 302 {
+		t.Fatal("login start failed")
+	}
+	location, _ := url.Parse(start.Header().Get("Location"))
+	nonce = location.Query().Get("nonce")
+	if len(nonce) != 43 {
+		t.Fatal("OIDC nonce absent")
+	}
+	r := httptest.NewRequest("GET", "/auth/sso/callback?code=fixture&state="+location.Query().Get("state"), nil)
+	r.AddCookie(start.Result().Cookies()[0])
+	callback := httptest.NewRecorder()
+	handler.ServeHTTP(callback, r)
+	if callback.Code != 302 || client.login.Token != "signed-browser-id-token" || client.login.Nonce != nonce || client.login.AccessToken != "opaque-access-token" || client.login.ProfileID != profile.ID {
+		t.Fatalf("ID token not sent to Auth: status=%d", callback.Code)
+	}
+	sso, err := profile.browser(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cookie *http.Cookie
+	for _, value := range callback.Result().Cookies() {
+		if value.Name == browserSSOSessionCookie {
+			cookie = value
+		}
+	}
+	if cookie == nil {
+		t.Fatal("session cookie absent")
+	}
+	var session browserSSOSession
+	if err := sso.open(browserSSOSessionCookie, cookie.Value, &session); err != nil || session.Token != handle {
+		t.Fatal("cookie contains upstream token")
+	}
+	if session.ExpiresAt < time.Now().Add(50*time.Minute).Unix() {
+		t.Fatal("server session bounded by upstream access expiry")
+	}
+	r = httptest.NewRequest("GET", "/admin/v1/session", nil)
+	r.AddCookie(cookie)
+	current := httptest.NewRecorder()
+	handler.ServeHTTP(current, r)
+	if current.Code != 200 {
+		t.Fatal("opaque session not used for authorization")
+	}
+	r = httptest.NewRequest("POST", "/auth/sso/logout", nil)
+	r.AddCookie(cookie)
+	logout := httptest.NewRecorder()
+	handler.ServeHTTP(logout, r)
+	if logout.Code != 204 || client.revoked != handle {
+		t.Fatal("logout did not revoke server session")
+	}
+	client.err = errors.New("Auth unavailable")
+	logout = httptest.NewRecorder()
+	handler.ServeHTTP(logout, r)
+	if logout.Code != 503 || len(logout.Result().Cookies()) != 1 {
+		t.Fatal("logout hid revocation failure or retained cookie")
 	}
 }

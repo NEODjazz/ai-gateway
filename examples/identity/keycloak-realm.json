@@ -126,7 +126,7 @@
             "claim.name": "resource_access.gateway.roles",
             "jsonType.label": "String",
             "multivalued": "true",
-            "id.token.claim": "false",
+            "id.token.claim": "true",
             "access.token.claim": "true"
           }
         }

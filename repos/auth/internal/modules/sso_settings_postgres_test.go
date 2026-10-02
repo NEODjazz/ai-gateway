@@ -141,5 +141,33 @@ func TestPostgresSSOSettingsEncryptionAndReplicaCAS(t *testing.T) {
 	if _, _, err := first.Load(ctx); !errors.Is(err, ErrSSOUnavailable) {
 		t.Fatal("old key still reads migrated settings")
 	}
+	// Both replicas upgrade existing managed API trust once, without revoking it.
+	legacy := SSOSettingsState{SchemaVersion: 1, Active: &SSOProfile{SSOProfileConfig: testSSOConfig(), ID: "legacy-api", Enabled: true}}
+	if err := canonical.save(ctx, revision, legacy); err != nil {
+		t.Fatal(err)
+	}
+	for _, manager := range migrants {
+		wg.Add(1)
+		go func(m *SSOManager) {
+			defer wg.Done()
+			state, rev, err := m.Load(ctx)
+			if err != nil || rev != 5 || state.APITrust == nil || state.APITrust.Issuer != legacy.Active.Issuer {
+				t.Error("API trust migration did not converge across replicas")
+			}
+		}(manager)
+	}
+	wg.Wait()
+	separated, revision, err := canonical.Load(ctx)
+	if err != nil || revision != 5 {
+		t.Fatal("API trust migration repeated")
+	}
+	separated.Active.Audience = "another-browser-client"
+	if err := canonical.save(ctx, revision, separated); err != nil {
+		t.Fatal(err)
+	}
+	api, err := canonical.JWTModule(ctx, AuthModule{})
+	if err != nil || api.jwtConfig.Audience != legacy.Active.Audience {
+		t.Fatal("browser edit changed persisted API trust")
+	}
 
 }

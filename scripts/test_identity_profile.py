@@ -39,6 +39,8 @@ class ProfileTests(unittest.TestCase):
             self.assertEqual(audience["config"]["included.client.audience"], "gateway")
             self.assertEqual(audience["config"]["id.token.claim"], "false")
             self.assertEqual(audience["config"]["access.token.claim"], "true")
+            roles = next(m for m in client["protocolMappers"] if m["protocolMapper"] == "oidc-usermodel-client-role-mapper")
+            self.assertEqual(roles["config"]["id.token.claim"], "true" if name == "gateway-console" else "false")
         self.assertNotEqual(
             clients["openwebui"]["redirectUris"],
             clients["gateway-console"]["redirectUris"],
