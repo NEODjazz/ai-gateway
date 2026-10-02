@@ -2,16 +2,17 @@ import { useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { PageLayout, PageLayoutAside, type AsideHeaderItem } from "@gravity-ui/navigation/build/esm/index.js";
 import { Sparkles } from "@gravity-ui/icons";
+import { loginConnectionURL } from "../auth/ssoConnections";
 import { useAuth } from "../auth/AuthContext";
-import { appRoutes, routeCapability } from "./routes";
+import { appRoutes, canAccessRoute } from "./routes";
 import { navigationGroups, navigationIcon } from "./navigation";
 
 export function Layout() {
-  const { session, signOut } = useAuth();
+  const { session, signOut, ssoConnections, prepareSSOSignIn } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
   const [compact, setCompact] = useState(false);
-  const routes = appRoutes.filter((route) => route.navigation !== false && Boolean(session?.capabilities.includes(routeCapability(route))));
+  const routes = appRoutes.filter((route) => route.navigation !== false && canAccessRoute(route, session));
   const orderedRoutes = navigationGroups.flatMap((group) => routes.filter((route) => route.group === group));
   const menuItems: AsideHeaderItem[] = orderedRoutes.flatMap((route, index) => {
     const item: AsideHeaderItem = {
@@ -37,6 +38,6 @@ export function Layout() {
     onChangeCompact={setCompact}
     collapseTitle="Collapse navigation"
     expandTitle="Expand navigation"
-    renderFooter={({ compact: footerCompact }) => footerCompact ? <button className="gravity-sidebar-signout-compact" aria-label="Sign out" title="Sign out" onClick={signOut}>↪</button> : <div className="sidebar-footer"><div className="sidebar-account"><strong>{session?.user_id || session?.credential_alias || "Authenticated user"}</strong><small>{session?.roles.join(", ") || "gateway credential"}{session?.team_id ? ` · ${session.team_id}` : ""}</small></div><a href="/docs/" target="_blank" rel="noreferrer">API docs ↗</a><button className="secondary" onClick={signOut}>Sign out</button></div>}
+    renderFooter={({ compact: footerCompact }) => footerCompact ? <button className="gravity-sidebar-signout-compact" aria-label="Sign out" title="Sign out" onClick={signOut}>↪</button> : <div className="sidebar-footer"><div className="sidebar-account"><strong>{session?.user_id || session?.credential_alias || "Authenticated user"}</strong><small>{session?.roles.join(", ") || "gateway credential"}{session?.organization_id ? ` · Organization: ${session.organization_id}` : ""}{session?.team_id ? ` · ${session.team_id}` : ""}</small></div>{ssoConnections.length > 0 && <details><summary>Switch organization / connection</summary>{ssoConnections.map((connection) => <p key={connection.id}><a href={loginConnectionURL(connection)} onClick={prepareSSOSignIn}>{connection.name} · {connection.organization_id || "Platform"}</a></p>)}<small>Requires a fresh identity and organization verification.</small></details>}<a href="/docs/" target="_blank" rel="noreferrer">API docs ↗</a><button className="secondary" onClick={signOut}>Sign out</button></div>}
   /></nav><PageLayout.Content><main className="content"><Outlet /></main></PageLayout.Content></PageLayout>;
 }

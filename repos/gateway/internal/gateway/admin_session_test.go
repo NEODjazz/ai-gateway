@@ -64,3 +64,28 @@ func TestAdminSessionRejectsInvalidCredential(t *testing.T) {
 		t.Fatalf("unexpected auth failure: status=%d body=%s", response.Code, response.Body.String())
 	}
 }
+
+func TestOrganizationConsoleCapabilitiesRequirePinnedOrganization(t *testing.T) {
+	for _, test := range []struct {
+		role, organization string
+		allowed            bool
+	}{{"org_admin", "org-a", true}, {"org_admin", "", false}, {"user", "org-a", false}, {"team_admin", "org-a", false}} {
+		capabilities := consoleCapabilitiesForIdentity([]string{test.role}, test.organization)
+		for _, capability := range []string{"organization_reports", "organization_keys"} {
+			found := false
+			for _, actual := range capabilities {
+				if actual == capability {
+					found = true
+				}
+			}
+			if found != test.allowed {
+				t.Errorf("role=%s org=%q %s=%v want=%v", test.role, test.organization, capability, found, test.allowed)
+			}
+		}
+		for _, capability := range capabilities {
+			if capability == "admin" {
+				t.Fatal("organization role received platform capability")
+			}
+		}
+	}
+}

@@ -2,7 +2,7 @@ import { lazy, type ReactNode } from "react";
 import { CapabilityPage } from "../components/CapabilityPage";
 import { ResourcePage, type ResourceConfig } from "../components/ResourcePage";
 import { resourceConfigs } from "../pages/resourceConfigs";
-import { useAuth, type ConsoleCapability } from "../auth/AuthContext";
+import { useAuth, type AdminSession, type ConsoleCapability } from "../auth/AuthContext";
 
 export type AppRoute = { path: string; title: string; group: "Monitor" | "Manage" | "Access Control" | "AI Hub" | "Govern" | "System"; element: ReactNode; available: boolean; capability?: ConsoleCapability; navigation?: boolean };
 
@@ -12,6 +12,7 @@ const CustomerInsightsPage = lazy(() => import("../pages/CustomerInsightsPage").
 const LogsPage = lazy(() => import("../pages/LogsPage").then((module) => ({ default: module.LogsPage })));
 const RoutingPage = lazy(() => import("../pages/RoutingPage").then((module) => ({ default: module.RoutingPage })));
 const PlaygroundPage = lazy(() => import("../pages/PlaygroundPage").then((module) => ({ default: module.PlaygroundPage })));
+const OrganizationKeysPage = lazy(() => import("../pages/OrganizationKeysPage").then((module) => ({ default: module.OrganizationKeysPage })));
 const VirtualKeysPage = lazy(() => import("../pages/VirtualKeysPage").then((module) => ({ default: module.VirtualKeysPage })));
 const VirtualKeyDetailsPage = lazy(() => import("../pages/VirtualKeyDetailsPage").then((module) => ({ default: module.VirtualKeyDetailsPage })));
 const ModelCatalogPage = lazy(() => import("../pages/ModelCatalogPage").then((module) => ({ default: module.ModelCatalogPage })));
@@ -48,19 +49,28 @@ function UsersPage() {
   return <ResourcePage config={resourceConfigs.users} readOnly={!hasCapability("admin")} />;
 }
 
+function ConsoleKeysPage() {
+ const { hasCapability } = useAuth();
+ return hasCapability("admin") ? <VirtualKeysPage /> : <OrganizationKeysPage />;
+}
+export function canAccessRoute(route: AppRoute, session: AdminSession | null): boolean {
+ const capability = routeCapability(route);
+ return Boolean(session?.capabilities.includes(capability) || (["organization_reports", "organization_keys"].includes(capability) && session?.capabilities.includes("admin")));
+}
+
 export function routeCapability(route: AppRoute): ConsoleCapability {
   return route.capability || "admin";
 }
 
 export const appRoutes: AppRoute[] = [
   { path: "/overview", title: "Overview", group: "Monitor", element: <OverviewPage />, available: true },
-  { path: "/usage", title: "Usage & spend", group: "Monitor", element: <UsagePage />, available: true },
+  { path: "/usage", title: "Usage & spend", group: "Monitor", element: <UsagePage />, available: true, capability: "organization_reports" },
   { path: "/customers", title: "Customer insights", group: "Monitor", element: <CustomerInsightsPage />, available: true },
-  { path: "/logs", title: "Logs", group: "Monitor", element: <LogsPage />, available: true },
+  { path: "/logs", title: "Logs", group: "Monitor", element: <LogsPage />, available: true, capability: "organization_reports" },
   { path: "/routing", title: "Routing diagnostics", group: "Monitor", element: <RoutingPage />, available: true },
   { path: "/playground", title: "Playground", group: "Monitor", element: <PlaygroundPage />, available: true, capability: "inference" },
 
-  { path: "/api-keys", title: "Virtual keys", group: "Manage", element: <VirtualKeysPage />, available: true },
+  { path: "/api-keys", title: "Virtual keys", group: "Manage", element: <ConsoleKeysPage />, available: true, capability: "organization_keys" },
   { path: "/api-keys/:id", title: "Virtual key details", group: "Manage", element: <VirtualKeyDetailsPage />, available: true, navigation: false },
   { path: "/models", title: "Models", group: "Manage", element: <ModelCatalogPage />, available: true },
   { path: "/model-onboarding", title: "Model onboarding", group: "Manage", element: <ModelOnboardingPage />, available: true },

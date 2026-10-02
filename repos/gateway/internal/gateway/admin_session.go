@@ -49,16 +49,23 @@ func (h Handler) GetAdminSession(w http.ResponseWriter, r *http.Request) {
 		Roles:           uniqueSorted(req.Roles),
 		AllowedModels:   uniqueSorted(req.AllowedModels),
 		AllowedTools:    uniqueSorted(req.AllowedTools),
-		Capabilities:    consoleCapabilities(req.Roles),
+		Capabilities:    consoleCapabilitiesForIdentity(req.Roles, req.OrganizationID),
 	})
 }
 
 func consoleCapabilities(roles []string) []string {
+	return consoleCapabilitiesForIdentity(roles, "")
+}
+
+func consoleCapabilitiesForIdentity(roles []string, organizationID string) []string {
 	capabilities := []string{consoleCapabilityAPIDocs, consoleCapabilityInference}
 	if hasRole(roles, "admin") {
 		capabilities = append(capabilities, consoleCapabilityAdmin, consoleCapabilityTeamDirectory)
 	} else if hasRole(roles, "team_admin") {
 		capabilities = append(capabilities, consoleCapabilityTeamDirectory)
+	}
+	if hasRole(roles, "org_admin") && organizationID != "" {
+		capabilities = append(capabilities, "organization_reports", "organization_keys")
 	}
 	return uniqueSorted(capabilities)
 }

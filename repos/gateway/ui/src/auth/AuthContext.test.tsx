@@ -3,8 +3,8 @@ import userEvent from "@testing-library/user-event";
 import { AuthProvider, useAuth } from "./AuthContext";
 
 function Consumer() {
-  const { token, session, signIn, signOut } = useAuth();
-  return <><span>{token || "signed-out"}</span><span>{session?.user_id || "no-session"}</span><button onClick={() => void signIn("Bearer abc").catch(() => undefined)}>Sign in</button><button onClick={signOut}>Sign out</button></>;
+  const { token, session, signIn, signOut, prepareSSOSignIn } = useAuth();
+  return <><span>{token || "signed-out"}</span><span>{session?.user_id || "no-session"}</span><button onClick={() => void signIn("Bearer abc").catch(() => undefined)}>Sign in</button><button onClick={prepareSSOSignIn}>Start fresh SSO</button><button onClick={signOut}>Sign out</button></>;
 }
 
 const session = { user_id: "admin-user", roles: ["admin"], allowed_models: ["gpt"], allowed_tools: [], capabilities: ["admin", "api_docs", "inference", "team_directory"] };
@@ -31,6 +31,14 @@ describe("AuthProvider", () => {
     sessionStorage.setItem("ai-gateway.admin-token", "restored");
     render(<AuthProvider><Consumer /></AuthProvider>);
     await userEvent.click(screen.getByRole("button", { name: "Sign out" }));
+    expect(screen.getByText("signed-out")).toBeInTheDocument();
+    expect(sessionStorage.getItem("ai-gateway.admin-token")).toBeNull();
+  });
+
+  it("clears the old bearer identity before switching to a fresh OIDC connection", async () => {
+    sessionStorage.setItem("ai-gateway.admin-token", "old-api-token");
+    render(<AuthProvider><Consumer /></AuthProvider>);
+    await userEvent.click(screen.getByRole("button", { name: "Start fresh SSO" }));
     expect(screen.getByText("signed-out")).toBeInTheDocument();
     expect(sessionStorage.getItem("ai-gateway.admin-token")).toBeNull();
   });

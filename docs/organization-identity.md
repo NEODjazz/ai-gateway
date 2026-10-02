@@ -107,10 +107,10 @@ preserving existing data. Cache scopes additionally include the authenticated
 organization and effective policy. This does not grant organization administrators
 access to another user's files or jobs.
 
-Delegated organization management UI, verified tenant selection, remaining
-per-resource permission checks, and multiple connections remain separate
-implementation stages; the role does not confer global configuration or budget
-mutation access.
+The console exposes organization reports and read-only key metadata through
+separate `organization_reports` and `organization_keys` capabilities. They require
+both verified `org_admin` and a pinned organization. The role does not confer
+platform configuration, directory approval or budget mutation access.
 
 ## Permission and resource boundary
 
@@ -133,3 +133,25 @@ Changing headers or selecting an organization label cannot switch ownership.
 There is no cross-tenant resource sharing or automatic migration of existing files
 and jobs. A future same-credential context switch would require a separately
 versioned owner namespace and explicit migration; it is not supported here.
+
+## Organization console and approvals
+
+Platform administrators manage explicit membership in **Organizations → an
+organization → Organization approvals**. Choose an existing user, active/disabled
+membership and the subset `org_admin`, `user`, `developer`. Mapping an IdP group
+cannot create or expand approval. The list uses actual server totals and paging;
+foreign membership rows are rejected by the UI.
+
+Organization administrators can open Usage & spend, request logs and read-only
+Virtual keys. Key pages use explicit organization ownership and do not request
+global directory or financial expansion. Global audit events and key mutations
+remain hidden. Usage/CSV data is constrained on the server; child user/team/key
+breakdowns are read-only because those drill-down scopes cannot replace the
+organization predicate. Request logs pin organization, skip global directory
+lookups, and support exact child IDs within the same server-enforced predicate.
+Late responses from old log windows cannot overwrite current data.
+
+The sidebar displays the verified organization. Switch organization / connection
+starts a fresh OIDC login from an enabled connection and clears the previous tab
+bearer credential, so it cannot override the new HttpOnly browser session after
+callback. The selected label does not grant membership or mutate API credentials.

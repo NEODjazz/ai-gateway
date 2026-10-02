@@ -5,7 +5,7 @@ import { APIClient } from "../api/client";
 const storageKey = "ai-gateway.admin-token";
 const browserSSOMarker = "browser-sso";
 
-export type ConsoleCapability = "admin" | "api_docs" | "inference" | "team_directory";
+export type ConsoleCapability = "admin" | "api_docs" | "inference" | "team_directory" | "organization_reports" | "organization_keys";
 
 export type AdminSession = {
   user_id?: string;
@@ -29,6 +29,7 @@ type AuthValue = {
   ssoEnabled: boolean;
   ssoChecking: boolean;
   hasCapability: (capability: ConsoleCapability) => boolean;
+  prepareSSOSignIn: () => void;
   signOut: () => void;
 };
 
@@ -41,6 +42,9 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const [ssoEnabled, setSSOEnabled] = useState(false);
   const [ssoChecking, setSSOChecking] = useState(() => !token && window.location.pathname.startsWith("/ui"));
   const ssoDiscoveryStarted = useRef(false);
+  const prepareSSOSignIn = useCallback(() => {
+    sessionStorage.removeItem(storageKey); setSession(null); setToken("");
+  }, []);
   const signOut = useCallback(() => {
     sessionStorage.removeItem(storageKey);
     setSession(null);
@@ -105,8 +109,9 @@ export function AuthProvider({ children }: PropsWithChildren) {
     ssoEnabled,
     ssoChecking,
     hasCapability: (capability) => Boolean(session?.capabilities.includes(capability)),
+    prepareSSOSignIn,
     signOut
-  }), [restoreSession, session, signOut, ssoChecking, ssoEnabled, ssoConnections, token, validate]);
+  }), [restoreSession, session, signOut, ssoChecking, ssoEnabled, ssoConnections, token, validate, prepareSSOSignIn]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
