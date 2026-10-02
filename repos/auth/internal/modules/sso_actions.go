@@ -50,7 +50,7 @@ func (m AuthModule) VerifySSOTest(ctx context.Context, profileID, ticket, token 
 		login.AccessToken = nonce[1]
 	}
 	req, err := m.verifySSOIdentity(ctx, state.Draft, login)
-	if err != nil || req.UserID != state.Attempt.ActorID || !slices.Contains(req.Roles, "admin") || req.JWTIdentity == nil {
+	if err != nil || req.UserID != state.Attempt.ActorID || !m.validSSOTestAdmin(ctx, state.Draft, req) || req.JWTIdentity == nil {
 		state.Attempt.Status = "failed"
 		if saveErr := m.sso.save(ctx, revision, state); saveErr != nil {
 			return saveErr
@@ -74,15 +74,18 @@ func (m AuthModule) ChangeSSO(ctx context.Context, action string, expectedRevisi
 	switch action {
 	case "activate":
 		attempt := state.Attempt
-		if state.Draft == nil || attempt == nil || attempt.Status != "passed" || attempt.ExpiresAt <= m.sso.now().Unix() || attempt.ActorID != actor || attempt.UserID != actor || !slices.Contains(attempt.Roles, "admin") {
+		if state.Draft == nil || attempt == nil || attempt.Status != "passed" || attempt.ExpiresAt <= m.sso.now().Unix() || attempt.ActorID != actor || attempt.UserID != actor {
 			return SSOSettingsView{}, ErrSSOConfiguration
 		}
 		candidate := m
 		candidate.sso, candidate.jwtConfig = nil, state.Draft.jwtConfig()
 		candidate.jwtConfig.Audience = state.Draft.ClientID
-		req := RequestContext{UserID: attempt.UserID, CredentialID: attempt.CredentialID, Roles: attempt.Roles, JWTIdentity: attempt.Identity}
+		req := RequestContext{UserID: attempt.UserID, CredentialID: attempt.CredentialID, Roles: attempt.Roles, OrganizationID: state.Draft.OrganizationID, JWTIdentity: attempt.Identity}
 		if err := candidate.ReauthorizeJWTPrincipal(ctx, &req); err != nil {
 			return SSOSettingsView{}, err
+		}
+		if !m.validSSOTestAdmin(ctx, state.Draft, req) {
+			return SSOSettingsView{}, ErrUnauthorized
 		}
 		state.Previous, state.Active, state.Draft = state.Active, state.Draft, nil
 		state.CanRollback, state.Attempt = true, nil
@@ -116,4 +119,21 @@ func (m AuthModule) ChangeSSO(ctx context.Context, action string, expectedRevisi
 		return SSOSettingsView{}, err
 	}
 	return m.sso.View(ctx)
+}
+
+// A tenant connection never maps a platform admin role. Its test still proves
+// the same platform administrator, with a separately approved tenant role.
+func (m AuthModule) validSSOTestAdmin(ctx context.Context, profile *SSOProfile, req RequestContext) bool {
+	if profile.OrganizationID == "" {
+		return slices.Contains(req.Roles, "admin")
+	}
+	if req.OrganizationID != profile.OrganizationID || !slices.Contains(req.Roles, "org_admin") || req.JWTIdentity == nil {
+		return false
+	}
+	store, ok := m.store.(jwtPrincipalStore)
+	if !ok {
+		return false
+	}
+	principal, found, err := store.LookupJWTPrincipal(ctx, req.JWTIdentity.Issuer, req.JWTIdentity.Subject, req.JWTIdentity.Audience)
+	return err == nil && found && principal.Enabled && principal.UserID == req.UserID && principal.OrganizationID == profile.OrganizationID && slices.Contains(principal.Roles, "admin") && principalRoleApproved(principal, "org_admin")
 }

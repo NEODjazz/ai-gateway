@@ -90,7 +90,7 @@ func (s *PostgresVirtualKeyStore) Ready(ctx context.Context) error {
 	if err := s.pool.Ping(ctx); err != nil {
 		return errors.New("auth postgres is unavailable")
 	}
-	var migrationExists, toolsColumnExists, metadataColumnExists, directoryTableExists, ownershipColumnExists, accessGroupsColumnExists, organizationMembershipsExist bool
+	var migrationExists, toolsColumnExists, metadataColumnExists, directoryTableExists, ownershipColumnExists, accessGroupsColumnExists, organizationMembershipsExist, ssoConnectionsExist bool
 	if err := s.pool.QueryRow(ctx, `
 		SELECT to_regclass('public.auth_virtual_keys') IS NOT NULL,
 		       EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='auth_virtual_keys' AND column_name='allowed_tools'),
@@ -98,7 +98,8 @@ func (s *PostgresVirtualKeyStore) Ready(ctx context.Context) error {
 		       to_regclass('public.auth_team_memberships') IS NOT NULL,
 		       EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='auth_virtual_keys' AND column_name='organization_id'),
 		       EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='auth_virtual_keys' AND column_name='access_group_ids'),
-		       to_regclass('public.auth_organization_memberships') IS NOT NULL`).Scan(&migrationExists, &toolsColumnExists, &metadataColumnExists, &directoryTableExists, &ownershipColumnExists, &accessGroupsColumnExists, &organizationMembershipsExist); err != nil || !migrationExists || !toolsColumnExists || !metadataColumnExists || !directoryTableExists || !ownershipColumnExists || !accessGroupsColumnExists || !organizationMembershipsExist {
+		       to_regclass('public.auth_organization_memberships') IS NOT NULL,
+		       to_regclass('public.auth_sso_connections') IS NOT NULL`).Scan(&migrationExists, &toolsColumnExists, &metadataColumnExists, &directoryTableExists, &ownershipColumnExists, &accessGroupsColumnExists, &organizationMembershipsExist, &ssoConnectionsExist); err != nil || !migrationExists || !toolsColumnExists || !metadataColumnExists || !directoryTableExists || !ownershipColumnExists || !accessGroupsColumnExists || !organizationMembershipsExist || !ssoConnectionsExist {
 		return errors.New("auth virtual-key migration is not applied")
 	}
 	return nil

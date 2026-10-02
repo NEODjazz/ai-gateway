@@ -26,6 +26,8 @@ var gatewayRoutes = []routeDefinition{
 	{RouteContract{http.MethodPost, "/auth/sso/logout"}, func(h Handler) http.Handler { return http.HandlerFunc(h.EndBrowserSSO) }},
 	{RouteContract{http.MethodGet, "/auth/sso/test/start"}, func(h Handler) http.Handler { return http.HandlerFunc(h.StartBrowserSSOTest) }},
 	{RouteContract{http.MethodGet, "/auth/sso/test/callback"}, func(h Handler) http.Handler { return http.HandlerFunc(h.CompleteBrowserSSOTest) }},
+	{RouteContract{http.MethodGet, "/admin/v1/sso/connections"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListSSOConnections) }},
+	{RouteContract{http.MethodPost, "/admin/v1/sso/connections"}, func(h Handler) http.Handler { return http.HandlerFunc(h.CreateSSOConnection) }},
 	{RouteContract{http.MethodGet, "/admin/v1/sso/settings"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GetSSOSettings) }},
 	{RouteContract{http.MethodPut, "/admin/v1/sso/settings"}, func(h Handler) http.Handler { return http.HandlerFunc(h.SaveSSODraft) }},
 	{RouteContract{http.MethodPost, "/admin/v1/sso/discover"}, func(h Handler) http.Handler { return http.HandlerFunc(h.DiscoverSSO) }},

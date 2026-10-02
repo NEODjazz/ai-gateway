@@ -385,7 +385,10 @@ ownership JWT principal закреплены, sessions и durable jobs повт�
 актуальные права. Migration 016 не назначает административные роли и не переносит
 ресурсы; старые tenant-bound sessions требуют нового входа. Делегированные
 resource permissions/UI, проверенный выбор tenant, несколько connections/API
-issuers и новый SSO UI ещё не завершены. Usage и request logs доступны `org_admin`
+issuers и новый SSO UI ещё не завершены. Реестр browser connections уже реализован
+с отдельными CAS revisions/proofs/rollback, encrypted metadata binding и
+проверкой organization ID token/session. Требуется migration 017; default
+connection и API trust сохраняются. Connection management/login UI — следующий этап. Usage и request logs доступны `org_admin`
 только с принудительным organization scope в Gateway и повторной проверкой Billing;
 detail lookup использует tenant predicate, чужие/unassigned события дают 404.
 Список ключей `org_admin` использует только explicit organization ownership;

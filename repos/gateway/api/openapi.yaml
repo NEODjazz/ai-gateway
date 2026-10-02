@@ -43,7 +43,62 @@ tags:
 security:
   - bearerAuth: []
 paths:
+  /admin/v1/sso/connections:
+    get:
+      operationId: listSSOConnections
+      tags: [Identity]
+      summary: List bounded redacted browser OIDC connections
+      responses:
+        '200':
+          description: Default connection and at most 16 independent connections
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    maxItems: 17
+                    items:
+                      $ref: '#/components/schemas/SSOConnectionView'
+        '403':
+          description: Platform administrator required
+        '503':
+          description: Auth or migration unavailable
+    post:
+      operationId: createSSOConnection
+      tags: [Identity]
+      summary: Create an organization-bound connection with immutable identity metadata
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SSOConnection'
+      responses:
+        '201':
+          description: Created; configure and verify a draft before activation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SSOConnection'
+        '400':
+          description: Invalid metadata, inactive organization or connection limit reached
+        '403':
+          description: Platform administrator required
+        '409':
+          description: Connection ID already exists
+        '503':
+          description: Auth, audit, encryption or migration unavailable
   /admin/v1/sso/settings:
+    parameters:
+    - name: connection
+      in: query
+      description: Connection ID; omitted or default selects the backward-compatible default connection
+      schema:
+        type: string
+        maxLength: 64
+        pattern: '^[a-z0-9_-]+$'
     get:
       operationId: getSSOSettings
       tags:
@@ -124,6 +179,14 @@ paths:
               required:
               - issuer
   /admin/v1/sso/test:
+    parameters:
+    - name: connection
+      in: query
+      description: Connection ID; omitted or default selects the backward-compatible default connection
+      schema:
+        type: string
+        maxLength: 64
+        pattern: '^[a-z0-9_-]+$'
     post:
       operationId: startSSOSettingsTest
       tags:
@@ -157,6 +220,14 @@ paths:
             schema:
               $ref: '#/components/schemas/SSORevisionInput'
   /admin/v1/sso/action:
+    parameters:
+    - name: connection
+      in: query
+      description: Connection ID; omitted or default selects the backward-compatible default connection
+      schema:
+        type: string
+        maxLength: 64
+        pattern: '^[a-z0-9_-]+$'
     post:
       operationId: changeSSOSettings
       tags:
@@ -5324,9 +5395,45 @@ components:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
   schemas:
+    SSOConnection:
+      type: object
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          maxLength: 64
+          pattern: '^[a-z0-9_-]+$'
+        name:
+          type: string
+          maxLength: 128
+        provider:
+          type: string
+          enum: [entra, keycloak, oidc]
+        organization_id:
+          type: string
+          maxLength: 256
+      required: [id, name, provider]
+    SSOConnectionView:
+      allOf:
+      - $ref: '#/components/schemas/SSOSettingsView'
+      - type: object
+        properties:
+          id:
+            type: string
+          name:
+            type: string
+          provider:
+            type: string
+          organization_id:
+            type: string
+        required: [id, name, provider]
     SSOProfileConfig:
       type: object
       properties:
+        organization_id:
+          type: string
+          maxLength: 256
+          description: Must match the connection binding; tenant connections cannot map platform roles
         issuer:
           type: string
           maxLength: 2048
@@ -5363,6 +5470,7 @@ components:
             type: string
             enum:
             - admin
+            - org_admin
             - user
             - team_admin
             - developer
@@ -5386,6 +5494,10 @@ components:
     SSODraftInput:
       type: object
       properties:
+        organization_id:
+          type: string
+          maxLength: 256
+          description: Must match the connection binding; tenant connections cannot map platform roles
         issuer:
           type: string
           maxLength: 2048
@@ -5422,6 +5534,7 @@ components:
             type: string
             enum:
             - admin
+            - org_admin
             - user
             - team_admin
             - developer
@@ -5456,6 +5569,10 @@ components:
     SSOProfileView:
       type: object
       properties:
+        organization_id:
+          type: string
+          maxLength: 256
+          description: Must match the connection binding; tenant connections cannot map platform roles
         issuer:
           type: string
           maxLength: 2048
@@ -5492,6 +5609,7 @@ components:
             type: string
             enum:
             - admin
+            - org_admin
             - user
             - team_admin
             - developer

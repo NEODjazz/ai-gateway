@@ -26,6 +26,7 @@ const (
 )
 
 type BrowserSSOConfig struct {
+	ConnectionID     string
 	ProfileID        string
 	AuthorizationURL string
 	TokenURL         string
@@ -98,6 +99,25 @@ func validBrowserSSORedirectURL(raw string) bool {
 }
 func (h Handler) GetBrowserSSOConfig(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
+	if client, ok := h.ssoManagement.(SSOLoginConnectionClient); ok {
+		connections, err := client.LoginSSOConnections(r.Context(), ssoServiceAudit(r))
+		if err != nil {
+			writeSSOFailure(w, err)
+			return
+		}
+		if len(connections) > 0 {
+			choices := make([]map[string]string, 0, len(connections))
+			for _, connection := range connections {
+				if !validSSOConnectionID(connection.ID) {
+					writeSSOFailure(w, nil)
+					return
+				}
+				choices = append(choices, map[string]string{"id": connection.ID, "name": connection.Name, "provider": connection.Provider, "organization_id": connection.OrganizationID, "start_url": "/auth/sso/start?connection=" + url.QueryEscape(connection.ID)})
+			}
+			writeJSON(w, 200, map[string]any{"enabled": true, "start_url": "/auth/sso/start", "connections": choices})
+			return
+		}
+	}
 	sso, err := h.resolveBrowserSSO(r)
 	if err != nil {
 		writeError(w, 503, "sso_unavailable", "Browser sign-in is unavailable.")
@@ -117,7 +137,7 @@ func (h Handler) StartBrowserSSO(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	if r.URL.RawQuery != "" {
+	if len(r.URL.Query()) > 1 || r.URL.RawQuery != "" && r.URL.Query().Get("connection") == "" {
 		writeError(w, http.StatusBadRequest, "invalid_request", "query parameters are not supported")
 		return
 	}
@@ -365,18 +385,29 @@ func (s *BrowserSSO) seal(purpose string, value any) (string, error) {
 	if _, err := rand.Read(nonce); err != nil {
 		return "", err
 	}
-	return base64.RawURLEncoding.EncodeToString(append(nonce, s.aead.Seal(nil, nonce, payload, []byte(purpose))...)), nil
+	prefix := ""
+	if s.config.ConnectionID != "" {
+		prefix = s.config.ConnectionID + "."
+	}
+	return prefix + base64.RawURLEncoding.EncodeToString(append(nonce, s.aead.Seal(nil, nonce, payload, []byte(s.cookiePurpose(purpose)))...)), nil
 }
 
 func (s *BrowserSSO) open(purpose, encoded string, destination any) error {
 	if len(encoded) > 64<<10 {
 		return errors.New("encrypted browser state is too large")
 	}
+	if s.config.ConnectionID != "" {
+		prefix := s.config.ConnectionID + "."
+		if !strings.HasPrefix(encoded, prefix) {
+			return errors.New("invalid SSO connection cookie")
+		}
+		encoded = strings.TrimPrefix(encoded, prefix)
+	}
 	value, err := base64.RawURLEncoding.DecodeString(encoded)
 	if err != nil || len(value) <= s.aead.NonceSize() {
 		return errors.New("invalid encrypted browser state")
 	}
-	payload, err := s.aead.Open(nil, value[:s.aead.NonceSize()], value[s.aead.NonceSize():], []byte(purpose))
+	payload, err := s.aead.Open(nil, value[:s.aead.NonceSize()], value[s.aead.NonceSize():], []byte(s.cookiePurpose(purpose)))
 	if err != nil {
 		return errors.New("invalid encrypted browser state")
 	}
@@ -404,4 +435,11 @@ func randomBrowserSSOValue(bytes int) (string, error) {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(value), nil
+}
+
+func (s *BrowserSSO) cookiePurpose(purpose string) string {
+	if s.config.ConnectionID == "" {
+		return purpose
+	}
+	return purpose + "\x00" + s.config.ConnectionID
 }

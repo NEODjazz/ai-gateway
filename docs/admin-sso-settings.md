@@ -172,3 +172,48 @@ disable и rollback на отдельной тестовой БД; этот сц
 Контракты IdP: [Microsoft OIDC endpoints](https://learn.microsoft.com/en-us/entra/identity-platform/v2-protocols-oidc),
 [Microsoft ID token claims](https://learn.microsoft.com/en-us/entra/identity-platform/id-token-claims-reference).
 Реальный Entra tenant в локальных проверках не использовался.
+
+## Multiple browser connections
+
+Apply Auth migration `017_sso_connections.sql` before updating Auth. The existing
+singleton is retained as connection `default`, with its encrypted settings,
+revision, API trust snapshot and browser sessions preserved. Readiness requires
+the connection table. No deployment configuration or credentials are changed by
+this migration.
+
+Platform administrators use `GET /admin/v1/sso/connections` and
+`POST /admin/v1/sso/connections`. Creation accepts `id` (lowercase letters,
+numbers, `_` and `-`, at most 64), `name` (at most 128), `provider` (`entra`,
+`keycloak`, `oidc`) and optional `organization_id`. Additional connections are
+bounded to 16; creation across replicas is serialized in PostgreSQL. Metadata and
+organization binding are immutable. Provider labels select UI guidance, not a
+weaker validation or authentication mode.
+
+Existing settings/test/action endpoints accept `?connection=<id>`. An unknown
+connection never falls back to default. Each connection has its own encrypted
+active/draft/previous document, CAS revision, proof ticket and rollback epoch.
+Encryption is bound to the connection's immutable metadata using
+`CREDENTIAL_ENCRYPTION_KEY`; copied ciphertext cannot move to another connection
+or tenant. Client/session secrets are never returned by the admin API. API JWT
+trust is independent and remains in the default trust configuration.
+
+For a bound connection, draft `organization_id` must equal its binding. It cannot
+map `admin` or `team_admin`: map the tenant administrator to `org_admin`, which
+requires explicit active organization membership. Testing additionally proves
+that the same internal user is an approved platform administrator in the directory;
+the resulting browser session still contains only mapped, tenant-approved roles.
+Changing connection issuer/client never transfers a principal's immutable tenant.
+Use separate approved issuer/client bindings for access to multiple organizations.
+
+`/auth/sso/config` lists enabled connection names and start URLs. Selecting
+`/auth/sso/start?connection=<id>` starts a fresh PKCE/nonce login. The connection
+hint in cookies is only routing information: both the encrypted cookie purpose
+and profile are verified before exchanging a code. Auth checks the ID token and
+pinned directory organization before issuing a local server session. Public
+headers/query labels cannot select a tenant for an existing credential. Existing
+API clients continue to present their independent resource tokens.
+
+Unit/browser tests cover tampered routing hints before code exchange, unknown
+connections, independent proof/revisions, server sessions and disable behavior.
+PostgreSQL tests cover replica CAS, bounded concurrent admission and ciphertext
+binding. UI connection management and provider presets are the next delivery.

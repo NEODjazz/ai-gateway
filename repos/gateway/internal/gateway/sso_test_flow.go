@@ -19,10 +19,16 @@ func validBrowserSSOTest(profile PrivateSSOTest, ticket string, now time.Time) b
 }
 
 func (h Handler) StartBrowserSSOTest(w http.ResponseWriter, r *http.Request) {
+	h, err := h.withRequestSSOConnection(r)
+	if err != nil {
+		writeSSOFailure(w, err)
+		return
+	}
+	id, _ := requestSSOConnection(r)
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	query := r.URL.Query()
-	if h.ssoManagement == nil || len(query) != 1 || len(query["ticket"]) != 1 {
+	if h.ssoManagement == nil || (len(query) != 1 && !(len(query) == 2 && id != "")) || len(query["ticket"]) != 1 {
 		writeError(w, 400, "invalid_sso_test", "SSO test is invalid or expired.")
 		return
 	}
@@ -36,11 +42,20 @@ func (h Handler) StartBrowserSSOTest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 503, "sso_unavailable", "Browser sign-in is unavailable.")
 		return
 	}
+	if id != "" && id != "default" {
+		sso.config.ConnectionID = id
+	}
 	h.browserSSO = sso
 	h.startBrowserSSO(w, r, profile.Profile.ID, query.Get("ticket"))
 }
 
 func (h Handler) CompleteBrowserSSOTest(w http.ResponseWriter, r *http.Request) {
+	h, err := h.withRequestSSOConnection(r)
+	if err != nil {
+		writeSSOFailure(w, err)
+		return
+	}
+	id, _ := requestSSOConnection(r)
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	if h.ssoManagement == nil {
@@ -56,6 +71,9 @@ func (h Handler) CompleteBrowserSSOTest(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		writeError(w, 503, "sso_unavailable", "Browser sign-in is unavailable.")
 		return
+	}
+	if id != "" && id != "default" {
+		sso.config.ConnectionID = id
 	}
 	// Verify the sealed ticket and profile before submitting an authorization code.
 	cookie, err := r.Cookie(browserSSOTestStateCookie)
@@ -74,5 +92,12 @@ func (h Handler) CompleteBrowserSSOTest(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	// The test never creates or overwrites an active browser session.
-	http.Redirect(w, r, "/ui/settings?sso_test=passed", http.StatusFound)
+	http.Redirect(w, r, "/ui/settings?sso_test=passed"+ssoConnectionQueryForID(id), http.StatusFound)
+}
+
+func ssoConnectionQueryForID(id string) string {
+	if id == "" || id == "default" {
+		return ""
+	}
+	return "&connection=" + id
 }

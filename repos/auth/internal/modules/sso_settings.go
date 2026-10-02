@@ -27,6 +27,7 @@ var (
 
 // SSOProfileConfig contains public configuration, never client/session secrets.
 type SSOProfileConfig struct {
+	OrganizationID    string            `json:"organization_id,omitempty"`
 	EndpointOrigins   []string          `json:"endpoint_origins,omitempty"`
 	Issuer            string            `json:"issuer"`
 	Audience          string            `json:"audience"`
@@ -103,11 +104,15 @@ type SSOSettingsStore interface {
 }
 
 type SSOManager struct {
-	store      SSOSettingsStore
-	aead       cipher.AEAD
-	legacyAEAD cipher.AEAD
-	now        func() time.Time
-	mu         sync.Mutex
+	store          SSOSettingsStore
+	aead           cipher.AEAD
+	legacyAEAD     cipher.AEAD
+	now            func() time.Time
+	mu             sync.Mutex
+	connectionKey  [32]byte
+	sessionStore   ssoSessionStore
+	sessionAEAD    cipher.AEAD
+	organizationID string
 	// Only the active verifier is retained. Candidate verifiers are request local.
 	profileID string
 	verifier  *jwtVerifier
@@ -128,6 +133,8 @@ func newRuntimeSSOManager(store SSOSettingsStore, key, legacyKey string) (*SSOMa
 		return nil, ErrSSOUnavailable
 	}
 	manager := &SSOManager{store: store, now: time.Now}
+	manager.sessionStore, _ = store.(ssoSessionStore)
+	manager.connectionKey = sha256.Sum256([]byte("ai-gateway/sso-connections/v1\x00" + key))
 	var err error
 	if key != "" {
 		manager.aead, err = ssoSettingsCipher(key)
@@ -141,6 +148,7 @@ func newRuntimeSSOManager(store SSOSettingsStore, key, legacyKey string) (*SSOMa
 			return nil, err
 		}
 	}
+	manager.sessionAEAD = manager.aead
 	return manager, nil
 }
 
@@ -262,6 +270,16 @@ func ssoEndpoint(raw string) (*url.URL, bool) {
 }
 
 func (p SSOProfileConfig) Validate() error {
+	if p.OrganizationID != "" {
+		if !validJWTIdentityValue(p.OrganizationID, 256) {
+			return ErrSSOConfiguration
+		}
+		for _, role := range p.RoleMappings {
+			if role == "admin" || role == "team_admin" {
+				return ErrSSOConfiguration
+			}
+		}
+	}
 	issuer, ok := ssoEndpoint(p.Issuer)
 	if !ok || !validJWTIdentityValue(p.Audience, 256) || !validJWTIdentityValue(p.ClientID, 512) {
 		return ErrSSOConfiguration
@@ -333,6 +351,9 @@ func ssoRandom() (string, error) {
 }
 
 func (m *SSOManager) SaveDraft(ctx context.Context, input SSODraftInput) (SSOSettingsView, error) {
+	if _, scoped := m.store.(scopedSSOSettingsStore); scoped && input.OrganizationID != m.organizationID {
+		return SSOSettingsView{}, ErrSSOConfiguration
+	}
 	if err := input.SSOProfileConfig.Validate(); err != nil {
 		return SSOSettingsView{}, err
 	}

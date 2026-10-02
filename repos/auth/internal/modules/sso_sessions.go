@@ -103,6 +103,9 @@ func (m AuthModule) verifySSOIdentity(ctx context.Context, profile *SSOProfile, 
 	if err := candidate.authorizeJWTPrincipal(ctx, &req, claims); err != nil {
 		return req, err
 	}
+	if profile.OrganizationID != "" && req.OrganizationID != profile.OrganizationID {
+		return req, ErrUnauthorized
+	}
 	return req, nil
 }
 
@@ -122,19 +125,19 @@ func (m AuthModule) CreateSSOBrowserSession(ctx context.Context, login SSOBrowse
 	if m.sso == nil || m.sso.aead == nil {
 		return SSOBrowserSession{}, ErrSSOUnavailable
 	}
-	state, _, err := m.sso.Load(ctx)
+	profile, err := m.sso.activeProfile(ctx, login.ProfileID)
 	if err != nil {
 		return SSOBrowserSession{}, err
 	}
-	if state.Active == nil || !state.Active.Enabled {
+	if profile == nil || !profile.Enabled {
 		return SSOBrowserSession{}, ErrUnauthorized
 	}
-	req, err := m.verifySSOIdentity(ctx, state.Active, login)
+	req, err := m.verifySSOIdentity(ctx, profile, login)
 	if err != nil {
 		return SSOBrowserSession{}, err
 	}
-	store, ok := m.sso.store.(ssoSessionStore)
-	if !ok {
+	store := m.sso.sessionStore
+	if store == nil {
 		return SSOBrowserSession{}, ErrSSOUnavailable
 	}
 	random, err := ssoRandom()
@@ -143,18 +146,18 @@ func (m AuthModule) CreateSSOBrowserSession(ctx context.Context, login SSOBrowse
 	}
 	token := ssoSessionPrefix + random
 	hash, _ := ssoSessionHash(token)
-	epoch := sha256.Sum256([]byte(state.Active.SessionKey))
-	session := storedSSOSession{Epoch: hex.EncodeToString(epoch[:]), ProfileID: state.Active.ID, Identity: *req.JWTIdentity, UserID: req.UserID, OrganizationID: req.OrganizationID, Roles: req.Roles, ExpiresAt: m.sso.now().Add(time.Duration(state.Active.SessionTTLSeconds) * time.Second).Unix()}
+	epoch := sha256.Sum256([]byte(profile.SessionKey))
+	session := storedSSOSession{Epoch: hex.EncodeToString(epoch[:]), ProfileID: profile.ID, Identity: *req.JWTIdentity, UserID: req.UserID, OrganizationID: req.OrganizationID, Roles: req.Roles, ExpiresAt: m.sso.now().Add(time.Duration(profile.SessionTTLSeconds) * time.Second).Unix()}
 	plain, err := json.Marshal(session)
 	if err != nil {
 		return SSOBrowserSession{}, ErrSSOUnavailable
 	}
-	nonce := make([]byte, m.sso.aead.NonceSize())
+	nonce := make([]byte, m.sso.sessionAEAD.NonceSize())
 	if _, err := rand.Read(nonce); err != nil {
 		return SSOBrowserSession{}, ErrSSOUnavailable
 	}
-	payload := m.sso.aead.Seal(nonce, nonce, plain, []byte("sso-session/v1\x00"+hash))
-	loginDigest := sha256.Sum256([]byte(state.Active.Issuer + "\x00" + state.Active.ClientID + "\x00" + login.Nonce))
+	payload := m.sso.sessionAEAD.Seal(nonce, nonce, plain, []byte("sso-session/v1\x00"+hash))
+	loginDigest := sha256.Sum256([]byte(profile.Issuer + "\x00" + profile.ClientID + "\x00" + login.Nonce))
 	if err := store.CreateSSOSession(ctx, hash, hex.EncodeToString(loginDigest[:]), session.ProfileID, session.UserID, session.ExpiresAt, payload); err != nil {
 		return SSOBrowserSession{}, err
 	}
@@ -173,18 +176,18 @@ func (m AuthModule) authorizeSSOSessionHash(ctx context.Context, req *RequestCon
 	if m.sso == nil || m.sso.aead == nil {
 		return ErrSSOUnavailable
 	}
-	store, ok := m.sso.store.(ssoSessionStore)
-	if !ok {
+	store := m.sso.sessionStore
+	if store == nil {
 		return ErrSSOUnavailable
 	}
 	payload, err := store.LoadSSOSession(ctx, hash, m.sso.now().Unix())
 	if err != nil {
 		return err
 	}
-	if len(payload) < m.sso.aead.NonceSize() || len(payload) > 8192 {
+	if len(payload) < m.sso.sessionAEAD.NonceSize() || len(payload) > 8192 {
 		return ErrUnauthorized
 	}
-	plain, err := m.sso.aead.Open(nil, payload[:m.sso.aead.NonceSize()], payload[m.sso.aead.NonceSize():], []byte("sso-session/v1\x00"+hash))
+	plain, err := m.sso.sessionAEAD.Open(nil, payload[:m.sso.sessionAEAD.NonceSize()], payload[m.sso.sessionAEAD.NonceSize():], []byte("sso-session/v1\x00"+hash))
 	if err != nil {
 		return ErrUnauthorized
 	}
@@ -192,11 +195,10 @@ func (m AuthModule) authorizeSSOSessionHash(ctx context.Context, req *RequestCon
 	if json.Unmarshal(plain, &session) != nil || session.ExpiresAt <= m.sso.now().Unix() {
 		return ErrUnauthorized
 	}
-	state, _, err := m.sso.Load(ctx)
+	profile, err := m.sso.activeProfile(ctx, session.ProfileID)
 	if err != nil {
 		return err
 	}
-	profile := state.Active
 	if profile == nil || !profile.Enabled || profile.ID != session.ProfileID || profile.Issuer != session.Identity.Issuer || profile.ClientID != session.Identity.Audience {
 		return ErrUnauthorized
 	}
@@ -212,7 +214,7 @@ func (m AuthModule) authorizeSSOSessionHash(ctx context.Context, req *RequestCon
 	if err != nil {
 		return ErrJWTDirectoryUnavailable
 	}
-	if !found || !principal.Enabled || principal.UserID != session.UserID || principal.OrganizationID != session.OrganizationID || principal.Issuer != session.Identity.Issuer || principal.Subject != session.Identity.Subject || principal.Audience != session.Identity.Audience {
+	if !found || !principal.Enabled || principal.UserID != session.UserID || principal.OrganizationID != session.OrganizationID || profile.OrganizationID != "" && principal.OrganizationID != profile.OrganizationID || principal.Issuer != session.Identity.Issuer || principal.Subject != session.Identity.Subject || principal.Audience != session.Identity.Audience {
 		return ErrUnauthorized
 	}
 	roles := []string{}
@@ -245,8 +247,8 @@ func (m AuthModule) RevokeSSOBrowserSession(ctx context.Context, token string) e
 	if m.sso == nil {
 		return ErrSSOUnavailable
 	}
-	store, ok := m.sso.store.(ssoSessionStore)
-	if !ok {
+	store := m.sso.sessionStore
+	if store == nil {
 		return ErrSSOUnavailable
 	}
 	if err := store.RevokeSSOSession(ctx, hash); err != nil {

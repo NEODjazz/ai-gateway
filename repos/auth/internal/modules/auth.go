@@ -127,15 +127,15 @@ func (m AuthModule) Ready(ctx context.Context) error {
 		}
 	}
 	if m.sso != nil {
-		state, _, err := m.sso.Load(ctx)
+		_, _, err := m.sso.Load(ctx)
 		if err != nil {
 			return err
 		}
-		if state.Active != nil && state.Active.Enabled {
-			if store, ok := m.sso.store.(interface{ SSOSessionsReady(context.Context) error }); ok {
-				if err := store.SSOSessionsReady(ctx); err != nil {
-					return err
-				}
+		// Managed connections can be active while the default is disabled.
+		// Durable session tables are therefore always required for managed SSO.
+		if store, ok := m.sso.store.(interface{ SSOSessionsReady(context.Context) error }); ok {
+			if err := store.SSOSessionsReady(ctx); err != nil {
+				return err
 			}
 		}
 	}

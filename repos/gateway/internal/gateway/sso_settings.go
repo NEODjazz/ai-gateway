@@ -12,6 +12,7 @@ import (
 )
 
 type SSOProfileConfig struct {
+	OrganizationID    string            `json:"organization_id,omitempty"`
 	EndpointOrigins   []string          `json:"endpoint_origins,omitempty"`
 	Issuer            string            `json:"issuer"`
 	Audience          string            `json:"audience"`
@@ -119,10 +120,10 @@ type SSOManagementClient interface {
 }
 
 func (c *RemoteManagementClient) GetSSOSettings(ctx context.Context, audit ManagementAudit) (SSOSettingsView, error) {
-	return managementCall[struct{}, SSOSettingsView](ctx, c, http.MethodGet, "/internal/v1/sso/settings", audit, struct{}{})
+	return managementCall[struct{}, SSOSettingsView](ctx, c, http.MethodGet, c.ssoPath("/internal/v1/sso/settings"), audit, struct{}{})
 }
 func (c *RemoteManagementClient) SaveSSODraft(ctx context.Context, audit ManagementAudit, input SSODraftInput) (SSOSettingsView, error) {
-	return managementCall[SSODraftInput, SSOSettingsView](ctx, c, http.MethodPut, "/internal/v1/sso/settings", audit, input)
+	return managementCall[SSODraftInput, SSOSettingsView](ctx, c, http.MethodPut, c.ssoPath("/internal/v1/sso/settings"), audit, input)
 }
 func (c *RemoteManagementClient) DiscoverSSO(ctx context.Context, audit ManagementAudit, issuer string) (SSODiscovery, error) {
 	return managementCall[map[string]string, SSODiscovery](ctx, c, http.MethodPost, "/internal/v1/sso/discover", audit, map[string]string{"issuer": issuer})
@@ -130,22 +131,22 @@ func (c *RemoteManagementClient) DiscoverSSO(ctx context.Context, audit Manageme
 func (c *RemoteManagementClient) StartSSOTest(ctx context.Context, audit ManagementAudit, input SSORevisionInput) (string, error) {
 	out, err := managementCall[SSORevisionInput, struct {
 		Ticket string `json:"ticket"`
-	}](ctx, c, http.MethodPost, "/internal/v1/sso/test", audit, input)
+	}](ctx, c, http.MethodPost, c.ssoPath("/internal/v1/sso/test"), audit, input)
 	return out.Ticket, err
 }
 func (c *RemoteManagementClient) ChangeSSO(ctx context.Context, audit ManagementAudit, input SSOActionInput) (SSOSettingsView, error) {
-	return managementCall[SSOActionInput, SSOSettingsView](ctx, c, http.MethodPost, "/internal/v1/sso/action", audit, input)
+	return managementCall[SSOActionInput, SSOSettingsView](ctx, c, http.MethodPost, c.ssoPath("/internal/v1/sso/action"), audit, input)
 }
 func (c *RemoteManagementClient) ActiveSSO(ctx context.Context, audit ManagementAudit) (*PrivateSSOProfile, error) {
-	return managementCall[struct{}, *PrivateSSOProfile](ctx, c, http.MethodGet, "/internal/v1/sso/active", audit, struct{}{})
+	return managementCall[struct{}, *PrivateSSOProfile](ctx, c, http.MethodGet, c.ssoPath("/internal/v1/sso/active"), audit, struct{}{})
 }
 func (c *RemoteManagementClient) TestSSOProfile(ctx context.Context, audit ManagementAudit) (PrivateSSOTest, error) {
-	return managementCall[struct{}, PrivateSSOTest](ctx, c, http.MethodGet, "/internal/v1/sso/test-profile", audit, struct{}{})
+	return managementCall[struct{}, PrivateSSOTest](ctx, c, http.MethodGet, c.ssoPath("/internal/v1/sso/test-profile"), audit, struct{}{})
 }
 func (c *RemoteManagementClient) VerifySSOTest(ctx context.Context, audit ManagementAudit, input SSOTestVerification) error {
 	_, err := managementCall[SSOTestVerification, struct {
 		Verified bool `json:"verified"`
-	}](ctx, c, http.MethodPost, "/internal/v1/sso/verify-test", audit, input)
+	}](ctx, c, http.MethodPost, c.ssoPath("/internal/v1/sso/verify-test"), audit, input)
 	return err
 }
 func (h Handler) WithSSOManagement(client SSOManagementClient) Handler {
@@ -171,9 +172,14 @@ func writeSSOFailure(w http.ResponseWriter, err error) {
 			return
 		}
 	}
-	writeError(w, 503, "sso_unavailable", "Managed SSO requires PostgreSQL migration 014 and CREDENTIAL_ENCRYPTION_KEY of at least 32 bytes; check Auth availability.")
+	writeError(w, 503, "sso_unavailable", "Managed SSO requires PostgreSQL migrations 014–017 and CREDENTIAL_ENCRYPTION_KEY of at least 32 bytes; check Auth availability.")
 }
 func (h Handler) GetSSOSettings(w http.ResponseWriter, r *http.Request) {
+	h, err := h.withRequestSSOConnection(r)
+	if err != nil {
+		writeSSOFailure(w, err)
+		return
+	}
 	req, ok := h.authorizeDirectory(w, r, "__global__")
 	if !ok {
 		return
@@ -192,6 +198,11 @@ func (h Handler) GetSSOSettings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, view)
 }
 func (h Handler) SaveSSODraft(w http.ResponseWriter, r *http.Request) {
+	h, err := h.withRequestSSOConnection(r)
+	if err != nil {
+		writeSSOFailure(w, err)
+		return
+	}
 	req, ok := h.authorizeDirectory(w, r, "__global__")
 	if !ok {
 		return
@@ -247,6 +258,11 @@ func (c *RemoteManagementClient) DiscoverSSOWithOrigins(ctx context.Context, aud
 	return managementCall[map[string]any, SSODiscovery](ctx, c, http.MethodPost, "/internal/v1/sso/discover", audit, map[string]any{"issuer": issuer, "endpoint_origins": origins})
 }
 func (h Handler) StartSSOTest(w http.ResponseWriter, r *http.Request) {
+	h, err := h.withRequestSSOConnection(r)
+	if err != nil {
+		writeSSOFailure(w, err)
+		return
+	}
 	req, ok := h.authorizeDirectory(w, r, "__global__")
 	if !ok {
 		return
@@ -257,10 +273,15 @@ func (h Handler) StartSSOTest(w http.ResponseWriter, r *http.Request) {
 	}
 	h.ssoMutation(w, r, req, "test.start", func(audit ManagementAudit) (any, error) {
 		ticket, err := h.ssoManagement.StartSSOTest(r.Context(), audit, input)
-		return map[string]string{"start_url": "/auth/sso/test/start?ticket=" + ticket}, err
+		return map[string]string{"start_url": "/auth/sso/test/start?ticket=" + ticket + ssoConnectionQuery(r)}, err
 	})
 }
 func (h Handler) ChangeSSO(w http.ResponseWriter, r *http.Request) {
+	h, err := h.withRequestSSOConnection(r)
+	if err != nil {
+		writeSSOFailure(w, err)
+		return
+	}
 	req, ok := h.authorizeDirectory(w, r, "__global__")
 	if !ok {
 		return
@@ -290,7 +311,7 @@ func (h Handler) ssoMutation(w http.ResponseWriter, r *http.Request, req modules
 		return
 	}
 	audit := managementAudit(req)
-	event := AuditEvent{Action: "sso." + action, TargetType: "sso", TargetID: "browser-sso"}
+	event := AuditEvent{Action: "sso." + action, TargetType: "sso", TargetID: ssoAuditTarget(r)}
 	if h.audit == nil || !h.auditMutation(r.Context(), audit, event) {
 		writeError(w, 503, "audit_unavailable", "Audit service is unavailable.")
 		return
@@ -322,7 +343,15 @@ func (h Handler) resolveBrowserSSO(r *http.Request) (*BrowserSSO, error) {
 	if h.ssoManagement == nil {
 		return h.browserSSO, nil
 	}
-	profile, err := h.ssoManagement.ActiveSSO(r.Context(), ssoServiceAudit(r))
+	selected, err := h.withRequestSSOConnection(r)
+	if err != nil {
+		return nil, err
+	}
+	id, err := requestSSOConnection(r)
+	if err != nil {
+		return nil, err
+	}
+	profile, err := selected.ssoManagement.ActiveSSO(r.Context(), ssoServiceAudit(r))
 	if err != nil {
 		return nil, err
 	}
@@ -332,7 +361,11 @@ func (h Handler) resolveBrowserSSO(r *http.Request) (*BrowserSSO, error) {
 	if !profile.Enabled {
 		return nil, nil
 	}
-	return profile.browser(false)
+	browser, err := profile.browser(false)
+	if browser != nil && id != "" && id != "default" {
+		browser.config.ConnectionID = id
+	}
+	return browser, err
 }
 func (h Handler) browserSSOMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -350,4 +383,12 @@ func (h Handler) browserSSOMiddleware(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func ssoAuditTarget(r *http.Request) string {
+	id, err := requestSSOConnection(r)
+	if err != nil || id == "" || id == "default" {
+		return "browser-sso"
+	}
+	return "browser-sso/" + id
 }

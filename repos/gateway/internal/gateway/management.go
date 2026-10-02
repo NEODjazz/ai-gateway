@@ -105,9 +105,10 @@ type ManagementClient interface {
 }
 
 type RemoteManagementClient struct {
-	baseURL string
-	secret  string
-	client  *http.Client
+	ssoConnection string
+	baseURL       string
+	secret        string
+	client        *http.Client
 }
 
 type ManagementError struct {
