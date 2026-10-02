@@ -86,6 +86,9 @@ func requestSSOConnection(r *http.Request) (string, error) {
 	if r.URL.Path == "/auth/sso/test/callback" {
 		name = browserSSOTestStateCookie
 	}
+	return requestSSOCookieConnection(r, name)
+}
+func requestSSOCookieConnection(r *http.Request, name string) (string, error) {
 	cookie, err := r.Cookie(name)
 	if err != nil {
 		return "", nil
@@ -107,6 +110,9 @@ func (h Handler) withRequestSSOConnection(r *http.Request) (Handler, error) {
 	if err != nil {
 		return h, err
 	}
+	return h.withSSOConnection(id)
+}
+func (h Handler) withSSOConnection(id string) (Handler, error) {
 	if id == "" || id == "default" {
 		return h, nil
 	}

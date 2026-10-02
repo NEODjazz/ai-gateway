@@ -1,12 +1,14 @@
 package gateway
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -113,5 +115,99 @@ func TestSSOConnectionHintIsNotOrganizationAuthority(t *testing.T) {
 		if _, err := requestSSOConnection(httptest.NewRequest("GET", path, nil)); err == nil {
 			t.Fatal("noncanonical connection hint accepted", path)
 		}
+	}
+}
+
+type connectionSessionAuth struct {
+	browserSSOAuthModule
+	roles []string
+	org   string
+}
+
+func (m *connectionSessionAuth) Handle(ctx context.Context, req *modules.RequestContext) error {
+	if err := m.browserSSOAuthModule.Handle(ctx, req); err != nil {
+		return err
+	}
+	req.Roles = m.roles
+	req.OrganizationID = m.org
+	return nil
+}
+func TestSSOManagementTargetDoesNotSelectAuthenticationConnection(t *testing.T) {
+	for _, test := range []struct {
+		name, cookie, target string
+		roles                []string
+		want                 int
+	}{
+		{"default admin edits tenant", "", "a", []string{"admin"}, 200},
+		{"connection admin edits another", "a", "b", []string{"admin"}, 200},
+		{"connection admin lists registry", "a", "", []string{"admin"}, 200},
+		{"tenant is authenticated then denied", "a", "b", []string{"org_admin"}, 403},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			profiles := map[string]*PrivateSSOProfile{}
+			for _, id := range []string{"", "a", "b"} {
+				key := id
+				if key == "" {
+					key = "d"
+				}
+				profiles[id] = &PrivateSSOProfile{ID: "profile-" + key, Enabled: true, SessionKey: base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat(key, 32))), SSOProfileConfig: SSOProfileConfig{ClientID: "console-" + key, AuthorizationURL: "https://idp.example/authorize", TokenURL: "https://idp.example/token", RedirectURL: "http://ai-gateway.localhost/auth/sso/callback", SessionTTLSeconds: 3600}}
+			}
+			var mu sync.Mutex
+			var authConnection, settingsConnection string
+			service := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Header.Get("X-Management-Token") != "fixture" {
+					t.Error("missing service auth")
+				}
+				switch r.URL.Path {
+				case "/internal/v1/sso/active":
+					id := r.URL.Query().Get("connection")
+					mu.Lock()
+					authConnection = id
+					mu.Unlock()
+					_ = json.NewEncoder(w).Encode(profiles[id])
+				case "/internal/v1/sso/settings":
+					mu.Lock()
+					settingsConnection = r.URL.Query().Get("connection")
+					mu.Unlock()
+					_ = json.NewEncoder(w).Encode(SSOSettingsView{Revision: 7})
+				case "/internal/v1/sso/connections":
+					_ = json.NewEncoder(w).Encode(map[string]any{"data": []SSOConnectionView{}})
+				default:
+					w.WriteHeader(404)
+				}
+			}))
+			defer service.Close()
+			handle := "agsso_" + base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("s", 32)))
+			sso, err := profiles[test.cookie].browser(false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sso.config.ConnectionID = test.cookie
+			sealed, err := sso.seal(browserSSOSessionCookie, browserSSOSession{Token: handle, ExpiresAt: time.Now().Add(time.Hour).Unix()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			auth := &connectionSessionAuth{browserSSOAuthModule: browserSSOAuthModule{token: handle}, roles: test.roles, org: "org-a"}
+			handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{auth}), modelsProvider{}).WithIdentityDirectory(&directoryClientStub{}).WithSSOManagement(NewRemoteManagementClient(service.URL, "fixture")))
+			path := "/admin/v1/sso/connections"
+			if test.target != "" {
+				path = "/admin/v1/sso/settings?connection=" + test.target
+			}
+			r := httptest.NewRequest("GET", path, nil)
+			r.AddCookie(&http.Cookie{Name: browserSSOSessionCookie, Value: sealed})
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, r)
+			if w.Code != test.want {
+				t.Fatal(w.Code, w.Body.String())
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if authConnection != test.cookie {
+				t.Fatal("management target changed session verification connection")
+			}
+			if test.want == 200 && test.target != "" && settingsConnection != test.target {
+				t.Fatal("management connection selection lost")
+			}
+		})
 	}
 }

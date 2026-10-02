@@ -345,14 +345,17 @@ func (p *PrivateSSOProfile) browser(test bool) (*BrowserSSO, error) {
 	return NewBrowserSSO(BrowserSSOConfig{ProfileID: p.ID, AuthorizationURL: p.AuthorizationURL, TokenURL: p.TokenURL, ClientID: p.ClientID, ClientSecret: p.ClientSecret, RedirectURL: redirect, Scopes: p.Scopes, SessionKey: key, SessionTTL: time.Duration(p.SessionTTLSeconds) * time.Second})
 }
 func (h Handler) resolveBrowserSSO(r *http.Request) (*BrowserSSO, error) {
-	if h.ssoManagement == nil {
-		return nil, nil
-	}
-	selected, err := h.withRequestSSOConnection(r)
+	id, err := requestSSOConnection(r)
 	if err != nil {
 		return nil, err
 	}
-	id, err := requestSSOConnection(r)
+	return h.resolveBrowserSSOConnection(r, id)
+}
+func (h Handler) resolveBrowserSSOConnection(r *http.Request, id string) (*BrowserSSO, error) {
+	if h.ssoManagement == nil {
+		return nil, nil
+	}
+	selected, err := h.withSSOConnection(id)
 	if err != nil {
 		return nil, err
 	}
@@ -379,7 +382,14 @@ func (h Handler) browserSSOMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") == "" {
 			if _, err := r.Cookie(browserSSOSessionCookie); err == nil && !strings.HasPrefix(r.URL.Path, "/auth/sso/") {
-				sso, err := h.resolveBrowserSSO(r)
+				// The authentication connection comes from the sealed session,
+				// independently of the management connection selected in the query.
+				id, err := requestSSOCookieConnection(r, browserSSOSessionCookie)
+				if err != nil {
+					writeError(w, 503, "sso_unavailable", "Browser session verification is unavailable.")
+					return
+				}
+				sso, err := h.resolveBrowserSSOConnection(r, id)
 				if err != nil {
 					writeError(w, 503, "sso_unavailable", "Browser session verification is unavailable.")
 					return
