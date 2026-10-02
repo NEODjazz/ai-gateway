@@ -6,6 +6,7 @@ import { PageHeader } from "../components/PageHeader";
 import { GatewayButton } from "../components/GatewayButton";
 import { SSOConnections, type Connection } from "./sso/SSOConnections";
 import { SSOMappings, parseMappings } from "./sso/SSOMappings";
+import { APIIssuers } from "./sso/APIIssuers";
 import { SSOPreset } from "./sso/SSOPreset";
 
 type Profile = {
@@ -24,8 +25,11 @@ const message = (error: unknown) => error instanceof Error ? error.message : "SS
 export function SSOSettingsPage() {
   const [connection, setConnection] = useState<Connection>({ id: "default", name: "Default", provider: "oidc" });
   const [reload, setReload] = useState(0);
+  const [showAPI, setShowAPI] = useState(false);
   return <div className="sso-settings">
     <PageHeader eyebrow="System" title="Settings · Single sign-on" description="Configure browser OIDC connections and organization bindings. API JWT trust is managed independently." />
+    <GatewayButton aria-expanded={showAPI} onClick={() => setShowAPI((value) => !value)}>Manage API JWT issuers</GatewayButton>
+    {showAPI && <APIIssuers />}
     <SSOConnections selected={connection.id} reload={reload} onSelect={setConnection} />
     <SSOConnectionEditor key={connection.id} connection={connection} onChanged={() => setReload((n) => n + 1)} />
   </div>;
@@ -146,9 +150,9 @@ function SSOConnectionEditor({ connection, onChanged }: { connection: Connection
           {([ ["client_id", "Client ID"], ["authorization_url", "Authorization endpoint"], ["token_url", "Token endpoint"], ["jwks_url", "JWKS URL"], ["redirect_url", "Callback URL"], ["roles_claim", "Roles claim path"] ] as const).map(([key, label]) => <label key={key}>{label}<input required value={profile[key]} onChange={(event) => update(key, event.target.value)} /></label>)}
           <label>Scopes<input required value={scopes} onChange={(event) => { setScopes(event.target.value); setDirty(true); }} /></label>
           <label>Maximum session lifetime (seconds)<input required type="number" min="60" max="86400" value={profile.session_ttl_seconds} onChange={(event) => update("session_ttl_seconds", Number(event.target.value))} /></label>
-          <SSOMappings kind="Role" value={mapping} tenant={Boolean(connection.organization_id)} onChange={(value) => { setMapping(value); setDirty(true); }} />
+          <SSOMappings kind="Role" value={mapping} tenant={Boolean(profile.organization_id || connection.organization_id)} onChange={(value) => { setMapping(value); setDirty(true); }} />
           <label>Groups claim path<input value={profile.groups_claim || ""} onChange={(event) => update("groups_claim", event.target.value)} placeholder="groups" /></label>
-          <SSOMappings kind="Group" value={groups} tenant={Boolean(connection.organization_id)} onChange={(value) => { setGroups(value); setDirty(true); }} />
+          <SSOMappings kind="Group" value={groups} tenant={Boolean(profile.organization_id || connection.organization_id)} onChange={(value) => { setGroups(value); setDirty(true); }} />
           <label>Client secret<input type="password" autoComplete="new-password" value={secret} disabled={clearSecret} placeholder={profile.client_secret_configured ? "Configured · leave blank to preserve" : "Optional for public clients"} onChange={(event) => { setSecret(event.target.value); setDirty(true); }} /></label>
           <label className="checkbox-line"><input type="checkbox" checked={clearSecret} onChange={(event) => { setClearSecret(event.target.checked); setSecret(""); setDirty(true); }} />Clear saved client secret</label>
         </fieldset>

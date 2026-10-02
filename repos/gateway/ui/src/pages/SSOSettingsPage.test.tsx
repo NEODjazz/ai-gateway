@@ -13,6 +13,16 @@ function show() {
   sessionStorage.setItem("ai-gateway.admin-token", "fixture"); return render(<MemoryRouter><AuthProvider><SSOSettingsPage /></AuthProvider></MemoryRouter>); }
 
 describe("SSOSettingsPage", () => {
+  it("limits mappings to tenant roles for an organization-bound default profile", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(json({ ...settings, draft: { ...profile, organization_id: "org-a", role_mappings: { owners: "org_admin" }, groups_claim: "groups", group_mappings: { operators: "org_admin" } } }));
+    show(); await screen.findByDisplayValue(profile.issuer);
+    for (const kind of ["role", "group"]) {
+      const choices = within(screen.getByLabelText(`Gateway role for ${kind} 1`));
+      expect(choices.getByRole("option", { name: "org_admin" })).toBeInTheDocument();
+      expect(choices.queryByRole("option", { name: "admin" })).not.toBeInTheDocument();
+      expect(choices.queryByRole("option", { name: "team_admin" })).not.toBeInTheDocument();
+    }
+  });
 	it("saves the browser client audience independently of legacy API audience and explains independent trust", async () => {
 		let body: Record<string, unknown> | undefined;
 		vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, options) => {

@@ -324,3 +324,12 @@ retains at most 64 keys and bounds the response to 1 MiB. Refresh network I/O
 runs outside its cache lock; concurrent refreshes share one result and canceled
 waiters can leave. Additional IdP availability is checked on the relevant API
 request rather than polling all IdPs during readiness.
+
+The console exposes this registry in **Settings → Manage API JWT issuers**.
+The browser connections table remains separate. The API table shows immutable
+issuer/audience/Organization metadata, active/disabled/draft status and the
+actual last test. Visual role mappings enforce Organization role restrictions;
+JWT administrators can inspect configuration, but mutations require a recovery
+key. The password-type test-token field clears before submission, including
+failed verification. Expired proofs disable activation, and canceled/stale
+requests cannot switch the editor back to an earlier issuer.
