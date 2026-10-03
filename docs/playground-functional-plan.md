@@ -91,6 +91,10 @@ compatibility must be distinguished from merely having an endpoint selector.
 - [x] Added credential-scoped resource discovery, MCP toolset/schema selection,
   owned Responses vector/container/file selection and optional prompt checks.
   Failed or blocked checks stop generation; code export includes the checks.
+- [x] Added explicit approval/decline for selected MCP functions, stable idempotency
+  on retries and typed tool-result continuation in Chat and both Responses modes.
+  Resource selection survives workspace tabs and resets on credential/model changes.
+  Bounded history removes whole conversation groups without orphan tool results.
 - [ ] Finish media/tool output, policy selection and full conversation verification.
 - [ ] Complete endpoint-specific execution and media/tool handling.
 - [ ] Complete comparison, compliance and agent views.

@@ -221,3 +221,18 @@ changes discard stale data. Up to four additional policies can check the current
 text prompt before generation; failures and blocks stop the request. Exported
 code includes those checks. Selected request tags are metadata labels; they do
 not change credential tags, mandatory policies or billing attribution.
+
+Selected MCP function calls in text conversations require explicit approval or
+decline. Tool arguments are shown before execution; a model cannot choose a
+server outside the request's selected bindings. Invalid or unbound calls can only
+be declined. Each call uses one idempotency key across retries. A cancelled or
+failed execution may already have completed at the server; retries use the
+Gateway's existing MCP replay contract. No automatic retry or tool loop runs.
+
+Continue explicitly after resolving every call. Chat sends typed tool messages;
+Responses sends function-call outputs, with either API or browser continuity,
+without an empty user message. Tool results are limited to 128 KiB per call and
+32 calls per response; oversized results fail visibly without truncation. Browser
+history drops complete user/assistant/tool groups within its existing limits.
+Resource selections survive workspace-tab changes and reset on identity, model
+or endpoint changes, including a model changed by refreshed discovery.

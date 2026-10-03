@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AuthProvider } from "../auth/AuthContext";
 import { PlaygroundPage } from "./PlaygroundPage";
@@ -19,6 +19,84 @@ function streamResponse(chunks: string[]) {
 }
 
 describe("PlaygroundPage", () => {
+  it.each(["chat", "responses-api", "responses-browser"])("requires approval and continues %s with typed results and no phantom user", async (variant) => {
+    const endpoint = variant === "chat" ? "chat" : "responses";
+    let inference = 0, toolAttempts = 0;
+    const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json" } });
+    const mock = vi.spyOn(globalThis, "fetch").mockImplementation(async (path) => {
+      if (path === "/v1/models") return json({ data: [{ id: "model" }] });
+      if (String(path).endsWith("/tools")) return json({ tools: [{ name: "lookup", inputSchema: { type: "object" } }] });
+      if (String(path).endsWith("/tools/lookup")) { toolAttempts++; return toolAttempts === 1 ? json({ error: { message: "Temporarily unavailable" } }, 503) : json({ content: [{ type: "text", text: "Found" }] }); }
+      inference++;
+      return inference === 1 ? json(endpoint === "chat" ? { choices: [{ message: { content: null, tool_calls: [{ id: "call_1", type: "function", function: { name: "lookup", arguments: '{"query":"demo"}' } }] } }] } : { id: "resp_1", output: [{ type: "function_call", call_id: "call_1", name: "lookup", arguments: '{"query":"demo"}' }] }) : json(endpoint === "chat" ? { choices: [{ message: { content: "Final answer" } }] } : { id: "resp_2", output_text: "Final answer" });
+    });
+    authenticated(); await screen.findByText("1 authorized model");
+    if (endpoint === "responses") await userEvent.click(screen.getByRole("tab", { name: "Responses API" }));
+    if (variant === "responses-browser") await userEvent.click(screen.getByLabelText("Use API session management"));
+    await userEvent.click(screen.getByText("Tools, resources and policies"));
+    await userEvent.type(screen.getByLabelText("Tool discovery server"), "weather");
+    await userEvent.click(screen.getByRole("button", { name: "Load MCP tools" }));
+    await userEvent.click(await screen.findByLabelText("MCP function lookup"));
+    await userEvent.type(screen.getByLabelText("Message"), "Look up demo"); await userEvent.click(screen.getByRole("button", { name: "Run request" }));
+    await screen.findByRole("region", { name: "Tool approvals" });
+    expect(toolAttempts).toBe(0); expect(screen.getByLabelText("Message")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Continue with tool results" })).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: "Execute lookup" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Temporarily unavailable");
+    await userEvent.click(screen.getByRole("button", { name: "Retry lookup" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Continue with tool results" })).toBeEnabled());
+    const toolCalls = mock.mock.calls.filter(([path]) => String(path).endsWith("/tools/lookup"));
+    expect(new Headers(toolCalls[0][1]?.headers).get("Idempotency-Key")).toBe(new Headers(toolCalls[1][1]?.headers).get("Idempotency-Key"));
+    await userEvent.click(screen.getByRole("button", { name: "Get code" }));
+    expect(await screen.findByLabelText("Request code")).toHaveTextContent(endpoint === "chat" ? "tool_call_id" : "function_call_output");
+    await userEvent.keyboard("{Escape}");
+    await userEvent.click(screen.getByRole("button", { name: "Continue with tool results" }));
+    await screen.findByText("Final answer"); expect(screen.queryByRole("region", { name: "Tool approvals" })).not.toBeInTheDocument();
+    const body = JSON.parse(String(mock.mock.calls.filter(([path]) => path === (endpoint === "chat" ? "/v1/chat/completions" : "/v1/responses"))[1][1]?.body));
+    if (endpoint === "chat") { expect(body.messages.at(-1)).toMatchObject({ role: "tool", tool_call_id: "call_1" }); expect(body.messages.filter((item: { role: string }) => item.role === "user")).toHaveLength(1); }
+    else { expect(body.input.at(-1)).toMatchObject({ type: "function_call_output", call_id: "call_1" }); expect(body.input.some((item: { role?: string }) => item.role === "user")).toBe(variant === "responses-browser"); expect(body.previous_response_id).toBe(variant === "responses-api" ? "resp_1" : undefined); }
+  });
+  it("allows declining an unbound tool without contacting any MCP server", async () => {
+    let inference = 0;
+    const mock = vi.spyOn(globalThis, "fetch").mockImplementation(async (path) => path === "/v1/models" ? new Response('{"data":[{"id":"model"}]}') : new Response(JSON.stringify(++inference === 1 ? { choices: [{ message: { content: null, tool_calls: [{ id: "call", type: "function", function: { name: "unknown", arguments: "{}" } }] } }] } : { choices: [{ message: { content: "Declined acknowledged" } }] }), { headers: { "Content-Type": "application/json" } }));
+    authenticated(); await screen.findByText("1 authorized model"); await userEvent.type(screen.getByLabelText("Message"), "Question"); await userEvent.click(screen.getByRole("button", { name: "Run request" }));
+    expect(await screen.findByRole("button", { name: "Execute unknown" })).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: "Decline unknown" }));
+    await userEvent.click(screen.getByRole("button", { name: "Continue with tool results" })); await screen.findByText("Declined acknowledged");
+    expect(mock.mock.calls.some(([path]) => String(path).includes("/mcp/"))).toBe(false);
+    expect(JSON.parse(String(mock.mock.calls[2][1]?.body)).messages.at(-1).content).toContain("User declined");
+  });
+  it("preserves selected policies across workspace tabs, and resets them when refreshed models change scope", async () => {
+    let model = "first";
+    const mock = vi.spyOn(globalThis, "fetch").mockImplementation(async (path) => {
+      if (path === "/v1/models") return new Response(JSON.stringify({ data: [{ id: model }] }));
+      if (String(path).includes("catalog")) return new Response('{"mcp_servers":[],"mcp_toolsets":[],"policies":["strict"],"tags":[],"agents":[],"truncated":false}');
+      return new Response('{"allowed":false}');
+    });
+    authenticated(); await screen.findByText("1 authorized model"); await userEvent.click(screen.getByText("Tools, resources and policies")); await userEvent.click(screen.getByRole("button", { name: "Load resource catalog" })); await userEvent.click(await screen.findByLabelText("Prompt policy strict"));
+    await userEvent.click(screen.getByRole("tab", { name: "Compliance" })); await userEvent.click(screen.getByRole("tab", { name: "Chat" }));
+    await userEvent.type(screen.getByLabelText("Message"), "Check preserved"); await userEvent.click(screen.getByRole("button", { name: "Run request" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("blocked by policy strict");
+    model = "second"; await userEvent.click(screen.getByRole("button", { name: "Refresh models" })); await waitFor(() => expect(screen.getByLabelText("Model")).toHaveTextContent("second"));
+    await userEvent.click(screen.getByText("Tools, resources and policies")); expect(screen.queryByText(/Active selections/)).not.toBeInTheDocument();
+    expect(mock.mock.calls.filter(([path]) => path === "/guardrails/apply_guardrail")).toHaveLength(1);
+  });
+  it("discards a late approved tool result after an endpoint change clears the conversation", async () => {
+    let resolve!: (response: Response) => void;
+    const mock = vi.spyOn(globalThis, "fetch").mockImplementation(async (path) => {
+      if (path === "/v1/models") return new Response('{"data":[{"id":"model"}]}');
+      if (String(path).endsWith("/tools")) return new Response('{"tools":[{"name":"lookup","inputSchema":{}}]}');
+      if (String(path).endsWith("/tools/lookup")) return new Promise<Response>((done) => resolve = done);
+      return new Response('{"choices":[{"message":{"content":null,"tool_calls":[{"id":"call","type":"function","function":{"name":"lookup","arguments":"{}"}}]}}]}', { headers: { "Content-Type": "application/json" } });
+    });
+    authenticated(); await screen.findByText("1 authorized model"); await userEvent.click(screen.getByText("Tools, resources and policies")); await userEvent.type(screen.getByLabelText("Tool discovery server"), "weather"); await userEvent.click(screen.getByRole("button", { name: "Load MCP tools" })); await userEvent.click(await screen.findByLabelText("MCP function lookup"));
+    await userEvent.type(screen.getByLabelText("Message"), "Question"); await userEvent.click(screen.getByRole("button", { name: "Run request" })); await userEvent.click(await screen.findByRole("button", { name: "Execute lookup" }));
+    await userEvent.click(screen.getByLabelText("Endpoint")); await userEvent.click(screen.getByRole("option", { name: "/v1/responses" }));
+    await act(async () => resolve(new Response('{"content":[{"type":"text","text":"Late"}]}')));
+    expect(screen.queryByRole("region", { name: "Tool approvals" })).not.toBeInTheDocument(); expect(screen.queryByText("Late")).not.toBeInTheDocument();
+    expect(mock.mock.calls.filter(([path]) => String(path).endsWith("/tools/lookup"))).toHaveLength(1);
+  });
+
   it("stops generation when an additional prompt policy blocks or fails, and exports preflight checks", async () => {
     const mock = vi.spyOn(globalThis, "fetch").mockImplementation(async (path) => {
       if (path === "/v1/models") return new Response('{"data":[{"id":"model"}]}');

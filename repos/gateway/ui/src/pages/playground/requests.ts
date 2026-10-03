@@ -71,8 +71,8 @@ function responseHistory(history: Message[]): unknown[] {
   });
 }
 
-export function buildTextRequest({ endpoint, model, input, instructions, history = [], previousResponseID = "", streaming, settings }: {
-  endpoint: TextEndpoint; model: string; input: unknown; instructions: string; history?: Message[];
+export function buildTextRequest({ endpoint, model, input, instructions, history = [], toolOutputs = [], previousResponseID = "", streaming, settings }: {
+  endpoint: TextEndpoint; model: string; input?: unknown; instructions: string; history?: Message[]; toolOutputs?: Message[];
   previousResponseID?: string; streaming: boolean; settings: GenerationSettings;
 }): Record<string, unknown> {
   if (typeof input === "string" && new TextEncoder().encode(input).length > 1024 * 1024) throw new Error("Prompt exceeds the 1 MiB Playground limit.");
@@ -93,7 +93,7 @@ export function buildTextRequest({ endpoint, model, input, instructions, history
   const body: Record<string, unknown> = { ...extras, model: model.trim(), stream: streaming,
     ...(temperature === undefined ? {} : { temperature }), ...(topP === undefined ? {} : { top_p: topP }) };
   if (endpoint === "chat") {
-    body.messages = [...(instructions.trim() ? [{ role: "system", content: instructions.trim() }] : []), ...history, { role: "user", content: input }];
+    body.messages = [...(instructions.trim() ? [{ role: "system", content: instructions.trim() }] : []), ...history, ...toolOutputs, ...(input === undefined ? [] : [{ role: "user", content: input }])];
     if (limit !== undefined) body.max_completion_tokens = limit;
     if (streaming) body.stream_options = { include_usage: true };
     if (settings.responseFormat !== "text") {
@@ -101,7 +101,9 @@ export function buildTextRequest({ endpoint, model, input, instructions, history
     }
   } else {
     const current = Array.isArray(input) ? [{ role: "user", content: responseContent(input) }] : input;
-    body.input = previousResponseID || !history.length ? current : [...responseHistory(history), { role: "user", content: responseContent(input) }];
+    body.input = input === undefined || toolOutputs.length
+      ? [...(previousResponseID ? [] : responseHistory(history)), ...responseHistory(toolOutputs), ...(input === undefined ? [] : [{ role: "user", content: responseContent(input) }])]
+      : previousResponseID || !history.length ? current : [...responseHistory(history), { role: "user", content: responseContent(input) }];
     if (instructions.trim()) body.instructions = instructions.trim();
     if (previousResponseID) body.previous_response_id = previousResponseID;
     if (limit !== undefined) body.max_output_tokens = limit;

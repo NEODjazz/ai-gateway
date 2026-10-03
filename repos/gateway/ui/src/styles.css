@@ -502,3 +502,7 @@ textarea { resize: vertical; }
 .playground-main-panel details > pre { max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
 
 .playground-resource-list { display: grid; gap: 8px; max-height: 240px; overflow-y: auto; margin: 12px 0; }
+
+.playground-tool-approvals { display: grid; gap: 12px; margin: 16px 0; }
+.playground-turn.tool { background: var(--g-color-base-simple-hover, #f5f7f9); }
+.playground-tool-approvals details { margin: 8px 0; }

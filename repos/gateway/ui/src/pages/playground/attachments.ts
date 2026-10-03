@@ -13,11 +13,14 @@ export function conversationInput(text: string, attachments: Attachment[]): unkn
     : { type: "image_url", image_url: { url: `data:${file.media_type};base64,${file.data_base64}` } })];
 }
 
-// Drop whole user/assistant pairs so retained history starts at a user boundary.
-export function retainConversation<T>(turns: T[]): { turns: T[]; dropped: number } {
-  const retained = turns.slice(-40);
-  let dropped = turns.length - retained.length;
-  while (retained.length > 2 && new TextEncoder().encode(JSON.stringify(retained)).length > 32 * 1024 * 1024) { retained.splice(0, 2); dropped += 2; }
-  if (new TextEncoder().encode(JSON.stringify(retained)).length > 32 * 1024 * 1024) throw new Error("The latest conversation turn exceeds the 32 MiB history limit.");
+// A user turn starts a group, including all assistant/tool continuations.
+export function retainConversation<T extends { role: string }>(turns: T[]): { turns: T[]; dropped: number } {
+  const retained = turns.slice();
+  let dropped = 0;
+  while (retained.length > 40 || new TextEncoder().encode(JSON.stringify(retained)).length > 32 * 1024 * 1024) {
+    const boundary = retained.findIndex((turn, index) => index > 0 && turn.role === "user");
+    if (boundary < 0) throw new Error("The latest conversation group exceeds the 40-turn or 32 MiB history limit.");
+    retained.splice(0, boundary); dropped += boundary;
+  }
   return { turns: retained, dropped };
 }

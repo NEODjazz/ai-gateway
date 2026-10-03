@@ -12,6 +12,12 @@ describe("Conversation attachments and bounds", () => {
     await expect(conversationAttachments([new File(["x".repeat(8 * 1024 * 1024 + 1)], "image.png", { type: "image/png" })])).rejects.toThrow("8 MiB");
     await expect(conversationAttachments([new File(["image"], "../image.png", { type: "image/png" })])).rejects.toThrow("filename");
   });
+  it("never splits a tool continuation group or retains orphan tool results", () => {
+    const old = [{ role: "user" }, { role: "assistant" }, ...Array.from({ length: 30 }, () => ({ role: "tool" })), { role: "assistant" }];
+    const latest = [{ role: "user" }, ...Array.from({ length: 10 }, () => ({ role: "assistant" }))];
+    expect(retainConversation([...old, ...latest])).toEqual({ turns: latest, dropped: old.length });
+    expect(() => retainConversation([{ role: "user" }, ...Array.from({ length: 40 }, () => ({ role: "tool" }))])).toThrow("40-turn");
+  });
   it("retains whole conversation pairs at the turn and byte boundaries", () => {
     const turns = Array.from({ length: 50 }, (_, index) => ({ role: index % 2 ? "assistant" : "user", text: String(index) }));
     expect(retainConversation(turns)).toEqual({ turns: turns.slice(10), dropped: 10 });

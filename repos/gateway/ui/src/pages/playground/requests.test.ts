@@ -40,6 +40,13 @@ describe("Playground requests", () => {
       { role: "user", content: [{ type: "input_image", image_url: "data:image/png;base64,AA==" }] }
     ]);
   });
+  it.each(["chat", "responses"] as const)("continues %s using tool results without an extra user turn", (endpoint) => {
+    const history = [{ role: "user", content: "Look up" }, { role: "assistant", content: null, tool_calls: [{ id: "call", function: { name: "lookup", arguments: "{}" } }] }];
+    const toolOutputs = [{ role: "tool", tool_call_id: "call", content: "Found" }];
+    const body = request(endpoint, {}, { input: undefined, history, toolOutputs });
+    expect(endpoint === "chat" ? body.messages : body.input).toEqual(endpoint === "chat" ? [{ role: "system", content: "Be concise" }, ...history, ...toolOutputs] : [{ role: "user", content: "Look up" }, { type: "function_call", call_id: "call", name: "lookup", arguments: "{}" }, { type: "function_call_output", call_id: "call", output: "Found" }]);
+    if (endpoint === "responses") expect(request(endpoint, {}, { input: undefined, history, toolOutputs, previousResponseID: "response" }).input).toEqual([{ type: "function_call_output", call_id: "call", output: "Found" }]);
+  });
   it("generates the two different structured output dialects", () => {
     const schema = { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"], additionalProperties: false };
     const patch = { responseFormat: "json_schema" as const, schema: JSON.stringify(schema) };

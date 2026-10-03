@@ -21,10 +21,13 @@ export function ResourceControls({ connection, model, endpoint, value, onUpdate,
   const [tools, setTools] = useState<MCPTool[]>([]), [cursor, setCursor] = useState(""), [loadedTools, setLoadedTools] = useState(false);
   const [owned, setOwned] = useState<Record<ResourceKind, OwnedPage>>({ vectors: emptyPage(), containers: emptyPage(), files: emptyPage() });
   const generation = useRef(0), abort = useRef<AbortController | undefined>(undefined), update = useRef(onUpdate);
+  const scope = useRef({ connection, model, endpoint });
   update.current = onUpdate;
   useEffect(() => {
     generation.current++; abort.current?.abort(); setBusy(false); setCatalog(undefined); setError(""); setToolset("all"); setServer(""); setTools([]); setCursor(""); setLoadedTools(false);
-    setOwned({ vectors: emptyPage(), containers: emptyPage(), files: emptyPage() }); update.current({ ...emptyResources });
+    setOwned({ vectors: emptyPage(), containers: emptyPage(), files: emptyPage() });
+    if (scope.current.connection !== connection || scope.current.model !== model || scope.current.endpoint !== endpoint) update.current({ ...emptyResources });
+    scope.current = { connection, model, endpoint };
     return () => { generation.current++; abort.current?.abort(); };
   }, [connection, model, endpoint]);
   const blocked = disabled || busy;
@@ -77,6 +80,7 @@ export function ResourceControls({ connection, model, endpoint, value, onUpdate,
   }
   return <details className="playground-advanced"><summary>Tools, resources and policies</summary>
     <GatewayButton view="outlined" disabled={blocked} onClick={loadCatalog}>Load resource catalog</GatewayButton>
+    {(value.tools.length > 0 || value.policies.length > 0 || value.tags.length > 0 || value.vectors.length > 0 || value.codeInterpreter) && <><p className="muted">Active selections: {value.tools.length} tools, {value.policies.join(", ") || "no additional policies"}, {value.tags.length} tags, {value.vectors.length} vector stores{value.codeInterpreter ? ", code interpreter" : ""}.</p><GatewayButton view="flat" disabled={blocked} onClick={() => onUpdate({ ...emptyResources })}>Clear resource selections</GatewayButton></>}
     <p className="muted">Discovery uses the active Playground credential. Loading MCP tools contacts the selected server through the gateway and is accounted as a discovery request.</p>
     {catalog?.truncated && <p role="status">Catalog limited to 256 entries per list. Use explicit IDs for other authorized resources.</p>}
     {!!catalog?.mcp_toolsets.length && <SelectControl label="MCP toolset" value={toolset} disabled={blocked} options={[{ value: "all", content: "All accessible servers" }, ...catalog.mcp_toolsets.map((item) => ({ value: item.id, content: item.name }))]} onUpdate={(id) => { setToolset(id); setServer(""); setTools([]); setCursor(""); setLoadedTools(false); patch({ tools: [] }); }} />}
