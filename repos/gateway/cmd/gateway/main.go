@@ -15,6 +15,7 @@ import (
 	"ai-gateway-gateway/internal/modelcatalog"
 	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/provider"
+	"ai-gateway-gateway/internal/realtimestate"
 	"ai-gateway-gateway/internal/redisstore"
 	"ai-gateway-gateway/internal/telemetry"
 )
@@ -154,6 +155,16 @@ func main() {
 		}
 	}
 	handler := gateway.NewHandlerWithMetrics(gatewayPipeline, llmProvider, rateLimits, readiness, metrics).WithResourceBillingPipeline(providerPipeline).WithModelRegistry(modelRegistry).WithComplianceModules(dlpModule, avModule).WithAnonymizerModule(anonymizerModule).WithGuardrailMonitor(guardrailMonitor).WithCacheDiagnostics(gateway.CacheRuntimeConfig{ExactTTLSeconds: cfg.Cache.TTLSeconds, ExactMaxBytes: cfg.Cache.MaxBytes, SemanticTTLSeconds: cfg.Cache.Semantic.TTLSeconds, SemanticMaxEntries: cfg.Cache.Semantic.MaxEntries, SemanticMaxBytes: cfg.Cache.Semantic.MaxBytes}).WithLoggingRegistry(loggingRegistry).WithAgentRegistry(agentRegistry).WithMCPRegistry(mcpRegistry).WithAccessRegistry(accessRegistry).WithAdminState(adminState)
+	if len(cfg.Provider.CredentialKey) >= 16 {
+		var tickets realtimestate.Store = realtimestate.NewMemoryStore(realtimestate.MaxTickets, realtimestate.MaxOwnerTickets)
+		if providerControlStore != nil {
+			tickets = providerControlStore
+		}
+		handler, err = handler.WithRealtimeBrowserTickets(tickets, []byte(cfg.Provider.CredentialKey))
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
 	if providerControlStore != nil {
 		handler = handler.WithMCPCallStore(providerControlStore).
 			WithA2ATaskStore(providerControlStore, gateway.A2ATaskRuntimeConfig{

@@ -995,6 +995,59 @@ paths:
         '403': {description: Model is not allowed}
         '429': {description: "Credential, deployment, or provider capacity exceeded"}
         '503': {description: No eligible Realtime deployment is available}
+  /v1/realtime/browser-tickets:
+    post:
+      operationId: createRealtimeBrowserTicket
+      tags: [Inference]
+      summary: Create a one-use encrypted browser Realtime ticket
+      description: Authenticates the current gateway credential and model grants without opening a provider connection. Tickets expire in 30 seconds and are bound to the requested model, same-host browser origin and current credential/user/organization/team identity. Storage is bounded to 1024 tickets globally and 8 per identity; PostgreSQL storage shares atomic consumption across replicas. Credential material is encrypted using the configured credential encryption key. Responses are never cached. Apply migration 040 before enabling this route with PostgreSQL storage.
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [model, origin]
+              properties:
+                model: {type: string, minLength: 1, maxLength: 256}
+                origin: {type: string, minLength: 1, maxLength: 2048, format: uri}
+      responses:
+        '201':
+          description: One-use browser ticket
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ticket, expires_at, protocol, socket_path]
+                properties:
+                  ticket: {type: string, minLength: 43, maxLength: 43}
+                  expires_at: {type: string, format: date-time}
+                  protocol: {type: string, const: ai-gateway.realtime.v1}
+                  socket_path: {type: string, const: /v1/realtime/browser}
+        '400': {description: "Invalid model, origin or credential size"}
+        '401': {description: "Invalid gateway credential"}
+        '403': {description: "Model is not allowed"}
+        '429': {description: "Pending ticket capacity exceeded"}
+        '503': {description: "Credential encryption, configuration or ticket storage is unavailable"}
+  /v1/realtime/browser:
+    get:
+      operationId: openBrowserRealtimeSession
+      tags: [Inference]
+      summary: Consume an origin-bound browser ticket and open Realtime
+      description: Requires two WebSocket subprotocols, ai-gateway.realtime.v1 and ai-gateway.realtime.ticket.<ticket>. The ticket is consumed atomically, credentials and identity are verified again, and only the stable protocol is echoed. Ticket material is removed before provider routing. URL credentials are rejected. Provider routing, policy enforcement, response admission and billing use the existing Realtime flow.
+      security: [{realtimeBrowserTicket: []}]
+      parameters:
+        - {name: model, in: query, required: true, schema: {type: string, minLength: 1, maxLength: 256}}
+        - {name: Origin, in: header, required: true, schema: {type: string, maxLength: 2048, format: uri}}
+      responses:
+        '101': {description: "Browser WebSocket session established"}
+        '400': {description: "Invalid WebSocket handshake"}
+        '401': {description: "Missing, used, expired or invalid ticket, changed identity or revoked credential"}
+        '403': {description: "Model is no longer allowed"}
+        '429': {description: "Realtime capacity exceeded"}
+        '503': {description: "Configuration, ticket storage or Realtime deployment is unavailable"}
   /a2a/{agent}/.well-known/agent-card.json:
     get:
       operationId: getA2AAgentCard
@@ -5355,6 +5408,11 @@ paths:
         '503': {$ref: '#/components/responses/ManagementUnavailable'}
 components:
   securitySchemes:
+    realtimeBrowserTicket:
+      type: apiKey
+      in: header
+      name: Sec-WebSocket-Protocol
+      description: One-use browser ticket carried with the stable ai-gateway.realtime.v1 protocol
     googleAPIKey:
       type: apiKey
       in: header

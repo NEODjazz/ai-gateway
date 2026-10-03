@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"crypto/cipher"
 	"crypto/rand"
 	"encoding/json"
 	"errors"
@@ -29,6 +30,7 @@ import (
 	"ai-gateway-gateway/internal/provider"
 	"ai-gateway-gateway/internal/publichttp"
 	"ai-gateway-gateway/internal/ragstate"
+	"ai-gateway-gateway/internal/realtimestate"
 	"ai-gateway-gateway/internal/skillstate"
 	"ai-gateway-gateway/internal/vectorstate"
 	"ai-gateway-gateway/internal/videostate"
@@ -93,6 +95,8 @@ type Handler struct {
 	browserSSO         *BrowserSSO
 	ssoManagement      SSOManagementClient
 	adminState         *AdminStateRuntime
+	realtimeTickets    realtimestate.Store
+	realtimeTicketAEAD cipher.AEAD
 }
 
 func (h Handler) WithBatchStore(store batchstate.Store, jobs asyncstate.Store) Handler {

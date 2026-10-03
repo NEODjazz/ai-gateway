@@ -116,6 +116,11 @@ compatibility must be distinguished from merely having an endpoint selector.
   image/PDF parts, completed-task continuity, explicit task refresh/cancel and
   response identity checks. Pending tasks block new prompts, failed refreshes
   preserve known tasks, and stateless responses are visibly independent.
+- [x] Added origin/model/identity-bound browser Realtime tickets with encrypted
+  credentials, 30-second expiry, single-use consumption and global/owner limits.
+  PostgreSQL consumption is atomic across replicas; credential and model grants
+  are revalidated before opening the existing Realtime proxy. Browser Realtime
+  controls and voice handling remain pending.
 - [ ] Finish media/tool output, policy selection and full conversation verification.
 - [ ] Complete endpoint-specific execution and media/tool handling.
 - [ ] Complete comparison, compliance and agent views.
@@ -139,3 +144,30 @@ no-store`; callers must reload after changing identity or model.
 Guardrail selection and direct application use organization and user bindings
 in addition to key, team, model and tag bindings. Selecting a policy does not
 change mandatory inference policies or the identity's grants.
+
+
+## Browser Realtime authorization
+
+Browser clients obtain a short-lived ticket with authenticated
+`POST /v1/realtime/browser-tickets`, supplying a model and same-host browser
+origin. They connect to `GET /v1/realtime/browser?model=<model-id>` using the
+`ai-gateway.realtime.v1` subprotocol and a second
+`ai-gateway.realtime.ticket.<ticket>` subprotocol. The credential and ticket
+must never appear in the WebSocket URL or exported examples. Only the stable
+subprotocol is echoed to the client; the ticket is not forwarded upstream.
+
+Tickets use the existing `CREDENTIAL_ENCRYPTION_KEY`, separate encryption-key
+derivation and authenticated binding to identity, model, origin and expiry.
+Storage contains a ticket digest and encrypted credential, with a 30-second
+lifetime, at most 1024 pending tickets globally and eight per identity. Memory
+storage is process-local; PostgreSQL migration 040 supplies shared atomic
+single-use consumption for multiple replicas. Tickets fail closed on expiry,
+replay, changed identity, revoked credentials, storage failure or tampering.
+The existing bearer-authenticated `/v1/realtime` contract is unchanged.
+
+Browser ticket endpoints return 503 when credential encryption is unavailable.
+Opening a connection still requires a routed model/deployment supporting
+Realtime; issuing a ticket does not run inference or reserve billing. The
+existing proxy enforces policy, rate limits and response billing. The current
+browser origin policy allows the same host only; cross-host browser origins
+are not implicitly trusted.

@@ -107,6 +107,8 @@ var gatewayRoutes = []routeDefinition{
 	{RouteContract{http.MethodGet, "/v1/conversations/{conversation_id}/items/{item_id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GetConversationItem) }},
 	{RouteContract{http.MethodDelete, "/v1/conversations/{conversation_id}/items/{item_id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.DeleteConversationItem) }},
 	{RouteContract{http.MethodGet, "/v1/realtime"}, func(h Handler) http.Handler { return http.HandlerFunc(h.Realtime) }},
+	{RouteContract{http.MethodPost, "/v1/realtime/browser-tickets"}, func(h Handler) http.Handler { return http.HandlerFunc(h.CreateRealtimeBrowserTicket) }},
+	{RouteContract{http.MethodGet, "/v1/realtime/browser"}, func(h Handler) http.Handler { return http.HandlerFunc(h.RealtimeBrowser) }},
 	{RouteContract{http.MethodPost, "/v1/interactions"}, func(h Handler) http.Handler { return http.HandlerFunc(h.Interactions) }},
 	{RouteContract{http.MethodGet, "/v1/interactions/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GetInteraction) }},
 	{RouteContract{http.MethodDelete, "/v1/interactions/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.DeleteInteraction) }},

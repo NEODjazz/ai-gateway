@@ -44,6 +44,15 @@ func (h Handler) Realtime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	identity.APIKey = ""
+	browserBinding, browser := r.Context().Value(realtimeBrowserBindingKey{}).(realtimeBrowserBinding)
+	if browser && realtimeTicketOwner(identity) != browserBinding.ownerKey {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "Browser ticket identity changed")
+		return
+	}
+	if browser && h.adminState != nil && h.adminState.Refresh(r.Context()) != nil {
+		writeError(w, http.StatusServiceUnavailable, "admin_state_unavailable", "Realtime configuration is unavailable")
+		return
+	}
 	if !h.prepareAccessGroups(w, &identity) || !h.authorizeModel(w, identity, model) || !h.prepareModelFallbacks(w, r.Context(), &identity, model) {
 		return
 	}
@@ -73,10 +82,19 @@ func (h Handler) Realtime(w http.ResponseWriter, r *http.Request) {
 	})
 	defer tracker.Close(r.Context(), errors.New("realtime session closed"))
 
-	websocket.Handler(func(client *websocket.Conn) {
+	serve := websocket.Handler(func(client *websocket.Conn) {
 		client.MaxPayloadBytes = provider.MaxRealtimeEventBytes
 		proxyRealtime(r.Context(), client, upstream, tracker)
-	}).ServeHTTP(w, r)
+	})
+	if browser {
+		server := websocket.Server{Handler: serve, Handshake: func(config *websocket.Config, _ *http.Request) error {
+			config.Protocol = []string{realtimeBrowserProtocol}
+			return nil
+		}}
+		server.ServeHTTP(w, r)
+		return
+	}
+	serve.ServeHTTP(w, r)
 }
 
 func realtimeModelRequest(model string) (request openai.ChatCompletionRequest) {
