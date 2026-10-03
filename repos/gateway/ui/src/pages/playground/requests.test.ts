@@ -30,13 +30,25 @@ describe("Playground requests", () => {
     const history = [{ role: "assistant", content: null, tool_calls: [{ id: "call-1", function: { name: "lookup", arguments: "{}" } }] }, { role: "tool", tool_call_id: "call-1", content: "result" }];
     const body = request(endpoint, {}, { input, history });
     const messages = endpoint === "chat" ? body.messages : body.input;
-    expect(messages).toEqual([...(endpoint === "chat" ? [{ role: "system", content: "Be concise" }] : []), ...history, { role: "user", content: input }]);
+    expect(messages).toEqual(endpoint === "chat" ? [{ role: "system", content: "Be concise" }, ...history, { role: "user", content: input }] : [
+      { type: "function_call", call_id: "call-1", name: "lookup", arguments: "{}" },
+      { type: "function_call_output", call_id: "call-1", output: "result" },
+      { role: "user", content: [{ type: "input_image", image_url: "data:image/png;base64,AA==" }] }
+    ]);
   });
   it("generates the two different structured output dialects", () => {
     const schema = { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"], additionalProperties: false };
     const patch = { responseFormat: "json_schema" as const, schema: JSON.stringify(schema) };
     expect(request("chat", patch).response_format).toEqual({ type: "json_schema", json_schema: { name: "playground_output", schema, strict: true } });
     expect(request("responses", patch).text).toEqual({ format: { type: "json_schema", name: "playground_output", schema, strict: true } });
+  });
+  it("wraps Responses image input as message content even with API continuity", () => {
+    const input = [{ type: "image_url", image_url: { url: "https://example.test/image.png", detail: "low" } }];
+    expect(request("responses", {}, { input, previousResponseID: "previous" })).toMatchObject({ previous_response_id: "previous", input: [{ role: "user", content: [{ type: "input_image", image_url: "https://example.test/image.png", detail: "low" }] }] });
+  });
+  it("preserves native Responses output items in browser continuation", () => {
+    const responseItems = [{ type: "reasoning", id: "reasoning", encrypted_content: "opaque" }, { type: "function_call", call_id: "call", name: "lookup", arguments: "{}" }];
+    expect(request("responses", {}, { history: [{ role: "assistant", content: "", responseItems }, { role: "tool", tool_call_id: "call", content: "result" }] }).input).toEqual([...responseItems, { type: "function_call_output", call_id: "call", output: "result" }, { role: "user", content: "hello" }]);
   });
   it("sends advanced controls without dropping false, zero or tool constraints", () => {
     const extras = { logprobs: false, frequency_penalty: 0, tools: [{ type: "function", function: { name: "count", parameters: { type: "object", properties: { n: { type: "integer", minimum: 1 } } } } }] };

@@ -490,7 +490,13 @@ textarea { resize: vertical; }
 .playground-compliance-connection, .playground-compliance-filters { display: grid; gap: 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .playground-compliance-connection p { grid-column: 1 / -1; }
 .playground-case-list { max-height: 480px; overflow: auto; }
-.playground-policy-case { border: 1px solid var(--line); border-radius: 8px; padding: 16px; margin-top: 12px; }
+.playground-policy-case { border: 1px solid #e0e5e9; border-radius: 8px; padding: 16px; margin-top: 12px; }
 .playground-policy-case pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 .playground-policy-case > .muted { display: block; margin-top: 8px; }
 @media (max-width: 700px) { .playground-compliance-connection, .playground-compliance-filters { grid-template-columns: minmax(0, 1fr); } }
+
+.playground-compliance .playground-parameters-card { min-height: 0; }
+.playground-endpoint-selector { max-width: 420px; margin-top: 20px; }
+.playground-native-output pre, .playground-native-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.playground-generated-image { display: block; max-width: 100%; max-height: 600px; object-fit: contain; margin-bottom: 12px; }
+.playground-main-panel details > pre { max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }

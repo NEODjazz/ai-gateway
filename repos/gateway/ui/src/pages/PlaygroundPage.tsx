@@ -8,6 +8,8 @@ import { PageTabs } from "../components/PageTabs";
 import { ToolbarIconButton } from "../components/ToolbarIconButton";
 import { GravityThemeScope } from "../components/GravityThemeScope";
 import { AreaControl, SelectControl, TextControl } from "./playground/Controls";
+import { EndpointPlayground } from "./playground/EndpointPlayground";
+import { endpointPaths, type SpecializedEndpoint } from "./playground/endpointRequests";
 import { CompliancePlayground } from "./playground/CompliancePlayground";
 import { ComparePlayground } from "./playground/ComparePlayground";
 import { CodeDialog } from "./playground/CodeDialog";
@@ -33,6 +35,7 @@ export function PlaygroundPage() {
   const [appliedConnection, setAppliedConnection] = useState({ source: "session" as KeySource, key: "", url: "" });
   const connection = useMemo(() => playgroundConnection(sessionClient, appliedConnection.source, appliedConnection.key, appliedConnection.url), [sessionClient, appliedConnection]);
   const client = connection.client;
+  const [endpoint, setEndpoint] = useState<"chat" | "responses" | SpecializedEndpoint>("chat");
   const [mode, setMode] = useState<PlaygroundMode>("chat");
   const [view, setView] = useState<"chat" | "compare" | "compliance">("chat");
   const [visitedCompare, setVisitedCompare] = useState(false);
@@ -94,7 +97,7 @@ export function PlaygroundPage() {
 
   function changeMode(next: PlaygroundMode) {
     if (next === mode || running) return;
-    setMode(next); newSession();
+    setMode(next); setEndpoint(next); newSession();
   }
 
   function applyConnection() {
@@ -133,7 +136,7 @@ export function PlaygroundPage() {
       const userTurn: TranscriptTurn = { id: ++turnID.current, role: "user", content: input, wire: { role: "user", content: input } };
       const choice = (result.response.choices as { message?: Message }[] | undefined)?.[0]?.message;
       const assistantTurn: TranscriptTurn = { id: ++turnID.current, role: "assistant", content: result.text, reasoning: result.reasoning, response: result.response,
-        wire: { ...choice, role: "assistant", content: choice?.content ?? result.text } };
+        wire: { ...choice, role: "assistant", content: choice?.content ?? result.text, ...(mode === "responses" && Array.isArray(result.response.output) ? { responseItems: result.response.output } : {}) } };
       setTranscript((current) => [...current, userTurn, assistantTurn].slice(-maximumTranscriptTurns));
       setPendingOutput(""); setMetadata(result); setMessage("");
       if ("events" in result && Array.isArray(result.events)) setEvents(result.events as SSEEvent[]);
@@ -162,7 +165,9 @@ export function PlaygroundPage() {
   return <>
     <PageHeader eyebrow="Inference" title="Playground" description="Explore models, tune requests and inspect live responses." />
     <PageTabs label="Playground workspace" value={view} items={[{ value: "chat", label: "Chat" }, { value: "compare", label: "Compare" }, { value: "compliance", label: "Compliance" }]} onUpdate={(next) => { if (running) abortRef.current?.abort(); setCodeRequest(undefined); if (next === "compare") setVisitedCompare(true); if (next === "compliance") setVisitedCompliance(true); setView(next); }} />
-    {view === "chat" && <div className="playground-workspace playground-config-layout">
+    {view === "chat" && <div className="playground-endpoint-selector"><SelectControl label="Endpoint" value={endpoint} options={[{ value: "chat", content: "/v1/chat/completions" }, { value: "responses", content: "/v1/responses" }, ...Object.entries(endpointPaths).map(([value, path]) => ({ value: value as SpecializedEndpoint, content: path }))]} onUpdate={(next) => { newSession(); setEndpoint(next); if (next === "chat" || next === "responses") setMode(next); }} /></div>}
+    {view === "chat" && endpoint !== "chat" && endpoint !== "responses" && <EndpointPlayground key={endpoint} endpoint={endpoint} connection={connection} models={models} connectionControls={connectionControls} connectionChanged={connectionChanged} />}
+    {view === "chat" && (endpoint === "chat" || endpoint === "responses") && <div className="playground-workspace playground-config-layout">
       <aside className="playground-side-panel" aria-label="Playground configuration">
         <section className="playground-parameters-card">
           <h2>Configurations</h2>

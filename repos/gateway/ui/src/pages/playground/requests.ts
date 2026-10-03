@@ -1,7 +1,7 @@
 import { APIClient } from "../../api/client";
 
 export type TextEndpoint = "chat" | "responses";
-export type Message = { role: string; content: unknown; tool_calls?: unknown; tool_call_id?: string; reasoning?: unknown; reasoning_content?: unknown; refusal?: unknown; annotations?: unknown; audio?: unknown; function_call?: unknown };
+export type Message = { role: string; content: unknown; tool_calls?: unknown; tool_call_id?: string; reasoning?: unknown; reasoning_content?: unknown; refusal?: unknown; annotations?: unknown; audio?: unknown; function_call?: unknown; responseItems?: unknown[] };
 export type GenerationSettings = {
   maxTokens: string;
   temperature: string;
@@ -34,6 +34,43 @@ export function jsonObject(value: string, label: string): Record<string, unknown
   return parsed as Record<string, unknown>;
 }
 
+function responseContent(content: unknown): unknown {
+  if (!Array.isArray(content)) return content;
+  return content.map((value) => {
+    if (!value || typeof value !== "object") throw new Error("Invalid content part.");
+    const part = value as Record<string, unknown>;
+    if (part.type === "text") return { ...part, type: "input_text" };
+    if (part.type === "image_url") {
+      const image = part.image_url as { url?: unknown; detail?: unknown } | undefined;
+      if (typeof image?.url !== "string") throw new Error("Invalid image URL part.");
+      return { type: "input_image", image_url: image.url, ...(image.detail ? { detail: image.detail } : {}) };
+    }
+    if (part.type === "file") {
+      const file = part.file as Record<string, unknown> | undefined;
+      if (!file) throw new Error("Invalid file part."); return { type: "input_file", ...file };
+    }
+    return part;
+  });
+}
+
+function responseHistory(history: Message[]): unknown[] {
+  return history.flatMap((message): unknown[] => {
+    if (message.responseItems) return message.responseItems;
+    if (message.role === "tool") {
+      if (!message.tool_call_id) throw new Error("A tool result requires tool_call_id.");
+      return [{ type: "function_call_output", call_id: message.tool_call_id, output: typeof message.content === "string" ? message.content : JSON.stringify(message.content) }];
+    }
+    const items: unknown[] = [];
+    if (message.content != null && message.content !== "") items.push({ role: message.role, content: responseContent(message.content) });
+    if (Array.isArray(message.tool_calls)) for (const value of message.tool_calls) {
+      const call = value as { id?: string; function?: { name?: string; arguments?: string } };
+      if (!call.id || !call.function?.name || typeof call.function.arguments !== "string") throw new Error("Invalid tool call in conversation history.");
+      items.push({ type: "function_call", call_id: call.id, name: call.function.name, arguments: call.function.arguments });
+    }
+    return items;
+  });
+}
+
 export function buildTextRequest({ endpoint, model, input, instructions, history = [], previousResponseID = "", streaming, settings }: {
   endpoint: TextEndpoint; model: string; input: unknown; instructions: string; history?: Message[];
   previousResponseID?: string; streaming: boolean; settings: GenerationSettings;
@@ -61,7 +98,8 @@ export function buildTextRequest({ endpoint, model, input, instructions, history
       body.response_format = settings.responseFormat === "json_schema" ? { type: "json_schema", json_schema: { name: format.name, schema: format.schema, strict: true } } : format;
     }
   } else {
-    body.input = previousResponseID ? input : history.length ? [...history, { role: "user", content: input }] : input;
+    const current = Array.isArray(input) ? [{ role: "user", content: responseContent(input) }] : input;
+    body.input = previousResponseID || !history.length ? current : [...responseHistory(history), { role: "user", content: responseContent(input) }];
     if (instructions.trim()) body.instructions = instructions.trim();
     if (previousResponseID) body.previous_response_id = previousResponseID;
     if (limit !== undefined) body.max_output_tokens = limit;
@@ -100,10 +138,13 @@ export function playgroundConnection(sessionClient: APIClient, source: KeySource
 
 function shellQuote(value: string) { return `'${value.replace(/'/g, `'"'"'`)}'`; }
 
-export function requestCode(language: "curl" | "python" | "javascript", path: string, body: unknown, baseURL = ""): string {
+export function requestCode(language: "curl" | "python" | "javascript", path: string, body: unknown, baseURL = "", additionalHeaders: Record<string, string> = {}, binaryOutput = false): string {
   const url = gatewayPath(baseURL || window.location.origin, path);
+  for (const [name, value] of Object.entries(additionalHeaders)) if (name !== "Idempotency-Key" || !/^[\x21-\x7e]{1,128}$/.test(value)) throw new Error("Unsupported code export header.");
+  const headerJSON = JSON.stringify(additionalHeaders);
+  const curlHeaders = Object.entries(additionalHeaders).map(([name, value]) => `  -H ${shellQuote(`${name}: ${value}`)} \\\n`).join("");
   const payload = JSON.stringify(body, null, 2);
-  if (language === "curl") return `curl ${shellQuote(url)} \\\n  -H "Authorization: Bearer $GATEWAY_API_KEY" \\\n  -H 'Content-Type: application/json' \\\n  --data-raw ${shellQuote(payload)}`;
-  if (language === "python") return `import json, os, urllib.request\n\nbody = json.loads(${JSON.stringify(payload)})\nrequest = urllib.request.Request(\n    ${JSON.stringify(url)},\n    data=json.dumps(body).encode(),\n    headers={"Authorization": "Bearer " + os.environ["GATEWAY_API_KEY"], "Content-Type": "application/json"},\n    method="POST",\n)\nwith urllib.request.urlopen(request, timeout=120) as response:\n    print(response.read().decode())`;
-  return `const response = await fetch(${JSON.stringify(url)}, {\n  method: "POST",\n  headers: {\n    Authorization: "Bearer " + process.env.GATEWAY_API_KEY,\n    "Content-Type": "application/json",\n  },\n  body: JSON.stringify(${payload}),\n});\nif (!response.ok) throw new Error("Request failed: " + response.status);\nconsole.log(await response.text());`;
+  if (language === "curl") return `curl ${shellQuote(url)} \\\n  -H "Authorization: Bearer $GATEWAY_API_KEY" \\\n  -H 'Content-Type: application/json' \\\n${curlHeaders}  --data-raw ${shellQuote(payload)}${binaryOutput ? " --output ai-gateway-output.bin" : ""}`;
+  if (language === "python") return `import json, os, urllib.request\n\nbody = json.loads(${JSON.stringify(payload)})\nrequest = urllib.request.Request(\n    ${JSON.stringify(url)},\n    data=json.dumps(body).encode(),\n    headers={"Authorization": "Bearer " + os.environ["GATEWAY_API_KEY"], "Content-Type": "application/json", **json.loads(${JSON.stringify(headerJSON)})},\n    method="POST",\n)\nwith urllib.request.urlopen(request, timeout=120) as response:\n${binaryOutput ? '    with open("ai-gateway-output.bin", "wb") as output:\n        output.write(response.read())' : "    print(response.read().decode())"}`;
+  return `const response = await fetch(${JSON.stringify(url)}, {\n  method: "POST",\n  headers: {\n    Authorization: "Bearer " + process.env.GATEWAY_API_KEY,\n    "Content-Type": "application/json",\n    ...${headerJSON},\n  },\n  body: JSON.stringify(${payload}),\n});\nif (!response.ok) throw new Error("Request failed: " + response.status);\n${binaryOutput ? 'const { writeFile } = await import("node:fs/promises");\nawait writeFile("ai-gateway-output.bin", Buffer.from(await response.arrayBuffer()));' : "console.log(await response.text());"}`;
 }

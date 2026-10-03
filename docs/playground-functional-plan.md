@@ -79,6 +79,10 @@ compatibility must be distinguished from merely having an endpoint selector.
   interrupted streams fail and cancelled transports cannot publish late text.
 - [x] Added quick and batch policy checks, bounded concurrency, editable test
   suites, search, filters, CSV import/template/export and explicit failure states.
+- [x] Added endpoint-specific forms for Messages, Interactions, images, embeddings,
+  speech, transcription, A2A and MCP, including native streams and media output.
+- [x] Corrected Responses browser history and image input dialects; code export
+  includes MCP idempotency and saves speech responses as binary files.
 - [ ] Finish media/tool output, policy selection and full conversation verification.
 - [ ] Complete endpoint-specific execution and media/tool handling.
 - [ ] Complete comparison, compliance and agent views.
