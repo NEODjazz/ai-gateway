@@ -55,12 +55,14 @@ describe("SSO visual controls", () => {
     });
     show(); await screen.findByRole("button", { name: "Configure Tenant A" });
     await userEvent.click(screen.getByRole("button", { name: "Configure Tenant A" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Edit SSO settings" }));
     await screen.findByDisplayValue("https://tenant.example");
     await act(async () => resolve!(json(settings)));
     expect(screen.getByLabelText("Issuer URL")).toHaveValue("https://tenant.example");
     await userEvent.type(screen.getByLabelText("Client secret"), "fixture-secret");
-    await userEvent.click(screen.getByRole("button", { name: "Configure Default" }));
+    await userEvent.click(screen.getByRole("button", { name: "Configure Default", hidden: true }));
     await act(async () => resolve!(json(settings)));
+    await userEvent.click(await screen.findByRole("button", { name: "Edit SSO settings" }));
     await screen.findByDisplayValue(profile.issuer);
     expect(screen.getByLabelText("Client secret")).toHaveValue("");
   });
@@ -77,8 +79,10 @@ describe("SSO visual controls", () => {
     await screen.findByRole("region", { name: "Verified identity" });
     expect(screen.getByRole("button", { name: "Activate SSO" })).toBeDisabled();
     expect(screen.getByText(/does not permit activation/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Edit SSO settings" }));
     await userEvent.click(screen.getByRole("button", { name: "Save draft" }));
     await waitFor(() => expect(bodies[0]?.organization_id).toBe("org-a"));
+    await userEvent.click(screen.getByRole("button", { name: "Bind identity to a Gateway user" }));
     const form = screen.getByRole("form", { name: "SSO principal binding" });
     await userEvent.click(within(form).getByRole("button", { name: "Use verified subject" }));
     expect(within(form).getByLabelText("IdP subject (sub)")).toHaveValue("verified-subject");

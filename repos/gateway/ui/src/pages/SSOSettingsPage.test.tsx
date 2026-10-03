@@ -12,10 +12,16 @@ function show() {
   vi.mocked(globalThis.fetch).mockImplementation((url, options) => String(url).endsWith("/sso/connections") ? Promise.resolve(json({ data: [{ id: "default", name: "Default", provider: "oidc", ...settings }] })) : impl(url, options));
   sessionStorage.setItem("ai-gateway.admin-token", "fixture"); return render(<MemoryRouter><AuthProvider><SSOSettingsPage /></AuthProvider></MemoryRouter>); }
 
+async function edit() {
+  await userEvent.click(await screen.findByRole("button", { name: "Edit SSO settings" }));
+  await screen.findByRole("dialog", { name: "Edit SSO settings" });
+  await userEvent.click(screen.getByText("Advanced OIDC endpoints"));
+}
+
 describe("SSOSettingsPage", () => {
   it("limits mappings to tenant roles for an organization-bound default profile", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(json({ ...settings, draft: { ...profile, organization_id: "org-a", role_mappings: { owners: "org_admin" }, groups_claim: "groups", group_mappings: { operators: "org_admin" } } }));
-    show(); await screen.findByDisplayValue(profile.issuer);
+    show(); await edit(); await screen.findByDisplayValue(profile.issuer);
     for (const kind of ["role", "group"]) {
       const choices = within(screen.getByLabelText(`Gateway role for ${kind} 1`));
       expect(choices.getByRole("option", { name: "org_admin" })).toBeInTheDocument();
@@ -29,8 +35,8 @@ describe("SSOSettingsPage", () => {
 			if (options?.method === "PUT") { body = JSON.parse(String(options.body)); return json(settings); }
 			return json({ ...settings, draft: { ...profile, audience: "legacy-api-resource" } });
 		});
-		show(); await screen.findByDisplayValue(profile.issuer);
-		expect(screen.getByText(/Browser SSO settings are independent of API JWT trust/)).toBeInTheDocument();
+		show(); await edit(); await screen.findByDisplayValue(profile.issuer);
+		expect(screen.getByText(/Browser SSO settings are independent of API JWT trust/, { selector: "p" })).toBeInTheDocument();
 		await userEvent.type(screen.getByLabelText("Trusted additional endpoint origins"), "https://tokens.example, https://keys.example");
 		await userEvent.click(screen.getByRole("button", { name: "Save draft" }));
 		await waitFor(() => expect(body?.audience).toBe(profile.client_id));
@@ -42,9 +48,9 @@ describe("SSOSettingsPage", () => {
     try {
       vi.spyOn(globalThis, "fetch").mockResolvedValue(json({ ...settings, test_status: "passed", test_expires_at: Math.floor(Date.now() / 1000) + 1 }));
       await act(async () => { view = show(); });
-      expect(screen.getByRole("button", { name: "Activate SSO" })).toBeEnabled();
+      expect(screen.getByRole("button", { name: "Activate SSO", hidden: true })).toBeEnabled();
       act(() => vi.advanceTimersByTime(1001));
-      expect(screen.getByRole("button", { name: "Activate SSO" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Activate SSO", hidden: true })).toBeDisabled();
       expect(screen.getByText("expired", { exact: true })).toBeInTheDocument();
     } finally { view?.unmount(); vi.useRealTimers(); }
   });
@@ -54,33 +60,35 @@ describe("SSOSettingsPage", () => {
       if (options?.method === "PUT") { const body = JSON.parse(String(options.body)); bodies.push(body); return json({ ...settings, revision: bodies.length + 1 }); }
       return json(settings);
     });
-    show(); await screen.findByDisplayValue(profile.issuer);
-    expect(screen.getByRole("button", { name: "Activate SSO" })).toBeDisabled();
+    show(); await edit(); await screen.findByDisplayValue(profile.issuer);
+    expect(screen.getByRole("button", { name: "Activate SSO", hidden: true })).toBeDisabled();
     await userEvent.clear(screen.getByLabelText("Scopes"));
     await userEvent.type(screen.getByLabelText("Scopes"), "openid custom.scope");
     await userEvent.click(screen.getByRole("button", { name: "Save draft" }));
     await waitFor(() => expect(bodies).toHaveLength(1));
     expect(bodies[0]).not.toHaveProperty("client_secret"); expect(bodies[0]).not.toHaveProperty("client_secret_configured");
     expect(bodies[0].scopes).toEqual(["openid", "custom.scope"]);
+    await edit();
     await userEvent.click(screen.getByLabelText("Clear saved client secret"));
-    expect(screen.getByRole("button", { name: "Test sign-in" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Test sign-in", hidden: true })).toBeDisabled();
     await userEvent.click(screen.getByRole("button", { name: "Save draft" }));
     await waitFor(() => expect(bodies).toHaveLength(2));
     expect(bodies[1].client_secret).toBe("");
+    await edit();
     expect(screen.getByLabelText("Client secret")).toHaveValue("");
   });
   it("allows activation only after a fresh proof and prevents JWT sessions from changing trust", async () => {
     let current = { ...settings, key_session: false, test_status: "passed", test_expires_at: Math.floor(Date.now() / 1000) + 300 };
     const calls: string[] = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => { calls.push(String(url)); return json(current); });
-    show(); await screen.findByDisplayValue(profile.issuer);
-    expect(screen.getByRole("button", { name: "Activate SSO" })).toBeDisabled();
+    show(); await edit(); await screen.findByDisplayValue(profile.issuer);
+    expect(screen.getByRole("button", { name: "Activate SSO", hidden: true })).toBeDisabled();
     expect(screen.getByText(/Sign in with an administrator virtual key/)).toBeInTheDocument();
     current = { ...current, key_session: true };
-    await userEvent.click(screen.getByRole("button", { name: "Refresh test status" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Activate SSO" })).toBeEnabled());
+    await userEvent.click(screen.getByRole("button", { name: "Refresh test status", hidden: true }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Activate SSO", hidden: true })).toBeEnabled());
     await userEvent.type(screen.getByLabelText("Client ID"), "-edited");
-    expect(screen.getByRole("button", { name: "Activate SSO" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Activate SSO", hidden: true })).toBeDisabled();
     expect(calls).not.toContain("/admin/v1/sso/action");
   });
   it("loads discovery into the draft and validates role mappings before sending secrets", async () => {
@@ -89,7 +97,7 @@ describe("SSOSettingsPage", () => {
       methods.push(options?.method || "GET");
       return json(String(url).endsWith("discover") ? { issuer: profile.issuer, authorization_url: profile.issuer + "/new-auth", token_url: profile.issuer + "/new-token", jwks_url: profile.issuer + "/new-jwks" } : settings);
     });
-    show(); await screen.findByDisplayValue(profile.issuer);
+    show(); await edit(); await screen.findByDisplayValue(profile.issuer);
     await userEvent.click(screen.getByRole("button", { name: "Discover endpoints" }));
     await screen.findByDisplayValue(profile.issuer + "/new-token");
     await userEvent.click(screen.getByText("Advanced role mappings"));
@@ -107,12 +115,13 @@ describe("SSOSettingsPage", () => {
       if (String(url).endsWith("/test")) return json({ start_url: "/auth/sso/test/start?ticket=fixture" });
       return json({ ...settings, test_status: reads++ ? "running" : "not_started" });
     });
-    show(); await screen.findByDisplayValue(profile.issuer);
+    show(); await screen.findByRole("button", { name: "Edit SSO settings" });
     await userEvent.click(screen.getByRole("button", { name: "Test sign-in" }));
     await waitFor(() => expect(replace).toHaveBeenCalledWith("/auth/sso/test/start?ticket=fixture"));
     await screen.findByText("running");
+    await edit();
     await userEvent.type(screen.getByLabelText("Client ID"), "-edited");
-    await userEvent.click(screen.getByRole("button", { name: "Refresh test status" }));
+    await userEvent.click(screen.getByRole("button", { name: "Refresh test status", hidden: true }));
     expect(screen.getByLabelText("Client ID")).toHaveValue("console-edited");
   });
   it("configures an explicit principal binding with no implicit inference grants", async () => {
@@ -121,7 +130,7 @@ describe("SSOSettingsPage", () => {
       if (String(url).endsWith("jwt-principals")) { binding = JSON.parse(String(options?.body)); return json(binding); }
       return json(settings);
     });
-    show(); await screen.findByDisplayValue(profile.issuer);
+    show(); await userEvent.click(await screen.findByRole("button", { name: "Bind identity to a Gateway user" }));
     const form = screen.getByRole("form", { name: "SSO principal binding" });
     await userEvent.type(within(form).getByLabelText("Internal user ID"), "admin-user");
     await userEvent.type(within(form).getByLabelText("IdP subject (sub)"), "immutable-subject");
@@ -131,6 +140,6 @@ describe("SSOSettingsPage", () => {
   it("shows backend failures without a false configured state", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(json({ error: { message: "Auth unavailable" } }, 503));
     show(); expect(await screen.findByText("Auth unavailable")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Activate SSO" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Activate SSO", hidden: true })).not.toBeInTheDocument();
   });
 });

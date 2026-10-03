@@ -58,7 +58,33 @@ keys сохраняются; concurrent edit перечитывается, а н
 зашифрованных конфигураций. Уже обновлённые данные старые версии Auth не прочитают:
 обновляйте все реплики согласованно и сохраняйте резервную копию БД.
 
+## Экраны управления
+
+Вкладка **Browser SSO** содержит таблицу connections и обзор выбранного подключения.
+В обзоре показываются provider, immutable organization, revision, статус active / disabled,
+сохранённый draft, наличие client secret и callback URL с кнопками Copy. Если draft
+существует одновременно с active profile, UI отдельно показывает текущий active issuer;
+черновик не выдаётся за действующую конфигурацию. Secret нельзя просмотреть или скопировать.
+Отдельная карточка **Role and group mappings** показывает сохранённые карты, а
+**Verified identity** — минимальную проверенную identity после теста.
+
+**Set up SSO** открывает первоначальную настройку, **Edit SSO settings** — редактирование
+сохранённой конфигурации. Форма находится в диалоге: provider preset, client credentials,
+callback, scopes/session lifetime и визуальные карты ролей/групп. Ручные OIDC endpoints
+и дополнительные trusted origins доступны в **Advanced OIDC endpoints**. Для создания
+отдельного подключения используйте **Add connection**; для привязки principal —
+**Bind identity to a Gateway user**. Обе операции имеют отдельные диалоги.
+
+Escape и Cancel закрывают чистую форму, возвращая focus к кнопке открытия. При
+несохранённых изменениях необходимо выбрать **Continue editing** или **Discard changes**;
+отмена очищает введённый client secret. Во время запроса закрытие блокируется. Ошибка
+сохранения остаётся внутри диалога вместе с введёнными значениями. Успешный Save draft
+закрывает форму, обновляет обзор и требует Test sign-in перед Activate SSO.
+Browser SSO и API JWT представлены отдельными вкладками и не изменяют доверие друг друга.
+
 ## Конфигурация
+
+Откройте **Set up SSO** или **Edit SSO settings** для выбранного подключения.
 
 1. Введите точный issuer. **Discover endpoints** загружает authorization endpoint,
    token endpoint и JWKS. Discovery не выполняет вход и не активирует профиль.
@@ -113,8 +139,8 @@ ID token, nonce, точные issuer/client audience и действующую d
 ## Действие на систему и восстановление
 
 Browser SSO и API JWT trust независимы. Активация, отключение и rollback browser
-профиля не меняют issuer, audience и role policy API-клиентов. В текущем API
-контракте поддерживается один issuer; multi-issuer federation отсутствует.
+профиля не меняют issuer, audience и role policy API-клиентов. Primary environment issuer сохраняется отдельно; дополнительные API issuers
+управляются в независимом registry на вкладке **API JWT**.
 Virtual keys сохраняют независимый доступ. При обновлении уже сохранённой managed
 конфигурации её прежнее глобальное API trust один раз копируется в отдельную
 зашифрованную настройку с revision CAS. Это сохраняет действующих API-клиентов;
@@ -325,7 +351,7 @@ runs outside its cache lock; concurrent refreshes share one result and canceled
 waiters can leave. Additional IdP availability is checked on the relevant API
 request rather than polling all IdPs during readiness.
 
-The console exposes this registry in **Settings → Manage API JWT issuers**.
+The console exposes this registry in **Settings → Single sign-on → API JWT**.
 The browser connections table remains separate. The API table shows immutable
 issuer/audience/Organization metadata, active/disabled/draft status and the
 actual last test. Visual role mappings enforce Organization role restrictions;
