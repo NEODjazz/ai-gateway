@@ -1,4 +1,5 @@
 import { jsonObject, optionalNumber } from "./requests";
+import { nativeToolContent, nativeUserContent, type NativeToolResult } from "./nativeConversation";
 
 export type SpecializedEndpoint = "messages" | "interactions" | "images" | "image-edits" | "embeddings" | "speech" | "transcription" | "a2a" | "mcp";
 export const endpointPaths: Record<SpecializedEndpoint, string> = { messages: "/v1/messages", interactions: "/v1/interactions", images: "/v1/images/generations", "image-edits": "/v1/images/edits", embeddings: "/v1/embeddings", speech: "/v1/audio/speech", transcription: "/v1/audio/transcriptions", a2a: "/a2a", mcp: "/v1/mcp/servers" };
@@ -18,9 +19,11 @@ export async function readAttachment(file: File, kind: "image" | "audio" | "docu
   return { filename: file.name, media_type: file.type === "audio/x-wav" ? "audio/wav" : file.type === "audio/mp3" ? "audio/mpeg" : file.type, data_base64: data.slice(index + 1) };
 }
 
-export function buildEndpointRequest(endpoint: SpecializedEndpoint, model: string, input: string, settings: EndpointSettings, attachments: Attachment[] = [], mask?: Attachment, history: unknown[] = [], previousID = ""): { path: string; body: Record<string, unknown>; headers?: Record<string, string> } {
+export function buildEndpointRequest(endpoint: SpecializedEndpoint, model: string, input: string, settings: EndpointSettings, attachments: Attachment[] = [], mask?: Attachment, history: unknown[] = [], previousID = "", toolResults: NativeToolResult[] = []): { path: string; body: Record<string, unknown>; headers?: Record<string, string> } {
+  const native = endpoint === "messages" || endpoint === "interactions";
   if (!["a2a", "mcp"].includes(endpoint) && !model.trim()) throw new Error("Select a model before sending a request.");
-  if (!["transcription", "mcp"].includes(endpoint) && !input.trim()) throw new Error("Enter input before sending a request.");
+  if (!["transcription", "mcp"].includes(endpoint) && !input.trim() && !(native && (attachments.length || toolResults.length))) throw new Error("Enter input before sending a request.");
+  if (toolResults.length && (!native || input.trim() || attachments.length)) throw new Error("Tool continuation must contain only the reviewed tool results.");
   if (new TextEncoder().encode(input).length > 1024 * 1024) throw new Error("Prompt exceeds the 1 MiB Playground limit.");
   if (new TextEncoder().encode(settings.instructions).length > 65536) throw new Error("Instructions exceed the 64 KiB Playground limit.");
   const extras = settings.advanced.trim() ? jsonObject(settings.advanced, "Advanced parameters") : {};
@@ -32,13 +35,15 @@ export function buildEndpointRequest(endpoint: SpecializedEndpoint, model: strin
     const limit = optionalNumber(settings.limit, "Maximum output tokens", 1, Number.MAX_SAFE_INTEGER, true);
     const temperature = optionalNumber(settings.temperature, "Temperature", 0, endpoint === "messages" ? 1 : 2), topP = optionalNumber(settings.topP, "Top P", 0, 1);
     body.stream = settings.stream;
+    const content = toolResults.length ? nativeToolContent(endpoint, toolResults) : nativeUserContent(endpoint, input, attachments);
     if (endpoint === "messages") {
       if (limit === undefined) throw new Error("Messages requires a maximum output token limit.");
-      body.max_tokens = limit; body.messages = [...history, { role: "user", content: input }];
+      body.max_tokens = limit; body.messages = [...history, { role: "user", content }];
       if (settings.instructions.trim()) body.system = settings.instructions.trim();
       if (temperature !== undefined) body.temperature = temperature; if (topP !== undefined) body.top_p = topP;
     } else {
-      body.input = previousID ? input : history.length ? [...history, { role: "user", content: input }] : input;
+      const next = toolResults.length ? content as unknown[] : [{ role: "user", content }];
+      body.input = previousID || !history.length ? (toolResults.length ? content : attachments.length ? next : input) : [...history, ...next];
       if (previousID) body.previous_interaction_id = previousID;
       if (settings.instructions.trim()) body.system_instruction = settings.instructions.trim();
       body.generation_config = { ...(limit === undefined ? {} : { max_output_tokens: limit }), ...(temperature === undefined ? {} : { temperature }), ...(topP === undefined ? {} : { top_p: topP }) };

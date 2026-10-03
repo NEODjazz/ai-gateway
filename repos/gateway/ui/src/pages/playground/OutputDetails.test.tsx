@@ -15,6 +15,10 @@ describe("Playground output details", () => {
     const details = outputDetails({ content: [{ type: "image", data: "AA==", mime_type: "image/png" }, { type: "image_url", image_url: { url: "https://user:secret@example.test/image" } }, { type: "output_image", url: "file:///private/image.png" }] });
     expect(details.images).toEqual(["data:image/png;base64,AA=="]);
   });
+  it("finds tools and safe media inside interaction steps and agent parts", () => {
+    const details = outputDetails({ steps: [{ type: "function_call", id: "call", name: "lookup", arguments: { type: "image", url: "https://hidden.example.test" } }, { type: "model_output", content: [{ type: "image", data: "AA==", mime_type: "image/png" }] }], parts: [{ type: "output_text", annotations: [{ type: "url_citation", url: "https://docs.example.test", title: "Docs" }] }] });
+    expect(details.tools).toHaveLength(1); expect(details.images).toEqual(["data:image/png;base64,AA=="]); expect(details.citations).toEqual([{ url: "https://docs.example.test/", title: "Docs" }]);
+  });
   it("copies the exact output and reports clipboard failure visibly", async () => {
     const user = userEvent.setup();
     const write = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined);

@@ -11,6 +11,7 @@ export function outputDetails(payload: unknown): Details {
     if (!value || typeof value !== "object" || depth > 8 || ++visited > 512) return;
     if (Array.isArray(value)) { for (const item of value) visit(item, depth + 1); return; }
     const item = value as Record<string, unknown>;
+    if (["reasoning", "thought", "thinking", "redacted_thinking"].includes(String(item.type))) return;
     if (["function_call", "tool_use", "tool_result", "function_result", "mcp_call", "mcp_approval_request", "code_interpreter_call", "file_search_call"].includes(String(item.type))) details.tools.push(item);
     if (Array.isArray(item.tool_calls)) details.tools.push(...item.tool_calls);
     if (item.type === "url_citation" || item.type === "web_search_result_location") {
@@ -23,7 +24,7 @@ export function outputDetails(payload: unknown): Details {
       const url = safeMediaURL(image); if (url && !seen.has(url)) { seen.add(url); details.images.push(url); }
     }
     // Inspect only protocol output fields. Do not recurse into tool arguments or reasoning.
-    for (const key of ["choices", "message", "output", "outputs", "content", "annotations", "citations"]) visit(item[key], depth + 1);
+    for (const key of ["choices", "message", "output", "outputs", "steps", "parts", "content", "annotations", "citations"]) visit(item[key], depth + 1);
   }
   visit(payload, 0);
   return details;

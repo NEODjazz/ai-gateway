@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { APIClient } from "../../api/client";
 import { EndpointPlayground } from "./EndpointPlayground";
@@ -6,6 +6,7 @@ import { playgroundConnection } from "./requests";
 import type { SpecializedEndpoint } from "./endpointRequests";
 
 function setup(endpoint: SpecializedEndpoint) { return render(<EndpointPlayground endpoint={endpoint} connection={playgroundConnection(new APIClient(() => "test-key"), "session", "", "")} models={["model"]} connectionControls={null} connectionChanged={false} />); }
+const nativeJSON = (value: unknown) => new Response(typeof value === "string" ? value : JSON.stringify(value), { headers: { "Content-Type": "application/json" } });
 const run = () => userEvent.click(screen.getByRole("button", { name: "Run endpoint request" }));
 describe("Endpoint Playground", () => {
   it("renders generated image output safely and preserves the image dialect", async () => {
@@ -46,17 +47,73 @@ describe("Endpoint Playground", () => {
     expect(await screen.findByRole("link", { name: "Download speech" })).toHaveAttribute("download", "ai-gateway-speech.wav");
     view.unmount(); Reflect.deleteProperty(URL, "createObjectURL"); Reflect.deleteProperty(URL, "revokeObjectURL");
   });
-  it("keeps native conversation history visible and preserves structured tool use on continuation", async () => {
-    const mock = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(JSON.stringify({ type: "message", content: [{ type: "text", text: "Native answer" }, { type: "tool_use", id: "call-1", name: "lookup", input: { query: "Example" } }], usage: { input_tokens: 0, output_tokens: 4 } }), { headers: { "Content-Type": "application/json" } }));
+  it("requires explicit native tool results before continuing and preserves the assistant blocks", async () => {
+    const first = { type: "message", content: [{ type: "thinking", thinking: "Plan", signature: "signed" }, { type: "text", text: "Native answer" }, { type: "tool_use", id: "call-1", name: "lookup", input: { query: "Example" } }], usage: { input_tokens: 0, output_tokens: 4 } };
+    const mock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(nativeJSON(first)).mockImplementation(async () => nativeJSON('{"content":[{"type":"text","text":"Final answer"}]}'));
     setup("messages"); await userEvent.type(screen.getByLabelText("Endpoint input"), "First"); await run();
-    expect(await screen.findByText("Native answer")).toBeInTheDocument();
-    expect(screen.getByText("Tool calls and results")).toBeInTheDocument();
-    expect(screen.getByLabelText("Endpoint input")).toHaveValue("");
-    await userEvent.type(screen.getByLabelText("Endpoint input"), "Second"); await userEvent.keyboard("{Enter}");
-    await waitFor(() => expect(mock).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("Native answer")).toBeInTheDocument(); expect(screen.getByLabelText("Endpoint input")).toBeDisabled();
+    expect(mock).toHaveBeenCalledOnce();
+    await userEvent.click(screen.getByRole("button", { name: "Continue native tool results" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("every tool result"); expect(mock).toHaveBeenCalledOnce();
+    await userEvent.type(screen.getByLabelText("Tool result call-1"), "Verified result");
+    await userEvent.click(screen.getByRole("button", { name: "Continue native tool results" }));
+    await screen.findByText("Final answer");
     const body = JSON.parse(String(mock.mock.calls[1][1]?.body));
-    expect(body.messages[1].content[1]).toMatchObject({ type: "tool_use", id: "call-1" });
-    expect(await screen.findAllByText("Native answer")).toHaveLength(2);
+    expect(body.messages).toEqual([{ role: "user", content: "First" }, { role: "assistant", content: first.content }, { role: "user", content: [{ type: "tool_result", tool_use_id: "call-1", content: "Verified result" }] }]);
+    expect(screen.getByLabelText("Endpoint input")).not.toBeDisabled();
+    await userEvent.type(screen.getByLabelText("Endpoint input"), "Second"); await userEvent.keyboard("{Enter}");
+    await waitFor(() => expect(mock).toHaveBeenCalledTimes(3));
+    expect(JSON.parse(String(mock.mock.calls[2][1]?.body)).messages.at(-1)).toEqual({ role: "user", content: "Second" });
+  });
+  it("keeps pending calls after a failed native continuation and sends an explicit error on decline", async () => {
+    const mock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(nativeJSON('{"content":[{"type":"tool_use","id":"call","name":"lookup","input":{}}]}')).mockResolvedValueOnce(new Response('{"error":{"message":"Unavailable"}}', { status: 503 })).mockResolvedValueOnce(nativeJSON('{"content":[{"type":"text","text":"Recovered"}]}'));
+    setup("messages"); await userEvent.type(screen.getByLabelText("Endpoint input"), "First"); await run();
+    await userEvent.click(await screen.findByRole("button", { name: "Decline lookup" })); await userEvent.click(screen.getByRole("button", { name: "Continue native tool results" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Unavailable"); expect(screen.getByLabelText("Endpoint input")).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: "Continue native tool results" })); await screen.findByText("Recovered");
+    expect(JSON.parse(String(mock.mock.calls[1][1]?.body))).toEqual(JSON.parse(String(mock.mock.calls[2][1]?.body)));
+    expect(JSON.parse(String(mock.mock.calls[2][1]?.body)).messages.at(-1).content[0]).toMatchObject({ tool_use_id: "call", is_error: true });
+  });
+  it("replays canonical interaction steps when store is false and keeps typed function results", async () => {
+    const mock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(nativeJSON('{"id":"not-stored","steps":[{"type":"model_output","content":[{"type":"text","text":"Step answer"}]},{"type":"function_call","id":"call","name":"lookup","arguments":{"count":1}}]}')).mockResolvedValueOnce(nativeJSON('{"steps":[{"type":"model_output","content":[{"type":"text","text":"Continued"}]}]}'));
+    setup("interactions"); fireEvent.change(screen.getByLabelText("Endpoint parameters JSON"), { target: { value: '{"store":false}' } });
+    await userEvent.type(screen.getByLabelText("Endpoint input"), "First"); await run();
+    expect(await screen.findByText("Step answer")).toBeInTheDocument(); expect(screen.getByText("Tool calls and results")).toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText("Tool result call"), "Result"); await userEvent.click(screen.getByRole("button", { name: "Get endpoint code" }));
+    expect(await screen.findByLabelText("Request code")).toHaveTextContent("function_call_output"); await userEvent.keyboard("{Escape}");
+    await userEvent.click(screen.getByRole("button", { name: "Continue native tool results" })); await screen.findByText("Continued");
+    expect(JSON.parse(String(mock.mock.calls[1][1]?.body))).toMatchObject({ store: false, input: [{ role: "user", content: "First" }, { role: "assistant", content: [{ type: "output_text", text: "Step answer" }] }, { type: "function_call", call_id: "call", name: "lookup", arguments: '{"count":1}' }, { type: "function_call_output", call_id: "call", output: "Result" }] });
+    expect(JSON.parse(String(mock.mock.calls[1][1]?.body))).not.toHaveProperty("previous_interaction_id");
+  });
+  it("continues stored interactions by ID with only the new input", async () => {
+    const mock = vi.spyOn(globalThis, "fetch").mockImplementation(async () => nativeJSON('{"id":"stored","steps":[{"type":"model_output","content":[{"type":"text","text":"Stored answer"}]}]}'));
+    setup("interactions"); await userEvent.type(screen.getByLabelText("Endpoint input"), "First"); await run(); await screen.findByText("Stored answer");
+    await userEvent.type(screen.getByLabelText("Endpoint input"), "Second"); await run(); await waitFor(() => expect(mock).toHaveBeenCalledTimes(2));
+    expect(JSON.parse(String(mock.mock.calls[1][1]?.body))).toMatchObject({ previous_interaction_id: "stored", input: "Second" });
+  });
+  it.each(["messages", "interactions"] as const)("sends an attachment-only %s turn in the native dialect and removes the file after success", async (endpoint) => {
+    const response = endpoint === "messages" ? { content: [{ type: "text", text: "Read PDF" }] } : { steps: [{ type: "model_output", content: [{ type: "text", text: "Read PDF" }] }] };
+    const mock = vi.spyOn(globalThis, "fetch").mockResolvedValue(nativeJSON(response));
+    setup(endpoint); fireEvent.change(screen.getByLabelText("Endpoint attachment"), { target: { files: [new File(["pdf"], "input.pdf", { type: "application/pdf" })] } });
+    await screen.findByText("input.pdf · application/pdf"); await run(); await screen.findByText("Read PDF");
+    const body = JSON.parse(String(mock.mock.calls[0][1]?.body));
+    expect(endpoint === "messages" ? body.messages[0].content : body.input[0].content).toEqual([endpoint === "messages" ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: "cGRm" } } : { type: "input_file", filename: "input.pdf", file_data: "data:application/pdf;base64,cGRm" }]);
+    expect(screen.queryByText("input.pdf · application/pdf")).not.toBeInTheDocument();
+  });
+  it("clears native tool drafts and exported conversation content when the connection changes", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(nativeJSON({ content: [{ type: "tool_use", id: "call", name: "lookup", input: {} }] }));
+    const view = setup("messages"); await userEvent.type(screen.getByLabelText("Endpoint input"), "Private draft"); await run();
+    await userEvent.type(await screen.findByLabelText("Tool result call"), "Private result"); await userEvent.click(screen.getByRole("button", { name: "Get endpoint code" }));
+    expect(await screen.findByLabelText("Request code")).toHaveTextContent("Private result");
+    view.rerender(<EndpointPlayground endpoint="messages" connection={playgroundConnection(new APIClient(() => "another-test-key"), "session", "", "")} models={["model"]} connectionControls={null} connectionChanged={false} />);
+    expect(screen.queryByLabelText("Request code")).not.toBeInTheDocument(); expect(screen.queryByLabelText("Tool result call")).not.toBeInTheDocument(); expect(screen.getByLabelText("Endpoint input")).toHaveValue("");
+    expect(screen.getByLabelText("Native conversation history")).not.toHaveTextContent("Private draft");
+  });
+  it("keeps thought-only interactions out of answer text and copy controls", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(nativeJSON({ steps: [{ type: "thought", content: [{ type: "text", text: "Reasoning only" }] }] }));
+    setup("interactions"); await userEvent.type(screen.getByLabelText("Endpoint input"), "First"); await run();
+    const history = await screen.findByLabelText("Native conversation history"); await within(history).findByText("No text output");
+    expect(within(history).getByRole("button", { name: "Copy native response 2" })).toBeDisabled(); expect(within(history).getByText("Reasoning only").closest("details")).toBeInTheDocument();
   });
   it("transcribes the supplied audio and displays the transcript", async () => {
     const mock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response('{"text":"Transcript text","segments":[]}'));

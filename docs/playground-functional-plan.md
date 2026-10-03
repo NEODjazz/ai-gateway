@@ -108,6 +108,10 @@ compatibility must be distinguished from merely having an endpoint selector.
   tasks; model tool calls require per-panel approval/decline and explicit typed
   continuation. Pending calls/tasks block new shared prompts; individual panels
   can be cleared without discarding successful results in other panels.
+- [x] Corrected native Interactions `steps` history and stateless replay; Messages
+  and Interactions require explicit reviewed tool results or decline before a new
+  prompt. Added image/PDF input dialects, indexed stream tool assembly, bounded
+  result/history validation and retry preservation after continuation failure.
 - [ ] Finish media/tool output, policy selection and full conversation verification.
 - [ ] Complete endpoint-specific execution and media/tool handling.
 - [ ] Complete comparison, compliance and agent views.

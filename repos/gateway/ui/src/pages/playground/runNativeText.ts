@@ -34,9 +34,9 @@ export async function runNativeText(connection: PlaygroundConnection, endpoint: 
       if (endpoint === "messages") {
         if (type === "message_start") { response = record(payload.message) || {}; fail(response); }
         if (type === "content_block_start") {
-          if (!Number.isInteger(payload.index) || Number(payload.index) < 0 || Number(payload.index) >= 128) throw new Error("Invalid native block index");
+          if (!Number.isInteger(payload.index) || Number(payload.index) < 0 || Number(payload.index) >= 128 || blocks.has(Number(payload.index))) throw new Error("Invalid or duplicate native block index");
           const block = record(payload.content_block); if (!block) throw new Error("Invalid native content block"); bound(JSON.stringify(block)); blocks.set(Number(payload.index), { ...block });
-          if (block.type === "text" && typeof block.text === "string") { text += block.text; onText(text); }
+          if (block.type === "text" && typeof block.text === "string") { if (block.text && firstTokenMS === undefined) firstTokenMS = performance.now() - start; text += block.text; onText(text); }
         }
         if (type === "content_block_delta") {
           const index = Number(payload.index), block = blocks.get(index);
@@ -50,10 +50,29 @@ export async function runNativeText(connection: PlaygroundConnection, endpoint: 
         if (type === "message_delta") { if (record(payload.usage)) response.usage = { ...record(response.usage), ...record(payload.usage) }; if (delta?.stop_reason) response.stop_reason = delta.stop_reason; }
         if (type === "message_stop") terminal = true;
       } else {
+        if (type === "step.start") {
+          const step = record(payload.step);
+          if (!step || !Number.isInteger(payload.index) || Number(payload.index) < 0 || Number(payload.index) >= 128 || blocks.has(Number(payload.index))) throw new Error("Invalid or duplicate interaction step index");
+          bound(JSON.stringify(step)); blocks.set(Number(payload.index), { ...step });
+        }
+        if (type === "step.delta" && delta?.type === "arguments_delta") {
+          const index = Number(payload.index), step = blocks.get(index);
+          if (!step || step.type !== "function_call" || typeof delta.arguments !== "string") throw new Error("Interaction arguments reference an unavailable function call");
+          bound(delta.arguments); argumentsByIndex.set(index, (argumentsByIndex.get(index) || "") + delta.arguments);
+        }
         if (type === "step.delta" && typeof delta?.text === "string") {
           bound(delta.text);
           if (delta.type === "thought_summary") reasoning += delta.text;
           else { if (firstTokenMS === undefined) firstTokenMS = performance.now() - start; text += delta.text; onText(text); }
+          if (blocks.size) {
+            const step = blocks.get(Number(payload.index));
+            if (!step || !["model_output", "thought"].includes(String(step.type))) throw new Error("Interaction text references an unavailable output step");
+            const content = Array.isArray(step.content) ? step.content : [];
+            const last = record(content.at(-1));
+            if (last?.type === "text") last.text = String(last.text || "") + delta.text;
+            else content.push({ type: "text", text: delta.text });
+            step.content = content;
+          }
         }
         const interaction = record(payload.interaction);
         if (interaction) { fail(interaction); if (JSON.stringify(interaction).length > maximumCharacters) throw new Error("Native output exceeds the 2 MiB Playground limit."); response = interaction; }
@@ -66,7 +85,13 @@ export async function runNativeText(connection: PlaygroundConnection, endpoint: 
       if (endpoint === "messages") {
         for (const [index, json] of argumentsByIndex) { try { blocks.get(index)!.input = JSON.parse(json); } catch { throw new Error("Native tool arguments contain invalid JSON"); } }
         response.content = [...blocks.entries()].sort(([a], [b]) => a - b).map(([, value]) => value);
-      } else if (!text) text = interactionText(response, "model_output");
+      } else {
+        if (!Array.isArray(response.steps)) {
+          for (const [index, json] of argumentsByIndex) { try { blocks.get(index)!.arguments = JSON.parse(json); } catch { throw new Error("Native tool arguments contain invalid JSON"); } }
+          response.steps = blocks.size ? [...blocks.entries()].sort(([a], [b]) => a - b).map(([, value]) => value) : [...(text ? [{ type: "model_output", content: [{ type: "text", text }] }] : []), ...(reasoning ? [{ type: "thought", content: [{ type: "text", text: reasoning }] }] : [])];
+        }
+        accept(response);
+      }
     }
   }
   active(); return { text, reasoning, response, events, eventCount, firstTokenMS, latencyMS: performance.now() - start };

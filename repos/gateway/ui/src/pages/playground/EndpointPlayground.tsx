@@ -9,11 +9,11 @@ import { runNativeText, type NativeTextRun } from "./runNativeText";
 import type { PlaygroundConnection } from "./requests";
 import { contentText } from "./runText";
 import { CopyOutput, OutputDetails } from "./OutputDetails";
-import { retainConversation } from "./attachments";
+import { conversationAttachments, retainConversation } from "./attachments";
+import { nativeHistory, nativeToolCalls, nativeToolContent, nativeUserContent, type NativeToolCall, type NativeToolResult, type NativeTurn } from "./nativeConversation";
 import { PricingControls, defaultPricing, estimateCost } from "./PriceEstimate";
 
 type Output = { payload?: Record<string, unknown>; native?: NativeTextRun; audio?: { url: string; type: string; filename: string }; latencyMS: number };
-type NativeTurn = { role: "user" | "assistant"; content: unknown; text?: string; reasoning?: string };
 function object(value: unknown): Record<string, unknown> | undefined { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined; }
 export function EndpointPlayground({ endpoint, connection, connectionChanged, connectionControls, models }: {
   endpoint: SpecializedEndpoint; connection: PlaygroundConnection; connectionChanged: boolean; connectionControls: ReactNode; models: string[];
@@ -23,36 +23,41 @@ export function EndpointPlayground({ endpoint, connection, connectionChanged, co
   const [output, setOutput] = useState<Output>(), [pending, setPending] = useState(""), [error, setError] = useState("");
   const [running, setRunning] = useState(false), [reading, setReading] = useState(false), [code, setCode] = useState<{ path: string; body: unknown; baseURL: string; headers?: Record<string, string>; binaryOutput?: boolean }>();
   const [history, setHistory] = useState<NativeTurn[]>([]), [previousID, setPreviousID] = useState("");
+  const [calls, setCalls] = useState<NativeToolCall[]>([]), [toolResults, setToolResults] = useState<NativeToolResult[]>([]);
   const [historyDropped, setHistoryDropped] = useState(0), [pricing, setPricing] = useState(defaultPricing);
   const abort = useRef<AbortController | undefined>(undefined), generation = useRef(0), audioURL = useRef<string | undefined>(undefined);
   const attachmentInput = useRef<HTMLInputElement>(null), maskInput = useRef<HTMLInputElement>(null);
   const textEndpoint = endpoint === "messages" || endpoint === "interactions";
   const imageEndpoint = endpoint === "images" || endpoint === "image-edits";
   useEffect(() => () => { generation.current++; abort.current?.abort(); if (audioURL.current) URL.revokeObjectURL(audioURL.current); }, []);
-  useEffect(() => { clear(); setAttachments([]); setMask(undefined); if (attachmentInput.current) attachmentInput.current.value = ""; if (maskInput.current) maskInput.current.value = ""; setModel(models[0] || ""); setPricing(defaultPricing); }, [connection]);
+  useEffect(() => { clear(); setInput(""); setAttachments([]); setMask(undefined); if (attachmentInput.current) attachmentInput.current.value = ""; if (maskInput.current) maskInput.current.value = ""; setModel(models[0] || ""); setPricing(defaultPricing); }, [connection]);
   useEffect(() => { if (models.length && !models.includes(model)) { setModel(models[0]); clear(); } }, [models]);
   const patch = (value: Partial<EndpointSettings>) => setSettings((current) => ({ ...current, ...value }));
-  function clear() { generation.current++; abort.current?.abort(); abort.current = undefined; setRunning(false); setOutput(undefined); setPending(""); setHistory([]); setHistoryDropped(0); setPreviousID(""); setError(""); if (audioURL.current) URL.revokeObjectURL(audioURL.current); audioURL.current = undefined; }
+  function clear() { generation.current++; abort.current?.abort(); abort.current = undefined; setRunning(false); setOutput(undefined); setCode(undefined); setPending(""); setHistory([]); setHistoryDropped(0); setPreviousID(""); setCalls([]); setToolResults([]); setReading(false); setError(""); if (audioURL.current) URL.revokeObjectURL(audioURL.current); audioURL.current = undefined; }
   async function attach(files: FileList | null, isMask = false) {
     if (!files?.length || reading || running) return;
     const current = generation.current; if (isMask) setMask(undefined); else setAttachments([]); setReading(true); setError("");
     try { if (files.length > 8 || [...files].reduce((sum, file) => sum + file.size, 0) > 16 * 1024 * 1024) throw new Error("Choose at most 8 images, up to 16 MiB in total.");
       if (isMask && files[0].type !== "image/png") throw new Error("Image mask must be PNG.");
-      const items = await Promise.all([...files].map((file) => readAttachment(file, endpoint === "transcription" ? "audio" : "image")));
+      const items = textEndpoint ? await conversationAttachments([...files]) : await Promise.all([...files].map((file) => readAttachment(file, endpoint === "transcription" ? "audio" : "image")));
       if (current === generation.current) { if (isMask) setMask(items[0]); else setAttachments(items); }
     } catch (cause) { if (current === generation.current) { const field = isMask ? maskInput.current : attachmentInput.current; if (field) field.value = ""; setError(cause instanceof Error ? cause.message : "Attachment failed"); } }
-    finally { setReading(false); }
+    finally { if (current === generation.current) setReading(false); }
   }
-  function body() { return buildEndpointRequest(endpoint, model, input, settings, attachments, mask, endpoint === "messages" ? history.map(({ role, content }) => ({ role, content })) : [], previousID); }
+  function body(continuing = false) {
+    if (calls.length && !continuing) throw new Error("Resolve every pending tool call before sending another prompt.");
+    if (continuing && (!calls.length || calls.some((call) => !toolResults.find((result) => result.id === call.id)?.text.trim()))) throw new Error("Supply or decline every tool result before continuing.");
+    return buildEndpointRequest(endpoint, model, continuing ? "" : input, settings, continuing ? [] : attachments, mask, textEndpoint && !previousID ? nativeHistory(endpoint, history) : [], previousID, continuing ? toolResults : []);
+  }
   function getCode() {
-    try { const request = body(); setCode({ path: request.path, body: request.body, baseURL: connection.baseURL, headers: request.headers, binaryOutput: endpoint === "speech" }); }
+    try { const request = body(calls.length > 0); setCode({ path: request.path, body: request.body, baseURL: connection.baseURL, headers: request.headers, binaryOutput: endpoint === "speech" }); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "Could not generate code"); }
   }
-  async function submit(event: FormEvent) {
-    event.preventDefault(); if (running || reading) return;
+  async function submit(event?: FormEvent, continuing = false) {
+    event?.preventDefault(); if (running || reading) return;
     if (connectionChanged) { setError("Apply connection changes before running."); return; }
     let request: ReturnType<typeof body>;
-    try { request = body(); } catch (cause) { setError(cause instanceof Error ? cause.message : "Invalid request"); return; }
+    try { request = body(continuing); } catch (cause) { setError(cause instanceof Error ? cause.message : "Invalid request"); return; }
     const controller = new AbortController(); abort.current = controller; const current = ++generation.current, start = performance.now(); setRunning(true); setError(""); setPending(""); setOutput(undefined);
     try {
       let result: Output;
@@ -60,9 +65,11 @@ export function EndpointPlayground({ endpoint, connection, connectionChanged, co
         const native = await runNativeText(connection, endpoint, request.body, controller.signal, (text) => { if (current === generation.current) setPending(text); });
         result = { native, payload: native.response, latencyMS: native.latencyMS };
         if (current !== generation.current || controller.signal.aborted) return;
-        const retained = retainConversation<NativeTurn>([...history, { role: "user", content: input }, { role: "assistant", content: endpoint === "messages" ? native.response.content : native.response.outputs, text: native.text, reasoning: native.reasoning }]);
-        setHistory(retained.turns); setHistoryDropped((value) => value + retained.dropped);
-        if (endpoint === "interactions" && typeof native.response.id === "string") setPreviousID(native.response.id);
+        const nextCalls = nativeToolCalls(endpoint, native.response);
+        const content = continuing ? nativeToolContent(endpoint, toolResults) : nativeUserContent(endpoint, input, attachments);
+        const retained = retainConversation<NativeTurn>([...history, { role: continuing ? "tool" : "user", content, text: continuing ? toolResults.map((result) => `${result.id}: ${result.text}`).join("\n") : input || attachments.map((file) => file.filename).join("\n") }, { role: "assistant", content: endpoint === "messages" ? native.response.content : native.response.steps, text: native.text, reasoning: native.reasoning }]);
+        setHistory(retained.turns); setHistoryDropped((value) => value + retained.dropped); setCalls(nextCalls); setToolResults([]);
+        if (endpoint === "interactions") setPreviousID(request.body.store !== false && typeof native.response.id === "string" ? native.response.id : "");
       } else if (endpoint === "speech") {
         const audio = await connection.client.requestBinary(connection.path(request.path), { maximumResponseBytes: 32 * 1024 * 1024, method: "POST", body: request.body, signal: controller.signal });
         if (current !== generation.current || controller.signal.aborted) return;
@@ -79,7 +86,7 @@ export function EndpointPlayground({ endpoint, connection, connectionChanged, co
         result = { payload, latencyMS: performance.now() - start };
       }
       if (current !== generation.current || controller.signal.aborted) return;
-      setOutput(result); setPending(""); if (textEndpoint) setInput("");
+      setOutput(result); setPending(""); if (textEndpoint && !continuing) { setInput(""); setAttachments([]); if (attachmentInput.current) attachmentInput.current.value = ""; }
     } catch (cause) { if (current === generation.current) setError(controller.signal.aborted ? "Request cancelled" : cause instanceof Error ? cause.message : "Request failed"); }
     finally { if (current === generation.current) { setRunning(false); abort.current = undefined; } }
   }
@@ -105,13 +112,14 @@ export function EndpointPlayground({ endpoint, connection, connectionChanged, co
     </section></aside>
     <div className="playground-main-panel"><form className="playground-conversation-card" onSubmit={submit}>
       <div className="playground-output-heading"><h2>{textEndpoint ? "Native conversation" : "Endpoint request"}</h2><div className="playground-actions"><GatewayButton view="outlined" disabled={running} onClick={clear}>Clear endpoint output</GatewayButton><GatewayButton view="outlined" disabled={running} onClick={getCode}>Get endpoint code</GatewayButton></div></div>
-      {endpoint !== "mcp" && <AreaControl label={endpoint === "speech" ? "Speech text" : endpoint === "transcription" ? "Transcription prompt" : endpoint === "embeddings" ? "Embedding input" : "Endpoint input"} rows={5} value={input} disabled={running} onUpdate={setInput} onKeyDown={(event) => { if (textEndpoint && event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); if (!running) event.currentTarget.form?.requestSubmit(); } }} />}
-      {(endpoint === "image-edits" || endpoint === "transcription") && <><label>Input {endpoint === "transcription" ? "audio" : "images"}<input ref={attachmentInput} aria-label="Endpoint attachment" type="file" multiple={endpoint === "image-edits"} disabled={running || reading} accept={endpoint === "transcription" ? "audio/*,.webm" : "image/png,image/jpeg,image/webp,image/gif"} onChange={(event) => void attach(event.currentTarget.files)} /></label>{attachments.map((item) => <p key={item.filename}>{item.filename} · {item.media_type}</p>)}<GatewayButton view="flat" disabled={running || reading} onClick={() => { setAttachments([]); if (attachmentInput.current) attachmentInput.current.value = ""; }}>Remove attachments</GatewayButton></>}
+      {endpoint !== "mcp" && <AreaControl label={endpoint === "speech" ? "Speech text" : endpoint === "transcription" ? "Transcription prompt" : endpoint === "embeddings" ? "Embedding input" : "Endpoint input"} rows={5} value={input} disabled={running || calls.length > 0} onUpdate={setInput} onKeyDown={(event) => { if (textEndpoint && event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); if (!running) event.currentTarget.form?.requestSubmit(); } }} />}
+      {(endpoint === "image-edits" || endpoint === "transcription" || textEndpoint) && <><label>Input {endpoint === "transcription" ? "audio" : textEndpoint ? "images or PDF" : "images"}<input ref={attachmentInput} aria-label="Endpoint attachment" type="file" multiple={endpoint === "image-edits" || textEndpoint} disabled={running || reading || calls.length > 0} accept={endpoint === "transcription" ? "audio/*,.webm" : `image/png,image/jpeg,image/webp,image/gif${textEndpoint ? ",application/pdf" : ""}`} onChange={(event) => void attach(event.currentTarget.files)} /></label>{attachments.map((item) => <p key={item.filename}>{item.filename} · {item.media_type}</p>)}<GatewayButton view="flat" disabled={running || reading} onClick={() => { setAttachments([]); if (attachmentInput.current) attachmentInput.current.value = ""; }}>Remove attachments</GatewayButton></>}
       {endpoint === "image-edits" && <label>Optional mask<input ref={maskInput} aria-label="Image mask attachment" type="file" accept="image/png" disabled={running || reading} onChange={(event) => void attach(event.currentTarget.files, true)} />{mask && <><span>{mask.filename}</span><GatewayButton view="flat" disabled={running} onClick={() => { setMask(undefined); if (maskInput.current) maskInput.current.value = ""; }}>Remove mask</GatewayButton></>}</label>}
       {endpoint === "mcp" && <p className="muted">Running this request executes the selected tool with these arguments and a unique idempotency key. Review the tool and arguments before execution.</p>}
-      <div className="playground-actions"><GatewayButton type="submit" disabled={running || reading || connectionChanged}>{running ? "Running…" : endpoint === "mcp" ? "Execute MCP tool" : "Run endpoint request"}</GatewayButton>{running && <GatewayButton view="outlined" onClick={() => abort.current?.abort()}>Stop endpoint request</GatewayButton>}</div>
+      <div className="playground-actions"><GatewayButton type="submit" disabled={running || reading || connectionChanged || calls.length > 0}>{running ? "Running…" : endpoint === "mcp" ? "Execute MCP tool" : "Run endpoint request"}</GatewayButton>{running && <GatewayButton view="outlined" onClick={() => abort.current?.abort()}>Stop endpoint request</GatewayButton>}</div>
       {error && <p role="alert" className="form-error">{error}</p>}{pending && <pre className="playground-native-text">{pending}</pre>}
-      {textEndpoint && <section aria-label="Native conversation history">{history.map((turn, index) => <article className={`playground-turn ${turn.role}`} key={index}><strong>{turn.role === "user" ? "User" : "Assistant"}</strong><pre>{turn.text || contentText(turn.content) || "No text output"}</pre>{turn.role === "assistant" && <><CopyOutput label={`Copy native response ${index + 1}`} text={turn.text || contentText(turn.content)} />{turn.reasoning && <details><summary>Reasoning</summary><pre>{turn.reasoning}</pre></details>}<OutputDetails payload={{ content: turn.content }} /></>}</article>)}</section>}
+      {textEndpoint && <section aria-label="Native conversation history">{history.map((turn, index) => <article className={`playground-turn ${turn.role}`} key={index}><strong>{turn.role === "user" ? "User" : turn.role === "tool" ? "Tool result" : "Assistant"}</strong><pre>{(turn.text ?? contentText(turn.content)) || "No text output"}</pre>{turn.role === "assistant" && <><CopyOutput label={`Copy native response ${index + 1}`} text={turn.text ?? contentText(turn.content)} />{turn.reasoning && <details><summary>Reasoning</summary><pre>{turn.reasoning}</pre></details>}<OutputDetails payload={{ content: turn.content }} /></>}</article>)}</section>}
+      {calls.length > 0 && <section className="playground-tool-approvals" aria-label="Native tool results"><h3>Pending tool calls</h3><p className="muted">Review the arguments, supply a result from your tool, or decline the call. Tools do not execute automatically.</p>{calls.map((call) => { const result = toolResults.find((item) => item.id === call.id); return <article className="playground-turn tool" key={call.id}><strong>{call.name} · {call.id}</strong><pre>{JSON.stringify(call.arguments, null, 2)}</pre><AreaControl label={`Tool result ${call.id}`} rows={3} value={result?.text || ""} disabled={running} onUpdate={(text) => setToolResults((items) => [...items.filter((item) => item.id !== call.id), { id: call.id, text, declined: false }])} /><GatewayButton view="outlined" disabled={running} onClick={() => setToolResults((items) => [...items.filter((item) => item.id !== call.id), { id: call.id, text: "Tool execution declined by the user.", declined: true }])}>Decline {call.name}</GatewayButton>{result?.declined && <p>Declined</p>}</article>; })}<GatewayButton disabled={running || connectionChanged} onClick={() => void submit(undefined, true)}>Continue native tool results</GatewayButton></section>}
       {historyDropped > 0 && <p className="muted">{historyDropped} earlier turns removed to keep browser history bounded.</p>}
       {images.map((item, index) => <figure key={index}>{item.src ? <><img className="playground-generated-image" src={item.src} alt={`Generated image ${index + 1}`} referrerPolicy="no-referrer" /><a href={item.src} download={`ai-gateway-image-${index + 1}.png`} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer">Open/download image</a></> : <p>Image output URL is unavailable or unsupported.</p>}{typeof item.prompt === "string" && <figcaption>{item.prompt}</figcaption>}</figure>)}
       {output?.audio && <div>{/^audio\/(mpeg|wav|x-wav|ogg|flac|mp4|webm|aac)$/.test(output.audio.type) ? <audio controls src={output.audio.url} aria-label="Generated speech" /> : <p>Audio format has no browser preview. Download to play it.</p>}<a href={output.audio.url} download={output.audio.filename}>Download speech</a></div>}
