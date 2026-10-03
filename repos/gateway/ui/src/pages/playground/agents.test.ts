@@ -41,6 +41,22 @@ describe("saved agent requests", () => {
     mock.mockResolvedValueOnce(json({ jsonrpc: "2.0", id: get.body.id, result: { id: "task-one", contextId: "ctx-one", status: { state: "TASK_STATE_COMPLETED" }, artifacts: [{ parts: [{ text: "Task refreshed" }] }] } }));
     expect((await runAgentRequest(connection(), get, signal)).text).toBe("Task refreshed");
   });
+  it("rejects mismatched task or context IDs in agent continuation and refresh responses", async () => {
+    const task = { id: "task-one", contextID: "context-one", state: "TASK_STATE_COMPLETED" };
+    const mock = vi.spyOn(globalThis, "fetch");
+    for (const request of [agentRequest("writer", "Next", task), agentTaskRequest("writer", task, "GetTask")]) {
+      mock.mockResolvedValueOnce(json({ jsonrpc: "2.0", id: request.body.id, result: { task: { id: "task-one", contextId: "other-context", status: { state: "TASK_STATE_COMPLETED" } } } }));
+      await expect(runAgentRequest(connection(), request, new AbortController().signal)).rejects.toThrow("different agent task");
+    }
+    const request = agentRequest("writer", "Prompt");
+    await expect(runAgentRequest(connection(), { ...request, body: { ...request.body, params: [] } }, new AbortController().signal)).rejects.toThrow("Invalid agent RPC");
+    expect(mock).toHaveBeenCalledTimes(2);
+  });
+  it("rejects malformed or oversized agent attachments before transport", () => {
+    const file = { filename: "input.pdf", media_type: "application/pdf", data_base64: "AA==" };
+    expect(() => agentRequest("writer", "", undefined, [{ ...file, filename: "../input.pdf" }])).toThrow("Invalid native attachment");
+    expect(() => agentRequest("writer", "", undefined, [{ ...file, data_base64: "AAAA".repeat(Math.ceil(8 * 1024 * 1024 / 3) + 1) }])).toThrow("8 MiB");
+  });
   it("bounds batch concurrency, keeps partial failures and cancels queued prompts", async () => {
     const deferred: { id: string; resolve: (response: Response) => void }[] = [];
     const mock = vi.spyOn(globalThis, "fetch").mockImplementation((_url, options) => new Promise<Response>((resolve) => deferred.push({ id: JSON.parse(String(options?.body)).id, resolve })));

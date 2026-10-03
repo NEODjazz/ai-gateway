@@ -122,13 +122,52 @@ describe("Endpoint Playground", () => {
     expect(JSON.parse(String(mock.mock.calls[0][1]?.body))).toMatchObject({ file: { filename: "input.wav", media_type: "audio/wav" }, response_format: "verbose_json" });
   });
   it("sends the mandatory A2A version and includes it in exported code", async () => {
-    const mock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_path, options) => new Headers(options?.headers).get("A2A-Version") === "1.0" ? new Response('{"jsonrpc":"2.0","result":{"message":{"parts":[{"text":"Versioned response"}]}}}') : new Response('{"error":{"message":"Version not supported"}}', { status: 400 }));
+    const mock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_path, options) => new Headers(options?.headers).get("A2A-Version") === "1.0" ? nativeJSON({ jsonrpc: "2.0", id: JSON.parse(String(options?.body)).id, result: { message: { parts: [{ text: "Versioned response" }] } } }) : new Response('{"error":{"message":"Version not supported"}}', { status: 400 }));
     setup("a2a"); await userEvent.type(screen.getByLabelText("Agent ID"), "research"); await userEvent.type(screen.getByLabelText("Endpoint input"), "Question");
     await userEvent.click(screen.getByRole("button", { name: "Get endpoint code" })); expect(await screen.findByLabelText("Request code")).toHaveTextContent("A2A-Version: 1.0"); await userEvent.keyboard("{Escape}");
     await run(); await screen.findByText("Versioned response"); expect(mock).toHaveBeenCalledOnce();
   });
+  it("refreshes a pending A2A task and continues the same task/context with attachments", async () => {
+    const mock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_path, options) => {
+      const request = JSON.parse(String(options?.body));
+      const refreshing = request.method === "GetTask", continuing = request.params.message?.taskId === "task";
+      const task = { id: "task", contextId: "context", status: { state: refreshing || continuing ? "TASK_STATE_COMPLETED" : "TASK_STATE_WORKING" }, artifacts: [{ parts: [{ text: refreshing ? "Refreshed answer" : continuing ? "Continued answer" : "Working answer" }] }] };
+      return nativeJSON({ jsonrpc: "2.0", id: request.id, result: refreshing ? task : { task } });
+    });
+    setup("a2a"); await userEvent.type(screen.getByLabelText("Agent ID"), "research"); await userEvent.type(screen.getByLabelText("Endpoint input"), "First"); await userEvent.keyboard("{Enter}");
+    await screen.findByText("Working answer"); expect(screen.getByLabelText("Endpoint input")).toBeDisabled(); expect(screen.getByRole("button", { name: "Run endpoint request" })).toBeDisabled(); expect(mock).toHaveBeenCalledOnce();
+    await userEvent.click(screen.getByRole("button", { name: "Get endpoint code" })); expect(await screen.findByLabelText("Request code")).toHaveTextContent("GetTask"); await userEvent.keyboard("{Escape}");
+    await userEvent.click(screen.getByRole("button", { name: "Refresh endpoint task" })); await screen.findByText("Refreshed answer"); expect(screen.queryByText("Working answer")).not.toBeInTheDocument(); expect(screen.getByLabelText("Endpoint input")).not.toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Endpoint attachment"), { target: { files: [new File(["pdf"], "brief.pdf", { type: "application/pdf" })] } }); await screen.findByText("brief.pdf · application/pdf");
+    await userEvent.type(screen.getByLabelText("Endpoint input"), "Second"); await run(); await screen.findByText("Continued answer");
+    expect(JSON.parse(String(mock.mock.calls[1][1]?.body))).toMatchObject({ method: "GetTask", params: { tenant: "research", id: "task" } });
+    expect(JSON.parse(String(mock.mock.calls[2][1]?.body))).toMatchObject({ method: "SendMessage", params: { message: { taskId: "task", contextId: "context", parts: [{ text: "Second" }, { raw: "cGRm", mediaType: "application/pdf", filename: "brief.pdf" }] } } });
+    expect(screen.queryByText("brief.pdf · application/pdf")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Agent conversation history")).toHaveTextContent("First"); expect(screen.getByLabelText("Agent conversation history")).toHaveTextContent("Second");
+  });
+  it("keeps a known A2A task after a refresh failure and cancels it only on explicit action", async () => {
+    let count = 0;
+    const mock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_path, options) => {
+      const request = JSON.parse(String(options?.body)); count++;
+      if (count === 2) return nativeJSON({ jsonrpc: "2.0", id: request.id, error: { message: "Refresh unavailable" } });
+      return nativeJSON({ jsonrpc: "2.0", id: request.id, result: { task: { id: "task", contextId: "context", status: { state: request.method === "CancelTask" ? "TASK_STATE_CANCELED" : "TASK_STATE_WORKING" }, artifacts: [] } } });
+    });
+    setup("a2a"); await userEvent.type(screen.getByLabelText("Agent ID"), "research"); await userEvent.type(screen.getByLabelText("Endpoint input"), "First"); await run();
+    await userEvent.click(await screen.findByRole("button", { name: "Refresh endpoint task" })); expect(await screen.findByRole("alert")).toHaveTextContent("Refresh unavailable"); expect(screen.getByLabelText("Endpoint input")).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: "Cancel endpoint task" })); await waitFor(() => expect(screen.getByLabelText("Agent task state")).toHaveTextContent("TASK_STATE_CANCELED"));
+    expect(JSON.parse(String(mock.mock.calls[2][1]?.body))).toMatchObject({ method: "CancelTask", params: { id: "task" } }); expect(screen.getByLabelText("Endpoint input")).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: "Clear endpoint output" })); expect(screen.getByLabelText("Endpoint input")).not.toBeDisabled(); expect(screen.queryByLabelText("Agent task state")).not.toBeInTheDocument();
+  });
+  it("clears A2A history on agent change and rejects a mismatched RPC response", async () => {
+    const mock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_path, options) => nativeJSON({ jsonrpc: "2.0", id: JSON.parse(String(options?.body)).id, result: { message: { parts: [{ text: "Independent answer" }] } } }));
+    setup("a2a"); await userEvent.type(screen.getByLabelText("Agent ID"), "research"); await userEvent.type(screen.getByLabelText("Endpoint input"), "First"); await run(); await screen.findByText("Independent answer"); expect(screen.getByRole("status")).toHaveTextContent("each request is independent");
+    await userEvent.type(screen.getByLabelText("Endpoint input"), "Draft"); fireEvent.change(screen.getByLabelText("Agent ID"), { target: { value: "other" } });
+    expect(screen.queryByText("Independent answer")).not.toBeInTheDocument(); expect(screen.getByLabelText("Endpoint input")).toHaveValue("");
+    mock.mockResolvedValueOnce(nativeJSON({ jsonrpc: "2.0", id: "wrong", result: { message: { parts: [{ text: "Wrong response" }] } } }));
+    await userEvent.type(screen.getByLabelText("Endpoint input"), "Second"); await run(); expect(await screen.findByRole("alert")).toHaveTextContent("invalid agent response"); expect(screen.queryByText("Wrong response")).not.toBeInTheDocument();
+  });
   it("does not interpret a JSON-RPC error as an empty successful agent response", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response('{"jsonrpc":"2.0","error":{"code":-32005,"message":"Agent unavailable"}}'));
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_path, options) => nativeJSON({ jsonrpc: "2.0", id: JSON.parse(String(options?.body)).id, error: { code: -32005, message: "Agent unavailable" } }));
     setup("a2a"); await userEvent.type(screen.getByLabelText("Agent ID"), "research"); await userEvent.type(screen.getByLabelText("Endpoint input"), "Question"); await run();
     expect(await screen.findByRole("alert")).toHaveTextContent("Agent unavailable"); expect(screen.queryByText("Agent response")).not.toBeInTheDocument();
   });

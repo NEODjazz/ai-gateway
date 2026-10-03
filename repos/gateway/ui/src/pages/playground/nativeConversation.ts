@@ -6,8 +6,7 @@ export type NativeToolCall = { id: string; name: string; arguments: Record<strin
 export type NativeToolResult = { id: string; text: string; declined: boolean };
 function record(value: unknown): Record<string, unknown> | undefined { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined; }
 
-export function nativeUserContent(endpoint: NativeEndpoint, text: string, files: Attachment[]): unknown {
-  if (!files.length) return text;
+export function validateConversationFiles(files: Attachment[]): void {
   let bytes = 0;
   for (const file of files) {
     if (files.length > 5 || !["image/png", "image/jpeg", "image/gif", "image/webp", "application/pdf"].includes(file.media_type) || !file.filename || file.filename.length > 256 || /[\\/\x00]/.test(file.filename) || !file.data_base64) throw new Error("Invalid native attachment; choose at most 5 images/PDF files.");
@@ -15,6 +14,11 @@ export function nativeUserContent(endpoint: NativeEndpoint, text: string, files:
     if (bytes > 8 * 1024 * 1024) throw new Error("Native attachments exceed the 8 MiB Playground limit.");
     if (file.data_base64.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(file.data_base64)) throw new Error("Invalid native attachment encoding.");
   }
+}
+
+export function nativeUserContent(endpoint: NativeEndpoint, text: string, files: Attachment[]): unknown {
+  if (!files.length) return text;
+  validateConversationFiles(files);
   return [...(text.trim() ? [{ type: endpoint === "messages" ? "text" : "input_text", text }] : []), ...files.map((file) => {
     if (endpoint === "messages") return { type: file.media_type === "application/pdf" ? "document" : "image", source: { type: "base64", media_type: file.media_type, data: file.data_base64 } };
     return file.media_type === "application/pdf" ? { type: "input_file", filename: file.filename, file_data: `data:application/pdf;base64,${file.data_base64}` } : { type: "input_image", image_url: `data:${file.media_type};base64,${file.data_base64}` };

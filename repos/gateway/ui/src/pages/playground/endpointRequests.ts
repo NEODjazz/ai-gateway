@@ -1,5 +1,6 @@
 import { jsonObject, optionalNumber } from "./requests";
 import { nativeToolContent, nativeUserContent, type NativeToolResult } from "./nativeConversation";
+import { agentRequest, type AgentTask } from "./agents";
 
 export type SpecializedEndpoint = "messages" | "interactions" | "images" | "image-edits" | "embeddings" | "speech" | "transcription" | "a2a" | "mcp";
 export const endpointPaths: Record<SpecializedEndpoint, string> = { messages: "/v1/messages", interactions: "/v1/interactions", images: "/v1/images/generations", "image-edits": "/v1/images/edits", embeddings: "/v1/embeddings", speech: "/v1/audio/speech", transcription: "/v1/audio/transcriptions", a2a: "/a2a", mcp: "/v1/mcp/servers" };
@@ -19,10 +20,10 @@ export async function readAttachment(file: File, kind: "image" | "audio" | "docu
   return { filename: file.name, media_type: file.type === "audio/x-wav" ? "audio/wav" : file.type === "audio/mp3" ? "audio/mpeg" : file.type, data_base64: data.slice(index + 1) };
 }
 
-export function buildEndpointRequest(endpoint: SpecializedEndpoint, model: string, input: string, settings: EndpointSettings, attachments: Attachment[] = [], mask?: Attachment, history: unknown[] = [], previousID = "", toolResults: NativeToolResult[] = []): { path: string; body: Record<string, unknown>; headers?: Record<string, string> } {
+export function buildEndpointRequest(endpoint: SpecializedEndpoint, model: string, input: string, settings: EndpointSettings, attachments: Attachment[] = [], mask?: Attachment, history: unknown[] = [], previousID = "", toolResults: NativeToolResult[] = [], agentTask?: AgentTask): { path: string; body: Record<string, unknown>; headers?: Record<string, string> } {
   const native = endpoint === "messages" || endpoint === "interactions";
   if (!["a2a", "mcp"].includes(endpoint) && !model.trim()) throw new Error("Select a model before sending a request.");
-  if (!["transcription", "mcp"].includes(endpoint) && !input.trim() && !(native && (attachments.length || toolResults.length))) throw new Error("Enter input before sending a request.");
+  if (!["transcription", "mcp"].includes(endpoint) && !input.trim() && !((native || endpoint === "a2a") && (attachments.length || toolResults.length))) throw new Error("Enter input before sending a request.");
   if (toolResults.length && (!native || input.trim() || attachments.length)) throw new Error("Tool continuation must contain only the reviewed tool results.");
   if (new TextEncoder().encode(input).length > 1024 * 1024) throw new Error("Prompt exceeds the 1 MiB Playground limit.");
   if (new TextEncoder().encode(settings.instructions).length > 65536) throw new Error("Instructions exceed the 64 KiB Playground limit.");
@@ -66,8 +67,8 @@ export function buildEndpointRequest(endpoint: SpecializedEndpoint, model: strin
     if (input.trim()) body.prompt = input; if (settings.language.trim()) body.language = settings.language.trim();
   } else if (endpoint === "a2a") {
     if (!safeID.test(settings.agent)) throw new Error("Enter a valid agent ID.");
-    path += `/${encodeURIComponent(settings.agent)}`;
-    return { path, headers: { "A2A-Version": "1.0" }, body: { ...extras, jsonrpc: "2.0", id: crypto.randomUUID(), method: "SendMessage", params: { tenant: settings.agent, message: { messageId: crypto.randomUUID(), role: "ROLE_USER", parts: [{ text: input }] }, configuration: { acceptedOutputModes: ["text/plain"] } } } };
+    if (Object.keys(extras).length) throw new Error("A2A parameters are configured by the agent and task controls.");
+    return agentRequest(settings.agent, input, agentTask, attachments);
   } else {
     if (!safeID.test(settings.server) || !safeID.test(settings.tool)) throw new Error("Enter a valid MCP server ID and tool name.");
     path += `/${encodeURIComponent(settings.server)}/tools/${encodeURIComponent(settings.tool)}`;

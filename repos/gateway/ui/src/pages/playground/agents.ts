@@ -1,6 +1,7 @@
 import { csvCell } from "../../csv";
 import type { Attachment } from "./endpointRequests";
 import { optionalNumber, type PlaygroundConnection } from "./requests";
+import { validateConversationFiles } from "./nativeConversation";
 import { contentText } from "./runText";
 
 export type AgentProfile = { id: string; name: string; description?: string; model: string; instructions_template_id?: string; instructions_configured: boolean; generation?: { temperature?: number; max_output_tokens?: number }; tool_policy_id: string; allowed_tools: string[]; denied_tools?: string[]; approval_required?: string[]; max_tool_calls: number; max_iterations: number; tags?: string[]; enabled: boolean; execution_supported: boolean };
@@ -30,17 +31,19 @@ export function agentRequest(agent: string, prompt: string, task?: AgentTask, at
   if (!safeID.test(agent)) throw new Error("Select a valid agent ID.");
   if ((!prompt.trim() && !attachments.length) || new TextEncoder().encode(prompt).length > 1024 * 1024) throw new Error("Enter an agent prompt up to 1 MiB.");
   if (task && (!safeID.test(task.id) || !safeID.test(task.contextID) || task.state !== "TASK_STATE_COMPLETED")) throw new Error("Start a new conversation or resolve the current agent task before continuing.");
-  if (attachments.length > 5 || attachments.some((item) => !["image/png", "image/jpeg", "image/gif", "image/webp", "application/pdf"].includes(item.media_type))) throw new Error("Choose at most five images or PDF attachments.");
+  validateConversationFiles(attachments);
   const body = { jsonrpc: "2.0", id: crypto.randomUUID(), method: "SendMessage", params: { tenant: agent, message: { messageId: crypto.randomUUID(), role: "ROLE_USER", ...(task ? { taskId: task.id, contextId: task.contextID } : {}), parts: [...(prompt ? [{ text: prompt }] : []), ...attachments.map((item) => ({ raw: item.data_base64, mediaType: item.media_type, filename: item.filename }))] }, configuration: { acceptedOutputModes: ["text/plain"] } } };
   if (new TextEncoder().encode(JSON.stringify(body)).length > 24 * 1024 * 1024) throw new Error("Request exceeds the 24 MiB Playground limit.");
   return { path: `/a2a/${encodeURIComponent(agent)}`, body, headers: { "A2A-Version": "1.0" } };
 }
 export function agentTaskRequest(agent: string, task: AgentTask, method: "GetTask" | "CancelTask") {
-  if (!safeID.test(agent) || !safeID.test(task.id)) throw new Error("Invalid agent task ID.");
-  return { path: `/a2a/${encodeURIComponent(agent)}`, body: { jsonrpc: "2.0", id: crypto.randomUUID(), method, params: { tenant: agent, id: task.id } }, headers: { "A2A-Version": "1.0" } };
+  if (!safeID.test(agent) || !safeID.test(task.id) || !safeID.test(task.contextID)) throw new Error("Invalid agent task ID.");
+  return { path: `/a2a/${encodeURIComponent(agent)}`, body: { jsonrpc: "2.0", id: crypto.randomUUID(), method, params: { tenant: agent, id: task.id } }, headers: { "A2A-Version": "1.0" }, expectedTask: { id: task.id, contextID: task.contextID } };
 }
-export async function runAgentRequest(connection: PlaygroundConnection, request: ReturnType<typeof agentRequest> | ReturnType<typeof agentTaskRequest>, signal: AbortSignal): Promise<AgentRun> {
+export async function runAgentRequest(connection: PlaygroundConnection, request: { path: string; body: Record<string, unknown>; headers?: Record<string, string>; expectedTask?: Pick<AgentTask, "id" | "contextID"> }, signal: AbortSignal): Promise<AgentRun> {
   if (signal.aborted) throw new DOMException("Request cancelled", "AbortError");
+  const params = object(request.body.params);
+  if (request.body.jsonrpc !== "2.0" || typeof request.body.id !== "string" || !params || !["SendMessage", "GetTask", "CancelTask"].includes(String(request.body.method))) throw new Error("Invalid agent RPC request.");
   const start = performance.now();
   const payload = await connection.client.request<Record<string, unknown>>(connection.path(request.path), { method: "POST", body: request.body, headers: request.headers, signal, maximumResponseBytes: 4 * 1024 * 1024 });
   if (signal.aborted) throw new DOMException("Request cancelled", "AbortError");
@@ -50,7 +53,8 @@ export async function runAgentRequest(connection: PlaygroundConnection, request:
   if (task) {
     const state = object(task.status)?.state;
     if (typeof task.id !== "string" || !safeID.test(task.id) || typeof task.contextId !== "string" || !safeID.test(task.contextId) || typeof state !== "string" || !["TASK_STATE_COMPLETED", "TASK_STATE_FAILED", "TASK_STATE_CANCELED", "TASK_STATE_REJECTED", "TASK_STATE_SUBMITTED", "TASK_STATE_WORKING", "TASK_STATE_INPUT_REQUIRED", "TASK_STATE_AUTH_REQUIRED"].includes(state)) throw new Error("Gateway returned an invalid agent task.");
-    if ("id" in request.body.params && request.body.params.id !== task.id) throw new Error("Gateway returned a different agent task.");
+    const continuation = object(params.message);
+    if (("id" in params && params.id !== task.id) || (continuation?.taskId !== undefined && (continuation.taskId !== task.id || continuation.contextId !== task.contextId)) || (request.expectedTask && (request.expectedTask.id !== task.id || request.expectedTask.contextID !== task.contextId))) throw new Error("Gateway returned a different agent task.");
     const artifacts = Array.isArray(task.artifacts) ? task.artifacts : [];
     const latest = object(artifacts.at(-1));
     return { text: contentText(latest?.parts) || contentText(object(object(task.status)?.message)?.parts), task: { id: task.id, contextID: task.contextId, state }, latencyMS: performance.now() - start, response: payload };

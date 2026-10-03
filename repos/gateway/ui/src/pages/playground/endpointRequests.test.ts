@@ -29,6 +29,12 @@ describe("Endpoint request dialects", () => {
     expect(first).toMatchObject({ path: "/v1/mcp/servers/server/tools/lookup", body: { arguments: { query: "test" } } });
     expect(first.headers?.["Idempotency-Key"]).not.toBe(second.headers?.["Idempotency-Key"]);
   });
+  it("uses A2A completed task IDs and inline file parts while rejecting raw RPC overrides", () => {
+    const request = buildEndpointRequest("a2a", "", "Next", { ...defaultEndpointSettings, agent: "writer" }, [{ filename: "brief.pdf", media_type: "application/pdf", data_base64: "AA==" }], undefined, [], "", [], { id: "task", contextID: "context", state: "TASK_STATE_COMPLETED" });
+    expect(request.body).toMatchObject({ params: { message: { taskId: "task", contextId: "context", parts: [{ text: "Next" }, { raw: "AA==", mediaType: "application/pdf", filename: "brief.pdf" }] } } });
+    expect(() => buildEndpointRequest("a2a", "", "Next", { ...defaultEndpointSettings, agent: "writer", advanced: '{"extra":true}' })).toThrow("agent and task controls");
+    expect(() => buildEndpointRequest("a2a", "", "Next", { ...defaultEndpointSettings, agent: "writer" }, [], undefined, [], "", [], { id: "task", contextID: "context", state: "TASK_STATE_WORKING" })).toThrow("resolve");
+  });
   it.each([
     ["images", { count: "11" }, "Image count"], ["embeddings", { dimensions: "0" }, "Dimensions"], ["speech", { speed: "0" }, "Speech speed"],
     ["a2a", { agent: "../escape" }, "valid agent"], ["mcp", { server: "server", tool: "lookup", arguments: "[]" }, "JSON object"],
