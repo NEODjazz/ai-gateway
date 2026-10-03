@@ -13,6 +13,20 @@ available to other authenticated credentials. Hidden navigation is a UX guard,
 while backend RBAC remains authoritative for every operation. The sidebar shows
 the authenticated user, roles, and optional team without exposing a token.
 
+## Dependency override
+
+The lockfile pins the navigation package's codemod dependency to `jscodeshift 17.4.0`.
+This version replaces the vulnerable `micromatch → braces` dependency chain
+(GHSA-vfj7-8cjw-p6xm) with `picomatch`; runtime Gravity UI component versions remain
+unchanged. The gateway does not execute navigation codemods. Keep the scoped
+override until the navigation package updates its dependency, and retain
+`npm audit --omit=dev --audit-level=high` in CI.
+
+A standalone TSX codemod dry run validates the new jscodeshift runner. The packaged
+navigation `v4` codemod cannot be validated: its npm tarball omits the referenced
+`codemods/utils` files. This existing packaging limitation is independent of the
+override and does not affect the console bundle.
+
 ## Development
 
 ```sh
