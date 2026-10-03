@@ -423,3 +423,7 @@ textarea { resize: vertical; }
 .sso-settings td { overflow-wrap: anywhere; }
 .sso-settings .form-card > p { margin: 0; }
 @media (max-width: 600px) { .sso-card-heading { flex-direction: column; } .sso-details { grid-template-columns: 1fr; gap: 6px; } .sso-details dd { margin-bottom: 10px; } }
+
+.sso-dialog > .modal-heading { position: sticky; top: -24px; z-index: 3; background: white; padding: 16px 0; margin-top: -16px; }
+.sso-dialog > .modal-actions { position: sticky; bottom: -24px; z-index: 3; background: white; padding: 16px 0; margin-bottom: -16px; border-top: 1px solid #edf0f2; }
+.sso-dialog .error-state { position: sticky; top: 50px; z-index: 2; }

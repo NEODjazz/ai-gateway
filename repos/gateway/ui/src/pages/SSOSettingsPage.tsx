@@ -145,7 +145,7 @@ function SSOConnectionEditor({ connection, onChanged }: { connection: Connection
     {settings && <>
       <section className="form-card" aria-label="SSO status">
         <div className="sso-card-heading"><div><h2>SSO configuration</h2><span>{connection.name} · {providerName(connection.provider)}</span></div>
-          <GatewayButton onClick={() => { reset(settings); setEditing(true); setError(""); }}>{saved ? "Edit SSO settings" : "Set up SSO"}</GatewayButton>
+          <GatewayButton disabled={busy} onClick={() => { reset(settings); setEditing(true); setError(""); }}>{saved ? "Edit SSO settings" : "Set up SSO"}</GatewayButton>
         </div>
         <p>Organization: <strong>{connection.organization_id || saved?.organization_id || "Platform"}</strong>. This binding cannot be changed after creation.</p>
         <p>{settings.active ? settings.active.enabled ? `Browser SSO enabled: ${settings.active.issuer}` : "Managed browser SSO disabled" : connection.id === "default" ? "No managed browser configuration. Save a draft and test sign-in before activation. API trust remains unchanged." : "This connection is not active. Save a draft and complete a test sign-in before activation."}</p>
@@ -161,24 +161,24 @@ function SSOConnectionEditor({ connection, onChanged }: { connection: Connection
         {!settings.key_session && <p role="note">Sign in with an administrator virtual key to activate, disable or roll back SSO.</p>}
         <p>Browser SSO settings are independent of API JWT trust. Activation, disable and rollback do not change API issuer, audience or role mappings. Virtual keys remain available.</p></details>
         <div className="page-actions">
-          <GatewayButton disabled={busy || dirty || !settings.draft} onClick={startTest}>Test sign-in</GatewayButton>
-          <GatewayButton disabled={busy} onClick={refreshTest}>Refresh test status</GatewayButton>
+          <GatewayButton view="normal" disabled={busy || dirty || !settings.draft} onClick={startTest}>Test sign-in</GatewayButton>
+          <GatewayButton view="normal" disabled={busy} onClick={refreshTest}>Refresh test status</GatewayButton>
           <GatewayButton disabled={busy || dirty || !settings.draft || !settings.key_session || !verified} onClick={() => action("activate")}>Activate SSO</GatewayButton>
-          <GatewayButton disabled={busy || !settings.key_session || !settings.active?.enabled} onClick={() => action("disable")}>Disable browser SSO</GatewayButton>
-          <GatewayButton disabled={busy || !settings.key_session || !settings.can_rollback} onClick={() => action("rollback")}>Roll back</GatewayButton>
+          <GatewayButton view="normal" disabled={busy || !settings.key_session || !settings.active?.enabled} onClick={() => action("disable")}>Disable browser SSO</GatewayButton>
+          <GatewayButton view="normal" disabled={busy || !settings.key_session || !settings.can_rollback} onClick={() => action("rollback")}>Roll back</GatewayButton>
         </div>
         {testURL && <p><a href={testURL} target="_blank" rel="noopener noreferrer">Open test sign-in</a></p>}
       </section>
       {saved && <MappingSummary roles={saved.role_mappings} groups={saved.group_mappings} rolesClaim={saved.roles_claim} groupsClaim={saved.groups_claim} />}
-      {editing && <SSODialog title={saved ? "Edit SSO settings" : "Set up SSO"} busy={busy} dirty={dirty} onClose={closeEditor}>
-      <form className="sso-edit-form" onSubmit={save} aria-label="SSO configuration">
+      {editing && <SSODialog title={saved ? "Edit SSO settings" : "Set up SSO"} busy={busy} dirty={dirty} onClose={closeEditor} actions={<GatewayButton type="submit" form="sso-config-form" disabled={busy}>Save draft</GatewayButton>}>
+      <form id="sso-config-form" className="sso-edit-form" onSubmit={save} aria-label="SSO configuration">
         <p>Save a draft to review and test it before activation. Organization: <strong>{connection.organization_id || profile.organization_id || "Platform"}</strong>.</p>
         {error && <ErrorState message={error} />}
         <h3>Identity provider</h3>
         <SSOPreset provider={connection.provider} disabled={busy} onApply={(preset) => { setProfile((current) => ({ ...current, ...preset, authorization_url: "", token_url: "", jwks_url: "", endpoint_origins: [] })); setOrigins(""); setDirty(true); }} />
         <fieldset disabled={busy} className="form-grid">
           <label>Issuer URL<input required type="url" value={profile.issuer} onChange={(event) => update("issuer", event.target.value)} /></label>
-          <GatewayButton type="button" disabled={!profile.issuer} onClick={discover}>Discover endpoints</GatewayButton>
+          <GatewayButton view="normal" type="button" disabled={!profile.issuer} onClick={discover}>Discover endpoints</GatewayButton>
           <label>Client ID<input required value={profile.client_id} onChange={(event) => update("client_id", event.target.value)} /></label>
           <label>Client secret<input type="password" autoComplete="new-password" value={secret} disabled={clearSecret} placeholder={profile.client_secret_configured ? "Configured · leave blank to preserve" : "Optional for public clients"} onChange={(event) => { setSecret(event.target.value); setDirty(true); }} /></label>
           <label className="checkbox-line"><input type="checkbox" checked={clearSecret} onChange={(event) => { setClearSecret(event.target.checked); setSecret(""); setDirty(true); }} />Clear saved client secret</label>
@@ -198,7 +198,6 @@ function SSOConnectionEditor({ connection, onChanged }: { connection: Connection
         <p>Register both redirect URIs at your identity provider:</p>
         <p><code>{profile.redirect_url}</code><br /><code>{profile.redirect_url.replace(/\/auth\/sso\/callback$/, "/auth/sso/test/callback")}</code></p>
         <p>Use HTTPS in production. HTTP is allowed only for loopback testing. Browser identity uses a verified ID token for this client ID. Sessions are stored on the server and expire at the configured lifetime. When changing issuer or client ID, enter the new client secret or explicitly clear it.</p>
-        <div className="modal-actions"><GatewayButton type="submit" disabled={busy}>Save draft</GatewayButton></div>
       </form></SSODialog>}
       {settings.verified_identity && <section className="form-card" aria-label="Verified identity">
         <h2>Verified identity</h2>
@@ -231,8 +230,8 @@ function SSOPrincipalBinding({ profile, identity }: { profile: Profile | null; i
   return <section className="form-card">
     <div className="sso-card-heading"><h2>Directory identity</h2><GatewayButton view="normal" disabled={!profile} onClick={() => setOpen(true)}>Bind identity to a Gateway user</GatewayButton></div>
     <p>Manage approved users and roles in <Link to="/users">Users</Link>. An exact subject binding is required for sign-in; email does not grant access.</p>
-    {open && <SSODialog title="Bind identity to a Gateway user" busy={busy} dirty={dirty} onClose={() => { setOpen(false); setSubject(""); setModels(""); setTools(""); setDirty(false); setError(""); setResult(""); }}>
-    <form className="sso-edit-form" aria-label="SSO principal binding" onSubmit={save}>
+    {open && <SSODialog title="Bind identity to a Gateway user" busy={busy} dirty={dirty} onClose={() => { setOpen(false); setSubject(""); setModels(""); setTools(""); setDirty(false); setError(""); setResult(""); }} actions={<GatewayButton type="submit" form="sso-binding-form" disabled={busy || !profile}>Save principal binding</GatewayButton>}>
+    <form id="sso-binding-form" className="sso-edit-form" aria-label="SSO principal binding" onSubmit={save}>
     <p>Create the user and assign approved roles in <Link to="/users">Users</Link>. Bind the exact subject from the verified ID token; email is not used as identity. Existing subject ownership cannot be reassigned.</p>
     <p>Issuer: {profile?.issuer || "Save a configuration draft first"} · Audience: {profile?.client_id || "—"}</p>
     {error && <ErrorState message={error} />}{result && <p role="status">{result}</p>}
@@ -243,7 +242,6 @@ function SSOPrincipalBinding({ profile, identity }: { profile: Profile | null; i
       <label>Allowed models<input value={models} onChange={(event) => { setModels(event.target.value); setDirty(true); }} placeholder="Comma separated; empty denies inference" /></label>
       <label>Allowed tools<input value={tools} onChange={(event) => { setTools(event.target.value); setDirty(true); }} placeholder="Comma separated; empty denies tool execution" /></label>
     </fieldset>
-    <GatewayButton type="submit" disabled={busy || !profile}>Save principal binding</GatewayButton>
   </form></SSODialog>}
   </section>;
 }

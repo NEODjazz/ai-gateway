@@ -80,6 +80,12 @@ Escape и Cancel закрывают чистую форму, возвращая 
 отмена очищает введённый client secret. Во время запроса закрытие блокируется. Ошибка
 сохранения остаётся внутри диалога вместе с введёнными значениями. Успешный Save draft
 закрывает форму, обновляет обзор и требует Test sign-in перед Activate SSO.
+Вкладка **API JWT** содержит независимый registry и обзор выбранного issuer:
+immutable issuer/resource audience/organization, revision, saved draft JWKS и last test.
+**New API issuer** и **Edit API issuer settings** открывают диалог. Save сохраняет
+черновик с CAS, закрывает диалог и обновляет обзор; тестовый resource token вводится
+только в диалоге и очищается при отправке или отмене. Test / Activate / Disable /
+Rollback сохраняют прежние проверки operator identity, key session и срока proof.
 Browser SSO и API JWT представлены отдельными вкладками и не изменяют доверие друг друга.
 
 ## Конфигурация
@@ -267,7 +273,7 @@ and policy digests are never returned.
 ## Connection management in the console
 
 Open **Settings → Single sign-on**. The connections table displays Name, Provider,
-Organization, Issuer, Status and Last test. Select Configure to edit only that
+Organization, Issuer, Status and Last test. Select View, then Edit SSO settings to edit only that
 connection. Switching clears unsaved client secrets and ignores older loads.
 Add connection accepts an exact existing organization ID or an empty platform
 binding; server validation rejects unknown/disabled organizations. Metadata is

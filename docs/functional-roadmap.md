@@ -380,7 +380,7 @@ approvals. Deployment этим этапом не обновляется.
 | P1: независимые browser OIDC и API JWT | Проверенный ID token, nonce/PKCE, локальные opaque PostgreSQL sessions; browser disable/rollback не меняет API trust | Auth/Gateway regression и PostgreSQL integration; реальный Keycloak callback и отзыв |
 | P1: Organization как tenant boundary | Immutable principal/key organization; explicit membership и `org_admin`; server-side scopes для Usage, logs и keys; credentials/models и управление billing остаются platform-only | Endpoint permission matrix, foreign-owner lifecycle regressions, реальные PostgreSQL/ClickHouse и два OIDC realms |
 | P2: несколько connections/issuers | Отдельные bounded browser connections и API issuer registry; exact issuer/audience/organization, encrypted state, собственные draft/test/activate/disable/rollback | CAS/cross-replica PostgreSQL tests, одинаковые `sub`/`kid`, ошибки подписи и недоступность directory/JWKS |
-| P2: понятный UI | Entra/Keycloak/Generic presets, визуальные role/group mappings, проверенная identity, таблица connections и отдельная API issuer форма | UI component tests, typecheck/build и browser QA основных SSO/organization страниц |
+| P2: понятный UI | Entra/Keycloak/Generic presets, визуальные role/group mappings, проверенная identity, таблица connections, обзор сохранённой конфигурации и отдельные SSO/API issuer диалоги | UI component tests, typecheck/build и browser QA основных SSO/organization страниц |
 
 ### Контракт и совместимость
 
@@ -415,7 +415,9 @@ Immutable tenant привязка credential не позволяет перен�
 
 ### Настройка и ограничения ресурсов
 
-В **Settings** доступны browser connections и **Manage API JWT issuers**.
+В **Settings → Single sign-on** доступны независимые вкладки **Browser SSO**
+и **API JWT**. Обзор показывает сохранённую конфигурацию, а создание и
+редактирование открываются в отдельных диалогах.
 Browser таблица показывает `Name / Provider / Organization / Issuer / Status /
 Last test`. Org approvals находятся в **Organizations → Organization approvals**.
 Organization administrators видят scoped Usage/request logs и read-only keys.
@@ -470,3 +472,19 @@ lookup, refresh sessions, IdP logout и same-credential tenant switching не в
 [ClickHouse integration](../repos/billing/internal/modules/organization_clickhouse_integration_test.go),
 [реальная identity integration](../scripts/test-identity-integration.py) и
 [SSO UI](../repos/gateway/ui/src/pages/SSOSettingsPage.tsx).
+
+
+## Экраны настройки identity: 2026-10-03
+
+SSO управление организовано как inventory → обзор выбранной конфигурации →
+Add/Edit dialog. Provider presets и role/group mappings остаются в форме,
+сохранённые карты отображаются отдельной карточкой. Callback URL можно копировать;
+обзор показывает только наличие client secret. Draft не выдаётся за active profile.
+API JWT имеет отдельную вкладку с теми же принципами организации экранов.
+
+Диалоги удерживают keyboard focus, возвращают его к opener, подтверждают discard,
+очищают write-only credentials при отмене и блокируют закрытие во время запросов.
+Header и Cancel/Save доступны при прокрутке. Backend errors сохраняют введённые
+данные. Regression tests проверяют создание/редактирование, сохранение tenant
+binding, proof expiry, late responses, connection limit и точность clipboard feedback.
+Runtime trust, OIDC protocol и опубликованные API этим изменением не расширяются.

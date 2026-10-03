@@ -8,10 +8,10 @@ import { CopyValue } from "./SSODetails";
 const json = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status });
 const profile = { issuer: "https://idp.example", client_id: "console", audience: "console", authorization_url: "https://idp.example/authorize", token_url: "https://idp.example/token", jwks_url: "https://idp.example/jwks", redirect_url: "https://gateway.example/auth/sso/callback", scopes: ["openid"], roles_claim: "roles", role_mappings: { operators: "org_admin" }, groups_claim: "groups", group_mappings: { engineers: "developer" }, organization_id: "org-a", session_ttl_seconds: 3600, client_secret_configured: true };
 const settings = { revision: 1, active: null, draft: profile, key_session: true, can_rollback: false, test_status: "not_started" };
-function show(view: unknown = settings, mutate?: (path: string, options: RequestInit) => Promise<Response>) {
+function show(view: unknown = settings, mutate?: (path: string, options: RequestInit) => Promise<Response>, inventory?: unknown[]) {
   const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async (path, options) => {
     if (options?.method && mutate) return mutate(String(path), options);
-    if (String(path).endsWith("/sso/connections")) return json({ data: [{ id: "default", name: "Default", provider: "oidc", ...settings }] });
+    if (String(path).endsWith("/sso/connections")) return json({ data: inventory || [{ id: "default", name: "Default", provider: "oidc", ...settings }] });
     if (String(path).endsWith("/api-issuers")) return json({ data: [], key_session: true });
     return json(view);
   });
@@ -94,6 +94,12 @@ describe("SSO settings organization", () => {
     expect(await screen.findByText("Organization is inactive")).toBeInTheDocument();
     expect(screen.getByLabelText("Connection name")).toHaveValue("Operations");
   });
+  it("does not offer creation after the additional connection limit is reached", async () => {
+    show(settings, undefined, [{ id: "default", name: "Default", provider: "oidc", ...settings }, ...Array.from({ length: 16 }, (_, index) => ({ id: `id-${index}`, name: `Connection ${index + 1}`, provider: "oidc", ...settings }))]);
+    await screen.findByRole("cell", { name: "Connection 16" });
+    expect(screen.getByRole("button", { name: "Add connection" })).toBeDisabled();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
   it("navigates to API JWT independently and does not load its inventory before selection", async () => {
     const fetch = show(); await screen.findByRole("button", { name: "Edit SSO settings" });
     expect(fetch.mock.calls.some(([path]) => String(path).includes("api-issuers"))).toBe(false);
@@ -116,4 +122,17 @@ it("copies the exact callback and reports clipboard failures truthfully", async 
   await userEvent.click(screen.getByRole("button", { name: "Copy login callback" }));
   expect(await screen.findByText(/Could not copy/)).toBeInTheDocument();
   expect(screen.queryByText("Copied")).not.toBeInTheDocument();
+});
+
+
+it("does not claim that a new callback was copied when an old clipboard request finishes", async () => {
+  let finish!: () => void;
+  const pending = new Promise<void>((resolve) => { finish = resolve; });
+  Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: vi.fn().mockReturnValue(pending) } });
+  const view = render(<CopyValue label="callback" value="https://old.example/callback" />);
+  await userEvent.click(screen.getByRole("button", { name: "Copy callback" }));
+  view.rerender(<CopyValue label="callback" value="https://new.example/callback" />);
+  await act(async () => { finish(); await pending; });
+  expect(screen.queryByText("Copied")).not.toBeInTheDocument();
+  expect(screen.getByText("https://new.example/callback")).toBeInTheDocument();
 });

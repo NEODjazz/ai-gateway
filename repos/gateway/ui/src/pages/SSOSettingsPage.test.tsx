@@ -134,7 +134,7 @@ describe("SSOSettingsPage", () => {
     const form = screen.getByRole("form", { name: "SSO principal binding" });
     await userEvent.type(within(form).getByLabelText("Internal user ID"), "admin-user");
     await userEvent.type(within(form).getByLabelText("IdP subject (sub)"), "immutable-subject");
-    await userEvent.click(within(form).getByRole("button", { name: "Save principal binding" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save principal binding" }));
     await waitFor(() => expect(binding).toEqual({ issuer: profile.issuer, audience: "console", subject: "immutable-subject", user_id: "admin-user", enabled: true, allowed_models: [], allowed_tools: [] }));
   });
   it("shows backend failures without a false configured state", async () => {

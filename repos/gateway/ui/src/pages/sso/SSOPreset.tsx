@@ -24,7 +24,7 @@ export function SSOPreset({ provider, disabled, onApply }: { provider: string; d
     <label>Provider preset<select value={selected} onChange={(event) => { setSelected(event.target.value); setError(""); }}><option value="entra">Microsoft Entra</option><option value="keycloak">Keycloak</option><option value="oidc">Generic OIDC</option></select></label>
     {selected === "entra" && <label>Entra tenant ID<input value={tenant} onChange={(event) => setTenant(event.target.value)} placeholder="Tenant GUID" /></label>}
     {selected === "keycloak" && <><label>Keycloak base URL<input value={base} onChange={(event) => setBase(event.target.value)} placeholder="https://identity.example" /></label><label>Keycloak realm<input value={realm} onChange={(event) => setRealm(event.target.value)} /></label></>}
-    {selected !== "oidc" ? <><GatewayButton type="button" onClick={apply}>Apply preset</GatewayButton><p>Apply the issuer and claim paths, then discover endpoints. Group claims must be configured at your IdP. Secrets and existing mappings are preserved for review.</p></> : <p>Enter your issuer and exact role/group claim paths, then discover endpoints.</p>}
+    {selected !== "oidc" ? <><GatewayButton view="normal" type="button" onClick={apply}>Apply preset</GatewayButton><p>Apply the issuer and claim paths, then discover endpoints. Group claims must be configured at your IdP. Secrets and existing mappings are preserved for review.</p></> : <p>Enter your issuer and exact role/group claim paths, then discover endpoints.</p>}
     {error && <p role="alert">{error}</p>}
   </fieldset>;
 }

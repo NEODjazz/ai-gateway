@@ -31,9 +31,9 @@ export function SSOMappings({ kind, value, tenant, onChange }: { kind: "Role" | 
     {rows.map((row, index) => <div className="form-grid" key={index}>
       <label>IdP {kind.toLowerCase()} {index + 1}<input value={row.source} onChange={(event) => change(rows.map((entry, n) => n === index ? { ...entry, source: event.target.value } : entry))} /></label>
       <label>Gateway role for {kind.toLowerCase()} {index + 1}<select value={row.role} onChange={(event) => change(rows.map((entry, n) => n === index ? { ...entry, role: event.target.value } : entry))}><option value="">Select role</option>{!allowed.includes(row.role) && row.role && <option value={row.role}>{row.role} (not allowed)</option>}{allowed.map((role) => <option key={role}>{role}</option>)}</select></label>
-      <GatewayButton type="button" onClick={() => change(rows.filter((_, n) => n !== index))}>Remove {kind.toLowerCase()} mapping {index + 1}</GatewayButton>
+      <GatewayButton view="flat" type="button" onClick={() => change(rows.filter((_, n) => n !== index))}>Remove {kind.toLowerCase()} mapping {index + 1}</GatewayButton>
     </div>)}
-    <GatewayButton type="button" onClick={() => change([...rows, { source: "", role: "user" }])}>Add {kind.toLowerCase()} mapping</GatewayButton>
+    <GatewayButton view="normal" type="button" onClick={() => change([...rows, { source: "", role: "user" }])}>Add {kind.toLowerCase()} mapping</GatewayButton>
     <details><summary>Advanced {kind.toLowerCase()} mappings</summary><label>{kind} mappings (JSON)<textarea rows={5} value={value} onChange={(event) => onChange(event.target.value)} /></label></details>
   </section>;
 }

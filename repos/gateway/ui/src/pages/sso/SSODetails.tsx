@@ -1,14 +1,16 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { GatewayButton } from "../../components/GatewayButton";
 
 export const providerName = (provider: string) => ({ entra: "Microsoft Entra", keycloak: "Keycloak", oidc: "Generic OIDC" })[provider] || provider;
 
 export function CopyValue({ label, value }: { label: string; value: string }) {
   const [result, setResult] = useState("");
-  useEffect(() => setResult(""), [value]);
+  const generation = useRef(0);
+  useEffect(() => { generation.current++; setResult(""); return () => { generation.current++; }; }, [value]);
   const copy = async () => {
-    try { await navigator.clipboard.writeText(value); setResult("Copied"); }
-    catch { setResult("Could not copy. Select and copy the value manually."); }
+    const current = ++generation.current;
+    try { await navigator.clipboard.writeText(value); if (generation.current === current) setResult("Copied"); }
+    catch { if (generation.current === current) setResult("Could not copy. Select and copy the value manually."); }
   };
   return <div className="sso-copy-value"><code>{value}</code><GatewayButton view="flat" aria-label={`Copy ${label}`} onClick={() => void copy()}>Copy</GatewayButton>{result && <small role="status">{result}</small>}</div>;
 }
