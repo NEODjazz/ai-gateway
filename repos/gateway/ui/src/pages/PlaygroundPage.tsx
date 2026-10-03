@@ -14,6 +14,7 @@ import { PricingControls, defaultPricing, estimateCost } from "./playground/Pric
 import { EndpointPlayground } from "./playground/EndpointPlayground";
 import { endpointPaths, type SpecializedEndpoint } from "./playground/endpointRequests";
 import { CompliancePlayground } from "./playground/CompliancePlayground";
+import { AgentBuilder } from "./playground/AgentBuilder";
 import { ComparePlayground } from "./playground/ComparePlayground";
 import { ResourceControls } from "./playground/ResourceControls";
 import { checkPolicies, emptyResources, policyChecks, withResources } from "./playground/resources";
@@ -44,9 +45,10 @@ export function PlaygroundPage() {
   const client = connection.client;
   const [endpoint, setEndpoint] = useState<"chat" | "responses" | SpecializedEndpoint>("chat");
   const [mode, setMode] = useState<PlaygroundMode>("chat");
-  const [view, setView] = useState<"chat" | "compare" | "compliance">("chat");
+  const [view, setView] = useState<"chat" | "compare" | "compliance" | "agents">("chat");
   const [visitedCompare, setVisitedCompare] = useState(false);
   const [visitedCompliance, setVisitedCompliance] = useState(false);
+  const [visitedAgents, setVisitedAgents] = useState(false);
   const [models, setModels] = useState<string[]>([]);
   const [modelsError, setModelsError] = useState("");
   const [loadingModels, setLoadingModels] = useState(true);
@@ -215,7 +217,7 @@ export function PlaygroundPage() {
   </>;
   return <>
     <PageHeader eyebrow="Inference" title="Playground" description="Explore models, tune requests and inspect live responses." />
-    <PageTabs label="Playground workspace" value={view} items={[{ value: "chat", label: "Chat" }, { value: "compare", label: "Compare" }, { value: "compliance", label: "Compliance" }]} onUpdate={(next) => { if (running) abortRef.current?.abort(); setCodeRequest(undefined); if (next === "compare") setVisitedCompare(true); if (next === "compliance") setVisitedCompliance(true); setView(next); }} />
+    <PageTabs label="Playground workspace" value={view} items={[{ value: "chat", label: "Chat" }, { value: "compare", label: "Compare" }, { value: "compliance", label: "Compliance" }, { value: "agents", label: "Agent Builder" }]} onUpdate={(next) => { if (running) abortRef.current?.abort(); setCodeRequest(undefined); if (next === "compare") setVisitedCompare(true); if (next === "compliance") setVisitedCompliance(true); if (next === "agents") setVisitedAgents(true); setView(next); }} />
     {view === "chat" && <div className="playground-endpoint-selector"><SelectControl label="Endpoint" value={endpoint} options={[{ value: "chat", content: "/v1/chat/completions" }, { value: "responses", content: "/v1/responses" }, ...Object.entries(endpointPaths).map(([value, path]) => ({ value: value as SpecializedEndpoint, content: path }))]} onUpdate={(next) => { newSession(); setEndpoint(next); if (next === "chat" || next === "responses") setMode(next); }} /></div>}
     {view === "chat" && endpoint !== "chat" && endpoint !== "responses" && <EndpointPlayground key={endpoint} endpoint={endpoint} connection={connection} models={models} connectionControls={connectionControls} connectionChanged={connectionChanged} />}
     {view === "chat" && (endpoint === "chat" || endpoint === "responses") && <div className="playground-workspace playground-config-layout">
@@ -281,6 +283,7 @@ export function PlaygroundPage() {
     </div>}
     {visitedCompare && <div style={view !== "compare" ? { display: "none" } : undefined}><ComparePlayground active={view === "compare"} connection={connection} models={models} connectionControls={view === "compare" ? connectionControls : null} connectionChanged={connectionChanged} />{view === "compare" && error && <p role="alert" className="form-error">{error}</p>}</div>}
     {visitedCompliance && <div style={view !== "compliance" ? { display: "none" } : undefined}><CompliancePlayground active={view === "compliance"} connection={connection} connectionChanged={connectionChanged} connectionControls={view === "compliance" ? connectionControls : null} /></div>}
+    {visitedAgents && <div style={view !== "agents" ? { display: "none" } : undefined}><AgentBuilder active={view === "agents"} connection={connection} models={models} connectionChanged={connectionChanged} connectionControls={view === "agents" ? connectionControls : null} /></div>}
     {codeRequest && <CodeDialog {...codeRequest} onClose={() => setCodeRequest(undefined)} />}
   </>;
 }

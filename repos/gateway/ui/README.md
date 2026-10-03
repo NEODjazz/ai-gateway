@@ -240,3 +240,14 @@ or endpoint changes, including a model changed by refreshed discovery.
 A2A requests and code exports include the mandatory `A2A-Version: 1.0` header.
 Generated headers allow only that fixed version and MCP idempotency; they cannot
 override authorization.
+
+Agent Builder uses the active Playground credential for administrator-only
+profile CRUD and A2A execution. Saved instructions are loaded explicitly from
+the protected configuration endpoint; drafts and keys stay in browser memory.
+Unsaved configuration cannot execute. Chat continues only completed durable
+tasks using their task/context IDs, exposes task refresh/cancellation and marks
+stateless responses as independent requests. Batch Test runs 1–20 independent
+prompts with two concurrent requests, normal billing, cancellation, per-test
+errors and CSV export. Connect examples omit credentials and saved instructions.
+The current A2A path performs one generation; its governance profile is not an
+MCP execution loop. Instruction-template profiles remain visibly unavailable.

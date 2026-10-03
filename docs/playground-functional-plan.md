@@ -100,6 +100,10 @@ compatibility must be distinguished from merely having an endpoint selector.
   preservation, ciphertext binding and real PostgreSQL restoration have tests.
 - [x] Corrected mandatory A2A protocol headers, live public registry refresh and
   versioned configuration compatibility to avoid stale or silently lost settings.
+- [x] Added Agent Builder configuration CRUD, saved A2A chat with task continuity
+  and task refresh/cancel, explicit bounded batch inference and connection code.
+  Unsaved drafts cannot execute; credential changes discard late reads/results.
+  The existing one-generation A2A path still has no MCP execution loop.
 - [ ] Finish media/tool output, policy selection and full conversation verification.
 - [ ] Complete endpoint-specific execution and media/tool handling.
 - [ ] Complete comparison, compliance and agent views.

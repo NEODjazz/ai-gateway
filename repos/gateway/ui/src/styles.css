@@ -439,6 +439,9 @@ textarea { resize: vertical; }
 .playground-comparison-panel details > label { margin-top: 12px; }
 .playground-comparison-output { display: grid; gap: 12px; min-height: 260px; align-content: start; }
 .playground-compare-composer { display: grid; gap: 12px; padding: 20px; border: 1px solid var(--border); border-radius: 10px; background: white; }
+.playground-agent-execution { display: grid; gap: 16px; min-height: 0; }
+.playground-agent-prompt { display: grid; gap: 14px; }
+.playground-agent-builder > .playground-main-panel { align-content: start; }
 @media (max-width: 1000px) { .playground-comparison-panels { grid-template-columns: 1fr; } }
 @media (max-width: 900px) { .playground-config-layout { grid-template-columns: 1fr; } }
 @media (max-width: 600px) { .playground-config-layout .playground-metadata { grid-template-columns: 1fr; } .playground-actions { justify-content: flex-start; } .playground-config-layout .playground-output-heading { flex-direction: column; } }
