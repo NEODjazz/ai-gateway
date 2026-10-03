@@ -34,6 +34,9 @@ func (NVIDIANIM) SupportsAudioInput() bool       { return true }
 func (NVIDIANIM) SupportsVideoInput() bool       { return true }
 
 func (n NVIDIANIM) ValidateChatParameters(request openai.ChatCompletionRequest) error {
+	if err := rejectChatModeration("nvidia-nim", request); err != nil {
+		return err
+	}
 	if request.Model == "deepseek-ai/DeepSeek-V4-Pro-0813" {
 		for _, message := range request.Messages {
 			if message.ReasoningContent != "" {

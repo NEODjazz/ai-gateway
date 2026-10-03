@@ -6,6 +6,7 @@ on:
     branches:
       - main
       - master
+      - test
   pull_request:
 
 permissions:
@@ -54,6 +55,20 @@ jobs:
           fail-on: WARN
           allow-external-refs: false
           review: false
+          err-ignore: repos/gateway/api/compatibility/err-ignore.txt
+          warn-ignore: repos/gateway/api/compatibility/warn-ignore.txt
+
+  smoke-scripts:
+    name: Smoke script contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Verify prerequisites
+        run: command -v curl && command -v jq && command -v python3
+      - name: Test embedding smoke routing and credential handling
+        run: python3 -B -m unittest scripts/test_smoke_ollama_embeddings.py
+      - name: Validate secret-free OIDC realm profile
+        run: python3 -B -m unittest scripts/test_identity_profile.py
 
   go:
     name: Go / ${{ matrix.service }}
@@ -129,11 +144,88 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: repos/gateway/go.mod
+      - name: Set up Helm
+        uses: azure/setup-helm@v5
+        with:
+          version: v4.2.1
       - name: Create isolated test databases
         run: |
           psql postgres://postgres@127.0.0.1:5432/postgres -v ON_ERROR_STOP=1 -c 'CREATE DATABASE gateway_test' -c 'CREATE DATABASE auth_test' -c 'CREATE DATABASE billing_test'
       - name: Apply migrations and run required database scenarios
         run: bash scripts/test-postgres-integration.sh
+
+  organization-reporting-integration:
+    name: ClickHouse organization reporting integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      clickhouse:
+        image: clickhouse/clickhouse-server:24.8-alpine
+        env:
+          CLICKHOUSE_USER: integration
+          # Disposable fixture credentials, never deployment credentials.
+          CLICKHOUSE_PASSWORD: integration-only-test-password
+          CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+        ports:
+          - 8123:8123
+        options: >-
+          --health-cmd "clickhouse-client --user integration --password integration-only-test-password --query 'SELECT 1'"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      CLICKHOUSE_INTEGRATION_REQUIRED: "true"
+      BILLING_CLICKHOUSE_TEST_URL: http://127.0.0.1:8123
+      BILLING_CLICKHOUSE_TEST_USERNAME: integration
+      BILLING_CLICKHOUSE_TEST_PASSWORD: integration-only-test-password
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: repos/billing/go.mod
+      - name: Verify tenant Usage, detail, groups and pagination on real ClickHouse
+        working-directory: repos/billing
+        run: go test -race -count=1 -run TestClickHouseOrganizationReportingIsolationIntegration ./internal/modules
+
+  identity-integration:
+    name: Keycloak and OpenWebUI identity integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      IDENTITY_INTEGRATION_TESTS: "true"
+      CONTROL_PLANE_POSTGRES_TEST_DSN: postgres://postgres@127.0.0.1:5432/identity_gateway_test?sslmode=disable
+      AUTH_POSTGRES_TEST_DSN: postgres://postgres@127.0.0.1:5432/identity_auth_test?sslmode=disable
+      BILLING_POSTGRES_TEST_DSN: postgres://postgres@127.0.0.1:5432/identity_billing_test?sslmode=disable
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: repos/gateway/go.mod
+      - uses: azure/setup-helm@v5
+        with:
+          version: v4.2.1
+      - name: Create dedicated test databases
+        run: |
+          psql postgres://postgres@127.0.0.1:5432/postgres -v ON_ERROR_STOP=1 -c 'CREATE DATABASE identity_gateway_test' -c 'CREATE DATABASE identity_auth_test' -c 'CREATE DATABASE identity_billing_test'
+      - name: Pull pinned real identity services
+        run: |
+          docker pull quay.io/keycloak/keycloak:26.3.3@sha256:6a7217a100bd3e5de4063a27a538ef999a3c5a88c4b4ec0ffc0a642aee7b2597
+          docker pull ghcr.io/open-webui/open-webui:v0.11.4-slim@sha256:0487ad4a5a4b986062dedace806c3ef1e88fec38c10d1e64d6a5501c66671e5e
+      - name: Verify user OAuth, refresh, grants, resources and billing
+        run: python3 -B scripts/test-identity-integration.py
+      # Never upload raw OAuth/service logs: they may contain runtime test tokens.
 
   admin-ui:
     name: React admin UI
@@ -197,6 +289,10 @@ jobs:
       - name: Render chart
         run: helm template "${{ matrix.chart }}" "charts/${{ matrix.chart }}" --namespace ai-gateway > /dev/null
 
+      - name: Verify shared credential encryption configuration
+        if: matrix.chart == 'ai-gateway'
+        run: python3 scripts/test-credential-encryption-charts.py
+
       - name: Verify gateway integer environment rendering
         if: matrix.chart == 'ai-gateway'
         shell: bash
@@ -208,6 +304,21 @@ jobs:
           fi
           grep -A1 'name: ASSISTANT_RUN_RETENTION_SECONDS' <<< "$rendered" | grep -q 'value: "2592000"'
           grep -A1 'name: A2A_TASK_TTL_SECONDS' <<< "$rendered" | grep -q 'value: "2592000"'
+
+      - name: Verify Azure service principal Secret reference
+        if: matrix.chart == 'ai-gateway'
+        shell: bash
+        run: |
+          default_rendered="$(helm template ai-gateway charts/ai-gateway --namespace ai-gateway)"
+          if grep -q 'name: AZURE_CLIENT_SECRET' <<< "$default_rendered"; then
+            echo "Azure client secret must be opt-in"
+            exit 1
+          fi
+          rendered="$(helm template ai-gateway charts/ai-gateway --namespace ai-gateway --set gateway.azureIdentity.tenantId=tenant-id --set gateway.azureIdentity.clientId=client-id --set gateway.azureIdentity.clientSecretSecretName=azure-sp)"
+          grep -A1 'name: AZURE_TENANT_ID' <<< "$rendered" | grep -q 'value: "tenant-id"'
+          grep -A1 'name: AZURE_CLIENT_ID' <<< "$rendered" | grep -q 'value: "client-id"'
+          grep -A5 'name: AZURE_CLIENT_SECRET' <<< "$rendered" | grep -q 'name: "azure-sp"'
+          grep -A5 'name: AZURE_CLIENT_SECRET' <<< "$rendered" | grep -q 'key: "AZURE_CLIENT_SECRET"'
 
       - name: Verify published image defaults
         shell: bash

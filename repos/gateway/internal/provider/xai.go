@@ -618,11 +618,33 @@ func (XAI) ValidateImageEditParameters(request openai.ImageEditRequest) error {
 }
 
 func (x XAI) ValidateChatParameters(request openai.ChatCompletionRequest) error {
+	if err := rejectChatModeration("xai", request); err != nil {
+		return err
+	}
 	if !validXAIServiceTier(request.ServiceTier) {
 		return xaiParameterError("service_tier", "service_tier must be default or priority")
 	}
-	if !validXAIReasoningEffort(request.ReasoningEffort) {
-		return xaiParameterError("reasoning_effort", "reasoning_effort must be none, low, medium, high, or xhigh")
+	if request.ReasoningEffort != "" && !xaiSupportsReasoningEffort(request.Model, request.ReasoningEffort, false) {
+		return xaiParameterError("reasoning_effort", "reasoning_effort is not supported by this xAI model")
+	}
+	if xaiReasoningChatModel(request.Model) {
+		for _, check := range []parameterCheck{
+			{"stop", request.Stop != nil},
+			{"frequency_penalty", request.FrequencyPenalty != nil},
+			{"presence_penalty", request.PresencePenalty != nil},
+		} {
+			if check.supplied {
+				return xaiParameterError(check.name, check.name+" is not supported by this xAI reasoning model")
+			}
+		}
+	}
+	if xaiIgnoresLogprobs(request.Model) {
+		if request.TopLogprobs != nil {
+			return xaiParameterError("top_logprobs", "top_logprobs is not supported by this xAI model")
+		}
+		if request.Logprobs != nil {
+			return xaiParameterError("logprobs", "logprobs is not supported by this xAI model")
+		}
 	}
 	if request.TopLogprobs != nil && (*request.TopLogprobs < 0 || *request.TopLogprobs > 8 || request.Logprobs == nil || !*request.Logprobs) {
 		return xaiParameterError("top_logprobs", "top_logprobs must be between 0 and 8 and requires logprobs=true")
@@ -669,6 +691,12 @@ func (x XAI) ValidateResponseParameters(request openai.ResponseRequest) error {
 	if request.Background {
 		return xaiUnsupportedParameter("background")
 	}
+	if len(request.ContextManagement) > 0 {
+		return xaiUnsupportedParameter("context_management")
+	}
+	if request.Moderation != nil {
+		return xaiUnsupportedParameter("moderation")
+	}
 	if message := request.Validate(); message != "" {
 		return &Error{Class: FailureClientRequest, Provider: "xai", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New(message)}
 	}
@@ -702,9 +730,6 @@ func (x XAI) ValidateResponseParameters(request openai.ResponseRequest) error {
 	if request.StreamOptions != nil {
 		return xaiUnsupportedParameter("stream_options")
 	}
-	if request.MaxToolCalls != nil {
-		return xaiUnsupportedParameter("max_tool_calls")
-	}
 	if _, supplied := openai.ResponseTextVerbosity(request.Text); supplied {
 		return xaiUnsupportedParameter("text.verbosity")
 	}
@@ -712,8 +737,8 @@ func (x XAI) ValidateResponseParameters(request openai.ResponseRequest) error {
 		if reasoning.Summary != nil || reasoning.GenerateSummary != nil || reasoning.Context != nil || reasoning.Mode != nil {
 			return xaiUnsupportedParameter("reasoning")
 		}
-		if reasoning.Effort != nil && !validXAIReasoningEffort(*reasoning.Effort) {
-			return xaiParameterError("reasoning.effort", "reasoning effort must be low, medium, high, or xhigh")
+		if reasoning.Effort != nil && !xaiSupportsReasoningEffort(request.Model, *reasoning.Effort, true) {
+			return xaiParameterError("reasoning.effort", "reasoning effort is not supported by this xAI model")
 		}
 	}
 	return x.compatible.ValidateResponseParameters(request)
@@ -768,8 +793,54 @@ func validXAIServiceTier(value string) bool {
 	return value == "" || value == "default" || value == "priority"
 }
 
-func validXAIReasoningEffort(value string) bool {
-	return value == "" || value == "none" || value == "low" || value == "medium" || value == "high" || value == "xhigh"
+func xaiSupportsReasoningEffort(model, effort string, responses bool) bool {
+	base := effort == "low" || effort == "medium" || effort == "high"
+	switch {
+	case xaiGrok45Model(model):
+		return base
+	case model == "grok-4.6" || strings.HasPrefix(model, "grok-4.6-"), model == "grok-4.7" || strings.HasPrefix(model, "grok-4.7-"):
+		return base || effort == "xhigh"
+	case responses && (model == "grok-4.20-multi-agent" || strings.HasPrefix(model, "grok-4.20-multi-agent-")):
+		return base || effort == "xhigh"
+	default:
+		return false
+	}
+}
+
+func xaiGrok45Model(model string) bool {
+	return model == "grok-4.5" || strings.HasPrefix(model, "grok-4.5-") || model == "grok-build-latest"
+}
+
+func xaiReasoningChatModel(model string) bool {
+	if xaiGrok45Model(model) {
+		return true
+	}
+	for _, family := range []string{"grok-4.6", "grok-4.7"} {
+		if model == family || strings.HasPrefix(model, family+"-") {
+			return true
+		}
+	}
+	return false
+}
+
+func xaiIgnoresLogprobs(model string) bool {
+	if model == "grok-build-latest" {
+		return true
+	}
+	for _, family := range []string{"grok-4.20", "grok-4.3", "grok-4.5", "grok-4.6", "grok-4.7"} {
+		if model == family || strings.HasPrefix(model, family+"-") {
+			return true
+		}
+	}
+	return false
+}
+
+func (XAI) ManagedChatModelProbes() []string {
+	return []string{"grok-4.20", "grok-4.3", "grok-4.5", "grok-build-latest", "grok-4.6", "grok-4.7"}
+}
+
+func (x XAI) ManagedResponseModelProbes() []string {
+	return []string{"grok-4.5", "grok-build-latest", "grok-4.6", "grok-4.7", "grok-4.20-multi-agent"}
 }
 
 func xaiParameterError(param, message string) error {

@@ -129,6 +129,10 @@ type a2aRPCResponse struct {
 }
 
 func (h Handler) A2AAgentCard(w http.ResponseWriter, r *http.Request) {
+	if h.adminState != nil && h.adminState.Refresh(r.Context()) != nil {
+		writeError(w, http.StatusServiceUnavailable, "admin_state_unavailable", "agent configuration is unavailable")
+		return
+	}
 	profile, ok := h.a2aProfile(r.PathValue("agent"))
 	if !ok {
 		http.NotFound(w, r)
@@ -195,6 +199,10 @@ func (h Handler) A2AJSONRPC(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Header.Get("A2A-Version") != a2aProtocolVersion {
 		h.writeA2AError(w, request.ID, http.StatusBadRequest, -32009, "Version not supported")
+		return
+	}
+	if h.adminState != nil && h.adminState.Refresh(r.Context()) != nil {
+		h.writeA2AError(w, request.ID, http.StatusServiceUnavailable, -32603, "Agent configuration is unavailable")
 		return
 	}
 	profile, ok := h.a2aProfile(r.PathValue("agent"))
@@ -413,7 +421,11 @@ func (h Handler) sendA2AMessage(w http.ResponseWriter, r *http.Request, request 
 		model = stored.Model
 		input = a2aResponseInput(existing.History, content)
 	}
-	responseRequest := openai.ResponseRequest{Model: model, Input: input}
+	responseRequest := openai.ResponseRequest{Model: model, Input: input, Instructions: profile.Instructions}
+	if profile.Generation != nil {
+		responseRequest.Temperature = profile.Generation.Temperature
+		responseRequest.MaxOutputTokens = profile.Generation.MaxOutputTokens
+	}
 	if stream {
 		responseRequest.Stream = true
 		transformer := newA2AStreamTransformer(h, r.Context(), request, profile, stored, existing, continuation)
@@ -893,7 +905,7 @@ func (h Handler) authorizeA2ATaskOperation(w http.ResponseWriter, r *http.Reques
 }
 
 func (h Handler) authorizeA2ATaskModel(w http.ResponseWriter, rpcID json.RawMessage, reqCtx modules.RequestContext, model string) bool {
-	if !modelAllowed(model, reqCtx.AllowedModels) || reqCtx.AccessGroupsEvaluated && !modelAllowed(model, reqCtx.AccessGroupModels) {
+	if !requestModelAllowed(reqCtx, model) || reqCtx.AccessGroupsEvaluated && !modelAllowed(model, reqCtx.AccessGroupModels) {
 		h.writeA2AError(w, rpcID, http.StatusForbidden, -32603, "Task access is not allowed")
 		return false
 	}

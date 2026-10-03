@@ -23,7 +23,7 @@ func (s *PostgresStore) CreateVectorStoreFileBatch(ctx context.Context, batch ve
 	ids := make([]string, len(entries))
 	seen := make(map[string]struct{}, len(entries))
 	for index, entry := range entries {
-		if entry.FileID == "" || vectorstate.ValidateAttributes(entry.Attributes) != "" {
+		if entry.FileID == "" || vectorstate.ValidateAttributes(entry.Attributes) != "" || !entry.ChunkingStrategy.Valid() {
 			return vectorstate.FileBatch{}, vectorstate.ErrInvalid
 		}
 		if _, found := seen[entry.FileID]; found {
@@ -108,7 +108,7 @@ func (s *PostgresStore) CreateVectorStoreFileBatch(ctx context.Context, batch ve
 	}
 	queued := &pgx.Batch{}
 	for index, entry := range entries {
-		queued.Queue(`INSERT INTO gateway_vector_store_files (vector_store_id,file_id,owner_key,attributes) VALUES ($1,$2,$3,$4::jsonb)`, batch.VectorStoreID, entry.FileID, batch.OwnerKey, encoded[index])
+		queued.Queue(`INSERT INTO gateway_vector_store_files (vector_store_id,file_id,owner_key,attributes,chunking_type,max_chunk_size_tokens,chunk_overlap_tokens) VALUES ($1,$2,$3,$4::jsonb,$5,$6,$7)`, batch.VectorStoreID, entry.FileID, batch.OwnerKey, encoded[index], entry.ChunkingStrategy.Type, nullableChunkingValue(entry.ChunkingStrategy.Type, entry.ChunkingStrategy.MaxChunkSizeTokens), nullableChunkingValue(entry.ChunkingStrategy.Type, entry.ChunkingStrategy.ChunkOverlapTokens))
 		queued.Queue(`INSERT INTO gateway_vector_store_file_batch_files (batch_id,vector_store_id,file_id,owner_key,ordinal) VALUES ($1,$2,$3,$4,$5)`, batch.ID, batch.VectorStoreID, entry.FileID, batch.OwnerKey, index)
 	}
 	results := tx.SendBatch(ctx, queued)
@@ -181,15 +181,15 @@ func (s *PostgresStore) ListVectorStoreFileBatchFiles(ctx context.Context, owner
 		}
 		cursorTime = &createdAt
 	}
-	base := `SELECT a.vector_store_id,a.file_id,a.owner_key,a.status,f.bytes,a.attributes,a.created_at FROM gateway_vector_store_file_batch_files bf JOIN gateway_vector_store_files a ON a.vector_store_id=bf.vector_store_id AND a.file_id=bf.file_id AND a.owner_key=bf.owner_key JOIN gateway_files f ON f.id=a.file_id AND f.owner_key=a.owner_key AND (f.expires_at IS NULL OR f.expires_at>now()) WHERE bf.owner_key=$1 AND bf.vector_store_id=$2 AND bf.batch_id=$3 AND ($4='' OR a.status=$4) AND ($5::timestamptz IS NULL OR (a.created_at,a.file_id)<($5::timestamptz,$6)) ORDER BY a.created_at DESC,a.file_id DESC LIMIT $7`
+	base := `SELECT a.vector_store_id,a.file_id,a.owner_key,a.status,f.bytes,a.attributes,a.chunking_type,a.max_chunk_size_tokens,a.chunk_overlap_tokens,a.created_at FROM gateway_vector_store_file_batch_files bf JOIN gateway_vector_store_files a ON a.vector_store_id=bf.vector_store_id AND a.file_id=bf.file_id AND a.owner_key=bf.owner_key JOIN gateway_files f ON f.id=a.file_id AND f.owner_key=a.owner_key AND (f.expires_at IS NULL OR f.expires_at>now()) WHERE bf.owner_key=$1 AND bf.vector_store_id=$2 AND bf.batch_id=$3 AND ($4='' OR a.status=$4) AND ($5::timestamptz IS NULL OR (a.created_at,a.file_id)<($5::timestamptz,$6)) ORDER BY a.created_at DESC,a.file_id DESC LIMIT $7`
 	if options.Order == "asc" {
-		base = `SELECT a.vector_store_id,a.file_id,a.owner_key,a.status,f.bytes,a.attributes,a.created_at FROM gateway_vector_store_file_batch_files bf JOIN gateway_vector_store_files a ON a.vector_store_id=bf.vector_store_id AND a.file_id=bf.file_id AND a.owner_key=bf.owner_key JOIN gateway_files f ON f.id=a.file_id AND f.owner_key=a.owner_key AND (f.expires_at IS NULL OR f.expires_at>now()) WHERE bf.owner_key=$1 AND bf.vector_store_id=$2 AND bf.batch_id=$3 AND ($4='' OR a.status=$4) AND ($5::timestamptz IS NULL OR (a.created_at,a.file_id)>($5::timestamptz,$6)) ORDER BY a.created_at ASC,a.file_id ASC LIMIT $7`
+		base = `SELECT a.vector_store_id,a.file_id,a.owner_key,a.status,f.bytes,a.attributes,a.chunking_type,a.max_chunk_size_tokens,a.chunk_overlap_tokens,a.created_at FROM gateway_vector_store_file_batch_files bf JOIN gateway_vector_store_files a ON a.vector_store_id=bf.vector_store_id AND a.file_id=bf.file_id AND a.owner_key=bf.owner_key JOIN gateway_files f ON f.id=a.file_id AND f.owner_key=a.owner_key AND (f.expires_at IS NULL OR f.expires_at>now()) WHERE bf.owner_key=$1 AND bf.vector_store_id=$2 AND bf.batch_id=$3 AND ($4='' OR a.status=$4) AND ($5::timestamptz IS NULL OR (a.created_at,a.file_id)>($5::timestamptz,$6)) ORDER BY a.created_at ASC,a.file_id ASC LIMIT $7`
 	}
 	if options.Before != "" && options.Order == "desc" {
-		base = `SELECT a.vector_store_id,a.file_id,a.owner_key,a.status,f.bytes,a.attributes,a.created_at FROM gateway_vector_store_file_batch_files bf JOIN gateway_vector_store_files a ON a.vector_store_id=bf.vector_store_id AND a.file_id=bf.file_id AND a.owner_key=bf.owner_key JOIN gateway_files f ON f.id=a.file_id AND f.owner_key=a.owner_key AND (f.expires_at IS NULL OR f.expires_at>now()) WHERE bf.owner_key=$1 AND bf.vector_store_id=$2 AND bf.batch_id=$3 AND ($4='' OR a.status=$4) AND (a.created_at,a.file_id)>($5::timestamptz,$6) ORDER BY a.created_at ASC,a.file_id ASC LIMIT $7`
+		base = `SELECT a.vector_store_id,a.file_id,a.owner_key,a.status,f.bytes,a.attributes,a.chunking_type,a.max_chunk_size_tokens,a.chunk_overlap_tokens,a.created_at FROM gateway_vector_store_file_batch_files bf JOIN gateway_vector_store_files a ON a.vector_store_id=bf.vector_store_id AND a.file_id=bf.file_id AND a.owner_key=bf.owner_key JOIN gateway_files f ON f.id=a.file_id AND f.owner_key=a.owner_key AND (f.expires_at IS NULL OR f.expires_at>now()) WHERE bf.owner_key=$1 AND bf.vector_store_id=$2 AND bf.batch_id=$3 AND ($4='' OR a.status=$4) AND (a.created_at,a.file_id)>($5::timestamptz,$6) ORDER BY a.created_at ASC,a.file_id ASC LIMIT $7`
 	}
 	if options.Before != "" && options.Order == "asc" {
-		base = `SELECT a.vector_store_id,a.file_id,a.owner_key,a.status,f.bytes,a.attributes,a.created_at FROM gateway_vector_store_file_batch_files bf JOIN gateway_vector_store_files a ON a.vector_store_id=bf.vector_store_id AND a.file_id=bf.file_id AND a.owner_key=bf.owner_key JOIN gateway_files f ON f.id=a.file_id AND f.owner_key=a.owner_key AND (f.expires_at IS NULL OR f.expires_at>now()) WHERE bf.owner_key=$1 AND bf.vector_store_id=$2 AND bf.batch_id=$3 AND ($4='' OR a.status=$4) AND (a.created_at,a.file_id)<($5::timestamptz,$6) ORDER BY a.created_at DESC,a.file_id DESC LIMIT $7`
+		base = `SELECT a.vector_store_id,a.file_id,a.owner_key,a.status,f.bytes,a.attributes,a.chunking_type,a.max_chunk_size_tokens,a.chunk_overlap_tokens,a.created_at FROM gateway_vector_store_file_batch_files bf JOIN gateway_vector_store_files a ON a.vector_store_id=bf.vector_store_id AND a.file_id=bf.file_id AND a.owner_key=bf.owner_key JOIN gateway_files f ON f.id=a.file_id AND f.owner_key=a.owner_key AND (f.expires_at IS NULL OR f.expires_at>now()) WHERE bf.owner_key=$1 AND bf.vector_store_id=$2 AND bf.batch_id=$3 AND ($4='' OR a.status=$4) AND (a.created_at,a.file_id)<($5::timestamptz,$6) ORDER BY a.created_at DESC,a.file_id DESC LIMIT $7`
 	}
 	rows, err := s.pool.Query(ctx, base, owner, vectorStoreID, batchID, options.Status, cursorTime, cursorID, options.Limit+1)
 	if err != nil {

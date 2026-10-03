@@ -120,7 +120,7 @@ sequenceDiagram
 6. `billing` post-response — заменяет reservation фактическим provider usage; при окончательной ошибке выполняет cancel.
 7. Gateway восстанавливает placeholders в успешном ответе.
 
-Неуспешная попытка обязательного модуля или provider добавляется в агрегированную ошибку router, после чего router может перейти к следующему совместимому endpoint. Content rejection и budget rejection являются terminal: provider не вызывается, fallback не выполняется, клиент получает соответственно `451` или `429 budget_exceeded`. Если остальные кандидаты закончились, клиент получает `502 provider_failed`.
+Неуспешная попытка обязательного модуля или provider добавляется в агрегированную ошибку router, после чего router может перейти к следующему совместимому endpoint. Content rejection и budget rejection являются terminal: provider не вызывается, fallback не выполняется, клиент получает соответственно `451` или `429 budget_exceeded`. После исчерпания кандидатов статус берётся из последней типизированной provider-попытки: upstream 429 возвращается как `429 upstream_rate_limited` с безопасным `Retry-After`; upstream 401/403, 503 и 504 также сохраняют статус с нормализованным кодом без raw provider error. Upstream 500 и неизвестные ошибки возвращаются как `502`.
 
 Для streaming router повторяет вызов того же endpoint или переходит к fallback
 только до первой попытки записи SSE-события клиенту. После первого chunk/event
@@ -275,8 +275,12 @@ half-open probe lease. Успех закрывает circuit, а ошибка pr
 новый `cooldown_seconds`. При ошибке Redis router использует локальный tracker,
 но readiness остается неуспешным до восстановления Redis.
 Responses `previous_response_id` закрепляется за создавшим его endpoint в
-tenant-scoped affinity store. С Redis это общий state для всех replicas, без
-Redis — локальный memory fallback. Provider-scoped response ID не отправляется
+tenant-scoped affinity store. При настроенном PostgreSQL affinity и ownership
+хранятся в общей для replicas таблице с TTL и не зависят от Redis. Без PostgreSQL
+используется Redis, а без обоих хранилищ — локальный memory fallback для affinity.
+При настроенном PostgreSQL startup и readiness проверяют наличие session-таблицы,
+чтобы миграция не оставила gateway готовым при невозможности сохранить binding.
+Provider-scoped response ID не отправляется
 другому endpoint при failover.
 
 Semantic cache выключен по умолчанию. Для допустимого text-only chat запроса он
@@ -464,7 +468,7 @@ HTTP_ADDR=:8080
 DEFAULT_PROVIDER=azure-open-ai
 PROVIDERS_JSON=[...]
 PROVIDER_CONTROL_PLANE_POSTGRES_DSN=postgres://ai_gateway:...@ai-gateway-postgres:5432/ai_gateway?sslmode=disable
-PROVIDER_CREDENTIAL_ENCRYPTION_KEY=<stable-secret-at-least-16-characters>
+CREDENTIAL_ENCRYPTION_KEY=<shared-stable-secret-at-least-32-bytes>
 PROVIDER_CONTROL_PLANE_REFRESH_SECONDS=1
 
 AUTH_REQUIRED=true

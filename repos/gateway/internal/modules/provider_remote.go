@@ -231,6 +231,9 @@ func scanPayload(req *RequestContext) string {
 		if text := openai.ContentText(message.Content); text != "" {
 			parts = append(parts, message.Role+": "+text)
 		}
+		if message.ReasoningContent != "" {
+			parts = append(parts, "reasoning_content: "+message.ReasoningContent)
+		}
 		for _, call := range message.ToolCalls {
 			if call.Function.Arguments != "" {
 				parts = append(parts, "tool_arguments: "+call.Function.Arguments)
@@ -337,6 +340,9 @@ func scanResponsePayload(req *RequestContext) (string, error) {
 	if req.Response != nil {
 		for _, choice := range req.Response.Choices {
 			if err := appendText("assistant: ", openai.ContentText(choice.Message.Content)); err != nil {
+				return "", err
+			}
+			if err := appendText("reasoning_content: ", choice.Message.ReasoningContent); err != nil {
 				return "", err
 			}
 			for _, annotation := range choice.Message.Annotations {

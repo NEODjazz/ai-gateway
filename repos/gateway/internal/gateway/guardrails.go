@@ -157,11 +157,13 @@ type complianceResult struct {
 }
 
 type guardrailApplyResult struct {
-	ExecutionID   string            `json:"execution_id"`
-	GuardrailName string            `json:"guardrail_name"`
-	Allowed       bool              `json:"allowed"`
-	Checks        map[string]string `json:"checks"`
-	ContentStored bool              `json:"content_stored"`
+	ExecutionID    string            `json:"execution_id"`
+	GuardrailName  string            `json:"guardrail_name"`
+	Allowed        bool              `json:"allowed"`
+	Checks         map[string]string `json:"checks"`
+	ContentStored  bool              `json:"content_stored"`
+	AnonymizedText string            `json:"anonymized_text,omitempty"`
+	Replacements   int               `json:"replacements"`
 }
 
 func (h Handler) ApplyGuardrail(w http.ResponseWriter, r *http.Request) {
@@ -207,7 +209,7 @@ func (h Handler) ApplyGuardrail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	controller, ok := h.guardrailController()
-	if !ok || h.dlp == nil || h.av == nil {
+	if !ok {
 		writeError(w, http.StatusServiceUnavailable, "guardrail_unavailable", "guardrail execution is unavailable")
 		return
 	}
@@ -226,7 +228,10 @@ func (h Handler) ApplyGuardrail(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "audit_unavailable", "audit service is unavailable")
 		return
 	}
-	checks, allowed, _, _, err := h.executeGuardrail(r.Context(), req.RequestID, "guardrail_api", input.Text, policy, false)
+	checks, allowed, anonymizedText, replacements, err := h.executeGuardrail(r.Context(), req.RequestID, "guardrail_api", input.Text, policy, true)
+	if replacements == 0 {
+		anonymizedText = ""
+	}
 	event.Details = map[string]any{"allowed": allowed, "checks": checks}
 	event.Outcome = "succeeded"
 	if err != nil {
@@ -240,7 +245,7 @@ func (h Handler) ApplyGuardrail(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "guardrail_unavailable", "guardrail execution is unavailable")
 		return
 	}
-	writeJSON(w, http.StatusOK, guardrailApplyResult{ExecutionID: req.RequestID, GuardrailName: policy.Name, Allowed: allowed, Checks: checks, ContentStored: false})
+	writeJSON(w, http.StatusOK, guardrailApplyResult{ExecutionID: req.RequestID, GuardrailName: policy.Name, Allowed: allowed, Checks: checks, ContentStored: false, AnonymizedText: anonymizedText, Replacements: replacements})
 }
 
 func validGuardrailName(value string) bool {
@@ -255,6 +260,10 @@ func validGuardrailName(value string) bool {
 	return true
 }
 
+func guardrailPolicyMatch(req modules.RequestContext, model string) PolicyMatchContext {
+	return PolicyMatchContext{OrganizationID: req.OrganizationID, TeamID: req.TeamID, UserID: req.UserID, CredentialID: req.CredentialID, CredentialAlias: req.CredentialAlias, Model: model, Tags: req.Tags}
+}
+
 func (h Handler) authorizeGuardrailPolicy(w http.ResponseWriter, req modules.RequestContext, name, model string) bool {
 	if hasRole(req.Roles, "admin") {
 		return true
@@ -263,7 +272,7 @@ func (h Handler) authorizeGuardrailPolicy(w http.ResponseWriter, req modules.Req
 		writeError(w, http.StatusServiceUnavailable, "policy_unavailable", "policy attachment registry is unavailable")
 		return false
 	}
-	match := PolicyMatchContext{TeamID: req.TeamID, CredentialID: req.CredentialID, CredentialAlias: req.CredentialAlias, Model: model, Tags: req.Tags}
+	match := guardrailPolicyMatch(req, model)
 	resolution := h.resolvePolicyAttachmentSet(h.access.MatchingPolicyAttachments(match), match)
 	if !resolution.Enforceable {
 		writeError(w, http.StatusServiceUnavailable, "policy_unavailable", "an attached policy is missing or disabled")
@@ -299,6 +308,10 @@ func (h Handler) executeGuardrail(ctx context.Context, requestID, source, text s
 		if !check.enabled {
 			checks[check.name] = "disabled"
 			continue
+		}
+		if check.module == nil {
+			checks[check.name] = "unavailable"
+			return checks, false, "", 0, errors.New(check.name + " scanner is unavailable")
 		}
 		err := check.module.Handle(ctx, &scan)
 		if errors.Is(err, modules.ErrContentRejected) {

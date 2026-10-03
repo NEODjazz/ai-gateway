@@ -163,11 +163,11 @@ func (s *PostgresStore) DeleteVectorStore(ctx context.Context, owner, id string)
 	return nil
 }
 
-func (s *PostgresStore) AttachVectorStoreFile(ctx context.Context, owner, vectorStoreID, fileID string, attributes map[string]any, quota int, byteQuota int64) (vectorstate.File, error) {
+func (s *PostgresStore) AttachVectorStoreFile(ctx context.Context, owner, vectorStoreID, fileID string, attributes map[string]any, chunking vectorstate.ChunkingStrategy, quota int, byteQuota int64) (vectorstate.File, error) {
 	if s == nil || s.pool == nil {
 		return vectorstate.File{}, vectorstate.ErrUnavailable
 	}
-	if owner == "" || vectorStoreID == "" || fileID == "" || quota < 1 || byteQuota < 1 {
+	if owner == "" || vectorStoreID == "" || fileID == "" || !chunking.Valid() || quota < 1 || byteQuota < 1 {
 		return vectorstate.File{}, vectorstate.ErrInvalid
 	}
 	if attributes == nil {
@@ -218,7 +218,7 @@ func (s *PostgresStore) AttachVectorStoreFile(ctx context.Context, owner, vector
 	if usedBytes < 0 || bytes < 0 || usedBytes > byteQuota || bytes > byteQuota-usedBytes {
 		return vectorstate.File{}, vectorstate.ErrByteQuotaExceeded
 	}
-	command, err := tx.Exec(ctx, `INSERT INTO gateway_vector_store_files (vector_store_id,file_id,owner_key,attributes) VALUES ($1,$2,$3,$4::jsonb) ON CONFLICT DO NOTHING`, vectorStoreID, fileID, owner, string(encodedAttributes))
+	command, err := tx.Exec(ctx, `INSERT INTO gateway_vector_store_files (vector_store_id,file_id,owner_key,attributes,chunking_type,max_chunk_size_tokens,chunk_overlap_tokens) VALUES ($1,$2,$3,$4::jsonb,$5,$6,$7) ON CONFLICT DO NOTHING`, vectorStoreID, fileID, owner, string(encodedAttributes), chunking.Type, nullableChunkingValue(chunking.Type, chunking.MaxChunkSizeTokens), nullableChunkingValue(chunking.Type, chunking.ChunkOverlapTokens))
 	if err != nil {
 		return vectorstate.File{}, err
 	}
@@ -266,15 +266,15 @@ func (s *PostgresStore) ListVectorStoreFiles(ctx context.Context, owner, vectorS
 		}
 		cursorTime = &createdAt
 	}
-	query := `SELECT a.vector_store_id,a.file_id,a.owner_key,a.status,f.bytes,a.attributes,a.created_at FROM gateway_vector_store_files a JOIN gateway_files f ON f.id=a.file_id AND f.owner_key=a.owner_key AND (f.expires_at IS NULL OR f.expires_at>now()) WHERE a.owner_key=$1 AND a.vector_store_id=$2 AND ($3='' OR a.status=$3) AND ($4::timestamptz IS NULL OR (a.created_at,a.file_id)<($4::timestamptz,$5)) ORDER BY a.created_at DESC,a.file_id DESC LIMIT $6`
+	query := `SELECT a.vector_store_id,a.file_id,a.owner_key,a.status,f.bytes,a.attributes,a.chunking_type,a.max_chunk_size_tokens,a.chunk_overlap_tokens,a.created_at FROM gateway_vector_store_files a JOIN gateway_files f ON f.id=a.file_id AND f.owner_key=a.owner_key AND (f.expires_at IS NULL OR f.expires_at>now()) WHERE a.owner_key=$1 AND a.vector_store_id=$2 AND ($3='' OR a.status=$3) AND ($4::timestamptz IS NULL OR (a.created_at,a.file_id)<($4::timestamptz,$5)) ORDER BY a.created_at DESC,a.file_id DESC LIMIT $6`
 	if options.Order == "asc" {
-		query = `SELECT a.vector_store_id,a.file_id,a.owner_key,a.status,f.bytes,a.attributes,a.created_at FROM gateway_vector_store_files a JOIN gateway_files f ON f.id=a.file_id AND f.owner_key=a.owner_key AND (f.expires_at IS NULL OR f.expires_at>now()) WHERE a.owner_key=$1 AND a.vector_store_id=$2 AND ($3='' OR a.status=$3) AND ($4::timestamptz IS NULL OR (a.created_at,a.file_id)>($4::timestamptz,$5)) ORDER BY a.created_at ASC,a.file_id ASC LIMIT $6`
+		query = `SELECT a.vector_store_id,a.file_id,a.owner_key,a.status,f.bytes,a.attributes,a.chunking_type,a.max_chunk_size_tokens,a.chunk_overlap_tokens,a.created_at FROM gateway_vector_store_files a JOIN gateway_files f ON f.id=a.file_id AND f.owner_key=a.owner_key AND (f.expires_at IS NULL OR f.expires_at>now()) WHERE a.owner_key=$1 AND a.vector_store_id=$2 AND ($3='' OR a.status=$3) AND ($4::timestamptz IS NULL OR (a.created_at,a.file_id)>($4::timestamptz,$5)) ORDER BY a.created_at ASC,a.file_id ASC LIMIT $6`
 	}
 	if options.Before != "" && options.Order == "desc" {
-		query = `SELECT a.vector_store_id,a.file_id,a.owner_key,a.status,f.bytes,a.attributes,a.created_at FROM gateway_vector_store_files a JOIN gateway_files f ON f.id=a.file_id AND f.owner_key=a.owner_key AND (f.expires_at IS NULL OR f.expires_at>now()) WHERE a.owner_key=$1 AND a.vector_store_id=$2 AND ($3='' OR a.status=$3) AND (a.created_at,a.file_id)>($4::timestamptz,$5) ORDER BY a.created_at ASC,a.file_id ASC LIMIT $6`
+		query = `SELECT a.vector_store_id,a.file_id,a.owner_key,a.status,f.bytes,a.attributes,a.chunking_type,a.max_chunk_size_tokens,a.chunk_overlap_tokens,a.created_at FROM gateway_vector_store_files a JOIN gateway_files f ON f.id=a.file_id AND f.owner_key=a.owner_key AND (f.expires_at IS NULL OR f.expires_at>now()) WHERE a.owner_key=$1 AND a.vector_store_id=$2 AND ($3='' OR a.status=$3) AND (a.created_at,a.file_id)>($4::timestamptz,$5) ORDER BY a.created_at ASC,a.file_id ASC LIMIT $6`
 	}
 	if options.Before != "" && options.Order == "asc" {
-		query = `SELECT a.vector_store_id,a.file_id,a.owner_key,a.status,f.bytes,a.attributes,a.created_at FROM gateway_vector_store_files a JOIN gateway_files f ON f.id=a.file_id AND f.owner_key=a.owner_key AND (f.expires_at IS NULL OR f.expires_at>now()) WHERE a.owner_key=$1 AND a.vector_store_id=$2 AND ($3='' OR a.status=$3) AND (a.created_at,a.file_id)<($4::timestamptz,$5) ORDER BY a.created_at DESC,a.file_id DESC LIMIT $6`
+		query = `SELECT a.vector_store_id,a.file_id,a.owner_key,a.status,f.bytes,a.attributes,a.chunking_type,a.max_chunk_size_tokens,a.chunk_overlap_tokens,a.created_at FROM gateway_vector_store_files a JOIN gateway_files f ON f.id=a.file_id AND f.owner_key=a.owner_key AND (f.expires_at IS NULL OR f.expires_at>now()) WHERE a.owner_key=$1 AND a.vector_store_id=$2 AND ($3='' OR a.status=$3) AND (a.created_at,a.file_id)<($4::timestamptz,$5) ORDER BY a.created_at DESC,a.file_id DESC LIMIT $6`
 	}
 	rows, err := s.pool.Query(ctx, query, owner, vectorStoreID, options.Status, cursorTime, cursorID, options.Limit+1)
 	if err != nil {
@@ -377,7 +377,7 @@ type vectorStoreFileQuerier interface {
 }
 
 func getVectorStoreFile(ctx context.Context, query vectorStoreFileQuerier, owner, vectorStoreID, fileID string) (vectorstate.File, error) {
-	file, err := scanVectorStoreFile(query.QueryRow(ctx, `SELECT a.vector_store_id,a.file_id,a.owner_key,a.status,f.bytes,a.attributes,a.created_at FROM gateway_vector_store_files a JOIN gateway_files f ON f.id=a.file_id AND f.owner_key=a.owner_key AND (f.expires_at IS NULL OR f.expires_at>now()) WHERE a.owner_key=$1 AND a.vector_store_id=$2 AND a.file_id=$3`, owner, vectorStoreID, fileID))
+	file, err := scanVectorStoreFile(query.QueryRow(ctx, `SELECT a.vector_store_id,a.file_id,a.owner_key,a.status,f.bytes,a.attributes,a.chunking_type,a.max_chunk_size_tokens,a.chunk_overlap_tokens,a.created_at FROM gateway_vector_store_files a JOIN gateway_files f ON f.id=a.file_id AND f.owner_key=a.owner_key AND (f.expires_at IS NULL OR f.expires_at>now()) WHERE a.owner_key=$1 AND a.vector_store_id=$2 AND a.file_id=$3`, owner, vectorStoreID, fileID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return vectorstate.File{}, vectorstate.ErrFileNotFound
 	}
@@ -389,11 +389,26 @@ type vectorStoreFileScanner interface{ Scan(...any) error }
 func scanVectorStoreFile(row vectorStoreFileScanner) (vectorstate.File, error) {
 	var file vectorstate.File
 	var attributes []byte
-	err := row.Scan(&file.VectorStoreID, &file.FileID, &file.OwnerKey, &file.Status, &file.Bytes, &attributes, &file.CreatedAt)
+	var maxChunkSizeTokens, chunkOverlapTokens *int
+	err := row.Scan(&file.VectorStoreID, &file.FileID, &file.OwnerKey, &file.Status, &file.Bytes, &attributes, &file.ChunkingStrategy.Type, &maxChunkSizeTokens, &chunkOverlapTokens, &file.CreatedAt)
 	if err == nil {
 		err = json.Unmarshal(attributes, &file.Attributes)
 	}
+	if err == nil && file.ChunkingStrategy.Type == "static" && maxChunkSizeTokens != nil && chunkOverlapTokens != nil {
+		file.ChunkingStrategy.MaxChunkSizeTokens = *maxChunkSizeTokens
+		file.ChunkingStrategy.ChunkOverlapTokens = *chunkOverlapTokens
+	}
+	if err == nil && !file.ChunkingStrategy.Valid() {
+		err = vectorstate.ErrInvalid
+	}
 	return file, err
+}
+
+func nullableChunkingValue(chunkingType string, value int) any {
+	if chunkingType != "static" {
+		return nil
+	}
+	return value
 }
 
 type vectorStoreQuerier interface {

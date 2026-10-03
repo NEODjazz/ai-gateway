@@ -47,6 +47,9 @@ func cachedContentToolIdentifiers(request openai.ChatCompletionRequest) ([]strin
 	if request.GeminiGoogleMaps {
 		identifiers = append(identifiers, "google_maps")
 	}
+	identifiers = append(identifiers, openai.GeminiFileSearchToolIdentifiers(request.GeminiFileSearch)...)
+	identifiers = append(identifiers, openai.GeminiComputerUseToolIdentifiers(request.GeminiComputerUse)...)
+	identifiers = append(identifiers, request.GeminiMCPConnectorIDs...)
 	return identifiers, valid
 }
 
@@ -153,8 +156,21 @@ func (h Handler) CreateCachedContent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "invalid cached content request")
 		return
 	}
+	identity.Request = chat
+	if !h.prepareAccessGroups(w, &identity) {
+		return
+	}
+	if err := h.resolveGeminiMCPServers(&identity); err != nil {
+		writeGeminiMCPError(w, err)
+		return
+	}
+	chat = identity.Request
 	toolIdentifiers, validTools := cachedContentToolIdentifiers(chat)
-	if !h.prepareAccessGroups(w, &identity) || !h.authorizeBatchModel(w, identity, model) || !h.authorizeTools(w, identity, toolIdentifiers, validTools) || !h.applyPolicyAttachments(w, &identity, model) || !h.authorizeRateLimit(w, r.Context(), identity, openai.ChatInputTokens(chat)) {
+	if !h.authorizeBatchModel(w, identity, model) || !h.authorizeTools(w, identity, toolIdentifiers, validTools) || !h.applyPolicyAttachments(w, &identity, model) {
+		return
+	}
+	chat = identity.Request
+	if !h.authorizeRateLimit(w, r.Context(), identity, openai.ChatInputTokens(chat)) {
 		return
 	}
 	pipeline := h.resourceBillingPipeline()
@@ -492,10 +508,10 @@ func (h Handler) compensateCachedContent(ctx context.Context, runtime provider.C
 	compensation, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
 	if err := runtime.DeleteCachedContent(compensation, binding, name); err != nil && !cachedContentProviderNotFound(err) {
-		log.Printf("cached content compensation delete failed for %s: %v", name, err)
+		log.Print("cached content compensation delete failed")
 	} else if stored {
 		if err := h.cachedContents.DeleteCachedContentRecord(compensation, owner, name); err != nil && !errors.Is(err, cachedstate.ErrNotFound) {
-			log.Printf("cached content compensation ownership cleanup failed for %s: %v", name, err)
+			log.Print("cached content compensation ownership cleanup failed")
 		}
 	}
 	if request != nil {
@@ -507,6 +523,6 @@ func (h Handler) restoreCachedContentExpiration(ctx context.Context, runtime pro
 	compensation, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
 	if _, err := runtime.UpdateCachedContent(compensation, record.Binding, record.Content.Name, openai.GeminiCachedContentExpiration{ExpireTime: record.Content.ExpireTime}); err != nil {
-		log.Printf("cached content expiration compensation failed for %s: %v", record.Content.Name, err)
+		log.Print("cached content expiration compensation failed")
 	}
 }

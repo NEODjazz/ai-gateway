@@ -1,5 +1,10 @@
 # Конфигурация
 
+Browser SSO также настраивается global admin через **System → Settings** после
+миграции PostgreSQL 014 и подготовки encryption key. См.
+[настройку SSO в UI](admin-sso-settings.md): draft/test/activate и влияние на JWT
+trust всех клиентов. Environment settings остаются fallback до активации.
+
 Helm values — рекомендуемый интерфейс Kubernetes-конфигурации. Charts
 преобразуют их в environment variables и Secrets. При локальном запуске те же
 переменные задаются процессу напрямую. HTTP resources и payloads описаны в
@@ -24,7 +29,7 @@ OpenAPI, а не в этом документе.
 | `RESPONSES_AFFINITY_TTL_SECONDS` | `3600` | Affinity для `previous_response_id` |
 | `RESPONSES_OWNERSHIP_TTL_SECONDS` | `2592000` | Срок хранения неизменяемой привязки сохраняемого Response к владельцу и deployment; требует Redis |
 | `PROVIDER_CONTROL_PLANE_POSTGRES_DSN` | пусто | Durable versioned admin state |
-| `PROVIDER_CREDENTIAL_ENCRYPTION_KEY` | ephemeral без DSN | AES-GCM key; с DSN требуется минимум 16 символов |
+| `CREDENTIAL_ENCRYPTION_KEY` | ephemeral без DSN | Общий ключ provider credentials, MCP, logging, A2A и managed SSO; 32+ байта для SSO, legacy control plane требует 16+ |
 | `PROVIDER_CONTROL_PLANE_REFRESH_SECONDS` | `1` | Poll durable revision |
 | `REDIS_ADDR` | пусто | Shared cache/rate/circuit/affinity/monitor state |
 | `REDIS_DB` | `0` | Redis DB |
@@ -61,10 +66,35 @@ OpenAPI, а не в этом документе.
 Capability names are exact and cannot be duplicated; deployment mutations reject
 unknown or misspelled values.
 Route выбирает endpoint только при наличии capabilities, выведенных из запроса. Moderation deployments должны явно указывать capability `moderation`; она не выводится из совместимого URL автоматически.
+Для Chat SSE преждевременное закрытие upstream до `[DONE]` или непустого `finish_reason` считается ошибкой; частичный ответ не проходит post-response billing.
 
 Provider API key в static config можно передать полем `api_key` или переменной
 `PROVIDER_API_KEY_<NORMALIZED_ENDPOINT_NAME>`. Managed credentials шифруются в
 control-plane snapshot и никогда не возвращаются read API.
+Для локального `ollama` credential не требуется. Удалённый Ollama endpoint
+получает настроенный `api_key` или managed credential в `Authorization: Bearer`
+для chat, streaming, embeddings и completions. Redirects не выполняются.
+`base_url` принимает корень сервера, `/api` или `/v1`; адаптер приводит
+последние два варианта к общему корню, поскольку native и совместимые операции
+используют разные пути. Discovery применяет ту же нормализацию и считает ответ
+без поля `models` ошибкой, сохраняя допустимый пустой список `models: []`.
+Discovery других провайдеров также отклоняет успешный HTTP-ответ без обязательного
+массива моделей (`models` для Cohere, `data` для совместимого каталога).
+В мастере подключения моделей список discovery подтверждает только идентификаторы.
+Возможности модели выбираются вручную, если ответ не содержит
+`capability_source: provider_metadata`. Для Ollama это поле появляется после
+успешного чтения `/api/show`; ошибка чтения оставляет возможности неизвестными.
+После ручного изменения UI показывает источник «Selected by operator». Ранее
+созданные deployments и записи каталога не меняются автоматически.
+Если модель найдена, но ни один допустимый deployment не поддерживает
+запрошенные возможности Chat, Responses, Embeddings, Rerank, Moderations или
+legacy Completions, ошибка маршрутизации указывает недостающую capability.
+Для неизвестного model ID сохраняется обычная ошибка отсутствия endpoint.
+Cohere discovery проходит все страницы `next_page_token` перед публикацией списка;
+повторный токен или ошибка последующей страницы отклоняют весь результат.
+Для Azure OpenAI `base_url` с окончанием `/openai` в GA/preview-режиме использует
+`/openai/v1` и для inference, и для discovery; versioned deployment URL сохраняет
+маршрут `/openai/deployments/{deployment}`.
 
 ### Managed control plane
 
@@ -130,12 +160,40 @@ Provider form загружает этот профиль и показывает
 аутентификации для выбранного типа. Ошибка capability endpoint не блокирует
 список и редактирование providers: форма использует встроенный безопасный набор.
 
-Для `azure-openai` режим `auth_type=entra` использует статический bearer token
-из привязанного write-only credential. Без credential gateway сначала проверяет
-AKS workload identity через `AZURE_TENANT_ID`, `AZURE_CLIENT_ID` и абсолютный
+Для `azure-openai` режим `auth_type=entra` поддерживает два вида привязанного
+write-only credential в UI **Credentials** и мастере **Model Onboarding**:
+готовый bearer token или service principal (Tenant ID, Client ID и Client Secret). Service principal доступен
+только для credential, привязанного к Azure provider с `auth_type=entra`;
+gateway сам получает и обновляет краткоживущий access token. При ротации
+выберите вид credential повторно и введите новые значения: секретные поля
+не возвращаются через API. Готовый bearer token не обновляется автоматически.
+Без привязанного credential gateway сначала проверяет
+service principal через `AZURE_TENANT_ID`, `AZURE_CLIENT_ID` и
+`AZURE_CLIENT_SECRET`, затем AKS workload identity через первые два поля и абсолютный
 `AZURE_FEDERATED_TOKEN_FILE`, затем локальные `IDENTITY_ENDPOINT` и
-`IDENTITY_HEADER` App Service/Container Apps, затем Azure VM IMDS. Projected token
-обменивается на scope `https://cognitiveservices.azure.com/.default` через
+`IDENTITY_HEADER` App Service/Container Apps, затем Azure VM IMDS. Клиентский
+секрет и projected token обмениваются на короткоживущий access token; повторное получение
+выполняется до истечения срока. `AZURE_CLIENT_SECRET` и
+`AZURE_FEDERATED_TOKEN_FILE` нельзя задавать одновременно: неоднозначная или
+неполная конфигурация отклоняется без fallback на IMDS.
+В Helm chart service principal включается только явной ссылкой на существующий
+Kubernetes Secret; значение секрета не указывается в chart values:
+
+```yaml
+gateway:
+  azureIdentity:
+    tenantId: <tenant-id>
+    clientId: <client-id>
+    clientSecretSecretName: azure-service-principal
+    clientSecretSecretKey: AZURE_CLIENT_SECRET
+```
+
+Для этого способа provider должен иметь `auth_type=entra` без привязанного
+статического credential. Выбранный для endpoint cloud и `azure_audience`
+определяют token scope и authority.
+
+По умолчанию для Azure OpenAI resource endpoint в public cloud используется scope
+`https://cognitiveservices.azure.com/.default` через
 public-cloud Entra authority. Для endpoint с suffix `.openai.azure.us` или
 `.cognitiveservices.azure.us` gateway автоматически использует authority
 `https://login.microsoftonline.us` и resource
@@ -146,6 +204,34 @@ identity. Для endpoint с suffix `.openai.azure.cn` или
 `https://cognitiveservices.azure.cn/`. Выбор sovereign cloud выполняется только
 по полному host suffix; другие и похожие внешние домены остаются на public-cloud
 defaults.
+Foundry resource и project endpoints с host suffix `.services.ai.azure.com`
+используют Entra scope `https://ai.azure.com/.default`; project URL
+`/api/projects/{project}` автоматически дополняется `/openai/v1`.
+Для Azure endpoint за собственным hostname можно задать `azure_cloud=public`,
+`usgov` или `china` при `auth_type=entra`; без настройки cloud определяется по URL.
+Если endpoint требует конкретный Entra token audience, задайте
+`azure_audience=cognitive` или `azure_audience=foundry` при `auth_type=entra`.
+Без этого поля audience по-прежнему определяется по URL. Foundry audience в
+Azure China не поддерживается.
+Для Foundry project в Government выбираются authority `login.microsoftonline.us`
+и audience `https://ai.azure.us/`. `azure_cloud=china` для Foundry project
+отклоняется, поскольку этот контракт не поддерживается.
+Для project endpoint `api_version` должен быть пустым; неверная конфигурация
+отклоняется до provider execution. Это правило и запрет `azure_cloud=china`
+действуют также для project URL за reverse proxy с префиксом пути.
+Azure provider URL с `.`/`..` в сегментах пути, двойным разделителем или
+кодированным разделителем отклоняется до выполнения, чтобы proxy и gateway
+не могли по-разному определить границу проекта и deployment.
+Для Azure OpenAI provider с датированной `api_version` можно указать
+resource-root URL и в стартовом конфиге, и в control plane. Каждый model deployment получает собственный путь
+`/openai/deployments/{upstream_model}`; если `upstream_model` не указан,
+используется единственное имя из `models`. Для нескольких имен без явного
+`upstream_model` конфигурация отклоняется как неоднозначная. В стартовом конфиге
+`model_aliases` задаёт upstream deployment: несколько публичных имён допустимы,
+если все они указывают на одно и то же имя deployment. Явно заданный
+deployment URL сохраняется. Пустая версия использует `/openai/v1`.
+Для датированных версий Responses и связанные resource operations используют
+resource-level `/openai/responses`, а Chat и Embeddings остаются под deployment path.
 `AZURE_CLIENT_ID` также выбирает
 user-assigned managed identity. Разрешены только loopback и link-local identity
 endpoints; redirects и некорректные/просроченные ответы отклоняются. Временный
@@ -212,6 +298,8 @@ secret. Это не клиентские Bearer-токены; auth management и
 | `VECTOR_STORE_FILE_QUOTA` | `10000` | Максимальное число файлов в одном vector store; допустимо от 1 до 100000 |
 | `VECTOR_STORE_BYTE_QUOTA` | `1073741824` | Атомарная квота суммарного размера активных файлов одного vector store; допустимо до 1 TiB |
 | `ASSISTANT_OWNER_QUOTA` | `1000` | Максимальное число assistant definitions для пары credential/user; допустимо от 1 до 100000 |
+| `CONVERSATION_OWNER_QUOTA` | `10000` | Максимальное число durable conversations для пары credential/user; допустимо от 1 до 1000000 |
+| `CONVERSATION_ITEM_QUOTA` | `4096` | Максимальное число input/output items в одной conversation; допустимо от 1 до 100000 |
 | `ASSISTANT_THREAD_OWNER_QUOTA` | `10000` | Максимальное число assistant threads для пары credential/user; допустимо от 1 до 1000000 |
 | `ASSISTANT_MESSAGE_THREAD_QUOTA` | `100000` | Максимальное число сообщений в одном assistant thread; допустимо от 1 до 1000000 |
 | `ASSISTANT_RUN_OWNER_QUOTA` | `10000` | Максимальное число сохраненных assistant runs для пары credential/user; допустимо от 1 до 100000 |
@@ -259,6 +347,8 @@ Files API возвращает `503`, если `PROVIDER_CONTROL_PLANE_POSTGRES_
 | `AUTH_JWT_USER_ID_CLAIM` | `sub` | Dot-separated claim path |
 | `AUTH_JWT_TEAM_ID_CLAIM` | `team_id` | Dot-separated claim path |
 | `AUTH_JWT_ROLES_CLAIM` | `roles` | Dot-separated claim path |
+| `AUTH_JWT_IDENTITY_MODE` | `legacy` | `directory` требует pre-provisioned issuer/subject/audience binding, active directory и явные grants |
+| `AUTH_JWT_ROLE_MAPPINGS_JSON` | `{}` | Mapping внешних role values в `user`, `developer`, `team_admin`, `admin`; directory mode требует непустой mapping |
 
 Production должен использовать уникальные `AUTH_KEY_HASH_SECRET` и management
 secret, отключённые demo keys и static fallback после миграции ключей.
@@ -285,6 +375,19 @@ secret, отключённые demo keys и static fallback после мигр�
 ClickHouse username/password и service/management shared secrets должны
 приходить из Secret. Gateway и Billing должны получать одинаковые catalog JSON
 и billing service secret. Management secret является отдельным credential.
+При `commit` подтвержденный провайдером `total_tokens=0` сохраняется как точный
+ноль; запасная оценка применяется только при отсутствующем или неполном usage.
+Сервис billing использует переданный Gateway признак `usage_estimated`, чтобы
+отличить эти случаи.
+При отмене клиентского запроса Gateway отправляет `cancel` для активного budget
+reserve с отдельным ограниченным по времени context, чтобы снять резерв до TTL.
+Если следующий endpoint в failover отклоняет запрос на preflight, предыдущий
+reserve отменяется перед возвратом ошибки.
+Если проверка формы prompt или права сохранения Responses отклоняет запрос после
+reserve, Gateway также отправляет `cancel` до возврата ошибки клиенту.
+То же правило действует при preflight-отказе Embeddings, Rerank и Moderations,
+включая failover на следующий endpoint.
+Billing-запрос передает статус и класс сбоя, но не сырой текст ошибки провайдера.
 
 ## Anonymizer, DLP и AV
 
@@ -307,3 +410,15 @@ Default values удобны только для локального запус�
 Kubernetes Secrets. Не храните реальные provider keys, DSN passwords,
 encryption keys и shared secrets в Git. Изменение encryption key без
 перешифрования snapshot сделает сохранённые credentials нечитаемыми.
+
+Для directory JWT/Keycloak и внешнего пользовательского OpenWebUI см.
+[профиль identity](identity-keycloak-openwebui.md).
+
+`CREDENTIAL_ENCRYPTION_KEY` передаётся Gateway и Auth с одинаковым значением.
+`PROVIDER_CREDENTIAL_ENCRYPTION_KEY` — deprecated alias только при отсутствии нового
+имени; конфликт значений останавливает запуск. `AUTH_KEY_HASH_SECRET` не заменяется.
+Для Helm используйте `credentialEncryption.existingSecret` / `secretKey` в обоих
+releases. Существующее `gateway.controlPlane.credentialEncryptionKey` поддерживается
+как deprecated inline alias. Переименование не меняет ciphertext; ротация самого
+значения требует миграции всех зашифрованных конфигураций. Перенос старого SSO
+описан в [SSO settings](admin-sso-settings.md#совместимость-ключей).

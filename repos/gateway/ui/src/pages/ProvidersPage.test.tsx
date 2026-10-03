@@ -118,6 +118,32 @@ describe("ProvidersPage", () => {
 	expect(JSON.parse(created.body!)).toEqual({ id: "azure-native", type: "azure-openai", base_url: "https://resource.openai.azure.com", api_version: "2025-04-01-preview", auth_type: "entra", rate_limit_rpm: 0, rate_limit_tpm: 0, enabled: true });
   });
 
+  it("selects the Entra cloud for a sovereign Foundry proxy", async () => {
+    const calls: Array<{ path: string; method?: string; body?: string }> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, options) => {
+      const path = String(input); calls.push({ path, method: options?.method, body: String(options?.body || "") });
+      if (path === "/admin/v1/providers" && options?.method === "POST") return json({ id: "foundry-gov", type: "azure-openai", base_url: "https://proxy.example.test/api/projects/project-a", auth_type: "entra", azure_cloud: "usgov", enabled: true }, 201);
+      if (path === "/admin/v1/provider-capabilities") return json({ data: [{ type: "azure-openai", auth_types: ["api_key", "entra"] }] });
+      return json({ data: [] });
+    });
+    sessionStorage.setItem("ai-gateway.admin-token", "token");
+    render(<MemoryRouter><AuthProvider><ProvidersPage /></AuthProvider></MemoryRouter>);
+    await userEvent.click(await screen.findByRole("button", { name: "Create Provider" }));
+    const form = screen.getByRole("dialog", { name: "Create Provider" });
+    await userEvent.type(within(form).getByLabelText("ID"), "foundry-gov");
+    await userEvent.selectOptions(within(form).getByLabelText("Type"), "azure-openai");
+    await userEvent.type(within(form).getByLabelText("Base URL"), "https://proxy.example.test/api/projects/project-a");
+    expect(within(form).queryByLabelText("Azure cloud")).not.toBeInTheDocument();
+    expect(within(form).queryByLabelText("Entra token audience")).not.toBeInTheDocument();
+    await userEvent.selectOptions(within(form).getByLabelText("Authentication"), "entra");
+    await userEvent.selectOptions(within(form).getByLabelText("Azure cloud"), "usgov");
+    await userEvent.selectOptions(within(form).getByLabelText("Entra token audience"), "foundry");
+    await userEvent.click(within(form).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(calls.some((call) => call.path === "/admin/v1/providers" && call.method === "POST")).toBe(true));
+    const created = calls.find((call) => call.path === "/admin/v1/providers" && call.method === "POST")!;
+    expect(JSON.parse(created.body!)).toMatchObject({ id: "foundry-gov", type: "azure-openai", auth_type: "entra", azure_cloud: "usgov", azure_audience: "foundry" });
+  });
+
   it("configures Bedrock SigV4 authentication and region", async () => {
 	const calls: Array<{ path: string; method?: string; body?: string }> = [];
 	vi.spyOn(globalThis, "fetch").mockImplementation(async (input, options) => {

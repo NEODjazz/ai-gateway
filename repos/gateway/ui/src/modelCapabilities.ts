@@ -9,6 +9,13 @@ export const modelCapabilityOptions: ChipOption[] = [
   { value: "interaction_environment_reuse", label: "Interaction environment reuse", description: "Reuse an owner-bound native agent environment" },
   { value: "gemini_safety_settings", label: "Gemini safety settings", description: "Native per-category content blocking thresholds" },
   { value: "gemini_code_execution", label: "Gemini code execution", description: "Native managed code execution tool" },
+  { value: "gemini_audio_timestamp", label: "Vertex audio timestamps", description: "Timestamp-aware processing for audio inputs" },
+  { value: "gemini_media_resolution", label: "Gemini media resolution", description: "Control input media token resolution" },
+  { value: "gemini_media_processing", label: "Gemini video processing", description: "Static or agentic processing for video inputs" },
+  { value: "gemini_search_time_range", label: "Gemini search time range", description: "Bound native Google Search results by time" },
+  { value: "gemini_file_search", label: "Gemini file search", description: "Search explicitly authorized provider-managed stores" },
+  { value: "gemini_computer_use", label: "Gemini computer use", description: "Generate client-executed browser, mobile, or desktop actions" },
+  { value: "gemini_mcp", label: "Gemini MCP", description: "Use explicitly approved remote MCP servers" },
   { value: "url_context", label: "URL context", description: "Native retrieval of URLs supplied in the prompt" },
   { value: "google_maps", label: "Google Maps grounding", description: "Native location-aware grounding with source metadata" },
   { value: "background_responses", label: "Background responses", description: "Durable asynchronous Responses execution" },
@@ -70,10 +77,15 @@ export const modelCapabilityOptions: ChipOption[] = [
   { value: "file_input", label: "File input", description: "Bounded inline PDF input" }
 ];
 
-export function providerModelCapabilityOptions(capabilities?: string[]): ChipOption[] {
-  if (!capabilities) return modelCapabilityOptions;
-  const supported = new Set(capabilities);
-  return modelCapabilityOptions.filter(({ value }) => supported.has(value));
+export function providerModelCapabilityOptions(capabilities?: string[], providerType?: string, baseURL?: string): ChipOption[] {
+  const supported = capabilities && new Set(capabilities);
+  let foundryProject = false;
+  if (providerType === "azure-openai" && baseURL) {
+    try {
+      foundryProject = /(?:^|\/)api\/projects\/[^/]+(?:\/openai\/v1)?\/?$/.test(new URL(baseURL).pathname);
+    } catch { /* Invalid URLs are rejected by the provider form. */ }
+  }
+  return modelCapabilityOptions.filter(({ value }) => (!supported || supported.has(value)) && !(foundryProject && value === "embeddings"));
 }
 
 export function defaultModelCapabilities(providerType: string): string[] {

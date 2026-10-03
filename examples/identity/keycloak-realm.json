@@ -1,0 +1,156 @@
+{
+  "realm": "gateway-users",
+  "enabled": true,
+  "registrationAllowed": false,
+  "resetPasswordAllowed": true,
+  "sslRequired": "external",
+  "accessTokenLifespan": 300,
+  "roles": {
+    "client": {
+      "gateway": [
+        {
+          "name": "gateway-user"
+        },
+        {
+          "name": "gateway-admin"
+        },
+        {
+          "name": "gateway-team-admin"
+        }
+      ]
+    }
+  },
+  "clients": [
+    {
+      "clientId": "gateway",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false
+    },
+    {
+      "clientId": "openwebui",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "https://chat.example.com/oauth/oidc/callback"
+      ],
+      "webOrigins": [
+        "https://chat.example.com"
+      ],
+      "fullScopeAllowed": false,
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      },
+      "defaultClientScopes": [
+        "basic",
+        "profile",
+        "email"
+      ],
+      "protocolMappers": [
+        {
+          "name": "gateway audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "gateway",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        },
+        {
+          "name": "gateway roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-client-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "usermodel.clientRoleMapping.clientId": "gateway",
+            "claim.name": "resource_access.gateway.roles",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "gateway-console",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "https://gateway.example.com/auth/sso/callback",
+        "https://gateway.example.com/auth/sso/test/callback"
+      ],
+      "webOrigins": [
+        "https://gateway.example.com"
+      ],
+      "fullScopeAllowed": false,
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      },
+      "defaultClientScopes": [
+        "basic",
+        "profile",
+        "email"
+      ],
+      "protocolMappers": [
+        {
+          "name": "gateway audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "gateway",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        },
+        {
+          "name": "gateway roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-client-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "usermodel.clientRoleMapping.clientId": "gateway",
+            "claim.name": "resource_access.gateway.roles",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "clientScopeMappings": {
+    "gateway": [
+      {
+        "client": "openwebui",
+        "roles": [
+          "gateway-user",
+          "gateway-admin",
+          "gateway-team-admin"
+        ]
+      },
+      {
+        "client": "gateway-console",
+        "roles": [
+          "gateway-user",
+          "gateway-admin",
+          "gateway-team-admin"
+        ]
+      }
+    ]
+  }
+}

@@ -558,7 +558,7 @@ func RunVideoSettlementWorker(ctx context.Context, handler Handler) {
 	defer ticker.Stop()
 	for {
 		if _, err := handler.ProcessVideoSettlements(ctx); err != nil && ctx.Err() == nil {
-			log.Printf("video settlement processing failed: %v", err)
+			log.Print("video settlement processing failed")
 		}
 		select {
 		case <-ctx.Done():

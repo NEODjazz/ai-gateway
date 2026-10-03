@@ -68,4 +68,58 @@ describe("CredentialsPage", () => {
     expect(await screen.findByText(/remains write-only/)).toBeInTheDocument();
     expect(screen.queryByDisplayValue("secret-value")).not.toBeInTheDocument();
   });
+
+  it("configures an Azure service principal without exposing its secret in the UI response", async () => {
+    const calls: Array<{ path: string; method?: string; body?: string }> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, options) => {
+      const path = String(input); calls.push({ path, method: options?.method, body: String(options?.body || "") });
+      if (path === "/admin/v1/providers") return json({ data: [{ id: "azure", type: "azure-openai", auth_type: "entra", enabled: true }] });
+      if (path === "/admin/v1/credentials" && options?.method === "POST") return json({ id: "azure-sp", provider_id: "azure", description: "SP" }, 201);
+      return json({ data: [] });
+    });
+    sessionStorage.setItem("ai-gateway.admin-token", "token");
+    render(<AuthProvider><CredentialsPage /></AuthProvider>);
+    await userEvent.click(await screen.findByRole("button", { name: "Create Credential" }));
+    const form = screen.getByRole("dialog", { name: "Create Credential" });
+    await userEvent.type(within(form).getByLabelText("Credential ID"), "azure-sp");
+    await userEvent.selectOptions(within(form).getByLabelText("Credential provider"), "azure");
+    await userEvent.selectOptions(within(form).getByLabelText("Azure credential type"), "service_principal");
+    await userEvent.type(within(form).getByLabelText("Tenant ID"), "tenant-a");
+    await userEvent.type(within(form).getByLabelText("Client ID"), "client-a");
+    await userEvent.type(within(form).getByLabelText("Client secret"), "private-value");
+    await userEvent.type(within(form).getByLabelText("Confirm client secret"), "private-value");
+    await userEvent.click(within(form).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(calls.some((call) => call.path === "/admin/v1/credentials" && call.method === "POST")).toBe(true));
+    const sent = JSON.parse(calls.find((call) => call.path === "/admin/v1/credentials" && call.method === "POST")!.body!);
+    expect(sent.provider_id).toBe("azure");
+    expect(sent.secret.startsWith("azure-sp:v1:")).toBe(true);
+    expect(JSON.parse(sent.secret.slice("azure-sp:v1:".length))).toEqual({ tenant_id: "tenant-a", client_id: "client-a", client_secret: "private-value" });
+    expect(screen.queryByDisplayValue("private-value")).not.toBeInTheDocument();
+  });
+
+  it("selects service principal when rotating an existing Azure credential", async () => {
+    const calls: Array<{ path: string; method?: string; body?: string }> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, options) => {
+      const path = String(input); calls.push({ path, method: options?.method, body: String(options?.body || "") });
+      if (path === "/admin/v1/providers") return json({ data: [{ id: "azure", type: "azure-openai", auth_type: "entra", enabled: true }] });
+      if (path === "/admin/v1/credentials" && !options?.method) return json({ data: [{ id: "azure-sp", provider_id: "azure", kind: "azure_service_principal", created_at: "2026-09-01T10:00:00Z", updated_at: "2026-09-01T10:00:00Z" }] });
+      if (path === "/admin/v1/credentials/azure-sp/rotate" && options?.method === "POST") return json({ id: "azure-sp", provider_id: "azure", kind: "azure_service_principal" });
+      return json({ data: [] });
+    });
+    sessionStorage.setItem("ai-gateway.admin-token", "token");
+    render(<AuthProvider><CredentialsPage /></AuthProvider>);
+    await userEvent.click(await screen.findByRole("button", { name: "Actions for azure-sp" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Rotate secret" }));
+    const form = screen.getByRole("dialog", { name: "Rotate credential secret" });
+    expect(within(form).getByLabelText("Azure credential type")).toHaveValue("service_principal");
+    await userEvent.type(within(form).getByLabelText("Tenant ID"), "tenant-b");
+    await userEvent.type(within(form).getByLabelText("Client ID"), "client-b");
+    await userEvent.type(within(form).getByLabelText("Client secret"), "new-private-value");
+    await userEvent.type(within(form).getByLabelText("Confirm client secret"), "new-private-value");
+    await userEvent.click(within(form).getByRole("button", { name: "Rotate secret" }));
+    await waitFor(() => expect(calls.some((call) => call.path.endsWith("/rotate") && call.method === "POST")).toBe(true));
+    const sent = JSON.parse(calls.find((call) => call.path.endsWith("/rotate"))!.body!);
+    expect(JSON.parse(sent.secret.slice("azure-sp:v1:".length))).toEqual({ tenant_id: "tenant-b", client_id: "client-b", client_secret: "new-private-value" });
+    expect(screen.queryByDisplayValue("new-private-value")).not.toBeInTheDocument();
+  });
 });

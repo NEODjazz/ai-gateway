@@ -29,7 +29,8 @@ describe("App", () => {
     await userEvent.type(await screen.findByLabelText("Gateway bearer token"), "token");
     await userEvent.click(screen.getByRole("button", { name: "Open console" }));
     const navigation = await screen.findByRole("navigation", { name: "Dashboard" });
-    expect(within(navigation).queryByRole("button", { name: /Manage|Monitor|Access Control|AI Hub|Govern|System/ })).not.toBeInTheDocument();
+    expect(within(navigation).getByRole("heading", { name: "Observability" })).toBeInTheDocument();
+    await userEvent.click(within(navigation).getByRole("button", { name: "Models & endpoints" }));
     expect(screen.getByRole("link", { name: "Providers" })).toHaveAttribute("href", "/ui/providers");
     expect(screen.getByRole("link", { name: "Logs" })).toHaveAttribute("href", "/ui/logs");
     expect(within(navigation).getByRole("link", { name: "Organizations" })).toBeInTheDocument();
@@ -48,6 +49,8 @@ describe("App", () => {
     expect(within(navigation).getByRole("link", { name: "Users" })).toBeInTheDocument();
     expect(within(navigation).queryByRole("link", { name: "Providers" })).not.toBeInTheDocument();
     expect(within(navigation).queryByRole("link", { name: "Virtual keys" })).not.toBeInTheDocument();
+    expect(within(navigation).queryByRole("button", { name: "Models & endpoints" })).not.toBeInTheDocument();
+    expect(within(navigation).queryByRole("heading", { name: "Settings" })).not.toBeInTheDocument();
     expect(await screen.findByRole("heading", { name: "Playground" })).toBeInTheDocument();
   });
 
@@ -92,6 +95,17 @@ describe("App", () => {
     render(<AuthProvider><App /></AuthProvider>);
     expect(await screen.findByRole("link", { name: "Continue with SSO" })).toHaveAttribute("href", "/auth/sso/start");
     expect(screen.getByLabelText("Gateway bearer token")).toBeInTheDocument();
+  });
+
+  it("offers organization-bound connections and leaves authorization to a fresh OIDC sign-in", async () => {
+    history.replaceState({}, "", "/ui/");
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => String(input) === "/auth/sso/config"
+      ? new Response(JSON.stringify({ enabled: true, connections: [{ id: "tenant-a", name: "Company A", provider: "entra", organization_id: "org-a", start_url: "https://untrusted.example" }, { id: "default", name: "Platform", provider: "oidc" }] }), { status: 200 })
+      : new Response(JSON.stringify({ error: { message: "No browser session" } }), { status: 401 }));
+    render(<AuthProvider><App /></AuthProvider>);
+    expect(await screen.findByRole("link", { name: "Continue with Company A · org-a" })).toHaveAttribute("href", "/auth/sso/start?connection=tenant-a");
+    expect(screen.getByRole("link", { name: "Continue with Platform · Platform" })).toHaveAttribute("href", "/auth/sso/start?connection=default");
+    expect(sessionStorage.getItem("ai-gateway.admin-token")).toBeNull();
   });
 
   it("signs out from the shared layout", async () => {

@@ -60,3 +60,25 @@ func TestResponseLogprobsStreamReplacement(t *testing.T) {
 		}
 	}
 }
+
+func TestResponsesRejectInvalidOutputLogprobsBeforeDelivery(t *testing.T) {
+	top := strings.Repeat(`{"token":"B","logprob":-2},`, maxResponseTopLogprobs) + `{"token":"B","logprob":-2}`
+	for name, logprobs := range map[string]string{
+		"positive probability":  `[{"token":"A","logprob":0.1}]`,
+		"invalid byte":          `[{"token":"A","logprob":-0.1,"bytes":[256]}]`,
+		"too many alternatives": `[{"token":"A","logprob":-0.1,"top_logprobs":[` + top + `]}]`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			part := `{"type":"output_text","text":"A","logprobs":` + logprobs + `}`
+			document := `{"id":"r","output":[{"type":"message","content":[` + part + `]}]}`
+			if _, err := decodeResponseJSON(strings.NewReader(document)); err == nil {
+				t.Fatalf("invalid JSON logprobs accepted: %s", logprobs)
+			}
+			calls := 0
+			wire := "data: {\"type\":\"response.content_part.done\",\"part\":" + part + "}\n\n" + responseTestTerminal
+			if _, err := streamResponseData(strings.NewReader(wire), "m", func(string, string) error { calls++; return nil }); err == nil || calls != 0 {
+				t.Fatalf("invalid SSE logprobs delivered: err=%v calls=%d", err, calls)
+			}
+		})
+	}
+}

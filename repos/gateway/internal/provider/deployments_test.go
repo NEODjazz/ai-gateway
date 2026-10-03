@@ -153,6 +153,14 @@ func TestManagedDeploymentRejectsUnsupportedProviderCapabilities(t *testing.T) {
 		{providerType: "anthropic", capability: "bedrock_invoke"},
 		{providerType: "openai-compatible", capability: "video_extension"},
 		{providerType: "openai-compatible", capability: "gemini_code_execution"},
+		{providerType: "gemini", capability: "gemini_audio_timestamp"},
+		{providerType: "openai-compatible", capability: "gemini_audio_timestamp"},
+		{providerType: "openai-compatible", capability: "gemini_media_resolution"},
+		{providerType: "openai-compatible", capability: "gemini_media_processing"},
+		{providerType: "openai-compatible", capability: "gemini_search_time_range"},
+		{providerType: "openai-compatible", capability: "gemini_file_search"},
+		{providerType: "openai-compatible", capability: "gemini_computer_use"},
+		{providerType: "openai-compatible", capability: "gemini_mcp"},
 		{providerType: "openai-compatible", capability: "url_context"},
 		{providerType: "openai-compatible", capability: "google_maps"},
 		{providerType: "vertex-gemini", capability: "responses"},
@@ -175,6 +183,20 @@ func TestManagedDeploymentRejectsUnsupportedProviderCapabilities(t *testing.T) {
 			switch test.capability {
 			case "stream", "tools", "structured_output", "vision", "web_search", "web_fetch", "tool_search", "memory_tool", "bash_tool", "text_editor_tool", "computer_toolset", "browser_toolset", "thinking", "zero_output", "inference_geo", "context_management", "tool_result_error", "document_citations", "document_metadata", "document_text", "audio", "audio_input", "video_input", "prompt_cache", "assistant_prefill", "bedrock_invoke", "gemini_code_execution", "url_context", "google_maps", "cached_content":
 				capabilities = append([]string{"chat"}, capabilities...)
+			case "gemini_audio_timestamp":
+				capabilities = []string{"chat", "audio_input", "gemini_audio_timestamp"}
+			case "gemini_media_resolution":
+				capabilities = []string{"chat", "vision", "gemini_media_resolution"}
+			case "gemini_media_processing":
+				capabilities = []string{"chat", "video_input", "gemini_media_processing"}
+			case "gemini_search_time_range":
+				capabilities = []string{"chat", "web_search", "gemini_search_time_range"}
+			case "gemini_file_search":
+				capabilities = []string{"chat", "gemini_file_search"}
+			case "gemini_computer_use":
+				capabilities = []string{"chat", "gemini_computer_use"}
+			case "gemini_mcp":
+				capabilities = []string{"chat", "gemini_mcp"}
 			case "background_responses":
 				capabilities = []string{"responses", "background_responses"}
 			case "video_extension":
@@ -327,12 +349,12 @@ func TestManagedDeploymentAcceptsSupportedFeatureCapabilities(t *testing.T) {
 	}{
 		{providerType: "ollama", capabilities: []string{"chat", "tools", "structured_output", "vision"}},
 		{providerType: "anthropic", capabilities: []string{"chat", "tools", "structured_output", "vision", "web_search", "web_fetch", "tool_search", "prompt_cache", "assistant_prefill", "memory_tool", "bash_tool", "text_editor_tool", "computer_toolset", "browser_toolset", "thinking", "zero_output", "inference_geo", "context_management", "tool_result_error", "document_citations", "document_metadata", "document_text", "file_input"}},
-		{providerType: "gemini", capabilities: []string{"chat", "gemini_safety_settings", "gemini_code_execution", "url_context", "google_maps", "image_generation", "image_edit", "image_variation", "audio_transcription", "audio_translation", "audio_speech", "ocr", "tools", "structured_output", "vision", "web_search", "audio_input", "video_input", "file_input"}},
-		{providerType: "vertex-gemini", capabilities: []string{"chat", "embeddings", "stream", "gemini_safety_settings", "gemini_code_execution", "url_context", "tools", "structured_output", "vision", "web_search", "audio_input", "video_input", "file_input"}},
+		{providerType: "gemini", capabilities: []string{"chat", "gemini_safety_settings", "gemini_code_execution", "gemini_media_resolution", "gemini_media_processing", "gemini_search_time_range", "gemini_file_search", "gemini_computer_use", "gemini_mcp", "url_context", "google_maps", "image_generation", "image_edit", "image_variation", "audio_transcription", "audio_translation", "audio_speech", "ocr", "tools", "structured_output", "vision", "web_search", "audio_input", "video_input", "file_input"}},
+		{providerType: "vertex-gemini", capabilities: []string{"chat", "embeddings", "stream", "gemini_safety_settings", "gemini_code_execution", "gemini_audio_timestamp", "gemini_media_resolution", "gemini_media_processing", "gemini_search_time_range", "gemini_file_search", "gemini_computer_use", "gemini_mcp", "url_context", "tools", "structured_output", "vision", "web_search", "audio_input", "video_input", "file_input"}},
 		{providerType: "cohere", capabilities: []string{"chat", "tools", "structured_output"}},
 		{providerType: "bedrock", capabilities: []string{"chat", "tools", "prompt_cache", "bedrock_invoke"}},
 		{providerType: "groq", capabilities: []string{"chat", "responses", "audio_transcription", "audio_translation", "audio_speech", "stream", "tools", "structured_output", "mcp", "vision"}},
-		{providerType: "deepseek", capabilities: []string{"chat", "responses", "stream", "tools", "structured_output", "vision"}},
+		{providerType: "deepseek", capabilities: []string{"chat", "responses", "stream", "tools", "custom_tools", "structured_output", "vision"}},
 		{providerType: "openrouter", capabilities: []string{"chat", "responses", "embeddings", "rerank", "image_generation", "image_edit", "audio_transcription", "audio_speech", "stream", "tools", "custom_tools", "structured_output", "vision", "web_search", "audio"}},
 		{providerType: "mistral", capabilities: []string{"chat", "audio_transcription", "audio_speech", "tools", "structured_output", "vision", "assistant_prefill"}},
 		{providerType: "xai", capabilities: []string{"chat", "responses", "tools", "custom_tools", "video", "video_remix", "video_extension"}},
@@ -433,6 +455,24 @@ func TestManagedProviderCapabilityProfilesMatchAdapterOperations(t *testing.T) {
 	if !slices.Contains(profilesByType["gemini"].Capabilities, "gemini_code_execution") {
 		t.Fatalf("Gemini profile is missing native code execution: %+v", profilesByType["gemini"])
 	}
+	if slices.Contains(profilesByType["gemini"].Capabilities, "gemini_audio_timestamp") || !slices.Contains(profilesByType["vertex-gemini"].Capabilities, "gemini_audio_timestamp") {
+		t.Fatalf("Vertex audio timestamp profiles are incorrect: gemini=%+v vertex=%+v", profilesByType["gemini"], profilesByType["vertex-gemini"])
+	}
+	if !slices.Contains(profilesByType["gemini"].Capabilities, "gemini_media_resolution") || !slices.Contains(profilesByType["vertex-gemini"].Capabilities, "gemini_media_resolution") {
+		t.Fatalf("Gemini media resolution profiles are incomplete: gemini=%+v vertex=%+v", profilesByType["gemini"], profilesByType["vertex-gemini"])
+	}
+	if !slices.Contains(profilesByType["gemini"].Capabilities, "gemini_media_processing") || !slices.Contains(profilesByType["vertex-gemini"].Capabilities, "gemini_media_processing") {
+		t.Fatalf("Gemini media processing profiles are incomplete: gemini=%+v vertex=%+v", profilesByType["gemini"], profilesByType["vertex-gemini"])
+	}
+	if !slices.Contains(profilesByType["gemini"].Capabilities, "gemini_search_time_range") || !slices.Contains(profilesByType["vertex-gemini"].Capabilities, "gemini_search_time_range") {
+		t.Fatalf("Gemini search time-range profiles are incomplete: gemini=%+v vertex=%+v", profilesByType["gemini"], profilesByType["vertex-gemini"])
+	}
+	if !slices.Contains(profilesByType["gemini"].Capabilities, "gemini_file_search") || !slices.Contains(profilesByType["vertex-gemini"].Capabilities, "gemini_file_search") {
+		t.Fatalf("Gemini file search profiles are incomplete: gemini=%+v vertex=%+v", profilesByType["gemini"], profilesByType["vertex-gemini"])
+	}
+	if !slices.Contains(profilesByType["gemini"].Capabilities, "gemini_computer_use") || !slices.Contains(profilesByType["vertex-gemini"].Capabilities, "gemini_computer_use") {
+		t.Fatalf("Gemini computer use profiles are incomplete: gemini=%+v vertex=%+v", profilesByType["gemini"], profilesByType["vertex-gemini"])
+	}
 	if !slices.Contains(profilesByType["gemini"].Capabilities, "url_context") {
 		t.Fatalf("Gemini profile is missing native URL context: %+v", profilesByType["gemini"])
 	}
@@ -465,7 +505,7 @@ func TestManagedProviderCapabilityProfilesMatchAdapterOperations(t *testing.T) {
 	if !slices.Equal(profilesByType["groq"].Operations, []string{"chat", "responses", "audio_transcription", "audio_translation", "audio_speech", "stream"}) || !slices.Equal(profilesByType["groq"].Capabilities, []string{"chat", "responses", "audio_transcription", "audio_translation", "audio_speech", "stream", "tools", "structured_output", "mcp", "vision"}) {
 		t.Fatalf("groq profile=%+v", profilesByType["groq"])
 	}
-	if !slices.Equal(profilesByType["deepseek"].Operations, []string{"chat", "responses", "stream"}) || !slices.Equal(profilesByType["deepseek"].Capabilities, []string{"chat", "responses", "stream", "tools", "structured_output", "vision"}) {
+	if !slices.Equal(profilesByType["deepseek"].Operations, []string{"chat", "responses", "stream"}) || !slices.Equal(profilesByType["deepseek"].Capabilities, []string{"chat", "responses", "stream", "tools", "custom_tools", "structured_output", "vision"}) {
 		t.Fatalf("deepseek profile=%+v", profilesByType["deepseek"])
 	}
 	if !slices.Equal(profilesByType["xai"].Operations, []string{"chat", "responses", "embeddings", "image_generation", "image_edit", "audio_transcription", "audio_speech", "video", "video_remix", "video_extension", "stream"}) || !slices.Equal(profilesByType["xai"].Capabilities, []string{"chat", "responses", "embeddings", "image_generation", "image_edit", "audio_transcription", "audio_speech", "video", "video_remix", "video_extension", "stream", "tools", "custom_tools", "structured_output", "vision", "web_search"}) {
@@ -490,20 +530,20 @@ func TestManagedProviderCapabilityProfilesExposeValidatedChatParameters(t *testi
 		"bedrock":           {ReasoningEffort: []string{}, Logprobs: []string{}, ServiceTier: []string{"default", "flex", "priority"}},
 		"anthropic":         {ReasoningEffort: []string{"low", "medium", "high", "xhigh", "max"}, Logprobs: []string{}, ServiceTier: []string{"auto", "standard_only"}},
 		"gemini":            {ReasoningEffort: []string{"minimal", "low", "medium", "high"}, Logprobs: []string{"false", "true"}, ServiceTier: []string{"auto", "default", "flex", "priority", "standard_only"}},
-		"ollama":            {ReasoningEffort: []string{"none", "low", "medium", "high", "max"}, Logprobs: []string{"false", "true"}, ServiceTier: []string{}},
+		"ollama":            {ReasoningEffort: allReasoning, Logprobs: []string{"false", "true"}, ServiceTier: []string{}},
 		"cohere":            {ReasoningEffort: []string{}, Logprobs: []string{"false", "true"}, ServiceTier: []string{}},
 		"mistral":           {ReasoningEffort: []string{"none", "minimal", "low", "medium", "high", "xhigh"}, Logprobs: []string{}, ServiceTier: []string{}},
-		"deepseek":          {ReasoningEffort: []string{}, Logprobs: []string{"false", "true"}, ServiceTier: []string{}},
-		"xai":               {ReasoningEffort: []string{"none", "low", "medium", "high", "xhigh"}, Logprobs: []string{"false", "true"}, ServiceTier: []string{"default", "priority"}},
-		"groq":              {ReasoningEffort: allReasoning, Logprobs: []string{}, ServiceTier: []string{"auto", "default", "on_demand", "flex", "performance"}},
+		"deepseek":          {ReasoningEffort: []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"}, Thinking: []string{"enabled", "disabled"}, Logprobs: []string{"false", "true"}, ServiceTier: []string{}},
+		"xai":               {ReasoningEffort: []string{}, Logprobs: []string{"false", "true"}, ServiceTier: []string{"default", "priority"}},
+		"groq":              {ReasoningEffort: []string{}, ReasoningFormat: []string{}, CitationOptions: []string{"enabled", "disabled"}, Logprobs: []string{}, ServiceTier: []string{"auto", "on_demand", "flex", "performance"}},
 		"openrouter":        {ReasoningEffort: allReasoning, Logprobs: []string{"false", "true"}, ServiceTier: allTiers},
 		"openai-compatible": {ReasoningEffort: allReasoning, Logprobs: []string{"false", "true"}, ServiceTier: []string{}},
-		"openai":            {ReasoningEffort: allReasoning, Logprobs: []string{"false", "true"}, ServiceTier: []string{"auto", "default", "flex", "priority"}},
+		"openai":            {ReasoningEffort: allReasoning, Logprobs: []string{"false", "true"}, ServiceTier: []string{"auto", "default", "flex", "priority", "fast", "ultrafast"}},
 		"azure-openai":      {ReasoningEffort: allReasoning, Logprobs: []string{"false", "true"}, ServiceTier: []string{}},
 	}
 	for providerType, expected := range tests {
 		actual, found := byType[providerType]
-		if !found || !slices.Equal(actual.ReasoningEffort, expected.ReasoningEffort) || !slices.Equal(actual.Logprobs, expected.Logprobs) || !slices.Equal(actual.ServiceTier, expected.ServiceTier) {
+		if !found || !slices.Equal(actual.ReasoningEffort, expected.ReasoningEffort) || !slices.Equal(actual.ReasoningFormat, expected.ReasoningFormat) || !slices.Equal(actual.CitationOptions, expected.CitationOptions) || !slices.Equal(actual.Thinking, expected.Thinking) || !slices.Equal(actual.Logprobs, expected.Logprobs) || !slices.Equal(actual.ServiceTier, expected.ServiceTier) {
 			t.Fatalf("%s chat parameters=%+v want=%+v", providerType, actual, expected)
 		}
 	}
@@ -515,27 +555,43 @@ func TestManagedProviderCapabilityProfilesExposeAllValidatedChatOptions(t *testi
 	for _, profile := range profiles {
 		byType[profile.Type] = profile.ChatParameters.SupportedOptions
 	}
-	compatible := []string{"metadata", "modalities", "audio", "n", "safety_identifier", "prompt_cache_key", "prompt_cache_options", "prompt_cache_retention", "prediction", "user", "verbosity", "web_search_options", "web_fetch_options", "logprobs", "top_logprobs", "frequency_penalty", "presence_penalty", "min_p", "top_k", "top_a", "repetition_penalty", "logit_bias", "reasoning_effort"}
+	compatible := []string{"metadata", "modalities", "audio", "moderation", "n", "safety_identifier", "prompt_cache_key", "prompt_cache_options", "prompt_cache_retention", "prediction", "user", "verbosity", "web_search_options", "web_fetch_options", "logprobs", "top_logprobs", "frequency_penalty", "presence_penalty", "min_p", "top_k", "top_a", "repetition_penalty", "logit_bias", "reasoning_effort"}
+	openRouter := []string{"metadata", "modalities", "audio", "n", "safety_identifier", "prompt_cache_key", "prompt_cache_options", "prompt_cache_retention", "prediction", "user", "verbosity", "web_search_options", "web_fetch_options", "logprobs", "top_logprobs", "frequency_penalty", "presence_penalty", "min_p", "top_k", "top_a", "repetition_penalty", "logit_bias", "reasoning_effort", "service_tier"}
 	compatibleTiered := append(append([]string(nil), compatible...), "service_tier")
+	azureCompatible := slices.DeleteFunc(slices.Clone(compatible), func(option string) bool { return option == "web_search_options" })
 	expected := map[string][]string{
 		"demo": {}, "voyage": {}, "opensandbox": {},
 		"ollama":            {"logprobs", "top_logprobs", "min_p", "top_k", "reasoning_effort"},
 		"openai":            compatibleTiered,
 		"openai-compatible": compatible,
-		"openrouter":        compatibleTiered,
-		"azure-openai":      compatible,
+		"openrouter":        openRouter,
+		"azure-openai":      azureCompatible,
 		"anthropic":         {"metadata", "web_search_options", "web_fetch_options", "top_k", "reasoning_effort", "service_tier"},
 		"gemini":            {"store", "modalities", "n", "web_search_options", "logprobs", "top_logprobs", "frequency_penalty", "presence_penalty", "top_k", "reasoning_effort", "service_tier"},
 		"cohere":            {"logprobs", "frequency_penalty", "presence_penalty", "top_k"},
 		"mistral":           {"metadata", "safe_prompt", "n", "prompt_cache_key", "prompt_mode", "prediction", "frequency_penalty", "presence_penalty", "reasoning_effort"},
 		"bedrock":           {"service_tier"},
-		"groq":              {"user", "reasoning_effort", "service_tier"},
-		"deepseek":          {"user", "logprobs", "top_logprobs"},
-		"xai":               {"n", "prompt_cache_key", "user", "web_search_options", "logprobs", "top_logprobs", "frequency_penalty", "presence_penalty", "reasoning_effort", "service_tier"},
+		"groq":              {"user", "citation_options", "service_tier"},
+		"deepseek":          {"user", "logprobs", "top_logprobs", "reasoning_effort", "thinking"},
+		"xai":               {"n", "prompt_cache_key", "user", "web_search_options", "logprobs", "top_logprobs", "frequency_penalty", "presence_penalty", "service_tier"},
 	}
 	for providerType, want := range expected {
 		if got, found := byType[providerType]; !found || !slices.Equal(got, want) {
 			t.Errorf("%s supported options=%v want=%v", providerType, got, want)
+		}
+	}
+}
+
+func TestClearThinkingIsOnlyAdvertisedForCerebrasModel(t *testing.T) {
+	for _, profile := range ManagedProviderCapabilityProfiles() {
+		if slices.Contains(profile.ChatParameters.SupportedOptions, "clear_thinking") {
+			t.Fatalf("%s advertises provider-wide clear_thinking", profile.Type)
+		}
+		for _, policy := range profile.ChatModelParameters {
+			advertised := slices.Contains(policy.SupportedOptions, "clear_thinking")
+			if advertised != (profile.Type == "cerebras" && policy.Model == "zai-glm-4.7") {
+				t.Fatalf("%s/%s clear_thinking=%v", profile.Type, policy.Model, advertised)
+			}
 		}
 	}
 }
@@ -548,19 +604,19 @@ func TestManagedProviderCapabilityProfilesExposeAllValidatedResponseOptions(t *t
 	}
 	allReasoning := []string{"none", "minimal", "low", "medium", "high", "xhigh", "max", "default"}
 	allTiers := []string{"auto", "default", "on_demand", "flex", "performance", "scale", "priority", "fast", "ultrafast", "standard_only"}
-	compatible := []string{"metadata", "top_logprobs", "truncation", "store", "include", "parallel_tool_calls", "text.verbosity", "previous_response_id", "user", "safety_identifier", "prompt_cache_key", "prompt_cache_options", "prompt_cache_retention", "stream_options", "max_output_tokens", "max_tokens", "temperature", "top_p", "frequency_penalty", "presence_penalty", "max_tool_calls", "reasoning"}
+	compatible := []string{"metadata", "context_management", "moderation", "top_logprobs", "truncation", "store", "include", "parallel_tool_calls", "text.verbosity", "previous_response_id", "user", "safety_identifier", "prompt_cache_key", "prompt_cache_options", "prompt_cache_retention", "stream_options", "max_output_tokens", "max_tokens", "temperature", "top_p", "frequency_penalty", "presence_penalty", "max_tool_calls", "reasoning"}
 	tiered := append(append([]string(nil), compatible...), "service_tier")
 	expected := map[string]ProviderResponseParameterPolicy{
 		"demo": {}, "gemini": {}, "cohere": {}, "mistral": {}, "voyage": {}, "bedrock": {}, "opensandbox": {},
-		"ollama":            {SupportedOptions: []string{"metadata", "top_logprobs", "truncation", "store", "include", "parallel_tool_calls", "previous_response_id", "max_output_tokens", "max_tokens", "temperature", "top_p", "reasoning"}, ReasoningEffort: allReasoning},
-		"openai":            {SupportedOptions: tiered, ReasoningEffort: allReasoning, ServiceTier: []string{"auto", "default", "flex", "priority"}},
+		"ollama":            {SupportedOptions: []string{"max_output_tokens", "max_tokens", "temperature", "top_p", "reasoning"}, ReasoningEffort: allReasoning},
+		"openai":            {SupportedOptions: tiered, ReasoningEffort: allReasoning, ServiceTier: []string{"auto", "default", "flex", "priority", "fast", "ultrafast"}},
 		"openai-compatible": {SupportedOptions: compatible, ReasoningEffort: allReasoning},
 		"openrouter":        {SupportedOptions: tiered, ReasoningEffort: allReasoning, ServiceTier: allTiers},
 		"azure-openai":      {SupportedOptions: compatible, ReasoningEffort: allReasoning},
 		"anthropic":         {SupportedOptions: []string{"parallel_tool_calls", "max_output_tokens", "max_tokens", "temperature", "top_p"}},
-		"groq":              {SupportedOptions: []string{"metadata", "parallel_tool_calls", "user", "max_output_tokens", "max_tokens", "temperature", "top_p", "reasoning", "service_tier"}, ReasoningEffort: []string{"low", "medium", "high"}, ServiceTier: []string{"auto", "default", "flex"}},
-		"deepseek":          {SupportedOptions: []string{"top_logprobs", "user", "max_output_tokens", "max_tokens", "temperature", "top_p", "reasoning"}, ReasoningEffort: []string{"low", "medium", "high", "xhigh", "max"}},
-		"xai":               {SupportedOptions: []string{"store", "include", "parallel_tool_calls", "previous_response_id", "user", "prompt_cache_key", "max_output_tokens", "max_tokens", "temperature", "top_p", "reasoning", "service_tier"}, ReasoningEffort: []string{"none", "low", "medium", "high", "xhigh"}, ServiceTier: []string{"default", "priority"}},
+		"groq":              {SupportedOptions: []string{"metadata", "parallel_tool_calls", "user", "max_output_tokens", "max_tokens", "temperature", "top_p", "service_tier"}, ServiceTier: []string{"auto", "default", "flex"}},
+		"deepseek":          {SupportedOptions: []string{"top_logprobs", "user", "max_output_tokens", "max_tokens", "temperature", "top_p", "reasoning"}, ReasoningEffort: []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"}},
+		"xai":               {SupportedOptions: []string{"store", "include", "parallel_tool_calls", "previous_response_id", "user", "prompt_cache_key", "max_output_tokens", "max_tokens", "temperature", "top_p", "max_tool_calls", "service_tier"}, ServiceTier: []string{"default", "priority"}},
 	}
 	for providerType, want := range expected {
 		got, found := byType[providerType]
@@ -640,7 +696,7 @@ func TestManagedProviderCapabilityProfilesExposeValidatedCompletionOptions(t *te
 			t.Errorf("%s completion parameters=%+v", providerType, got)
 		}
 	}
-	if got := byType["ollama"].CompletionParameters; !slices.Equal(got.SupportedOptions, compatibleOptions) || !slices.Equal(got.PromptForms, []string{"text"}) {
+	if got := byType["ollama"].CompletionParameters; !slices.Equal(got.SupportedOptions, []string{"frequency_penalty", "logprobs", "max_tokens", "presence_penalty", "seed", "stop", "suffix", "temperature", "top_p"}) || !slices.Equal(got.PromptForms, []string{"text"}) {
 		t.Errorf("ollama completion parameters=%+v", got)
 	}
 	if got := byType["mistral"].CompletionParameters; !slices.Equal(got.SupportedOptions, []string{"metadata", "max_tokens", "min_tokens", "prompt_cache_key", "seed", "stop", "suffix", "temperature", "top_p"}) || !slices.Equal(got.PromptForms, []string{"text"}) {

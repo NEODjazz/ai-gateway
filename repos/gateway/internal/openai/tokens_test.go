@@ -92,6 +92,13 @@ func TestTokenEstimatesIncludeFullContextAndEquivalentLimits(t *testing.T) {
 	if ResponseInputTokens(withCustomGrammar) <= ResponseInputTokens(ResponseRequest{Input: "test"})+1000 {
 		t.Fatal("custom tool grammar omitted from the input-token reserve")
 	}
+	functionTool := ResponseTool{Type: "function", Name: "lookup", Parameters: map[string]any{"type": "object"}}
+	withFunctionTool := ResponseRequest{Input: "test", Tools: []ResponseTool{functionTool}}
+	functionTool.OutputSchema = map[string]any{"type": "object", "description": strings.Repeat("result", 1000)}
+	withOutputSchema := ResponseRequest{Input: "test", Tools: []ResponseTool{functionTool}}
+	if ResponseInputTokens(withOutputSchema) <= ResponseInputTokens(withFunctionTool)+1000 {
+		t.Fatal("function output schema omitted from the input-token reserve")
+	}
 	withImageTool := ResponseRequest{Input: "test", Tools: []ResponseTool{{Type: "image_generation", Model: "gpt-image", InputImageMask: &ResponseInputImageMask{FileID: "file_mask"}, OutputFormat: "png", Size: "1024x1024"}}}
 	if ResponseInputTokens(withImageTool) <= ResponseInputTokens(ResponseRequest{Input: "test"}) {
 		t.Fatal("image generation tool configuration omitted from the input-token reserve")
@@ -145,6 +152,24 @@ func TestExplicitZeroMessagesOutputHasNoDefaultReserve(t *testing.T) {
 	request.AllowZeroMaxTokens = false
 	if ChatOutputReserve(request) != DefaultOutputTokenReserve {
 		t.Fatal("ordinary chat lost its default reserve")
+	}
+}
+
+func TestResponsePrewarmReservesInputOnly(t *testing.T) {
+	enabled := true
+	limit := 100_000
+	request := ResponseRequest{
+		Input:              "prepare this prompt",
+		MaxOutputTokens:    &limit,
+		PromptCacheOptions: &PromptCacheOptions{Prewarm: &enabled},
+	}
+	if ResponseOutputLimit(request) != 0 || ResponseReserveTokens(request) != ResponseInputTokens(request) {
+		t.Fatalf("prewarm reserve includes output: output=%d total=%d input=%d", ResponseOutputLimit(request), ResponseReserveTokens(request), ResponseInputTokens(request))
+	}
+	disabled := false
+	request.PromptCacheOptions.Prewarm = &disabled
+	if ResponseOutputLimit(request) != limit || ResponseReserveTokens(request) != ResponseInputTokens(request)+limit {
+		t.Fatal("prewarm=false changed the normal response reserve")
 	}
 }
 

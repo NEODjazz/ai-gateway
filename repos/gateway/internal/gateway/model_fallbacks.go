@@ -16,7 +16,7 @@ func (h Handler) prepareModelFallbacks(w http.ResponseWriter, ctx context.Contex
 	}
 	targets := resolver.ModelFallbackTargets(ctx, model)
 	for _, target := range targets {
-		if !modelAllowed(target, req.AllowedModels) {
+		if !requestModelAllowed(*req, target) {
 			continue
 		}
 		if req.AccessGroupsEvaluated && (len(req.AccessGroupModels) == 0 || !modelAllowed(target, req.AccessGroupModels)) {

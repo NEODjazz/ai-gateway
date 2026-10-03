@@ -107,3 +107,16 @@ volumes:
 {{- printf "%v" . -}}
 {{- end -}}
 {{- end -}}
+
+{{- define "ai-gateway.credentialEncryptionKey" -}}
+{{- $key := .Values.credentialEncryption.key -}}
+{{- $legacy := .Values.gateway.controlPlane.credentialEncryptionKey -}}
+{{- if and $key $legacy (ne $key $legacy) -}}
+{{- fail "credentialEncryption.key conflicts with deprecated gateway.controlPlane.credentialEncryptionKey" -}}
+{{- end -}}
+{{- $key = default $legacy $key -}}
+{{- if and .Values.credentialEncryption.existingSecret $key -}}
+{{- fail "credentialEncryption.existingSecret cannot be combined with an inline encryption key" -}}
+{{- end -}}
+{{- $key -}}
+{{- end -}}

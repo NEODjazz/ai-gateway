@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { AuthProvider } from "../auth/AuthContext";
@@ -46,6 +46,26 @@ describe("LogsPage", () => {
     await userEvent.click(screen.getByRole("menuitem", { name: "Details" }));
     const details = await screen.findByRole("dialog", { name: "Audit log details" });
     expect(within(details).getByText(/changed/)).toBeInTheDocument();
+  });
+
+  it("ignores a late request-log response after changing the time window", async () => {
+    let oldResponse: ((value: Response) => void) | undefined;
+    const row = (id: string) => ({ request_id: id, timestamp: "2026-08-28T10:00:00Z", status: "ok", currency: "USD" });
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const path = String(input);
+      if (path.includes("request-logs?") && path.includes("days=7")) return new Promise<Response>((resolve) => { oldResponse = resolve; });
+      if (path.includes("request-logs?") && path.includes("days=30")) return json({ data: [row("new-window")] });
+      return json({ data: [] });
+    });
+    sessionStorage.setItem("ai-gateway.admin-token", "token");
+    render(<MemoryRouter><AuthProvider><LogsPage /></AuthProvider></MemoryRouter>);
+    await waitFor(() => expect(oldResponse).toBeDefined());
+    await userEvent.selectOptions(screen.getByLabelText("Request log window"), "30");
+    await userEvent.click(screen.getByRole("button", { name: "Apply window" }));
+    await screen.findByText("new-window");
+    await act(async () => oldResponse!(json({ data: [row("old-window")] })));
+    expect(screen.getByText("new-window")).toBeInTheDocument();
+    expect(screen.queryByText("old-window")).not.toBeInTheDocument();
   });
 
   it("restores a shareable request-log view and opens request details from the URL", async () => {

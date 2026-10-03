@@ -63,6 +63,32 @@ func TestOpenAICompatibleRejectsInvalidResponseInputTokenCounts(t *testing.T) {
 	}
 }
 
+func TestAzureResponseInputTokenCountFailsBeforeUpstream(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	t.Cleanup(server.Close)
+	for _, tc := range []struct {
+		name, path, authType string
+	}{
+		{name: "resource API key", authType: "api_key"},
+		{name: "Foundry Entra", path: "/api/projects/project-a", authType: "entra"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := NewAzureOpenAI(server.URL+tc.path, "credential", false, "", tc.authType)
+			_, err := client.CountResponseInputTokens(t.Context(), openai.ResponseInputTokenCountRequest{Model: "model", Input: "hello"})
+			if !errors.Is(err, ErrResponseInputTokenCountUnsupported) {
+				t.Fatalf("unsupported Azure token count reached upstream: %v", err)
+			}
+		})
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("unsupported Azure token count reached upstream %d times", calls.Load())
+	}
+}
+
 type responseCountTestClient struct {
 	calls   int
 	request openai.ResponseInputTokenCountRequest
@@ -120,6 +146,25 @@ func TestRouterResponseInputTokenCountRequiresExplicitSupport(t *testing.T) {
 	_, err := router.CountResponseInputTokens(t.Context(), modules.RequestContext{Request: openai.ChatCompletionRequest{Model: "model"}, ResponseRequest: &request})
 	if !errors.Is(err, ErrResponseInputTokenCountUnsupported) {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRouterSkipsUnsupportedAzureResponseInputTokenCount(t *testing.T) {
+	azure := NewAzureOpenAI("http://127.0.0.1:1", "credential", false, "", "api_key")
+	router := Router{
+		endpoints: []Endpoint{{Name: "azure", Type: "azure-openai", Provider: azure, Admission: newAdmissionController(0, 0, 0)}},
+		modules:   modules.NewPipeline(nil), health: newEndpointHealthTracker(), routeCounter: &atomic.Uint64{},
+	}
+	request := openai.ResponseRequest{Model: "model", Input: "hello"}
+	context := modules.RequestContext{Request: openai.ChatCompletionRequest{Model: "model"}, ResponseRequest: &request}
+	if _, err := router.CountResponseInputTokens(t.Context(), context); !errors.Is(err, ErrResponseInputTokenCountUnsupported) {
+		t.Fatalf("Azure count did not fail before provider execution: %v", err)
+	}
+	compatible := &responseCountTestClient{}
+	router.endpoints = append(router.endpoints, Endpoint{Name: "compatible", Type: "openai-compatible", Provider: compatible, Admission: newAdmissionController(0, 0, 0)})
+	result, err := router.CountResponseInputTokens(t.Context(), context)
+	if err != nil || result.InputTokens != 9 || compatible.calls != 1 {
+		t.Fatalf("compatible count was not selected: result=%+v calls=%d err=%v", result, compatible.calls, err)
 	}
 }
 

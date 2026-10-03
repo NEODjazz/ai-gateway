@@ -42,3 +42,16 @@ func TestResponseSummaryIndexBounds(t *testing.T) {
 		}
 	}
 }
+
+func TestResponseSummaryPartRejectsConflictingFieldsBeforeDelivery(t *testing.T) {
+	for _, field := range []string{`"refusal":"no"`, `"annotations":[null]`, `"logprobs":[{"token":"s","logprob":-1}]`} {
+		for _, kind := range []string{"response.reasoning_summary_part.added", "response.reasoning_summary_part.done"} {
+			payload := fmt.Sprintf("data: {\"type\":%q,\"part\":{\"type\":\"summary_text\",\"text\":\"summary\",%s}}\n\n", kind, field)
+			calls := 0
+			_, err := streamResponseData(strings.NewReader(payload+responseTestTerminal), "m", func(string, string) error { calls++; return nil })
+			if err == nil || calls != 0 {
+				t.Fatalf("kind=%s field=%s err=%v calls=%d", kind, field, err, calls)
+			}
+		}
+	}
+}

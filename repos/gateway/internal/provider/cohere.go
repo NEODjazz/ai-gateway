@@ -145,6 +145,9 @@ func NewCohere(baseURL, apiKey string, stream ...bool) Cohere {
 func (Cohere) SupportsResponses() bool { return false }
 
 func (Cohere) ValidateChatParameters(request openai.ChatCompletionRequest) error {
+	if err := rejectChatModeration("cohere", request); err != nil {
+		return err
+	}
 	if err := validateChatReasoningContent("cohere", request.Messages, false); err != nil {
 		return err
 	}
@@ -268,6 +271,8 @@ func (Cohere) ValidateChatParameters(request openai.ChatCompletionRequest) error
 	}
 	return rejectParameters("cohere",
 		parameterCheck{"metadata", request.Metadata != nil}, parameterCheck{"store", request.Store != nil}, parameterCheck{"modalities", request.Modalities != nil}, parameterCheck{"audio", request.Audio != nil},
+		parameterCheck{"clear_thinking", request.ClearThinking != nil}, parameterCheck{"citation_options", request.CitationOptions != ""}, parameterCheck{"thinking", request.Thinking != nil},
+		parameterCheck{"include_reasoning", request.IncludeReasoning != nil}, parameterCheck{"reasoning_format", request.ReasoningFormat != ""},
 		parameterCheck{"reasoning_effort", request.ReasoningEffort != ""}, parameterCheck{"n", request.N != nil}, parameterCheck{"safety_identifier", request.SafetyIdentifier != ""},
 		parameterCheck{"safe_prompt", request.SafePrompt != nil},
 		parameterCheck{"prompt_cache_key", request.PromptCacheKey != ""}, parameterCheck{"prompt_cache_options", request.PromptCacheOptions != nil}, parameterCheck{"prompt_cache_retention", request.PromptCacheRetention != ""},

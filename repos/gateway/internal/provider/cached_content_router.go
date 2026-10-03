@@ -59,7 +59,7 @@ func (r Router) CreateCachedContent(ctx context.Context, identity modules.Reques
 			if content.Name != "" {
 				cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 				if cleanupErr := client.DeleteCachedContent(cleanupCtx, content.Name); cleanupErr != nil {
-					log.Printf("cached content compensation delete failed for %s: %v", content.Name, cleanupErr)
+					log.Print("cached content compensation delete failed")
 				}
 				cancel()
 			}

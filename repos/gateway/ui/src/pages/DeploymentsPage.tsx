@@ -69,6 +69,7 @@ export function DeploymentsPage() {
   const [limit, setLimit] = useState(25);
   const [total, setTotal] = useState(0);
   const [providerCapabilities, setProviderCapabilities] = useState<Record<string, string[]>>({});
+  const [providerBaseURLs, setProviderBaseURLs] = useState<Record<string, string>>({});
   const [filtersOpen, setFiltersOpen] = useState(false);
   const loadOptions = useCallback((path: string) => client.request(path), [client]);
 
@@ -76,13 +77,15 @@ export function DeploymentsPage() {
     setLoading(true); setError("");
     try {
       const params = new URLSearchParams({ search, provider: providerFilter, state: stateFilter, sort, order, limit: String(limit), offset: String(offset) });
-      const [payload, capabilityPayload] = await Promise.all([
+      const [payload, capabilityPayload, providerPayload] = await Promise.all([
         client.request<{ data: Deployment[]; total?: number }>(`/admin/v1/model-deployments?${params}`),
-        client.request<{ data?: ProviderCapabilityProfile[] }>("/admin/v1/provider-capabilities").catch(() => ({ data: [] }))
+        client.request<{ data?: ProviderCapabilityProfile[] }>("/admin/v1/provider-capabilities").catch(() => ({ data: [] })),
+        client.request<{ data?: Array<{ id: string; base_url: string }> }>("/admin/v1/providers").catch(() => ({ data: [] }))
       ]);
       const rows = records<Deployment>(payload); setTotal(payload.total ?? rows.length);
       setDeployments(rows);
       setProviderCapabilities(Object.fromEntries((capabilityPayload.data || []).map((profile) => [profile.type, profile.capabilities || profile.operations || []])));
+      setProviderBaseURLs(Object.fromEntries((providerPayload.data || []).map((provider) => [provider.id, provider.base_url])));
       const checks = rows.length ? records<HealthCheck>(await client.request(`/admin/v1/model-deployments/health?ids=${encodeURIComponent(rows.map((row) => row.id).join(","))}`)) : [];
       setLatest(Object.fromEntries(checks.map((check) => [check.deployment_id, check])));
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not load deployments"); }
@@ -141,8 +144,8 @@ export function DeploymentsPage() {
   ], []);
   const deploymentSortKeys: Record<string, string> = { id: "id", provider_id: "provider", priority: "priority", weight: "weight", runtime_state: "state" };
   const editFields = useMemo(() => (resourceConfigs.deployments.fields || []).filter((field) => editing?.provider_type !== "vertex-gemini" || field.key !== "credential_id").map((field) => field.key === "capabilities" && editing
-    ? { ...field, chipOptions: providerModelCapabilityOptions(providerCapabilities[editing.provider_type]) }
-    : field), [editing, providerCapabilities]);
+    ? { ...field, chipOptions: providerModelCapabilityOptions(providerCapabilities[editing.provider_type], editing.provider_type, providerBaseURLs[editing.provider_id]) }
+    : field), [editing, providerCapabilities, providerBaseURLs]);
 
   return <><PageHeader eyebrow="Runtime routing" title="Deployments" description="Provider/model endpoints with live health, circuit state and operational controls." />
     {error && <ErrorState message={error} retry={() => void load()} />}

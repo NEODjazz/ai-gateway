@@ -55,7 +55,7 @@ func (s responseOwnershipStore) configured() bool {
 }
 
 func persistentResponseRequested(request openai.ResponseRequest) bool {
-	return request.Store != nil && *request.Store
+	return request.Conversation != nil || request.Store != nil && *request.Store
 }
 
 func (r Router) validateResponseOwnership(req modules.RequestContext, request openai.ResponseRequest) error {
@@ -78,7 +78,9 @@ func (r Router) persistResponseOwnership(ctx context.Context, req modules.Reques
 		Deployment: responseDeploymentIdentity(endpoint),
 		Resource:   "response",
 	}
-	if err := r.ownership.put(ctx, req, responseID, binding); err != nil {
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if err := r.ownership.put(writeCtx, req, responseID, binding); err != nil {
 		if errors.Is(err, ErrResponseOwnershipConflict) {
 			return err
 		}

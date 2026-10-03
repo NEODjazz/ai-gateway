@@ -176,7 +176,7 @@ func (m BillingModule) Handle(ctx context.Context, req *RequestContext) error {
 		}
 	}
 	promptTokens := estimatePromptTokens(req)
-	inputTokens, outputTokens, totalTokens, usageEstimated := usageTokens(req, promptTokens)
+	inputTokens, outputTokens, totalTokens, usageEstimated := usageTokens(req, promptTokens, phase)
 	if req.APIType == "video" {
 		inputTokens, outputTokens, totalTokens = 0, 0, 0
 		usageEstimated = metadataBool(req, "usage.estimated")
@@ -560,17 +560,18 @@ func estimatePromptTokens(req *RequestContext) int {
 	return promptTokens
 }
 
-func usageTokens(req *RequestContext, fallbackPromptTokens int) (int, int, int, bool) {
+func usageTokens(req *RequestContext, fallbackPromptTokens int, phase string) (int, int, int, bool) {
 	if metadata(req, "provider.cache.status") == "hit" {
 		return 0, 0, 0, false
 	}
-	if req.Usage != nil && (req.Usage.TotalTokens > 0 || req.APIType == "realtime" && !metadataBool(req, "usage.estimated")) {
+	_, exactUsageReported := req.Metadata["usage.estimated"]
+	if req.Usage != nil && (req.Usage.TotalTokens > 0 || phase == "commit" && exactUsageReported && !metadataBool(req, "usage.estimated")) {
 		return req.Usage.PromptTokens, req.Usage.CompletionTokens, req.Usage.TotalTokens, metadataBool(req, "usage.estimated")
 	}
-	if req.Response != nil && req.Response.Usage.TotalTokens > 0 {
+	if req.Response != nil && (req.Response.Usage.TotalTokens > 0 || phase == "commit" && exactUsageReported && !metadataBool(req, "usage.estimated")) {
 		return req.Response.Usage.PromptTokens, req.Response.Usage.CompletionTokens, req.Response.Usage.TotalTokens, false
 	}
-	if req.ResponsesResponse != nil && req.ResponsesResponse.Usage.TotalTokens > 0 {
+	if req.ResponsesResponse != nil && (req.ResponsesResponse.Usage.TotalTokens > 0 || phase == "commit" && exactUsageReported && !metadataBool(req, "usage.estimated")) {
 		return req.ResponsesResponse.Usage.InputTokens, req.ResponsesResponse.Usage.OutputTokens, req.ResponsesResponse.Usage.TotalTokens, false
 	}
 	return fallbackPromptTokens, 0, fallbackPromptTokens, true

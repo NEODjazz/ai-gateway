@@ -141,12 +141,11 @@ describe("VirtualKeysPage", () => {
     expect(writeText).toHaveBeenCalledWith("sk-ag-secret-once");
     const createCall = fetchMock.mock.calls.find(([path, options]) => path === "/admin/v1/keys" && options?.method === "POST")!;
     const body = JSON.parse(String(createCall[1]?.body));
-		expect(body).toMatchObject({ alias: "automation", team_id: "team-1" });
+		expect(body).toMatchObject({ alias: "automation", organization_id: "org-1", team_id: "team-1" });
 		expect(body.access_group_ids).toEqual(["platform"]);
 		expect(body.allowed_models).toEqual(expect.arrayContaining(["gpt", "embed"]));
 		expect(body).not.toHaveProperty("user_id");
 		expect(body).not.toHaveProperty("organization");
-		expect(body).not.toHaveProperty("organization_id");
 	});
 
 	it("filters team-owned and member-owned keys by the selected team", async () => {
@@ -200,10 +199,16 @@ describe("VirtualKeysPage", () => {
     expect(screen.getByRole("menuitem", { name: "Inspect" })).toHaveAttribute("href", "/ui/api-keys/vk_alpha");
     await userEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
     const edit = await screen.findByRole("dialog", { name: "Edit virtual key" });
+    expect(within(edit).getByLabelText("Organization")).toBeDisabled();
+    expect(within(edit).getByLabelText("Organization")).toHaveValue("");
+    expect(within(edit).getByLabelText("User")).toBeDisabled();
     await userEvent.type(within(edit).getByLabelText("Description"), "Updated policy");
     await userEvent.click(within(edit).getByRole("button", { name: "Save changes" }));
     await waitFor(() => expect(fetchMock.mock.calls.some(([path, options]) => path === "/admin/v1/keys/vk_alpha" && options?.method === "PUT")).toBe(true));
     await userEvent.click(screen.getByRole("button", { name: "Actions for production" }));
+    const editCall = fetchMock.mock.calls.find(([path, options]) => path === "/admin/v1/keys/vk_alpha" && options?.method === "PUT")!;
+    expect(JSON.parse(String(editCall[1]?.body))).toMatchObject({ user_id: "user-1", team_id: "team-1" });
+    expect(JSON.parse(String(editCall[1]?.body))).not.toHaveProperty("organization_id");
     await userEvent.click(screen.getByRole("menuitem", { name: "Disable" }));
     await waitFor(() => expect(fetchMock.mock.calls.some(([path]) => path === "/admin/v1/keys/vk_alpha/disable")).toBe(true));
     await userEvent.click(screen.getByRole("button", { name: "Actions for production" }));
@@ -215,4 +220,27 @@ describe("VirtualKeysPage", () => {
     await userEvent.click(screen.getByRole("menuitem", { name: "Revoke" }));
     await waitFor(() => expect(fetchMock.mock.calls.some(([path, options]) => path === "/admin/v1/keys/vk_alpha" && options?.method === "DELETE")).toBe(true));
   });
+  it("preserves explicit organization, user and team ownership in edit and rotation", async () => {
+    const fetchMock = mockAPI([{ ...key, organization_id: "org-1" }]); renderPage();
+    await screen.findByText("production");
+    await userEvent.click(screen.getByRole("button", { name: "Actions for production" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
+    const edit = await screen.findByRole("dialog", { name: "Edit virtual key" });
+    expect(within(edit).getByLabelText("Organization")).toHaveValue("org-1");
+    expect(within(edit).getByLabelText("Organization")).toBeDisabled();
+    expect(within(edit).getByLabelText("User")).toBeDisabled();
+    await userEvent.selectOptions(within(edit).getByLabelText("Team"), "");
+    expect(within(edit).getByLabelText("User")).toHaveValue("user-1");
+    await userEvent.selectOptions(within(edit).getByLabelText("Team"), "team-1");
+    await userEvent.click(within(edit).getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await userEvent.click(screen.getByRole("button", { name: "Actions for production" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Rotate" }));
+    await screen.findByRole("dialog", { name: "Virtual key created" });
+    for (const method of ["PUT", "POST"]) {
+      const call = fetchMock.mock.calls.find(([path, options]) => String(path).startsWith("/admin/v1/keys/vk_alpha") && options?.method === method)!;
+      expect(JSON.parse(String(call[1]?.body))).toMatchObject({ organization_id: "org-1", team_id: "team-1", user_id: "user-1" });
+    }
+  });
+
 });

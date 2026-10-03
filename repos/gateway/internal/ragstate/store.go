@@ -14,6 +14,7 @@ type IngestRequest struct {
 	VectorStore      *vectorstate.VectorStore
 	VectorStoreID    string
 	Attributes       map[string]any
+	ChunkingStrategy vectorstate.ChunkingStrategy
 	FileOwnerQuota   int64
 	VectorStoreQuota int
 	VectorStoreFiles int

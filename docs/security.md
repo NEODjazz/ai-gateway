@@ -1,5 +1,19 @@
 # Безопасность и границы данных
 
+[SSO settings в UI](admin-sso-settings.md) используют encrypted PostgreSQL
+document, точные issuer/audience, предварительную directory binding и явные
+role mappings. Активация требует проверочного входа тем же administrator и
+virtual-key session; права directory повторно проверяются перед сменой trust.
+Выбор нового issuer влияет на все JWT clients, поэтому рабочий профиль не
+активируется автоматически при обновлении приложения.
+
+Provisioned OIDC users используют `AUTH_JWT_IDENTITY_MODE=directory`: проверенная
+issuer/subject/audience identity связывается с активным пользователем directory,
+а права, группы и лимиты загружаются при каждой авторизации. Roles должны совпасть
+с явным mapping и ролями directory. Пустые grants запрещают доступ; идентификатор
+credential стабилен при refresh. Default `legacy` сохраняет старый claims-only
+режим и требует явного переключения для этой политики. См. [Auth](../repos/auth/README.md).
+
 ## Authentication
 
 Клиент передаёт `Authorization: Bearer <credential>`. Gateway отправляет токен
@@ -24,6 +38,25 @@ RS256/ES256. HS256 и built-in demo/static keys предназначены дл�
 
 `RequestContext` не является network DTO. Remote responses применяются по
 allowlist полей и не могут перезаписать identity или routing state целиком.
+При ошибке provider в request metadata остаются статус и, где он определён,
+ограниченный `failure_class`. Raw error и текст ошибки фонового ответа не
+копируются в metadata, передаваемую последующим модулям или сохраняемую в
+background jobs. Provider и module traces, а также логи ошибок provider
+worker, cache и optional modules, не записывают сырой текст ошибки.
+Это также относится к optional modules сервисов Auth, Billing и Anonymizer:
+их журналы содержат имя модуля и факт пропуска, но не текст ошибки.
+Gateway operational logs пишут фиксированный тип сбоя без пользовательских
+идентификаторов и raw error; внешний `X-Request-ID` в HTTP-логах и traces
+представлен SHA-256 fingerprint. Журнал management actions сервиса Auth
+также записывает только fingerprint внешнего request ID.
+Нестандартные HTTP methods записываются как `OTHER`.
+Billing readiness возвращает только фиксированную причину недоступности,
+не раскрывая подробности подключения к хранилищу.
+Внутренний `/usage` Billing не переносит сырой `error` в metadata обработки;
+для диагностики сохраняются статус и ограниченный `failure_class`.
+Новые ошибки доставки durable billing outbox записываются в PostgreSQL как
+ограниченные коды `event_decode_failed` или `usage_delivery_failed`. Ранее
+сохранённые значения `last_error` это изменение не переписывает.
 
 Internal `/authorize`, `/usage`, `/scan`, `/anonymize` и `/internal/v1/*`
 должны оставаться cluster-internal. Service contracts защищаются отдельными
@@ -43,6 +76,11 @@ gateway восстанавливает request-local placeholders в успеш�
 проверять masking нужно на входе provider или через cluster-internal ответ
 anonymizer; наличие исходного значения в клиентском ответе само по себе не
 означает, что оно было отправлено provider.
+
+Chat DLP и анонимизация включают обычный текст и неподписанное
+`reasoning_content` во входных сообщениях и ответах. Подписанные reasoning-блоки
+входят в DLP-проекцию, но не изменяются, поскольку изменение текста сделало бы
+подпись недействительной.
 
 Guardrail policy также задаёт профиль анонимизации: `disabled`, `basic`,
 `strict` или `custom`. `custom` содержит явный набор имён правил, доступных через
@@ -99,3 +137,6 @@ Gateway отвечает только на `ping`; необъявленные pr
 - Swagger `Try it out` и demo/static auth отключайте вне trusted environment;
 - Request Logs, traces и metrics не должны содержать prompt, response, Bearer,
   raw provider error или unbounded tenant labels.
+
+Порядок provisioning, scope, отзыва и безопасного legacy cutover описан в
+[Keycloak/OpenWebUI profile](identity-keycloak-openwebui.md).

@@ -7,6 +7,7 @@ import (
 	"log"
 	"time"
 
+	"ai-gateway-gateway/internal/conversationstate"
 	"ai-gateway-gateway/internal/openai"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -14,6 +15,7 @@ import (
 )
 
 type RequestContext struct {
+	JWTIdentity                *JWTIdentity                       `json:"jwt_identity,omitempty"`
 	APIKey                     string                             `json:"-"`
 	RequestID                  string                             `json:"request_id,omitempty"`
 	SessionID                  string                             `json:"session_id,omitempty"`
@@ -33,6 +35,8 @@ type RequestContext struct {
 	AccessGroupModels          []string                           `json:"-"`
 	AccessGroupTools           []string                           `json:"-"`
 	AccessGroupsEvaluated      bool                               `json:"-"`
+	ModelAccessRestricted      bool                               `json:"model_access_restricted,omitempty"`
+	ToolAccessRestricted       bool                               `json:"tool_access_restricted,omitempty"`
 	AllowedModels              []string                           `json:"allowed_models,omitempty"`
 	AllowedFallbackModels      []string                           `json:"-"`
 	FallbackPolicyEvaluated    bool                               `json:"-"`
@@ -44,6 +48,8 @@ type RequestContext struct {
 	Request                    openai.ChatCompletionRequest       `json:"request"`
 	CompletionRequest          *openai.CompletionRequest          `json:"completion_request,omitempty"`
 	ResponseRequest            *openai.ResponseRequest            `json:"response_request,omitempty"`
+	ConversationTurn           *conversationstate.Turn            `json:"-"`
+	ConversationInputItems     []conversationstate.Item           `json:"-"`
 	EmbeddingRequest           *openai.EmbeddingRequest           `json:"embedding_request,omitempty"`
 	RerankRequest              *openai.RerankRequest              `json:"rerank_request,omitempty"`
 	ModerationRequest          *openai.ModerationRequest          `json:"moderation_request,omitempty"`
@@ -140,7 +146,7 @@ func (p Pipeline) RunAfterAuthentication(ctx context.Context, req *RequestContex
 			if module.Required() || errors.Is(err, ErrContentRejected) || errors.Is(err, ErrGuardrailUnavailable) {
 				return fmt.Errorf("%s module failed: %w", module.Name(), err)
 			}
-			log.Printf("optional module %s skipped after error: %v", module.Name(), err)
+			log.Printf("optional module %s skipped: %s", module.Name(), moduleResult(err))
 		}
 	}
 	return nil
@@ -164,7 +170,7 @@ func (p Pipeline) RunTokenCountAfterAuthentication(ctx context.Context, req *Req
 			if module.Required() || errors.Is(err, ErrContentRejected) || errors.Is(err, ErrGuardrailUnavailable) {
 				return fmt.Errorf("%s module failed: %w", module.Name(), err)
 			}
-			log.Printf("optional module %s skipped after error: %v", module.Name(), err)
+			log.Printf("optional module %s skipped: %s", module.Name(), moduleResult(err))
 		}
 	}
 	return nil
@@ -184,7 +190,7 @@ func (p Pipeline) RunAuthentication(ctx context.Context, req *RequestContext) er
 			if module.Required() {
 				return fmt.Errorf("%s module failed: %w", module.Name(), err)
 			}
-			log.Printf("optional module %s skipped after error: %v", module.Name(), err)
+			log.Printf("optional module %s skipped: %s", module.Name(), moduleResult(err))
 		}
 	}
 	if !found || req.CredentialID == "" {
@@ -239,7 +245,7 @@ func (p Pipeline) runPre(ctx context.Context, req *RequestContext, tokenCount bo
 			if module.Required() || errors.Is(err, ErrContentRejected) || errors.Is(err, ErrGuardrailUnavailable) {
 				return fmt.Errorf("%s module failed: %w", module.Name(), err)
 			}
-			log.Printf("optional module %s skipped after error: %v", module.Name(), err)
+			log.Printf("optional module %s skipped: %s", module.Name(), moduleResult(err))
 		}
 	}
 	return nil
@@ -258,7 +264,7 @@ func (p Pipeline) RunPostResponse(ctx context.Context, req *RequestContext) erro
 				terminal = append(terminal, fmt.Errorf("%s post-response module failed: %w", module.Name(), err))
 				continue
 			}
-			log.Printf("optional post-response module %s skipped after error: %v", module.Name(), err)
+			log.Printf("optional post-response module %s skipped: %s", module.Name(), moduleResult(err))
 		}
 	}
 	return errors.Join(terminal...)
@@ -275,7 +281,7 @@ func (p Pipeline) RunNamed(ctx context.Context, req *RequestContext, name string
 			if module.Required() || errors.Is(err, ErrContentRejected) || errors.Is(err, ErrGuardrailUnavailable) {
 				return fmt.Errorf("%s module failed: %w", name, err)
 			}
-			log.Printf("optional module %s skipped after error: %v", name, err)
+			log.Printf("optional module %s skipped: %s", name, moduleResult(err))
 		}
 		return nil
 	}
@@ -298,7 +304,7 @@ func (p Pipeline) RunNamedPostResponse(ctx context.Context, req *RequestContext,
 			if module.Required() || errors.Is(err, ErrContentRejected) || errors.Is(err, ErrGuardrailUnavailable) {
 				return fmt.Errorf("%s post-response module failed: %w", name, err)
 			}
-			log.Printf("optional post-response module %s skipped after error: %v", name, err)
+			log.Printf("optional post-response module %s skipped: %s", name, moduleResult(err))
 		}
 		return nil
 	}
@@ -318,7 +324,6 @@ func (p Pipeline) RunFailure(ctx context.Context, req *RequestContext, cause err
 		result := moduleResult(err)
 		span.SetAttributes(attribute.String("ai.module.result", result))
 		if err != nil {
-			span.RecordError(err)
 			span.SetStatus(codes.Error, result)
 		}
 		span.End()
@@ -326,7 +331,7 @@ func (p Pipeline) RunFailure(ctx context.Context, req *RequestContext, cause err
 			p.observer.ObserveModule(module.Name(), "failure", result, time.Since(started))
 		}
 		if err != nil {
-			log.Printf("failure hook %s skipped after error: %v", module.Name(), err)
+			log.Printf("failure hook %s skipped: %s", module.Name(), result)
 		}
 	}
 }
@@ -339,7 +344,6 @@ func (p Pipeline) run(ctx context.Context, req *RequestContext, module Module, p
 	result := moduleResult(err)
 	span.SetAttributes(attribute.String("ai.module.result", result))
 	if err != nil {
-		span.RecordError(err)
 		span.SetStatus(codes.Error, result)
 	}
 	span.End()

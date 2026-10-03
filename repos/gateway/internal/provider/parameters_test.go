@@ -6,6 +6,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -14,24 +16,70 @@ import (
 	"ai-gateway-gateway/internal/openai"
 )
 
+func TestRejectGenerationOptionsCoversEveryPublicField(t *testing.T) {
+	optionsType := reflect.TypeOf(openai.ChatGenerationOptions{})
+	for index := 0; index < optionsType.NumField(); index++ {
+		field := optionsType.Field(index)
+		parameter := strings.Split(field.Tag.Get("json"), ",")[0]
+		if parameter == "" || parameter == "-" {
+			t.Fatalf("ChatGenerationOptions.%s does not declare a public JSON parameter", field.Name)
+		}
+		t.Run(parameter, func(t *testing.T) {
+			options := reflect.New(optionsType).Elem()
+			value := options.FieldByIndex(field.Index)
+			switch value.Kind() {
+			case reflect.Map:
+				value.Set(reflect.MakeMap(value.Type()))
+			case reflect.Pointer:
+				value.Set(reflect.New(value.Type().Elem()))
+			case reflect.Slice:
+				value.Set(reflect.MakeSlice(value.Type(), 0, 0))
+			case reflect.String:
+				value.SetString("supplied")
+			default:
+				t.Fatalf("ChatGenerationOptions.%s has unhandled kind %s", field.Name, value.Kind())
+			}
+
+			var failure *Error
+			err := rejectGenerationOptions("contract-test", options.Interface().(openai.ChatGenerationOptions))
+			if !errors.As(err, &failure) || failure.UpstreamCode != "unsupported_parameter" || failure.Param != parameter {
+				t.Fatalf("public parameter %s is not covered by the adapter rejection policy: %v", parameter, err)
+			}
+		})
+	}
+}
+
 func TestManagedOpenAIServiceTierIsValidatedAndForwarded(t *testing.T) {
 	requests := 0
+	expectedTiers := []string{"priority", "priority", "fast", "fast", "ultrafast", "ultrafast"}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requests++
 		var body map[string]any
-		if json.NewDecoder(r.Body).Decode(&body) != nil || body["service_tier"] != "priority" {
+		if json.NewDecoder(r.Body).Decode(&body) != nil || requests >= len(expectedTiers) || body["service_tier"] != expectedTiers[requests] {
 			t.Fatalf("service tier was not forwarded: %+v", body)
 		}
-		_, _ = w.Write([]byte(`{"id":"chat","model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+		requests++
+		switch r.URL.Path {
+		case "/v1/chat/completions":
+			_, _ = w.Write([]byte(`{"id":"chat","model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+		case "/v1/responses":
+			_, _ = w.Write([]byte(`{"id":"resp_1","object":"response","model":"m","status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`))
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
 	}))
 	defer server.Close()
 	client := providerFor(config.ProviderEndpointConfig{Type: "openai", BaseURL: server.URL})
-	request := openai.ChatCompletionRequest{Model: "m", Messages: []openai.Message{{Role: "user", Content: "test"}}, ChatGenerationOptions: openai.ChatGenerationOptions{ServiceTier: "priority"}}
-	if _, err := client.ChatCompletions(t.Context(), request); err != nil {
-		t.Fatal(err)
+	for _, tier := range []string{"priority", "fast", "ultrafast"} {
+		request := openai.ChatCompletionRequest{Model: "m", Messages: []openai.Message{{Role: "user", Content: "test"}}, ChatGenerationOptions: openai.ChatGenerationOptions{ServiceTier: tier}}
+		if _, err := client.ChatCompletions(t.Context(), request); err != nil {
+			t.Fatalf("chat service_tier=%s: %v", tier, err)
+		}
+		if _, err := client.Responses(t.Context(), openai.ResponseRequest{Model: "m", Input: "test", ServiceTier: tier}); err != nil {
+			t.Fatalf("responses service_tier=%s: %v", tier, err)
+		}
 	}
-	request.ServiceTier = "scale"
-	if err := validateChatAdapter(client, request); err == nil || requests != 1 {
+	request := openai.ChatCompletionRequest{Model: "m", Messages: []openai.Message{{Role: "user", Content: "test"}}, ChatGenerationOptions: openai.ChatGenerationOptions{ServiceTier: "scale"}}
+	if err := validateChatAdapter(client, request); err == nil || requests != 6 {
 		t.Fatalf("unsupported tier reached provider: err=%v requests=%d", err, requests)
 	}
 }
@@ -282,6 +330,120 @@ func TestNativeResponseAndEmbeddingParameterPolicy(t *testing.T) {
 	}
 	_, err = (Demo{}).Embeddings(context.Background(), openai.EmbeddingRequest{Model: "embed", Input: "text", User: "customer"})
 	assertUnsupportedParameter(t, err, "user")
+}
+
+func TestOllamaRejectsUnsupportedResponsesControlsBeforeUpstream(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	t.Cleanup(server.Close)
+	trueValue := true
+	falseValue := false
+	truncation := "auto"
+	topLogprobs := 1
+	context := "auto"
+	mode := "standard"
+	summary := "auto"
+	generateSummary := "auto"
+	for _, test := range []struct {
+		name    string
+		request openai.ResponseRequest
+	}{
+		{name: "previous_response_id", request: openai.ResponseRequest{PreviousResponse: "resp_prior"}},
+		{name: "conversation", request: openai.ResponseRequest{Conversation: &openai.ResponseConversation{ID: "conv_prior"}}},
+		{name: "truncation", request: openai.ResponseRequest{Truncation: &truncation}},
+		{name: "store", request: openai.ResponseRequest{Store: &trueValue}},
+		{name: "include", request: openai.ResponseRequest{Include: []string{"reasoning.encrypted_content"}}},
+		{name: "metadata", request: openai.ResponseRequest{Metadata: map[string]string{"trace": "one"}}},
+		{name: "top_logprobs", request: openai.ResponseRequest{TopLogprobs: &topLogprobs}},
+		{name: "tool_choice", request: openai.ResponseRequest{ToolChoice: "required"}},
+		{name: "parallel_tool_calls", request: openai.ResponseRequest{ParallelToolCalls: &falseValue}},
+		{name: "reasoning.context", request: openai.ResponseRequest{Reasoning: &openai.ResponseReasoning{Context: &context}}},
+		{name: "reasoning.mode", request: openai.ResponseRequest{Reasoning: &openai.ResponseReasoning{Mode: &mode}}},
+		{name: "reasoning.summary", request: openai.ResponseRequest{Reasoning: &openai.ResponseReasoning{Summary: &summary}}},
+		{name: "reasoning.generate_summary", request: openai.ResponseRequest{Reasoning: &openai.ResponseReasoning{GenerateSummary: &generateSummary}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request := test.request
+			request.Model = "model"
+			request.Input = "hello"
+			client := NewOllama(server.URL, true)
+			_, err := client.Responses(t.Context(), request)
+			assertUnsupportedParameter(t, err, test.name)
+			_, err = client.StreamResponses(t.Context(), request, func(string, string) error { t.Error("unexpected stream output"); return nil })
+			assertUnsupportedParameter(t, err, test.name)
+		})
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("unsupported Ollama requests reached upstream: %d", calls.Load())
+	}
+}
+
+func TestNativeAdaptersRejectResponseContextManagement(t *testing.T) {
+	threshold := 1_000
+	request := openai.ResponseRequest{
+		Model: "model",
+		Input: "hello",
+		ContextManagement: []openai.ResponseContextEntry{{
+			Type:             "compaction",
+			CompactThreshold: &threshold,
+		}},
+	}
+	for name, validate := range map[string]func(openai.ResponseRequest) error{
+		"anthropic": (Anthropic{}).ValidateResponseParameters,
+		"deepseek":  (DeepSeek{}).ValidateResponseParameters,
+		"demo":      (Demo{}).ValidateResponseParameters,
+		"groq":      (Groq{}).ValidateResponseParameters,
+		"ollama":    (Ollama{}).ValidateResponseParameters,
+		"xai":       (XAI{}).ValidateResponseParameters,
+	} {
+		t.Run(name, func(t *testing.T) {
+			assertUnsupportedParameter(t, validate(request), "context_management")
+		})
+	}
+}
+
+func TestNativeAdaptersRejectResponsesProviderModeration(t *testing.T) {
+	request := openai.ResponseRequest{Model: "model", Input: "hello", Moderation: &openai.ProviderModeration{Model: "moderation"}}
+	for name, validate := range map[string]func(openai.ResponseRequest) error{
+		"anthropic": (Anthropic{}).ValidateResponseParameters,
+		"deepseek":  (DeepSeek{}).ValidateResponseParameters,
+		"demo":      (Demo{}).ValidateResponseParameters,
+		"groq":      (Groq{}).ValidateResponseParameters,
+		"ollama":    (Ollama{}).ValidateResponseParameters,
+		"xai":       (XAI{}).ValidateResponseParameters,
+	} {
+		t.Run(name, func(t *testing.T) {
+			assertUnsupportedParameter(t, validate(request), "moderation")
+		})
+	}
+}
+
+func TestNativeAdaptersRejectChatProviderModeration(t *testing.T) {
+	request := openai.ChatCompletionRequest{ChatGenerationOptions: openai.ChatGenerationOptions{Moderation: &openai.ProviderModeration{Model: "moderation"}}, Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}}}
+	for name, validate := range map[string]func(openai.ChatCompletionRequest) error{
+		"anthropic":  (Anthropic{}).ValidateChatParameters,
+		"bedrock":    (Bedrock{}).ValidateChatParameters,
+		"cerebras":   (Cerebras{}).ValidateChatParameters,
+		"cohere":     (Cohere{}).ValidateChatParameters,
+		"deepseek":   (DeepSeek{}).ValidateChatParameters,
+		"demo":       (Demo{}).ValidateChatParameters,
+		"gemini":     (Gemini{}).ValidateChatParameters,
+		"groq":       (Groq{}).ValidateChatParameters,
+		"mistral":    (Mistral{}).ValidateChatParameters,
+		"nvidia-nim": (NVIDIANIM{}).ValidateChatParameters,
+		"ollama":     (Ollama{}).ValidateChatParameters,
+		"openrouter": (OpenRouter{}).ValidateChatParameters,
+		"together":   (Together{}).ValidateChatParameters,
+		"vertex":     (VertexGemini{}).ValidateChatParameters,
+		"xai":        (XAI{}).ValidateChatParameters,
+	} {
+		t.Run(name, func(t *testing.T) {
+			assertUnsupportedParameter(t, validate(request), "moderation")
+		})
+	}
 }
 
 func TestOtherEmbeddingAdaptersRejectMistralMetadata(t *testing.T) {

@@ -17,6 +17,7 @@ import (
 
 	"ai-gateway-gateway/internal/asyncstate"
 	"ai-gateway-gateway/internal/config"
+	"ai-gateway-gateway/internal/conversationstate"
 	"ai-gateway-gateway/internal/modelcatalog"
 	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/openai"
@@ -37,6 +38,11 @@ type Provider interface {
 	Responses(ctx context.Context, req modules.RequestContext) (openai.ResponseResponse, error)
 	StreamResponses(ctx context.Context, req modules.RequestContext, write ResponseStreamWriter) (openai.ResponseResponse, bool, error)
 	Models() []openai.Model
+}
+
+type ConversationProvider interface {
+	PrepareConversation(context.Context, modules.RequestContext) (modules.RequestContext, error)
+	ReleaseConversation(context.Context, *modules.RequestContext)
 }
 
 type InteractionProvider interface {
@@ -377,6 +383,7 @@ type StreamingResponseClient interface {
 var ErrStreamingUnsupported = errors.New("streaming unsupported")
 
 type Config struct {
+	BackgroundAuthorization modules.Pipeline
 	Default                 string
 	Endpoints               []config.ProviderEndpointConfig
 	GuardrailPolicies       map[string]config.GuardrailPolicyConfig
@@ -405,6 +412,8 @@ type Config struct {
 	ControlPlaneRefresh     time.Duration
 	DeploymentQuotaStore    DeploymentQuotaStore
 	AsyncJobs               asyncstate.Store
+	Conversations           conversationstate.Store
+	ConversationItemQuota   int
 }
 
 type ProviderObserver interface {
@@ -450,32 +459,35 @@ type Endpoint struct {
 }
 
 type Router struct {
-	defaultProvider  string
-	endpoints        []Endpoint
-	endpointState    *endpointRegistry
-	modules          modules.Pipeline
-	health           *endpointHealthTracker
-	routeCounter     *atomic.Uint64
-	cache            responseCache
-	catalog          *modelcatalog.Registry
-	observer         ProviderObserver
-	routingStrategy  string
-	adaptive         *adaptiveRouter
-	affinity         affinityStore
-	ownership        responseOwnershipStore
-	semantic         *semanticResponseCache
-	deployments      *deploymentRegistry
-	providers        *managedProviderRegistry
-	credentials      *credentialVault
-	modelGroups      *modelGroupRegistry
-	controlPlane     *controlPlaneRuntime
-	guardrails       *guardrailRegistry
-	adminState       *adminStateRegistry
-	deploymentHealth *deploymentHealthRegistry
-	retry            retryScheduler
-	deploymentQuotas DeploymentQuotaStore
-	awsCredentials   *awsCredentialRegistry
-	asyncJobs        asyncstate.Store
+	backgroundAuthorization modules.Pipeline
+	defaultProvider         string
+	endpoints               []Endpoint
+	endpointState           *endpointRegistry
+	modules                 modules.Pipeline
+	health                  *endpointHealthTracker
+	routeCounter            *atomic.Uint64
+	cache                   responseCache
+	catalog                 *modelcatalog.Registry
+	observer                ProviderObserver
+	routingStrategy         string
+	adaptive                *adaptiveRouter
+	affinity                affinityStore
+	ownership               responseOwnershipStore
+	semantic                *semanticResponseCache
+	deployments             *deploymentRegistry
+	providers               *managedProviderRegistry
+	credentials             *credentialVault
+	modelGroups             *modelGroupRegistry
+	controlPlane            *controlPlaneRuntime
+	guardrails              *guardrailRegistry
+	adminState              *adminStateRegistry
+	deploymentHealth        *deploymentHealthRegistry
+	retry                   retryScheduler
+	deploymentQuotas        DeploymentQuotaStore
+	awsCredentials          *awsCredentialRegistry
+	asyncJobs               asyncstate.Store
+	conversations           conversationstate.Store
+	conversationItemQuota   int
 }
 
 func New(cfg Config) Provider {
@@ -493,6 +505,48 @@ func NewWithError(cfg Config) (Provider, error) {
 	initialDeployments := make(map[string]ModelDeployment)
 	initialProviders := make(map[string]ManagedProvider)
 	for _, endpoint := range cfg.Endpoints {
+		providerBaseURL := endpoint.BaseURL
+		upstreamModel := ""
+		if len(endpoint.Models) == 1 {
+			upstreamModel = endpoint.Models[0]
+		}
+		if endpoint.Type == "azure-openai" {
+			if len(endpoint.Models) > 0 {
+				for index, model := range endpoint.Models {
+					mapped := endpoint.ModelAliases[model]
+					if mapped == "" {
+						mapped = model
+					}
+					if index == 0 {
+						upstreamModel = mapped
+					} else if upstreamModel != mapped {
+						upstreamModel = ""
+						break
+					}
+				}
+			}
+			if explicitModel := azureExplicitDeploymentModel(providerBaseURL); explicitModel != "" {
+				aliases := make(map[string]string, len(endpoint.Models)+len(endpoint.ModelAliases))
+				for model, mapped := range endpoint.ModelAliases {
+					if mapped != "" && mapped != explicitModel {
+						return nil, fmt.Errorf("provider %q has conflicting Azure deployment model: %w", endpoint.Name, ErrInvalidDeployment)
+					}
+					if mapped != "" {
+						aliases[model] = mapped
+					}
+				}
+				for _, model := range endpoint.Models {
+					aliases[model] = explicitModel
+				}
+				endpoint.ModelAliases = aliases
+				upstreamModel = explicitModel
+			}
+			baseURL, err := azureManagedDeploymentBaseURL(providerBaseURL, endpoint.APIVersion, ModelDeployment{Models: endpoint.Models, UpstreamModel: upstreamModel})
+			if err != nil {
+				return nil, fmt.Errorf("provider %q has invalid Azure deployment route: %w", endpoint.Name, err)
+			}
+			endpoint.BaseURL = baseURL
+		}
 		provider := providerFor(endpoint)
 		if provider == nil {
 			continue
@@ -556,10 +610,6 @@ func NewWithError(cfg Config) (Provider, error) {
 		if deploymentWeight == 0 {
 			deploymentWeight = 1
 		}
-		upstreamModel := ""
-		if len(endpoint.Models) == 1 {
-			upstreamModel = endpoint.Models[0]
-		}
 		authType := ""
 		region := ""
 		if endpoint.Type == "azure-openai" || endpoint.Type == "gemini" {
@@ -575,7 +625,7 @@ func NewWithError(cfg Config) (Provider, error) {
 				region = strings.ToLower(strings.TrimSpace(endpoint.Region))
 			}
 		}
-		initialProviders[endpoint.Name] = ManagedProvider{ID: endpoint.Name, Type: endpoint.Type, BaseURL: strings.TrimRight(endpoint.BaseURL, "/"), APIVersion: strings.TrimSpace(endpoint.APIVersion), AuthType: authType, Region: region, Enabled: enabled}
+		initialProviders[endpoint.Name] = ManagedProvider{ID: endpoint.Name, Type: endpoint.Type, BaseURL: strings.TrimRight(providerBaseURL, "/"), APIVersion: strings.TrimSpace(endpoint.APIVersion), AuthType: authType, AzureCloud: endpoint.AzureCloud, AzureAudience: endpoint.AzureAudience, Region: region, Enabled: enabled}
 		initialDeployments[endpoint.Name] = ModelDeployment{ID: endpoint.Name, ProviderID: endpoint.Name, ProviderType: endpoint.Type, UpstreamModel: upstreamModel, Models: append([]string(nil), endpoint.Models...), Capabilities: append([]string(nil), endpoint.Capabilities...), Priority: endpoint.Priority, Weight: deploymentWeight, GuardrailPolicy: endpoint.GuardrailPolicy, MaxRetries: endpoint.MaxRetries, CooldownAfterFailures: endpoint.CooldownAfterFailures, CooldownSeconds: endpoint.CooldownSeconds, MaxParallelRequests: endpoint.MaxParallelRequests, QueueCapacity: endpoint.QueueCapacity, QueueTimeoutMS: endpoint.QueueTimeoutMS, RateLimitRPM: endpoint.RateLimitRPM, RateLimitTPM: endpoint.RateLimitTPM, Enabled: enabled}
 	}
 
@@ -603,21 +653,24 @@ func NewWithError(cfg Config) (Provider, error) {
 		deploymentQuotas = NewMemoryDeploymentQuotaStore()
 	}
 	router := &Router{
-		defaultProvider:  cfg.Default,
-		endpoints:        endpoints,
-		modules:          cfg.Modules,
-		health:           newEndpointHealthTracker(cfg.CircuitStore),
-		routeCounter:     &atomic.Uint64{},
-		cache:            newResponseCache(cfg.CacheTTL, cfg.CacheMaxBytes, cfg.CacheStore),
-		catalog:          registry,
-		observer:         cfg.Observer,
-		routingStrategy:  strings.ToLower(strings.TrimSpace(cfg.RoutingStrategy)),
-		adaptive:         newAdaptiveRouter(cfg.AdaptiveEWMAAlpha),
-		deploymentQuotas: deploymentQuotas,
-		asyncJobs:        cfg.AsyncJobs,
-		awsCredentials:   &awsCredentialRegistry{current: make(map[string]managedAWSCredentialSource)},
-		affinity:         newAffinityStore(cfg.AffinityTTL, cfg.SessionStore),
-		ownership:        newResponseOwnershipStore(cfg.ResponseOwnershipTTL, cfg.SessionStore),
+		backgroundAuthorization: cfg.BackgroundAuthorization,
+		defaultProvider:         cfg.Default,
+		endpoints:               endpoints,
+		modules:                 cfg.Modules,
+		health:                  newEndpointHealthTracker(cfg.CircuitStore),
+		routeCounter:            &atomic.Uint64{},
+		cache:                   newResponseCache(cfg.CacheTTL, cfg.CacheMaxBytes, cfg.CacheStore),
+		catalog:                 registry,
+		observer:                cfg.Observer,
+		routingStrategy:         strings.ToLower(strings.TrimSpace(cfg.RoutingStrategy)),
+		adaptive:                newAdaptiveRouter(cfg.AdaptiveEWMAAlpha),
+		deploymentQuotas:        deploymentQuotas,
+		asyncJobs:               cfg.AsyncJobs,
+		conversations:           cfg.Conversations,
+		conversationItemQuota:   cfg.ConversationItemQuota,
+		awsCredentials:          &awsCredentialRegistry{current: make(map[string]managedAWSCredentialSource)},
+		affinity:                newAffinityStore(cfg.AffinityTTL, cfg.SessionStore),
+		ownership:               newResponseOwnershipStore(cfg.ResponseOwnershipTTL, cfg.SessionStore),
 		semantic: newSemanticResponseCache(semanticCacheConfig{
 			ttl: cfg.SemanticCacheTTL, threshold: cfg.SemanticCacheThreshold,
 			maxEntries: cfg.SemanticCacheMaxEntries, maxBytes: cfg.SemanticCacheMaxBytes,
@@ -687,6 +740,9 @@ func (r Router) ChatCompletions(ctx context.Context, req modules.RequestContext)
 		if err := r.validateCachedContentRequestBinding(request); err != nil {
 			return openai.ChatCompletionResponse{}, err
 		}
+		if required := requiredChatCapabilities(request, false); r.routeCapabilityMismatch(ctx, request, required...) {
+			return openai.ChatCompletionResponse{}, fmt.Errorf("no provider endpoint for provider=%q model=%q: required capabilities unavailable (%s)", request.Provider, request.Model, strings.Join(required, ", "))
+		}
 		return openai.ChatCompletionResponse{}, fmt.Errorf("no provider endpoint for provider=%q model=%q", request.Provider, request.Model)
 	}
 
@@ -706,6 +762,9 @@ func (r Router) ChatCompletions(ctx context.Context, req modules.RequestContext)
 		}
 		progress.enter(endpoint)
 		if err := validateChatAdapter(endpoint.Provider, request); err != nil {
+			if lastAttempt != nil {
+				r.modules.RunFailure(ctx, lastAttempt, err)
+			}
 			return openai.ChatCompletionResponse{}, err
 		}
 		attemptCtx := providerAttemptContext(req, endpoint)
@@ -721,6 +780,9 @@ func (r Router) ChatCompletions(ctx context.Context, req modules.RequestContext)
 		}
 		if err := r.modules.Run(ctx, &attemptCtx); err != nil {
 			if terminalModuleError(err) || ctx.Err() != nil {
+				if lastAttempt != nil {
+					r.modules.RunFailure(ctx, lastAttempt, err)
+				}
 				return openai.ChatCompletionResponse{}, fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err)
 			}
 			wrapped := fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err)
@@ -736,7 +798,14 @@ func (r Router) ChatCompletions(ctx context.Context, req modules.RequestContext)
 		started := time.Now()
 		lastAttempt = &attemptCtx
 		cacheKey := providerCacheKey("chat", attemptCtx)
-		if payload, found, cacheErr := r.cacheGet(ctx, cacheKey); found {
+		replaySafe := chatReplaySafe(attemptCtx.Request)
+		var payload []byte
+		var found bool
+		var cacheErr error
+		if replaySafe {
+			payload, found, cacheErr = r.cacheGet(ctx, cacheKey)
+		}
+		if found {
 			if response, ok := decodeCached[openai.ChatCompletionResponse](payload); ok {
 				attemptCtx.Metadata["provider.cache.status"] = "hit"
 				attemptCtx.Metadata["provider.cache.kind"] = "exact"
@@ -753,16 +822,16 @@ func (r Router) ChatCompletions(ctx context.Context, req modules.RequestContext)
 			}
 		} else if cacheErr != nil {
 			attemptCtx.Metadata["provider.cache.status"] = "error"
-			log.Printf("provider cache get failed: %v", cacheErr)
+			log.Print("provider cache get failed")
 		}
 		semanticScope, semanticVector := "", []float64(nil)
-		if scope, text, eligible := semanticRequest(attemptCtx, endpoint); eligible && r.semantic != nil {
+		if scope, text, eligible := semanticRequest(attemptCtx, endpoint); replaySafe && eligible && r.semantic != nil {
 			vector, embedErr := r.semantic.embedder.embed(ctx, text)
 			if embedErr != nil {
 				if r.observer != nil {
 					r.observer.ObserveCache("semantic_get", "error")
 				}
-				log.Printf("semantic cache embedding failed: %v", embedErr)
+				log.Printf("semantic cache embedding failed: %s", failureClass(embedErr))
 			} else {
 				semanticScope, semanticVector = scope, vector
 				if payload, found := r.semantic.lookup(scope, vector); found {
@@ -789,7 +858,7 @@ func (r Router) ChatCompletions(ctx context.Context, req modules.RequestContext)
 				}
 			}
 		}
-		if !mirrored && request.GeminiCachedContent == "" {
+		if !mirrored && request.GeminiCachedContent == "" && replaySafe {
 			r.mirrorChat(ctx, req.RequestID, attemptCtx.Request, request.Model, requiredChatCapabilities(request, false)...)
 			mirrored = true
 		}
@@ -801,10 +870,13 @@ func (r Router) ChatCompletions(ctx context.Context, req modules.RequestContext)
 			response.ProviderEndpoint = endpoint.Name
 			attemptCtx.Metadata["provider.cache.status"] = "miss"
 			var cachePayload []byte
-			if !chatResponseHasNativeContent(response) {
+			if replaySafe && !chatResponseHasNativeContent(response) {
 				cachePayload, _ = json.Marshal(response)
 			}
-			mergeChatUsage(&response, attemptCtx.Usage)
+			if err := mergeChatUsage(&response, attemptCtx.Usage); err != nil {
+				r.modules.RunFailure(ctx, &attemptCtx, err)
+				return openai.ChatCompletionResponse{}, &Error{Class: FailurePostProcessing, Provider: endpoint.Name, Err: err}
+			}
 			attemptCtx.Response = &response
 			modules.DeanonymizeResponse(&attemptCtx, &response)
 			if err := r.modules.RunPostResponse(ctx, &attemptCtx); err != nil {
@@ -813,7 +885,7 @@ func (r Router) ChatCompletions(ctx context.Context, req modules.RequestContext)
 			if len(cachePayload) > 0 {
 				if cacheErr := r.cacheSet(ctx, cacheKey, cachePayload); cacheErr != nil {
 					attemptCtx.Metadata["provider.cache.status"] = "error"
-					log.Printf("provider cache set failed: %v", cacheErr)
+					log.Print("provider cache set failed")
 				}
 				if semanticScope != "" && len(semanticVector) > 0 {
 					stored := r.semantic.set(semanticScope, semanticVector, cachePayload)
@@ -902,6 +974,9 @@ func (r Router) StreamChatCompletions(ctx context.Context, req modules.RequestCo
 		progress.enter(endpoint)
 
 		if err := validateChatAdapter(endpoint.Provider, request); err != nil {
+			if lastAttempt != nil {
+				r.modules.RunFailure(ctx, lastAttempt, err)
+			}
 			return openai.ChatCompletionResponse{}, false, err
 		}
 		attemptCtx := providerAttemptContext(req, endpoint)
@@ -918,6 +993,9 @@ func (r Router) StreamChatCompletions(ctx context.Context, req modules.RequestCo
 		attemptCtx.Request.Stream = true
 		if err := r.modules.Run(ctx, &attemptCtx); err != nil {
 			if terminalModuleError(err) || ctx.Err() != nil {
+				if lastAttempt != nil {
+					r.modules.RunFailure(ctx, lastAttempt, err)
+				}
 				return openai.ChatCompletionResponse{}, false, fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err)
 			}
 			wrapped := fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err)
@@ -930,7 +1008,7 @@ func (r Router) StreamChatCompletions(ctx context.Context, req modules.RequestCo
 			return openai.ChatCompletionResponse{}, false, err
 		}
 		lastAttempt = &attemptCtx
-		if !mirrored && request.GeminiCachedContent == "" {
+		if !mirrored && request.GeminiCachedContent == "" && chatReplaySafe(attemptCtx.Request) {
 			r.mirrorChat(ctx, req.RequestID, attemptCtx.Request, request.Model, requiredChatCapabilities(request, true)...)
 			mirrored = true
 		}
@@ -1000,7 +1078,10 @@ func (r Router) StreamChatCompletions(ctx context.Context, req modules.RequestCo
 		}
 		r.health.success(ctx, endpoint)
 
-		mergeChatUsage(&response, attemptCtx.Usage)
+		if err := mergeChatUsage(&response, attemptCtx.Usage); err != nil {
+			r.modules.RunFailure(ctx, &attemptCtx, err)
+			return openai.ChatCompletionResponse{}, true, &Error{Class: FailurePostProcessing, Provider: endpoint.Name, Err: err}
+		}
 		attemptCtx.Response = &response
 		if err := r.modules.RunPostResponse(ctx, &attemptCtx); err != nil {
 			return openai.ChatCompletionResponse{}, true, &Error{Class: FailurePostProcessing, Provider: endpoint.Name, Err: err}
@@ -1026,6 +1107,16 @@ func (r Router) Responses(ctx context.Context, req modules.RequestContext) (open
 	if err := validateResponseOptions(*req.ResponseRequest); err != nil {
 		return openai.ResponseResponse{}, err
 	}
+	prepared, err := r.prepareConversation(ctx, req)
+	if err != nil {
+		return openai.ResponseResponse{}, err
+	}
+	req = prepared
+	defer func() {
+		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		r.ReleaseConversation(releaseCtx, &req)
+	}()
 	if err := r.validateResponseOwnership(req, *req.ResponseRequest); err != nil {
 		return openai.ResponseResponse{}, err
 	}
@@ -1041,6 +1132,9 @@ func (r Router) Responses(ctx context.Context, req modules.RequestContext) (open
 	if len(candidates) == 0 {
 		if request.Background {
 			return openai.ResponseResponse{}, ErrBackgroundResponsesUnsupported
+		}
+		if required := requiredResponseCapabilities(request, false); r.routeCapabilityMismatch(ctx, openai.ChatCompletionRequest{Provider: request.Provider, Model: request.Model}, required...) {
+			return openai.ResponseResponse{}, fmt.Errorf("no provider endpoint for provider=%q model=%q: required capabilities unavailable (%s)", request.Provider, request.Model, strings.Join(required, ", "))
 		}
 		return openai.ResponseResponse{}, fmt.Errorf("no provider endpoint for provider=%q model=%q", request.Provider, request.Model)
 	}
@@ -1061,6 +1155,9 @@ func (r Router) Responses(ctx context.Context, req modules.RequestContext) (open
 		}
 		progress.enter(endpoint)
 		if err := validateResponseAdapter(endpoint.Provider, request); err != nil {
+			if lastAttempt != nil {
+				r.modules.RunFailure(ctx, lastAttempt, err)
+			}
 			return openai.ResponseResponse{}, err
 		}
 		attemptCtx := providerAttemptContext(req, endpoint)
@@ -1073,6 +1170,9 @@ func (r Router) Responses(ctx context.Context, req modules.RequestContext) (open
 		}
 		if err := r.modules.Run(ctx, &attemptCtx); err != nil {
 			if terminalModuleError(err) || ctx.Err() != nil {
+				if lastAttempt != nil {
+					r.modules.RunFailure(ctx, lastAttempt, err)
+				}
 				return openai.ResponseResponse{}, fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err)
 			}
 			wrapped := fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err)
@@ -1081,13 +1181,14 @@ func (r Router) Responses(ctx context.Context, req modules.RequestContext) (open
 			continue
 		}
 		if err := r.validateResponseOwnership(attemptCtx, *attemptCtx.ResponseRequest); err != nil {
+			r.modules.RunFailure(ctx, &attemptCtx, err)
 			return openai.ResponseResponse{}, err
 		}
 
 		started := time.Now()
 		lastAttempt = &attemptCtx
 		cacheKey := ""
-		if !persistentResponseRequested(*attemptCtx.ResponseRequest) && responseToolsReplaySafe(*attemptCtx.ResponseRequest) {
+		if attemptCtx.ConversationTurn == nil && !persistentResponseRequested(*attemptCtx.ResponseRequest) && responseReplaySafe(*attemptCtx.ResponseRequest) {
 			cacheKey = providerCacheKey("responses", attemptCtx)
 		}
 		if payload, found, cacheErr := r.cacheGet(ctx, cacheKey); found {
@@ -1108,9 +1209,9 @@ func (r Router) Responses(ctx context.Context, req modules.RequestContext) (open
 			}
 		} else if cacheErr != nil {
 			attemptCtx.Metadata["provider.cache.status"] = "error"
-			log.Printf("provider cache get failed: %v", cacheErr)
+			log.Print("provider cache get failed")
 		}
-		if !mirrored && !persistentResponseRequested(*attemptCtx.ResponseRequest) && responseToolsReplaySafe(*attemptCtx.ResponseRequest) {
+		if !mirrored && attemptCtx.ConversationTurn == nil && !persistentResponseRequested(*attemptCtx.ResponseRequest) && responseReplaySafe(*attemptCtx.ResponseRequest) {
 			r.mirrorResponses(ctx, req.RequestID, *attemptCtx.ResponseRequest, request.Model, requiredResponseCapabilities(request, false)...)
 			mirrored = true
 		}
@@ -1127,6 +1228,11 @@ func (r Router) Responses(ctx context.Context, req modules.RequestContext) (open
 			cachePayload, _ := json.Marshal(response)
 			attemptCtx.ResponsesResponse = &response
 			if attemptCtx.ResponseRequest.Background && backgroundResponsePending(response) {
+				if err := r.stageBackgroundConversation(ctx, &attemptCtx); err != nil {
+					r.compensateBackgroundResponse(ctx, attemptCtx, response.ID, request.Model, endpoint)
+					r.modules.RunFailure(ctx, &attemptCtx, err)
+					return openai.ResponseResponse{}, err
+				}
 				if err := r.persistResponseOwnership(ctx, attemptCtx, *attemptCtx.ResponseRequest, request.Model, response.ID, endpoint); err != nil {
 					r.compensateBackgroundResponse(ctx, attemptCtx, response.ID, request.Model, endpoint)
 					r.modules.RunFailure(ctx, &attemptCtx, err)
@@ -1141,13 +1247,17 @@ func (r Router) Responses(ctx context.Context, req modules.RequestContext) (open
 			}
 			modules.DeanonymizeResponsesResponse(&attemptCtx, &response)
 			r.rememberResponseAffinity(ctx, attemptCtx, response.ID, endpoint.Name)
+			if err := r.completeConversation(ctx, &attemptCtx, &response); err != nil {
+				r.modules.RunFailure(ctx, &attemptCtx, err)
+				return openai.ResponseResponse{}, &Error{Class: FailurePostProcessing, Provider: endpoint.Name, Err: err}
+			}
 			if err := r.modules.RunPostResponse(ctx, &attemptCtx); err != nil {
 				return openai.ResponseResponse{}, &Error{Class: FailurePostProcessing, Provider: endpoint.Name, Err: err}
 			}
 			if len(cachePayload) > 0 && cacheableResponsesResult(response) {
 				if cacheErr := r.cacheSet(ctx, cacheKey, cachePayload); cacheErr != nil {
 					attemptCtx.Metadata["provider.cache.status"] = "error"
-					log.Printf("provider cache set failed: %v", cacheErr)
+					log.Print("provider cache set failed")
 				}
 			}
 			if err := r.persistResponseOwnership(ctx, attemptCtx, *attemptCtx.ResponseRequest, request.Model, response.ID, endpoint); err != nil {
@@ -1179,6 +1289,9 @@ func (r Router) Embeddings(ctx context.Context, req modules.RequestContext) (ope
 	request := *req.EmbeddingRequest
 	candidates := r.routeCandidates(ctx, req, openai.ChatCompletionRequest{Provider: request.Provider, Model: request.Model}, "embeddings")
 	if len(candidates) == 0 {
+		if r.routeCapabilityMismatch(ctx, openai.ChatCompletionRequest{Provider: request.Provider, Model: request.Model}, "embeddings") {
+			return openai.EmbeddingResponse{}, fmt.Errorf("no embedding endpoint for provider=%q model=%q: required capabilities unavailable (embeddings)", request.Provider, request.Model)
+		}
 		return openai.EmbeddingResponse{}, fmt.Errorf("no embedding endpoint for provider=%q model=%q", request.Provider, request.Model)
 	}
 
@@ -1202,6 +1315,9 @@ func (r Router) Embeddings(ctx context.Context, req modules.RequestContext) (ope
 		}
 		progress.enter(endpoint)
 		if err := validateEmbeddingAdapter(endpoint.Provider, request); err != nil {
+			if lastAttempt != nil {
+				r.modules.RunFailure(ctx, lastAttempt, err)
+			}
 			return openai.EmbeddingResponse{}, err
 		}
 		attemptCtx := providerAttemptContext(req, endpoint)
@@ -1218,6 +1334,9 @@ func (r Router) Embeddings(ctx context.Context, req modules.RequestContext) (ope
 		}
 		if err := r.modules.Run(ctx, &attemptCtx); err != nil {
 			if terminalModuleError(err) || ctx.Err() != nil {
+				if lastAttempt != nil {
+					r.modules.RunFailure(ctx, lastAttempt, err)
+				}
 				return openai.EmbeddingResponse{}, fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err)
 			}
 			wrapped := fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err)
@@ -1237,7 +1356,10 @@ func (r Router) Embeddings(ctx context.Context, req modules.RequestContext) (ope
 		setAttemptMetadata(&attemptCtx, started, err)
 		setAttemptCounters(&attemptCtx, totalRetries, fallbackCount)
 		if err == nil {
-			mergeEmbeddingUsage(&response, attemptCtx.Usage)
+			if err := mergeEmbeddingUsage(&response, attemptCtx.Usage); err != nil {
+				r.modules.RunFailure(ctx, &attemptCtx, err)
+				return openai.EmbeddingResponse{}, &Error{Class: FailurePostProcessing, Provider: endpoint.Name, Err: err}
+			}
 			attemptCtx.EmbeddingResponse = &response
 			if err := r.modules.RunPostResponse(ctx, &attemptCtx); err != nil {
 				return openai.EmbeddingResponse{}, &Error{Class: FailurePostProcessing, Provider: endpoint.Name, Err: err}
@@ -1270,6 +1392,9 @@ func (r Router) Rerank(ctx context.Context, req modules.RequestContext) (openai.
 	request := *req.RerankRequest
 	candidates := r.routeCandidates(ctx, req, openai.ChatCompletionRequest{Provider: request.Provider, Model: request.Model}, "rerank")
 	if len(candidates) == 0 {
+		if r.routeCapabilityMismatch(ctx, openai.ChatCompletionRequest{Provider: request.Provider, Model: request.Model}, "rerank") {
+			return openai.RerankResponse{}, fmt.Errorf("no rerank endpoint for provider=%q model=%q: required capabilities unavailable (rerank)", request.Provider, request.Model)
+		}
 		return openai.RerankResponse{}, fmt.Errorf("no rerank endpoint for provider=%q model=%q", request.Provider, request.Model)
 	}
 	var errs []error
@@ -1291,6 +1416,12 @@ func (r Router) Rerank(ctx context.Context, req modules.RequestContext) (openai.
 			continue
 		}
 		progress.enter(endpoint)
+		if err := validateRerankAdapter(endpoint.Provider, request); err != nil {
+			if lastAttempt != nil {
+				r.modules.RunFailure(ctx, lastAttempt, err)
+			}
+			return openai.RerankResponse{}, err
+		}
 		attemptCtx := providerAttemptContext(req, endpoint)
 		r.applyCatalogPricing(ctx, &attemptCtx, endpoint, request.Model)
 		if endpoint.GuardrailPolicy != "" && !endpoint.GuardrailPolicyValid {
@@ -1301,6 +1432,9 @@ func (r Router) Rerank(ctx context.Context, req modules.RequestContext) (openai.
 		}
 		if err := r.modules.Run(ctx, &attemptCtx); err != nil {
 			if terminalModuleError(err) || ctx.Err() != nil {
+				if lastAttempt != nil {
+					r.modules.RunFailure(ctx, lastAttempt, err)
+				}
 				return openai.RerankResponse{}, fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err)
 			}
 			wrapped := fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err)
@@ -1360,6 +1494,9 @@ func (r Router) Moderations(ctx context.Context, req modules.RequestContext) (op
 	request := *req.ModerationRequest
 	candidates := r.routeCandidates(ctx, req, openai.ChatCompletionRequest{Provider: request.Provider, Model: request.Model}, "moderation")
 	if len(candidates) == 0 {
+		if r.routeCapabilityMismatch(ctx, openai.ChatCompletionRequest{Provider: request.Provider, Model: request.Model}, "moderation") {
+			return openai.ModerationResponse{}, fmt.Errorf("no moderation endpoint for provider=%q model=%q: required capabilities unavailable (moderation)", request.Provider, request.Model)
+		}
 		return openai.ModerationResponse{}, fmt.Errorf("no moderation endpoint for provider=%q model=%q", request.Provider, request.Model)
 	}
 	_, err := openai.InspectModerationInput(request.Input)
@@ -1385,6 +1522,9 @@ func (r Router) Moderations(ctx context.Context, req modules.RequestContext) (op
 		}
 		progress.enter(endpoint)
 		if err := validateModerationAdapter(client, request); err != nil {
+			if lastAttempt != nil {
+				r.modules.RunFailure(ctx, lastAttempt, err)
+			}
 			return openai.ModerationResponse{}, err
 		}
 		attemptCtx := providerAttemptContext(req, endpoint)
@@ -1397,6 +1537,9 @@ func (r Router) Moderations(ctx context.Context, req modules.RequestContext) (op
 		}
 		if err := r.modules.Run(ctx, &attemptCtx); err != nil {
 			if terminalModuleError(err) || ctx.Err() != nil {
+				if lastAttempt != nil {
+					r.modules.RunFailure(ctx, lastAttempt, err)
+				}
 				return openai.ModerationResponse{}, fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err)
 			}
 			wrapped := fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err)
@@ -1405,11 +1548,15 @@ func (r Router) Moderations(ctx context.Context, req modules.RequestContext) (op
 			continue
 		}
 		if attemptCtx.ModerationRequest == nil {
-			return openai.ModerationResponse{}, fmt.Errorf("%s/%s modules removed moderation request", endpoint.Type, endpoint.Name)
+			err := fmt.Errorf("%s/%s modules removed moderation request", endpoint.Type, endpoint.Name)
+			r.modules.RunFailure(ctx, &attemptCtx, err)
+			return openai.ModerationResponse{}, err
 		}
 		attemptInfo, err := openai.InspectModerationInput(attemptCtx.ModerationRequest.Input)
 		if err != nil {
-			return openai.ModerationResponse{}, fmt.Errorf("%s/%s modules returned invalid moderation input: %w", endpoint.Type, endpoint.Name, err)
+			wrapped := fmt.Errorf("%s/%s modules returned invalid moderation input: %w", endpoint.Type, endpoint.Name, err)
+			r.modules.RunFailure(ctx, &attemptCtx, wrapped)
+			return openai.ModerationResponse{}, wrapped
 		}
 		started := time.Now()
 		lastAttempt = &attemptCtx
@@ -1980,7 +2127,7 @@ func validateRerankResponse(response openai.RerankResponse, documentCount int) e
 		if units := response.Meta.BilledUnits; units != nil && (units.SearchUnits != units.SearchUnits || units.SearchUnits < 0 || units.SearchUnits > 1.7976931348623157e308 || units.TotalTokens < 0) {
 			return errors.New("provider returned invalid rerank billed units")
 		}
-		if tokens := response.Meta.Tokens; tokens != nil && (tokens.InputTokens < 0 || tokens.OutputTokens < 0) {
+		if tokens := response.Meta.Tokens; tokens != nil && (tokens.InputTokens < 0 || tokens.OutputTokens < 0 || tokens.InputTokens > int(^uint(0)>>1)-tokens.OutputTokens) {
 			return errors.New("provider returned invalid rerank token usage")
 		}
 	}
@@ -1997,13 +2144,25 @@ func validateRerankResponse(response openai.RerankResponse, documentCount int) e
 	return nil
 }
 
-func (r Router) StreamResponses(ctx context.Context, req modules.RequestContext, write ResponseStreamWriter) (openai.ResponseResponse, bool, error) {
+func (r Router) StreamResponses(ctx context.Context, req modules.RequestContext, write ResponseStreamWriter) (result openai.ResponseResponse, streamed bool, resultErr error) {
 	if req.ResponseRequest == nil {
 		return openai.ResponseResponse{}, false, errors.New("missing response request")
 	}
 	if err := validateResponseOptions(*req.ResponseRequest); err != nil {
 		return openai.ResponseResponse{}, true, err
 	}
+	prepared, err := r.prepareConversation(ctx, req)
+	if err != nil {
+		return openai.ResponseResponse{}, true, err
+	}
+	req = prepared
+	defer func() {
+		if streamed || resultErr != nil {
+			releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			r.releaseConversation(releaseCtx, &req)
+		}
+	}()
 	if err := r.validateResponseOwnership(req, *req.ResponseRequest); err != nil {
 		return openai.ResponseResponse{}, true, err
 	}
@@ -2047,6 +2206,9 @@ func (r Router) StreamResponses(ctx context.Context, req modules.RequestContext,
 		progress.enter(endpoint)
 
 		if err := validateResponseAdapter(endpoint.Provider, request); err != nil {
+			if lastAttempt != nil {
+				r.modules.RunFailure(ctx, lastAttempt, err)
+			}
 			return openai.ResponseResponse{}, false, err
 		}
 		attemptCtx := providerAttemptContext(req, endpoint)
@@ -2060,6 +2222,9 @@ func (r Router) StreamResponses(ctx context.Context, req modules.RequestContext,
 		attemptCtx.ResponseRequest.Stream = true
 		if err := r.modules.Run(ctx, &attemptCtx); err != nil {
 			if terminalModuleError(err) || ctx.Err() != nil {
+				if lastAttempt != nil {
+					r.modules.RunFailure(ctx, lastAttempt, err)
+				}
 				return openai.ResponseResponse{}, false, fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err)
 			}
 			wrapped := fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err)
@@ -2068,10 +2233,11 @@ func (r Router) StreamResponses(ctx context.Context, req modules.RequestContext,
 			continue
 		}
 		if err := r.validateResponseOwnership(attemptCtx, *attemptCtx.ResponseRequest); err != nil {
+			r.modules.RunFailure(ctx, &attemptCtx, err)
 			return openai.ResponseResponse{}, true, err
 		}
 		lastAttempt = &attemptCtx
-		if !mirrored && !persistentResponseRequested(*attemptCtx.ResponseRequest) && responseToolsReplaySafe(*attemptCtx.ResponseRequest) {
+		if !mirrored && attemptCtx.ConversationTurn == nil && !persistentResponseRequested(*attemptCtx.ResponseRequest) && responseReplaySafe(*attemptCtx.ResponseRequest) {
 			r.mirrorResponses(ctx, req.RequestID, *attemptCtx.ResponseRequest, request.Model, requiredResponseCapabilities(request, true)...)
 			mirrored = true
 		}
@@ -2148,6 +2314,10 @@ func (r Router) StreamResponses(ctx context.Context, req modules.RequestContext,
 		attemptCtx.ResponsesResponse = &response
 		modules.DeanonymizeResponsesResponse(&attemptCtx, &response)
 		r.rememberResponseAffinity(ctx, attemptCtx, response.ID, endpoint.Name)
+		if err := r.completeConversation(ctx, &attemptCtx, &response); err != nil {
+			r.modules.RunFailure(ctx, &attemptCtx, err)
+			return openai.ResponseResponse{}, true, &Error{Class: FailurePostProcessing, Provider: endpoint.Name, Err: err}
+		}
 		if err := r.modules.RunPostResponse(ctx, &attemptCtx); err != nil {
 			return openai.ResponseResponse{}, true, &Error{Class: FailurePostProcessing, Provider: endpoint.Name, Err: err}
 		}
@@ -2921,7 +3091,6 @@ func (r Router) startProviderCall(ctx context.Context, endpoint Endpoint, operat
 		result := "ok"
 		if err != nil {
 			result = string(failureClass(err))
-			span.RecordError(err)
 			span.SetStatus(codes.Error, result)
 		}
 		span.SetAttributes(attribute.String("ai.result", result))
@@ -2947,16 +3116,21 @@ func setAttemptMetadata(req *modules.RequestContext, started time.Time, err erro
 		return
 	}
 	req.Metadata["provider.status"] = "error"
-	req.Metadata["provider.error"] = err.Error()
+	delete(req.Metadata, "provider.error")
 	req.Metadata["provider.failure_class"] = string(failureClass(err))
 }
 
-func mergeChatUsage(response *openai.ChatCompletionResponse, usage *openai.Usage) {
+func mergeChatUsage(response *openai.ChatCompletionResponse, usage *openai.Usage) error {
 	if usage == nil || response.Usage.PromptTokens != 0 {
-		return
+		return nil
 	}
-	response.Usage.PromptTokens = usage.PromptTokens
-	response.Usage.TotalTokens += usage.PromptTokens
+	prompt := usage.PromptTokens
+	if prompt < 0 || response.Usage.TotalTokens < 0 || prompt > int(^uint(0)>>1)-response.Usage.TotalTokens {
+		return errors.New("invalid estimated Chat token usage")
+	}
+	response.Usage.PromptTokens = prompt
+	response.Usage.TotalTokens += prompt
+	return nil
 }
 
 func mergeResponseUsage(response *openai.ResponseResponse, usage *openai.Usage) error {
@@ -2976,12 +3150,17 @@ func mergeResponseUsage(response *openai.ResponseResponse, usage *openai.Usage) 
 	return nil
 }
 
-func mergeEmbeddingUsage(response *openai.EmbeddingResponse, usage *openai.Usage) {
+func mergeEmbeddingUsage(response *openai.EmbeddingResponse, usage *openai.Usage) error {
 	if usage == nil || response.UsageReported || response.Usage.PromptTokens != 0 {
-		return
+		return nil
 	}
-	response.Usage.PromptTokens = usage.PromptTokens
-	response.Usage.TotalTokens += usage.PromptTokens
+	prompt := usage.PromptTokens
+	if prompt < 0 || response.Usage.TotalTokens < 0 || prompt > int(^uint(0)>>1)-response.Usage.TotalTokens {
+		return errors.New("invalid estimated embedding token usage")
+	}
+	response.Usage.PromptTokens = prompt
+	response.Usage.TotalTokens += prompt
+	return nil
 }
 
 func (r Router) candidates(ctx context.Context, request openai.ChatCompletionRequest, capabilities ...string) []Endpoint {
@@ -3071,6 +3250,39 @@ func (r Router) candidatesWithCounter(ctx context.Context, request openai.ChatCo
 	return r.weightedOrder(candidates)
 }
 
+// routeCapabilityMismatch distinguishes an unsupported operation from an
+// unknown provider or model. Admission and health failures retain their own
+// generic no-endpoint error rather than being reported as capability failures.
+func (r Router) routeCapabilityMismatch(ctx context.Context, request openai.ChatCompletionRequest, required ...string) bool {
+	catalog := r.catalog.Current(ctx)
+	provider := strings.TrimSpace(request.Provider)
+	if provider == "" && strings.TrimSpace(request.Model) == "" {
+		provider = r.defaultProvider
+	}
+	group, grouped := r.modelGroup(request.Model)
+	groupDeployments := make(map[string]bool, len(group.DeploymentIDs))
+	for _, id := range group.DeploymentIDs {
+		groupDeployments[id] = true
+	}
+	matched := false
+	for _, endpoint := range r.runtimeEndpoints() {
+		if endpoint.Shadow || grouped && !groupDeployments[endpoint.Name] {
+			continue
+		}
+		if provider != "" && provider != "auto" && provider != endpoint.Name && provider != endpoint.Type {
+			continue
+		}
+		if !endpoint.supportsModel(request.Model) {
+			continue
+		}
+		matched = true
+		if supportsCatalogCapabilities(catalog, endpoint, request.Model, required...) {
+			return false
+		}
+	}
+	return matched
+}
+
 func (r Router) responseCandidates(ctx context.Context, req modules.RequestContext, request openai.ResponseRequest, capabilities ...string) ([]Endpoint, error) {
 	chatRequest := openai.ChatCompletionRequest{
 		Provider:  request.Provider,
@@ -3093,7 +3305,7 @@ func (r Router) responseCandidates(ctx context.Context, req modules.RequestConte
 	if request.PreviousResponse == "" && comparisonResponseID == "" {
 		return candidates, nil
 	}
-	if r.affinity == nil {
+	if r.affinity == nil && !r.ownership.configured() {
 		if comparisonResponseID != "" {
 			return nil, invalidResponseComparisonReference()
 		}
@@ -3114,18 +3326,48 @@ func (r Router) responseCandidates(ctx context.Context, req modules.RequestConte
 			}
 			continue
 		}
-		endpointName, found, err := r.affinity.get(ctx, key)
-		if r.observer != nil {
-			result := "miss"
-			if err != nil {
-				result = "error"
-			} else if found {
-				result = "hit"
+		endpointName, found := "", false
+		if r.affinity != nil {
+			var err error
+			endpointName, found, err = r.affinity.get(ctx, key)
+			if r.observer != nil {
+				result := "miss"
+				if err != nil {
+					result = "error"
+				} else if found {
+					result = "hit"
+				}
+				r.observer.ObserveCache("affinity_get", result)
 			}
-			r.observer.ObserveCache("affinity_get", result)
+			if err != nil {
+				return nil, fmt.Errorf("%w: %w", ErrResponseAffinityUnavailable, err)
+			}
 		}
-		if err != nil {
-			return nil, fmt.Errorf("%w: %w", ErrResponseAffinityUnavailable, err)
+		if !found && r.ownership.configured() {
+			binding, owned, err := r.ownership.get(ctx, req, reference.id)
+			if err != nil {
+				return nil, fmt.Errorf("%w: %w", ErrResponseAffinityUnavailable, err)
+			}
+			if owned {
+				available := binding.Resource == "" || binding.Resource == "response"
+				available = available && binding.Model == request.Model
+				if available {
+					available = false
+					for _, endpoint := range candidates {
+						if endpoint.Name == binding.Endpoint && responseDeploymentIdentity(endpoint) == binding.Deployment {
+							available = true
+							break
+						}
+					}
+				}
+				if !available {
+					if reference.required {
+						return nil, invalidResponseComparisonReference()
+					}
+					return nil, ErrResponseDeploymentChanged
+				}
+				endpointName, found = binding.Endpoint, true
+			}
 		}
 		if !found {
 			if reference.required {
@@ -3187,7 +3429,9 @@ func (r Router) rememberResponseAffinity(ctx context.Context, req modules.Reques
 	if key == "" {
 		return
 	}
-	err := r.affinity.set(ctx, key, endpoint)
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	err := r.affinity.set(writeCtx, key, endpoint)
 	if r.observer != nil {
 		result := "ok"
 		if err != nil {
@@ -3303,6 +3547,9 @@ func requiredChatCapabilities(request openai.ChatCompletionRequest, stream bool)
 	}
 	if request.WebSearchOptions != nil {
 		required = append(required, "web_search")
+		if request.WebSearchOptions.GeminiTimeRange != nil {
+			required = append(required, "gemini_search_time_range")
+		}
 	}
 	if request.WebFetchOptions != nil {
 		required = append(required, "web_fetch")
@@ -3315,6 +3562,24 @@ func requiredChatCapabilities(request openai.ChatCompletionRequest, stream bool)
 	}
 	if request.GeminiGoogleMaps {
 		required = append(required, "google_maps")
+	}
+	if request.GeminiAudioTimestamp != nil {
+		required = append(required, "gemini_audio_timestamp")
+	}
+	if request.GeminiMediaResolution != "" || openai.HasChatGeminiPartMediaResolution(request) {
+		required = append(required, "gemini_media_resolution")
+	}
+	if request.GeminiFileSearch != nil {
+		required = append(required, "gemini_file_search")
+	}
+	if request.GeminiComputerUse != nil {
+		required = append(required, "gemini_computer_use")
+	}
+	if len(request.GeminiMCPServerIDs) > 0 {
+		required = append(required, "gemini_mcp")
+	}
+	if openai.HasChatGeminiPartMediaProcessing(request) {
+		required = append(required, "gemini_media_processing")
 	}
 	if openai.ChatRequestsAudio(request) || openai.ChatHasAudioHistory(request) {
 		required = append(required, "audio")
@@ -3363,13 +3628,15 @@ func requiredResponseCapabilities(request openai.ResponseRequest, stream bool) [
 	computerOutputs, _ := openai.InspectResponseComputerCallOutputs(request.Input)
 	shellOutputs, _ := openai.InspectResponseShellCallOutputs(request.Input)
 	patchOutputs, _ := openai.InspectResponseApplyPatchCallOutputs(request.Input)
+	_, customHistory, _ := openai.InspectResponseCustomToolHistory(request.Input)
+	_, functionHistory, _ := openai.InspectResponseFunctionToolHistory(request.Input)
 	if request.Background {
 		required = append(required, "background_responses")
 	}
 	if stream {
 		required = append(required, "stream")
 	}
-	if len(request.Tools) > 0 || len(computerOutputs) > 0 || len(shellOutputs) > 0 || len(patchOutputs) > 0 {
+	if len(request.Tools) > 0 || len(computerOutputs) > 0 || len(shellOutputs) > 0 || len(patchOutputs) > 0 || customHistory || functionHistory {
 		required = append(required, "tools")
 	}
 	computerRequired := len(computerOutputs) > 0
@@ -3404,6 +3671,9 @@ func requiredResponseCapabilities(request openai.ResponseRequest, stream bool) [
 			required = append(required, "web_search")
 		}
 	}
+	if customHistory && !hasCapability(required, "custom_tools") {
+		required = append(required, "custom_tools")
+	}
 	if computerRequired {
 		required = append(required, "response_computer")
 	}
@@ -3413,7 +3683,7 @@ func requiredResponseCapabilities(request openai.ResponseRequest, stream bool) [
 	if patchRequired {
 		required = append(required, "response_apply_patch")
 	}
-	if request.Text != nil {
+	if responseNeedsStructuredOutput(request.Text) {
 		required = append(required, "structured_output")
 	}
 	if openai.HasResponsePromptImages(request) {
@@ -3426,6 +3696,25 @@ func requiredResponseCapabilities(request openai.ResponseRequest, stream bool) [
 		required = append(required, "file_input")
 	}
 	return required
+}
+
+func responseNeedsStructuredOutput(text any) bool {
+	if text == nil {
+		return false
+	}
+	payload, err := json.Marshal(text)
+	if err != nil {
+		return true
+	}
+	var config struct {
+		Format *struct {
+			Type string `json:"type"`
+		} `json:"format"`
+	}
+	if json.Unmarshal(payload, &config) != nil {
+		return true
+	}
+	return config.Format != nil && config.Format.Type != "text"
 }
 
 func hasCapability(capabilities []string, expected string) bool {
@@ -3453,9 +3742,24 @@ func (e Endpoint) supportsModel(model string) bool {
 }
 
 func (e Endpoint) supportsCapabilities(required ...string) bool {
+	if e.Type == "azure-openai" && hasCapability(required, "embeddings") && azureFoundryProjectBaseURL(e.BaseURL) {
+		return false
+	}
+	if e.Type == "ollama" && hasCapability(required, "structured_output") {
+		client, ok := e.Provider.(interface{ SupportsStructuredOutput() bool })
+		if !ok || !client.SupportsStructuredOutput() {
+			return false
+		}
+	}
 	if hasCapability(required, "chat") {
 		if client, ok := e.Provider.(interface{ SupportsChat() bool }); ok && !client.SupportsChat() {
 			return false
+		}
+		if e.Type == "azure-openai" && hasCapability(required, "web_search") {
+			client, ok := e.Provider.(interface{ SupportsWebSearch() bool })
+			if !ok || !client.SupportsWebSearch() {
+				return false
+			}
 		}
 	}
 	if hasCapability(required, "responses") {
@@ -3575,13 +3879,55 @@ func (e Endpoint) supportsCapabilities(required ...string) bool {
 		}
 	}
 	if hasCapability(required, "realtime") {
-		if _, ok := e.Provider.(RealtimeClient); !ok || e.Type != "openai" && e.Type != "openai-compatible" {
+		if _, ok := e.Provider.(RealtimeClient); !ok || e.Type != "openai" && e.Type != "openai-compatible" && (e.Type != "azure-openai" || !azureRealtimeSupportedBaseURL(e.BaseURL)) {
 			return false
 		}
 	}
 	if hasCapability(required, "web_fetch") {
 		client, ok := e.Provider.(interface{ SupportsWebFetch() bool })
 		if !ok || !client.SupportsWebFetch() {
+			return false
+		}
+	}
+	if hasCapability(required, "gemini_audio_timestamp") {
+		client, ok := e.Provider.(interface{ SupportsAudioTimestamp() bool })
+		if e.Type != "vertex-gemini" || !ok || !client.SupportsAudioTimestamp() {
+			return false
+		}
+	}
+	if hasCapability(required, "gemini_media_resolution") {
+		client, ok := e.Provider.(interface{ SupportsMediaResolution() bool })
+		if e.Type != "gemini" && e.Type != "vertex-gemini" || !ok || !client.SupportsMediaResolution() {
+			return false
+		}
+	}
+	if hasCapability(required, "gemini_media_processing") {
+		client, ok := e.Provider.(interface{ SupportsMediaProcessing() bool })
+		if e.Type != "gemini" && e.Type != "vertex-gemini" || !ok || !client.SupportsMediaProcessing() {
+			return false
+		}
+	}
+	if hasCapability(required, "gemini_search_time_range") {
+		client, ok := e.Provider.(interface{ SupportsSearchTimeRange() bool })
+		if e.Type != "gemini" && e.Type != "vertex-gemini" || !ok || !client.SupportsSearchTimeRange() {
+			return false
+		}
+	}
+	if hasCapability(required, "gemini_file_search") {
+		client, ok := e.Provider.(interface{ SupportsGeminiFileSearch() bool })
+		if e.Type != "gemini" && e.Type != "vertex-gemini" || !ok || !client.SupportsGeminiFileSearch() {
+			return false
+		}
+	}
+	if hasCapability(required, "gemini_computer_use") {
+		client, ok := e.Provider.(interface{ SupportsGeminiComputerUse() bool })
+		if e.Type != "gemini" && e.Type != "vertex-gemini" || !ok || !client.SupportsGeminiComputerUse() {
+			return false
+		}
+	}
+	if hasCapability(required, "gemini_mcp") {
+		client, ok := e.Provider.(interface{ SupportsGeminiMCP() bool })
+		if e.Type != "gemini" && e.Type != "vertex-gemini" || !ok || !client.SupportsGeminiMCP() {
 			return false
 		}
 	}
@@ -3605,6 +3951,15 @@ func supportsCatalogCapabilities(catalog modelcatalog.Catalog, endpoint Endpoint
 	// or adapter support. Both must permit the operation.
 	if !endpoint.supportsCapabilities(required...) {
 		return false
+	}
+	if endpoint.Type == "ollama" && hasCapability(required, "structured_output") {
+		model := requestedModel
+		if upstream, found := endpoint.ModelAliases[requestedModel]; found {
+			model = upstream
+		}
+		if ollamaCloudModelName(model) {
+			return false
+		}
 	}
 	models := []string{requestedModel}
 	if upstream, found := endpoint.ModelAliases[requestedModel]; found {
@@ -3639,11 +3994,11 @@ func supportsCatalogCapabilities(catalog modelcatalog.Catalog, endpoint Endpoint
 }
 
 func requiresExplicitEndpointCapability(required []string) bool {
-	return hasCapability(required, "interactions") || hasCapability(required, "interaction_agents") || hasCapability(required, "interaction_environment_reuse") || hasCapability(required, "gemini_safety_settings") || hasCapability(required, "gemini_code_execution") || hasCapability(required, "url_context") || hasCapability(required, "google_maps") || hasCapability(required, "background_interactions") || hasCapability(required, "mcp") || hasCapability(required, "custom_tools") || hasCapability(required, "response_image_generation") || hasCapability(required, "response_computer") || hasCapability(required, "response_shell") || hasCapability(required, "response_apply_patch") || hasCapability(required, "vision") || hasCapability(required, "rerank") || hasCapability(required, "moderation") || hasCapability(required, "image_generation") || hasCapability(required, "image_edit") || hasCapability(required, "image_variation") || hasCapability(required, "audio_transcription") || hasCapability(required, "audio_translation") || hasCapability(required, "audio_speech") || hasCapability(required, "ocr") || hasCapability(required, "search") || hasCapability(required, "fine_tuning") || hasCapability(required, "video") || hasCapability(required, "video_remix") || hasCapability(required, "video_extension") || hasCapability(required, "container") || hasCapability(required, "container_files") || hasCapability(required, "container_network") || hasCapability(required, "cached_content") || hasCapability(required, "video_input") || hasCapability(required, "realtime") || hasCapability(required, "web_search") || hasCapability(required, "web_fetch") || hasCapability(required, "tool_search") || hasCapability(required, "thinking") || hasCapability(required, "zero_output") || hasCapability(required, "inference_geo") || hasCapability(required, "context_management") || hasCapability(required, "tool_result_error") || hasCapability(required, "document_citations") || hasCapability(required, "document_metadata") || hasCapability(required, "document_text") || hasCapability(required, "audio") || hasCapability(required, "audio_input") || hasCapability(required, "prompt_cache") || hasCapability(required, "assistant_prefill") || hasCapability(required, "background_responses") || hasCapability(required, "file_input") || hasCapability(required, "bedrock_invoke")
+	return hasCapability(required, "interactions") || hasCapability(required, "interaction_agents") || hasCapability(required, "interaction_environment_reuse") || hasCapability(required, "gemini_safety_settings") || hasCapability(required, "gemini_code_execution") || hasCapability(required, "gemini_audio_timestamp") || hasCapability(required, "gemini_media_resolution") || hasCapability(required, "gemini_media_processing") || hasCapability(required, "gemini_search_time_range") || hasCapability(required, "gemini_file_search") || hasCapability(required, "gemini_computer_use") || hasCapability(required, "gemini_mcp") || hasCapability(required, "url_context") || hasCapability(required, "google_maps") || hasCapability(required, "background_interactions") || hasCapability(required, "mcp") || hasCapability(required, "custom_tools") || hasCapability(required, "response_image_generation") || hasCapability(required, "response_computer") || hasCapability(required, "response_shell") || hasCapability(required, "response_apply_patch") || hasCapability(required, "vision") || hasCapability(required, "rerank") || hasCapability(required, "moderation") || hasCapability(required, "image_generation") || hasCapability(required, "image_edit") || hasCapability(required, "image_variation") || hasCapability(required, "audio_transcription") || hasCapability(required, "audio_translation") || hasCapability(required, "audio_speech") || hasCapability(required, "ocr") || hasCapability(required, "search") || hasCapability(required, "fine_tuning") || hasCapability(required, "video") || hasCapability(required, "video_remix") || hasCapability(required, "video_extension") || hasCapability(required, "container") || hasCapability(required, "container_files") || hasCapability(required, "container_network") || hasCapability(required, "cached_content") || hasCapability(required, "video_input") || hasCapability(required, "realtime") || hasCapability(required, "web_search") || hasCapability(required, "web_fetch") || hasCapability(required, "tool_search") || hasCapability(required, "thinking") || hasCapability(required, "zero_output") || hasCapability(required, "inference_geo") || hasCapability(required, "context_management") || hasCapability(required, "tool_result_error") || hasCapability(required, "document_citations") || hasCapability(required, "document_metadata") || hasCapability(required, "document_text") || hasCapability(required, "audio") || hasCapability(required, "audio_input") || hasCapability(required, "prompt_cache") || hasCapability(required, "assistant_prefill") || hasCapability(required, "background_responses") || hasCapability(required, "file_input") || hasCapability(required, "bedrock_invoke")
 }
 
 func hasExplicitEndpointCapabilities(available []string, required []string) bool {
-	for _, capability := range []string{"interactions", "interaction_agents", "interaction_environment_reuse", "gemini_safety_settings", "gemini_code_execution", "url_context", "google_maps", "background_interactions", "mcp", "custom_tools", "response_image_generation", "response_computer", "response_shell", "response_apply_patch", "vision", "rerank", "moderation", "image_generation", "image_edit", "image_variation", "audio_transcription", "audio_translation", "audio_speech", "ocr", "search", "fine_tuning", "video", "video_remix", "video_extension", "container", "container_files", "container_network", "cached_content", "video_input", "realtime", "web_search", "web_fetch", "tool_search", "thinking", "zero_output", "inference_geo", "context_management", "tool_result_error", "document_citations", "document_metadata", "document_text", "audio", "audio_input", "prompt_cache", "assistant_prefill", "background_responses", "file_input", "bedrock_invoke"} {
+	for _, capability := range []string{"interactions", "interaction_agents", "interaction_environment_reuse", "gemini_safety_settings", "gemini_code_execution", "gemini_audio_timestamp", "gemini_media_resolution", "gemini_media_processing", "gemini_search_time_range", "gemini_file_search", "gemini_computer_use", "gemini_mcp", "url_context", "google_maps", "background_interactions", "mcp", "custom_tools", "response_image_generation", "response_computer", "response_shell", "response_apply_patch", "vision", "rerank", "moderation", "image_generation", "image_edit", "image_variation", "audio_transcription", "audio_translation", "audio_speech", "ocr", "search", "fine_tuning", "video", "video_remix", "video_extension", "container", "container_files", "container_network", "cached_content", "video_input", "realtime", "web_search", "web_fetch", "tool_search", "thinking", "zero_output", "inference_geo", "context_management", "tool_result_error", "document_citations", "document_metadata", "document_text", "audio", "audio_input", "prompt_cache", "assistant_prefill", "background_responses", "file_input", "bedrock_invoke"} {
 		if hasCapability(required, capability) && !hasCapability(available, capability) {
 			return false
 		}
@@ -3715,7 +4070,7 @@ func (r Router) weightedOrder(candidates []Endpoint) []Endpoint {
 func providerFor(endpoint config.ProviderEndpointConfig) Client {
 	switch endpoint.Type {
 	case "ollama":
-		return NewOllama(endpoint.BaseURL, endpoint.Stream)
+		return newOllamaWithToken(endpoint.BaseURL, endpoint.APIKey, endpoint.Stream)
 	case "openai":
 		client := NewOpenAICompatibleWithRerankPath(endpoint.BaseURL, endpoint.APIKey, endpoint.Stream, endpoint.RerankPath)
 		client.errorProvider = "openai"
@@ -3725,7 +4080,7 @@ func providerFor(endpoint config.ProviderEndpointConfig) Client {
 	case "openrouter":
 		return NewOpenRouter(endpoint.BaseURL, endpoint.APIKey, endpoint.Stream, endpoint.RerankPath)
 	case "azure-openai":
-		return NewAzureOpenAI(endpoint.BaseURL, endpoint.APIKey, endpoint.Stream, endpoint.APIVersion, endpoint.AuthType)
+		return NewAzureOpenAI(endpoint.BaseURL, endpoint.APIKey, endpoint.Stream, endpoint.APIVersion, endpoint.AuthType, endpoint.AzureCloud, endpoint.AzureAudience)
 	case "gemini":
 		return NewGeminiWithAuth(endpoint.BaseURL, endpoint.APIKey, endpoint.Stream, endpoint.AuthType)
 	case "vertex-gemini":

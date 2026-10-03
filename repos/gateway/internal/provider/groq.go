@@ -2,7 +2,9 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 
 	"ai-gateway-gateway/internal/openai"
@@ -27,7 +29,16 @@ func (Groq) SupportsTools() bool              { return true }
 func (Groq) SupportsStructuredOutput() bool   { return true }
 func (Groq) SupportsVision() bool             { return true }
 
+func (Groq) ManagedChatModelProbes() []string {
+	return []string{"openai/gpt-oss-20b", "openai/gpt-oss-120b", "qwen/qwen3.8-27b"}
+}
+
+func (g Groq) ManagedResponseModelProbes() []string { return g.ManagedChatModelProbes() }
+
 func (g Groq) ValidateChatParameters(request openai.ChatCompletionRequest) error {
+	if err := rejectChatModeration("groq", request); err != nil {
+		return err
+	}
 	if err := rejectParameters("groq",
 		parameterCheck{"metadata", request.Metadata != nil},
 		parameterCheck{"modalities", request.Modalities != nil}, parameterCheck{"audio", request.Audio != nil},
@@ -46,26 +57,87 @@ func (g Groq) ValidateChatParameters(request openai.ChatCompletionRequest) error
 	); err != nil {
 		return err
 	}
+	if err := validateGroqReasoningControls(request); err != nil {
+		return err
+	}
 	switch request.ServiceTier {
-	case "", "auto", "default", "on_demand", "flex", "performance":
+	case "", "auto", "on_demand", "flex", "performance":
 	default:
 		return &Error{Class: FailureClientRequest, Provider: "groq", StatusCode: http.StatusBadRequest, UpstreamCode: "unsupported_parameter", Param: "service_tier", Err: errUnsupportedServiceTier}
 	}
 	return g.compatible.ValidateChatParameters(request)
 }
 
+func validateGroqReasoningControls(request openai.ChatCompletionRequest) error {
+	invalid := func(parameter, message string) error {
+		return &Error{Class: FailureClientRequest, Provider: "groq", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: parameter, Err: errors.New(message)}
+	}
+	if request.IncludeReasoning != nil {
+		switch request.Model {
+		case "openai/gpt-oss-20b", "openai/gpt-oss-120b":
+		default:
+			return invalid("include_reasoning", "include_reasoning is not supported by this Groq model")
+		}
+	}
+	if request.ReasoningFormat != "" {
+		if request.Model != "qwen/qwen3.8-27b" {
+			return invalid("reasoning_format", "reasoning_format is not supported by this Groq model")
+		}
+		if request.ReasoningFormat == "raw" && (len(request.Tools) > 0 || request.ResponseFormat != nil && request.ResponseFormat.Type != "text") {
+			return invalid("reasoning_format", "reasoning_format=raw cannot be combined with tools or JSON response formats")
+		}
+	}
+	if request.ReasoningEffort != "" {
+		if !groqSupportsReasoningEffort(request.Model, request.ReasoningEffort) {
+			return invalid("reasoning_effort", "reasoning_effort is not supported by this Groq model")
+		}
+	}
+	return nil
+}
+
+func groqSupportsReasoningEffort(model, effort string) bool {
+	switch model {
+	case "openai/gpt-oss-20b", "openai/gpt-oss-120b":
+		return effort == "low" || effort == "medium" || effort == "high"
+	case "qwen/qwen3.8-27b":
+		return effort == "none" || effort == "default" || effort == "low" || effort == "medium" || effort == "high"
+	default:
+		return false
+	}
+}
+
 func (g Groq) ChatCompletions(ctx context.Context, request openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
 	if err := g.ValidateChatParameters(request); err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
-	return g.compatible.ChatCompletions(ctx, request)
+	return g.compatible.chatCompletions(ctx, request, decodeGroqChatCompletionResponse, normalizeGroqChatStreamPayload)
 }
 
 func (g Groq) StreamChatCompletions(ctx context.Context, request openai.ChatCompletionRequest, write ChatCompletionStreamWriter) (openai.ChatCompletionResponse, error) {
 	if err := g.ValidateChatParameters(request); err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
-	return g.compatible.StreamChatCompletions(ctx, request, write)
+	return g.compatible.streamChatCompletions(ctx, request, write, normalizeGroqChatStreamPayload)
+}
+
+func decodeGroqChatCompletionResponse(reader io.Reader, target *openai.ChatCompletionResponse) error {
+	payload, err := io.ReadAll(io.LimitReader(reader, maxChatCompletionResponseBytes+1))
+	if err != nil {
+		return err
+	}
+	if len(payload) > maxChatCompletionResponseBytes {
+		return errors.New("chat completion response exceeds limit")
+	}
+	normalized, err := normalizeChatReasoningAliasPayload("Groq", payload, "message")
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(normalized, target)
+}
+
+func normalizeGroqChatStreamPayload(payload string) (string, error) {
+	normalized, err := normalizeChatReasoningAliasPayload("Groq", []byte(payload), "delta")
+	return string(normalized), err
 }
 
 func (g Groq) ValidateResponseParameters(request openai.ResponseRequest) error {
@@ -75,20 +147,34 @@ func (g Groq) ValidateResponseParameters(request openai.ResponseRequest) error {
 	if request.ServiceTier != "" && request.ServiceTier != "auto" && request.ServiceTier != "default" && request.ServiceTier != "flex" {
 		return &Error{Class: FailureClientRequest, Provider: "groq", StatusCode: http.StatusBadRequest, UpstreamCode: "unsupported_parameter", Param: "service_tier", Err: errUnsupportedServiceTier}
 	}
+	for _, tool := range request.Tools {
+		switch tool.Type {
+		case "function", "mcp":
+		case "code_interpreter":
+			if request.Model != "openai/gpt-oss-20b" && request.Model != "openai/gpt-oss-120b" {
+				return &Error{Class: FailureClientRequest, Provider: "groq", StatusCode: http.StatusBadRequest, UpstreamCode: "unsupported_parameter", Param: "tools.code_interpreter", Err: errors.New("code interpreter is not supported by this Groq model")}
+			}
+			if !groqSupportsResponseCodeContainer(tool.Container) {
+				return &Error{Class: FailureClientRequest, Provider: "groq", StatusCode: http.StatusBadRequest, UpstreamCode: "unsupported_parameter", Param: "tools.code_interpreter.container", Err: errors.New("Groq code interpreter requires an automatic container without additional options")}
+			}
+		default:
+			return rejectParameters("groq", parameterCheck{"tools.type", true})
+		}
+	}
 	if reasoning := request.Reasoning; reasoning != nil {
 		if reasoning.Summary != nil || reasoning.GenerateSummary != nil || reasoning.Context != nil || reasoning.Mode != nil {
 			return rejectParameters("groq", parameterCheck{"reasoning", true})
 		}
 		if reasoning.Effort != nil {
-			switch *reasoning.Effort {
-			case "low", "medium", "high":
-			default:
-				return &Error{Class: FailureClientRequest, Provider: "groq", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "reasoning.effort", Err: errors.New("reasoning effort must be low, medium, or high")}
+			if !groqSupportsReasoningEffort(request.Model, *reasoning.Effort) {
+				return &Error{Class: FailureClientRequest, Provider: "groq", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "reasoning.effort", Err: errors.New("reasoning effort is not supported by this Groq model")}
 			}
 		}
 	}
 	_, verbositySupplied := openai.ResponseTextVerbosity(request.Text)
 	return rejectParameters("groq",
+		parameterCheck{"context_management", len(request.ContextManagement) > 0},
+		parameterCheck{"moderation", request.Moderation != nil},
 		parameterCheck{"include", len(request.Include) > 0},
 		parameterCheck{"store", request.Store != nil && *request.Store},
 		parameterCheck{"truncation", request.Truncation != nil},
@@ -104,6 +190,19 @@ func (g Groq) ValidateResponseParameters(request openai.ResponseRequest) error {
 		parameterCheck{"presence_penalty", request.PresencePenalty != nil},
 		parameterCheck{"max_tool_calls", request.MaxToolCalls != nil},
 	)
+}
+
+func groqSupportsResponseCodeContainer(container any) bool {
+	encoded, err := json.Marshal(container)
+	if err != nil {
+		return false
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(encoded, &fields) != nil || len(fields) != 1 {
+		return false
+	}
+	var containerType string
+	return json.Unmarshal(fields["type"], &containerType) == nil && containerType == "auto"
 }
 
 func (g Groq) Responses(ctx context.Context, request openai.ResponseRequest) (openai.ResponseResponse, error) {
