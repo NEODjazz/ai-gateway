@@ -22,12 +22,15 @@ baseline. Do not use this list for unrelated API changes.
 
 ## Saved agent instructions
 
-The separate `agent-configuration-err-ignore.txt` file accepts exactly one
-error-level finding on `GET /admin/v1/agent-profiles`: `content_stored` can now
-be true when an agent has explicitly configured encrypted instructions. Its
-previous constant false value described metadata-only profiles. Clients must
-read this boolean rather than assume false; omitted instructions retain the
-legacy metadata-only behavior. Instruction text remains absent from this list.
-The compatibility workflow uses this anchored finding only; its WARN threshold
-and all other checks remain unchanged. Remove the exception when the comparison
-baseline includes saved agent configuration.
+Agent list and PUT responses now expose truthful `content_stored` and
+`execution_supported` booleans instead of constant false values. Stored content
+means explicitly configured encrypted instructions; executable profiles use the
+A2A runtime. Clients must read these booleans rather than assume false. Omitted
+instructions retain metadata-only storage behavior. Instruction text remains
+absent from list and PUT responses.
+
+The compatibility workflow loads the adjacent error and warning lists. Each
+entry is an anchored, escaped literal finding, including the four agent flag
+changes; the WARN threshold and all other checks remain unchanged. New paths,
+fields, status codes or values still fail the gate. Remove the accepted findings
+when the comparison baseline includes these contracts.
