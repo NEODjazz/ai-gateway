@@ -41,6 +41,7 @@ describe("dashboard navigation", () => {
     const sections = visibleNavigationSections(appRoutes);
     expect(activeNavigationGroup(sections, "/providers")).toBe("models");
     expect(activeNavigationGroup(sections, "/providers/provider-a")).toBe("models");
+    expect(activeNavigationGroup(sections, "/Providers/provider-a")).toBe("models");
     expect(activeNavigationGroup(sections, "/providers-other")).toBeUndefined();
     expect(activeNavigationGroup(sections, "/usage")).toBeUndefined();
   });

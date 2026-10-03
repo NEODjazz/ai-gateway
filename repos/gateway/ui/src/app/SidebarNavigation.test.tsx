@@ -32,6 +32,11 @@ describe("grouped sidebar", () => {
     expect(screen.getByRole("link", { name: "Providers" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("link", { name: "Models" })).not.toHaveAttribute("aria-current");
   });
+  it("opens the active group for case-insensitive URLs supported by the router", () => {
+    show("/Providers");
+    expect(screen.getByRole("button", { name: "Models & endpoints" })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("link", { name: "Providers" })).toHaveAttribute("aria-current", "page");
+  });
   it("keeps highlighting detail routes and preserves ordinary browser link behavior", async () => {
     show("/api-keys/key-a");
     const link = screen.getByRole("link", { name: "Virtual keys" });

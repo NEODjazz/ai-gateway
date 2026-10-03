@@ -37,6 +37,7 @@ import {
   TagDollar,
 } from "@gravity-ui/icons";
 import type { AsideHeaderItem } from "@gravity-ui/navigation/build/esm/index.js";
+import { matchPath } from "react-router-dom";
 import type { AppRoute } from "./routes";
 
 type NavigationGroup = { id: string; title: string; paths: string[] };
@@ -78,7 +79,7 @@ export function visibleNavigationSections(routes: AppRoute[]): VisibleNavigation
 }
 
 export function isCurrentNavigationRoute(path: string, pathname: string): boolean {
-  return pathname === path || pathname.startsWith(`${path}/`);
+  return matchPath({ path, end: false }, pathname) !== null;
 }
 
 export function activeNavigationGroup(sections: VisibleNavigationSection[], pathname: string): string | undefined {
