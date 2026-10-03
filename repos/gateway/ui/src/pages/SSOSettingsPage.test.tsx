@@ -14,7 +14,8 @@ function show() {
 
 async function edit() {
   await userEvent.click(await screen.findByRole("button", { name: "Edit SSO settings" }));
-  await screen.findByRole("dialog", { name: "Edit SSO settings" });
+  const dialog = await screen.findByRole("dialog", { name: "Edit SSO settings" });
+  await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
   await userEvent.click(screen.getByText("Advanced OIDC endpoints"));
 }
 
@@ -81,13 +82,15 @@ describe("SSOSettingsPage", () => {
     let current = { ...settings, key_session: false, test_status: "passed", test_expires_at: Math.floor(Date.now() / 1000) + 300 };
     const calls: string[] = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => { calls.push(String(url)); return json(current); });
-    show(); await edit(); await screen.findByDisplayValue(profile.issuer);
+    show(); await screen.findByRole("button", { name: "Edit SSO settings" });
     expect(screen.getByRole("button", { name: "Activate SSO", hidden: true })).toBeDisabled();
     expect(screen.getByText(/Sign in with an administrator virtual key/)).toBeInTheDocument();
     current = { ...current, key_session: true };
     await userEvent.click(screen.getByRole("button", { name: "Refresh test status", hidden: true }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Activate SSO", hidden: true })).toBeEnabled());
+    await edit();
     await userEvent.type(screen.getByLabelText("Client ID"), "-edited");
+    expect(screen.getByLabelText("Client ID")).toHaveValue("console-edited");
     expect(screen.getByRole("button", { name: "Activate SSO", hidden: true })).toBeDisabled();
     expect(calls).not.toContain("/admin/v1/sso/action");
   });
