@@ -20,6 +20,7 @@ export function contentText(value: unknown): string {
   if (!value || typeof value !== "object") return "";
   const item = value as Record<string, unknown>;
   if (typeof item.text === "string") return item.text;
+  if (item.type === "refusal" && typeof item.refusal === "string") return item.refusal;
   if (item.content !== undefined) return contentText(item.content);
   return "";
 }
@@ -44,7 +45,7 @@ export async function runText(connection: PlaygroundConnection, endpoint: TextEn
   signal, sessionID, onText = () => undefined, clock = () => performance.now()
 }: { signal: AbortSignal; sessionID: string; onText?: (text: string) => void; clock?: () => number }): Promise<TextRun> {
   const start = clock();
-  let text = "", reasoning = "", firstTokenMS: number | undefined;
+  let text = "", reasoning = "", chatContent = "", refusal = "", firstTokenMS: number | undefined;
   let response: Record<string, unknown> = {};
   const toolCalls = new Map<number, { id: string; type: string; function: { name: string; arguments: string } }>();
   let toolCharacters = 0;
@@ -64,9 +65,9 @@ export async function runText(connection: PlaygroundConnection, endpoint: TextEn
     if (JSON.stringify(payload).length > maxOutputCharacters) throw new Error("Structured response exceeds the 2 MiB Playground limit.");
     response = payload;
     const message = object((Array.isArray(payload.choices) ? object(payload.choices[0]) : undefined)?.message);
-    text = endpoint === "chat" ? contentText(message?.content) : typeof payload.output_text === "string" ? payload.output_text : contentText(payload.output);
+    text = endpoint === "chat" ? (contentText(message?.content) || contentText(message?.refusal)) : typeof payload.output_text === "string" ? payload.output_text : contentText(payload.output);
     if (text.length > maxOutputCharacters) throw new Error("Text output exceeds the 2 MiB Playground limit.");
-    reasoning = contentText(message?.reasoning_content || message?.reasoning);
+    reasoning = contentText(message?.reasoning_content || message?.reasoning) || (endpoint === "responses" && Array.isArray(payload.output) ? payload.output.filter((item) => object(item)?.type === "reasoning").map((item) => contentText(object(item)?.summary)).filter(Boolean).join("\n") : "");
     onText(text);
   };
   const options = { maximumResponseBytes: 32 * 1024 * 1024, method: "POST", body, signal, headers: { "X-Session-ID": sessionID } };
@@ -106,7 +107,9 @@ export async function runText(connection: PlaygroundConnection, endpoint: TextEn
         if (object(payload.usage)) response.usage = payload.usage;
         const firstChoice = Array.isArray(payload.choices) ? object(payload.choices[0]) : undefined;
         const delta = object(firstChoice?.delta);
-        append(contentText(delta?.content));
+        const contentDelta = contentText(delta?.content), refusalDelta = contentText(delta?.refusal);
+        append(contentDelta); chatContent += contentDelta;
+        append(refusalDelta); refusal += refusalDelta;
         const reasoningDelta = contentText(delta?.reasoning_content || delta?.reasoning);
         if (text.length + reasoning.length + toolCharacters + reasoningDelta.length > maxOutputCharacters) throw new Error("Reasoning output exceeds the Playground limit.");
         reasoning += reasoningDelta;
@@ -128,7 +131,7 @@ export async function runText(connection: PlaygroundConnection, endpoint: TextEn
   }
   ensureActive();
   if (streamed && !terminal) throw new Error("Stream ended before the response completed.");
-  if (streamed && endpoint === "chat") response.choices = [{ message: { role: "assistant", content: text || null, ...(toolCalls.size ? { tool_calls: [...toolCalls.entries()].sort(([a], [b]) => a - b).map(([, value]) => value) } : {}), ...(reasoning ? { reasoning_content: reasoning } : {}) }, finish_reason: response.finish_reason }];
+  if (streamed && endpoint === "chat") response.choices = [{ message: { role: "assistant", content: chatContent || null, ...(refusal ? { refusal } : {}), ...(toolCalls.size ? { tool_calls: [...toolCalls.entries()].sort(([a], [b]) => a - b).map(([, value]) => value) } : {}), ...(reasoning ? { reasoning_content: reasoning } : {}) }, finish_reason: response.finish_reason }];
   return { text, reasoning, response, streamed, model: typeof response.model === "string" ? response.model : String(body.model || ""),
     id: typeof response.id === "string" ? response.id : undefined, usage: object(response.usage) as ReportedUsage | undefined,
     events, eventCount, latencyMS: clock() - start, firstTokenMS };

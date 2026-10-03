@@ -38,6 +38,26 @@ describe("Endpoint Playground", () => {
     view.unmount(); expect(revoke).toHaveBeenCalledWith("blob:audio");
     Reflect.deleteProperty(URL, "createObjectURL"); Reflect.deleteProperty(URL, "revokeObjectURL");
   });
+  it("names speech downloads using the returned MIME type instead of mutable form settings", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(new Uint8Array([1]), { headers: { "Content-Type": "audio/wav" } }));
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: () => "blob:audio" });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
+    const view = setup("speech"); await userEvent.type(screen.getByLabelText("Speech text"), "Speak"); await run();
+    expect(await screen.findByRole("link", { name: "Download speech" })).toHaveAttribute("download", "ai-gateway-speech.wav");
+    view.unmount(); Reflect.deleteProperty(URL, "createObjectURL"); Reflect.deleteProperty(URL, "revokeObjectURL");
+  });
+  it("keeps native conversation history visible and preserves structured tool use on continuation", async () => {
+    const mock = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(JSON.stringify({ type: "message", content: [{ type: "text", text: "Native answer" }, { type: "tool_use", id: "call-1", name: "lookup", input: { query: "Example" } }], usage: { input_tokens: 0, output_tokens: 4 } }), { headers: { "Content-Type": "application/json" } }));
+    setup("messages"); await userEvent.type(screen.getByLabelText("Endpoint input"), "First"); await run();
+    expect(await screen.findByText("Native answer")).toBeInTheDocument();
+    expect(screen.getByText("Tool calls and results")).toBeInTheDocument();
+    expect(screen.getByLabelText("Endpoint input")).toHaveValue("");
+    await userEvent.type(screen.getByLabelText("Endpoint input"), "Second"); await userEvent.keyboard("{Enter}");
+    await waitFor(() => expect(mock).toHaveBeenCalledTimes(2));
+    const body = JSON.parse(String(mock.mock.calls[1][1]?.body));
+    expect(body.messages[1].content[1]).toMatchObject({ type: "tool_use", id: "call-1" });
+    expect(await screen.findAllByText("Native answer")).toHaveLength(2);
+  });
   it("transcribes the supplied audio and displays the transcript", async () => {
     const mock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response('{"text":"Transcript text","segments":[]}'));
     setup("transcription"); fireEvent.change(screen.getByLabelText("Endpoint attachment"), { target: { files: [new File(["audio"], "input.wav", { type: "audio/wav" })] } });

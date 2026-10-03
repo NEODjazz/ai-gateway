@@ -203,3 +203,10 @@ configured team registry with organization-owned virtual keys, offers audited
 assignment and removal actions, and excludes teams owned by another
 organization. Reparenting is intentionally explicit: remove the current
 assignment before selecting the team for a different organization.
+
+Comparison sends shared image/PDF attachments to each selected model and retains
+typed history independently. Model refusals are displayed as output. Structured
+tool calls, safe output images and URL citations are shown separately; copy
+controls report clipboard failures. Native Messages/Interactions conversations
+retain bounded visible history. Speech download filenames use the returned MIME
+type rather than the current form setting.

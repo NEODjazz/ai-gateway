@@ -8,8 +8,12 @@ import { buildEndpointRequest, defaultEndpointSettings, readAttachment, safeMedi
 import { runNativeText, type NativeTextRun } from "./runNativeText";
 import type { PlaygroundConnection } from "./requests";
 import { contentText } from "./runText";
+import { CopyOutput, OutputDetails } from "./OutputDetails";
+import { retainConversation } from "./attachments";
+import { PricingControls, defaultPricing, estimateCost } from "./PriceEstimate";
 
-type Output = { payload?: Record<string, unknown>; native?: NativeTextRun; audio?: { url: string; type: string }; latencyMS: number };
+type Output = { payload?: Record<string, unknown>; native?: NativeTextRun; audio?: { url: string; type: string; filename: string }; latencyMS: number };
+type NativeTurn = { role: "user" | "assistant"; content: unknown; text?: string; reasoning?: string };
 function object(value: unknown): Record<string, unknown> | undefined { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined; }
 export function EndpointPlayground({ endpoint, connection, connectionChanged, connectionControls, models }: {
   endpoint: SpecializedEndpoint; connection: PlaygroundConnection; connectionChanged: boolean; connectionControls: ReactNode; models: string[];
@@ -18,16 +22,17 @@ export function EndpointPlayground({ endpoint, connection, connectionChanged, co
   const [attachments, setAttachments] = useState<Attachment[]>([]), [mask, setMask] = useState<Attachment>();
   const [output, setOutput] = useState<Output>(), [pending, setPending] = useState(""), [error, setError] = useState("");
   const [running, setRunning] = useState(false), [reading, setReading] = useState(false), [code, setCode] = useState<{ path: string; body: unknown; baseURL: string; headers?: Record<string, string>; binaryOutput?: boolean }>();
-  const [history, setHistory] = useState<unknown[]>([]), [previousID, setPreviousID] = useState("");
+  const [history, setHistory] = useState<NativeTurn[]>([]), [previousID, setPreviousID] = useState("");
+  const [historyDropped, setHistoryDropped] = useState(0), [pricing, setPricing] = useState(defaultPricing);
   const abort = useRef<AbortController | undefined>(undefined), generation = useRef(0), audioURL = useRef<string | undefined>(undefined);
   const attachmentInput = useRef<HTMLInputElement>(null), maskInput = useRef<HTMLInputElement>(null);
   const textEndpoint = endpoint === "messages" || endpoint === "interactions";
   const imageEndpoint = endpoint === "images" || endpoint === "image-edits";
   useEffect(() => () => { generation.current++; abort.current?.abort(); if (audioURL.current) URL.revokeObjectURL(audioURL.current); }, []);
-  useEffect(() => { clear(); setAttachments([]); setMask(undefined); if (attachmentInput.current) attachmentInput.current.value = ""; if (maskInput.current) maskInput.current.value = ""; setModel(models[0] || ""); }, [connection]);
+  useEffect(() => { clear(); setAttachments([]); setMask(undefined); if (attachmentInput.current) attachmentInput.current.value = ""; if (maskInput.current) maskInput.current.value = ""; setModel(models[0] || ""); setPricing(defaultPricing); }, [connection]);
   useEffect(() => { if (models.length && !models.includes(model)) { setModel(models[0]); clear(); } }, [models]);
   const patch = (value: Partial<EndpointSettings>) => setSettings((current) => ({ ...current, ...value }));
-  function clear() { generation.current++; abort.current?.abort(); abort.current = undefined; setRunning(false); setOutput(undefined); setPending(""); setHistory([]); setPreviousID(""); setError(""); if (audioURL.current) URL.revokeObjectURL(audioURL.current); audioURL.current = undefined; }
+  function clear() { generation.current++; abort.current?.abort(); abort.current = undefined; setRunning(false); setOutput(undefined); setPending(""); setHistory([]); setHistoryDropped(0); setPreviousID(""); setError(""); if (audioURL.current) URL.revokeObjectURL(audioURL.current); audioURL.current = undefined; }
   async function attach(files: FileList | null, isMask = false) {
     if (!files?.length || reading || running) return;
     const current = generation.current; if (isMask) setMask(undefined); else setAttachments([]); setReading(true); setError("");
@@ -38,7 +43,7 @@ export function EndpointPlayground({ endpoint, connection, connectionChanged, co
     } catch (cause) { if (current === generation.current) { const field = isMask ? maskInput.current : attachmentInput.current; if (field) field.value = ""; setError(cause instanceof Error ? cause.message : "Attachment failed"); } }
     finally { setReading(false); }
   }
-  function body() { return buildEndpointRequest(endpoint, model, input, settings, attachments, mask, history, previousID); }
+  function body() { return buildEndpointRequest(endpoint, model, input, settings, attachments, mask, endpoint === "messages" ? history.map(({ role, content }) => ({ role, content })) : [], previousID); }
   function getCode() {
     try { const request = body(); setCode({ path: request.path, body: request.body, baseURL: connection.baseURL, headers: request.headers, binaryOutput: endpoint === "speech" }); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "Could not generate code"); }
@@ -55,14 +60,17 @@ export function EndpointPlayground({ endpoint, connection, connectionChanged, co
         const native = await runNativeText(connection, endpoint, request.body, controller.signal, (text) => { if (current === generation.current) setPending(text); });
         result = { native, payload: native.response, latencyMS: native.latencyMS };
         if (current !== generation.current || controller.signal.aborted) return;
-        if (endpoint === "messages") setHistory((existing) => [...existing, { role: "user", content: input }, { role: "assistant", content: native.response.content }].slice(-40));
-        else if (typeof native.response.id === "string") setPreviousID(native.response.id);
+        const retained = retainConversation<NativeTurn>([...history, { role: "user", content: input }, { role: "assistant", content: endpoint === "messages" ? native.response.content : native.response.outputs, text: native.text, reasoning: native.reasoning }]);
+        setHistory(retained.turns); setHistoryDropped((value) => value + retained.dropped);
+        if (endpoint === "interactions" && typeof native.response.id === "string") setPreviousID(native.response.id);
       } else if (endpoint === "speech") {
         const audio = await connection.client.requestBinary(connection.path(request.path), { maximumResponseBytes: 32 * 1024 * 1024, method: "POST", body: request.body, signal: controller.signal });
         if (current !== generation.current || controller.signal.aborted) return;
         if (audio.body.size > 32 * 1024 * 1024) throw new Error("Audio output exceeds the 32 MiB Playground limit.");
         if (audioURL.current) URL.revokeObjectURL(audioURL.current); const url = URL.createObjectURL(audio.body); audioURL.current = url;
-        result = { audio: { url, type: audio.contentType.split(";")[0].toLowerCase() }, latencyMS: performance.now() - start };
+        const type = audio.contentType.split(";")[0].trim().toLowerCase();
+        const extension = ({ "audio/mpeg": "mp3", "audio/wav": "wav", "audio/x-wav": "wav", "audio/ogg": "ogg", "audio/flac": "flac", "audio/aac": "aac", "audio/mp4": "m4a", "audio/webm": "webm" } as Record<string, string>)[type] || (/^[a-z0-9]{1,8}$/.test(String(request.body.response_format)) ? String(request.body.response_format) : "bin");
+        result = { audio: { url, type, filename: `ai-gateway-speech.${extension}` }, latencyMS: performance.now() - start };
       } else {
         const payload = await connection.client.request<Record<string, unknown>>(connection.path(request.path), { maximumResponseBytes: 32 * 1024 * 1024, method: "POST", body: request.body, headers: request.headers, signal: controller.signal });
         if (!object(payload)) throw new Error("Gateway returned an invalid response.");
@@ -71,18 +79,20 @@ export function EndpointPlayground({ endpoint, connection, connectionChanged, co
         result = { payload, latencyMS: performance.now() - start };
       }
       if (current !== generation.current || controller.signal.aborted) return;
-      setOutput(result); setPending("");
+      setOutput(result); setPending(""); if (textEndpoint) setInput("");
     } catch (cause) { if (current === generation.current) setError(controller.signal.aborted ? "Request cancelled" : cause instanceof Error ? cause.message : "Request failed"); }
     finally { if (current === generation.current) { setRunning(false); abort.current = undefined; } }
   }
   const payload = output?.payload, native = output?.native;
   const usage = object(payload?.usage);
+  const inputTokens = usage?.input_tokens ?? usage?.prompt_tokens ?? usage?.total_input_tokens;
+  const outputTokens = usage?.output_tokens ?? usage?.completion_tokens ?? usage?.total_output_tokens;
   const images = imageEndpoint && Array.isArray(payload?.data) ? payload.data.slice(0, 10).map((value) => { const item = object(value); return { src: safeMediaURL(item?.b64_json ? `data:image/png;base64,${item.b64_json}` : item?.url), prompt: item?.revised_prompt }; }) : [];
   const embeddings = endpoint === "embeddings" && Array.isArray(payload?.data) ? payload.data.slice(0, 100).map((value) => object(value)) : [];
   const rpcResult = object(payload?.result), task = object(rpcResult?.task), agentMessage = object(rpcResult?.message);
   return <div className="playground-workspace playground-config-layout">
     <aside className="playground-side-panel"><section className="playground-parameters-card"><h2>Configurations</h2>{connectionControls}
-      {!["a2a", "mcp"].includes(endpoint) && (models.length ? <SelectControl label="Endpoint model" value={model} disabled={running} options={models.map((id) => ({ value: id, content: id }))} onUpdate={(value) => { setModel(value); clear(); }} /> : <TextControl label="Endpoint model" value={model} disabled={running} onUpdate={(value) => { setModel(value); clear(); }} />)}
+      {!["a2a", "mcp"].includes(endpoint) && (models.length ? <SelectControl label="Endpoint model" value={model} disabled={running} options={models.map((id) => ({ value: id, content: id }))} onUpdate={(value) => { setModel(value); setPricing(defaultPricing); clear(); }} /> : <TextControl label="Endpoint model" value={model} disabled={running} onUpdate={(value) => { setModel(value); setPricing(defaultPricing); clear(); }} />)}
       {textEndpoint && <><AreaControl label="Native system instructions" rows={3} value={settings.instructions} disabled={running} onUpdate={(instructions) => patch({ instructions })} /><TextControl label="Native maximum output tokens" value={settings.limit} type="number" disabled={running} onUpdate={(limit) => patch({ limit })} /><TextControl label="Native temperature" value={settings.temperature} type="number" disabled={running} onUpdate={(temperature) => patch({ temperature })} /><TextControl label="Native Top P" value={settings.topP} type="number" disabled={running} onUpdate={(topP) => patch({ topP })} /><GravityThemeScope><Checkbox controlProps={{ "aria-label": "Stream native response" }} checked={settings.stream} disabled={running} onUpdate={(stream) => patch({ stream })}>Stream response</Checkbox></GravityThemeScope></>}
       {imageEndpoint && <><TextControl label="Image size" value={settings.size} disabled={running} onUpdate={(size) => patch({ size })} placeholder="Provider default" /><TextControl label="Image count" type="number" value={settings.count} disabled={running} onUpdate={(count) => patch({ count })} /><TextControl label="Image quality" value={settings.quality} disabled={running} onUpdate={(quality) => patch({ quality })} placeholder="Provider default" /></>}
       {endpoint === "embeddings" && <TextControl label="Embedding dimensions" value={settings.dimensions} disabled={running} type="number" onUpdate={(dimensions) => patch({ dimensions })} placeholder="Model default" />}
@@ -90,25 +100,28 @@ export function EndpointPlayground({ endpoint, connection, connectionChanged, co
       {endpoint === "transcription" && <TextControl label="Transcription language" value={settings.language} disabled={running} onUpdate={(language) => patch({ language })} placeholder="Optional language code" />}
       {endpoint === "a2a" && <TextControl label="Agent ID" value={settings.agent} disabled={running} onUpdate={(agent) => { patch({ agent }); clear(); }} />}
       {endpoint === "mcp" && <><TextControl label="MCP server ID" value={settings.server} disabled={running} onUpdate={(server) => patch({ server })} /><TextControl label="MCP tool name" value={settings.tool} disabled={running} onUpdate={(tool) => patch({ tool })} /><AreaControl label="MCP arguments JSON" rows={6} value={settings.arguments} disabled={running} onUpdate={(args) => patch({ arguments: args })} /></>}
+      {textEndpoint && <PricingControls disabled={running} value={pricing} onUpdate={setPricing} />}
       <details><summary>Advanced endpoint parameters</summary><AreaControl label="Endpoint parameters JSON" rows={5} value={settings.advanced} disabled={running} onUpdate={(advanced) => patch({ advanced })} /><p className="muted">Uses this endpoint's native parameter dialect. Unsupported parameters produce an error.</p></details>
     </section></aside>
     <div className="playground-main-panel"><form className="playground-conversation-card" onSubmit={submit}>
       <div className="playground-output-heading"><h2>{textEndpoint ? "Native conversation" : "Endpoint request"}</h2><div className="playground-actions"><GatewayButton view="outlined" disabled={running} onClick={clear}>Clear endpoint output</GatewayButton><GatewayButton view="outlined" disabled={running} onClick={getCode}>Get endpoint code</GatewayButton></div></div>
-      {endpoint !== "mcp" && <AreaControl label={endpoint === "speech" ? "Speech text" : endpoint === "transcription" ? "Transcription prompt" : endpoint === "embeddings" ? "Embedding input" : "Endpoint input"} rows={5} value={input} disabled={running} onUpdate={setInput} />}
+      {endpoint !== "mcp" && <AreaControl label={endpoint === "speech" ? "Speech text" : endpoint === "transcription" ? "Transcription prompt" : endpoint === "embeddings" ? "Embedding input" : "Endpoint input"} rows={5} value={input} disabled={running} onUpdate={setInput} onKeyDown={(event) => { if (textEndpoint && event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); if (!running) event.currentTarget.form?.requestSubmit(); } }} />}
       {(endpoint === "image-edits" || endpoint === "transcription") && <><label>Input {endpoint === "transcription" ? "audio" : "images"}<input ref={attachmentInput} aria-label="Endpoint attachment" type="file" multiple={endpoint === "image-edits"} disabled={running || reading} accept={endpoint === "transcription" ? "audio/*,.webm" : "image/png,image/jpeg,image/webp,image/gif"} onChange={(event) => void attach(event.currentTarget.files)} /></label>{attachments.map((item) => <p key={item.filename}>{item.filename} · {item.media_type}</p>)}<GatewayButton view="flat" disabled={running || reading} onClick={() => { setAttachments([]); if (attachmentInput.current) attachmentInput.current.value = ""; }}>Remove attachments</GatewayButton></>}
       {endpoint === "image-edits" && <label>Optional mask<input ref={maskInput} aria-label="Image mask attachment" type="file" accept="image/png" disabled={running || reading} onChange={(event) => void attach(event.currentTarget.files, true)} />{mask && <><span>{mask.filename}</span><GatewayButton view="flat" disabled={running} onClick={() => { setMask(undefined); if (maskInput.current) maskInput.current.value = ""; }}>Remove mask</GatewayButton></>}</label>}
       {endpoint === "mcp" && <p className="muted">Running this request executes the selected tool with these arguments and a unique idempotency key. Review the tool and arguments before execution.</p>}
       <div className="playground-actions"><GatewayButton type="submit" disabled={running || reading || connectionChanged}>{running ? "Running…" : endpoint === "mcp" ? "Execute MCP tool" : "Run endpoint request"}</GatewayButton>{running && <GatewayButton view="outlined" onClick={() => abort.current?.abort()}>Stop endpoint request</GatewayButton>}</div>
       {error && <p role="alert" className="form-error">{error}</p>}{pending && <pre className="playground-native-text">{pending}</pre>}
-      {native && <div className="playground-native-output"><h3>Assistant</h3><pre>{native.text || "No text output"}</pre>{native.reasoning && <details><summary>Reasoning</summary><pre>{native.reasoning}</pre></details>}</div>}
+      {textEndpoint && <section aria-label="Native conversation history">{history.map((turn, index) => <article className={`playground-turn ${turn.role}`} key={index}><strong>{turn.role === "user" ? "User" : "Assistant"}</strong><pre>{turn.text || contentText(turn.content) || "No text output"}</pre>{turn.role === "assistant" && <><CopyOutput label={`Copy native response ${index + 1}`} text={turn.text || contentText(turn.content)} />{turn.reasoning && <details><summary>Reasoning</summary><pre>{turn.reasoning}</pre></details>}<OutputDetails payload={{ content: turn.content }} /></>}</article>)}</section>}
+      {historyDropped > 0 && <p className="muted">{historyDropped} earlier turns removed to keep browser history bounded.</p>}
       {images.map((item, index) => <figure key={index}>{item.src ? <><img className="playground-generated-image" src={item.src} alt={`Generated image ${index + 1}`} referrerPolicy="no-referrer" /><a href={item.src} download={`ai-gateway-image-${index + 1}.png`} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer">Open/download image</a></> : <p>Image output URL is unavailable or unsupported.</p>}{typeof item.prompt === "string" && <figcaption>{item.prompt}</figcaption>}</figure>)}
-      {output?.audio && <div>{/^audio\/(mpeg|wav|x-wav|ogg|flac|mp4|webm|aac)$/.test(output.audio.type) ? <audio controls src={output.audio.url} aria-label="Generated speech" /> : <p>Audio format has no browser preview. Download to play it.</p>}<a href={output.audio.url} download={`ai-gateway-speech.${settings.format}`}>Download speech</a></div>}
+      {output?.audio && <div>{/^audio\/(mpeg|wav|x-wav|ogg|flac|mp4|webm|aac)$/.test(output.audio.type) ? <audio controls src={output.audio.url} aria-label="Generated speech" /> : <p>Audio format has no browser preview. Download to play it.</p>}<a href={output.audio.url} download={output.audio.filename}>Download speech</a></div>}
       {!!embeddings.length && <section aria-label="Embedding vectors"><h3>Embedding vectors</h3>{embeddings.map((item, index) => <details key={index}><summary>Vector {String(item?.index ?? index)} · {Array.isArray(item?.embedding) ? item.embedding.length : "—"} dimensions</summary><pre>{JSON.stringify(item?.embedding ?? null).slice(0, 65536)}</pre></details>)}</section>}
-      {endpoint === "transcription" && typeof payload?.text === "string" && <section><h3>Transcript</h3><pre>{payload.text}</pre></section>}
+      {endpoint === "transcription" && typeof payload?.text === "string" && <section><h3>Transcript</h3><pre>{payload.text}</pre><CopyOutput text={payload.text} /></section>}
       {endpoint === "a2a" && rpcResult && <section><h3>Agent response</h3>{task && <p>Status: {String(object(task.status)?.state || "unknown")} · Task {String(task.id || "—")}</p>}<pre>{contentText(agentMessage?.parts) || (Array.isArray(task?.artifacts) ? task.artifacts.map((artifact) => contentText(object(artifact)?.parts)).join("\n") : "") || "No text output"}</pre></section>}
       {endpoint === "mcp" && payload && <section><h3>Tool output</h3><pre>{contentText(payload.content) || JSON.stringify(payload, null, 2).slice(0, 65536)}</pre></section>}
+      {payload && !textEndpoint && <OutputDetails payload={payload} />}
       {payload && <details><summary>Response details</summary><pre>{JSON.stringify(payload, null, 2).slice(0, 65536)}</pre></details>}
-    </form><section className="playground-metadata-card"><h2>Response metadata</h2><dl className="playground-metadata"><div><dt>Status</dt><dd>{String(payload?.status ?? payload?.stop_reason ?? (output ? "Response received" : "—"))}</dd></div><div><dt>Latency</dt><dd>{output ? `${Math.round(output.latencyMS)} ms` : "—"}</dd></div><div><dt>First token</dt><dd>{native?.firstTokenMS === undefined ? "—" : `${Math.round(native.firstTokenMS)} ms`}</dd></div><div><dt>Input tokens</dt><dd>{String(usage?.input_tokens ?? usage?.prompt_tokens ?? usage?.total_input_tokens ?? "—")}</dd></div><div><dt>Output tokens</dt><dd>{String(usage?.output_tokens ?? usage?.completion_tokens ?? usage?.total_output_tokens ?? "—")}</dd></div></dl>{native?.events.length ? <details><summary>Native events ({native.events.length}/{native.eventCount})</summary><pre>{native.events.map((event) => `${event.event}: ${event.data}`).join("\n\n")}</pre></details> : null}</section></div>
+    </form><section className="playground-metadata-card"><h2>Response metadata</h2><dl className="playground-metadata"><div><dt>Status</dt><dd>{String(payload?.status ?? payload?.stop_reason ?? (output ? "Response received" : "—"))}</dd></div><div><dt>Latency</dt><dd>{output ? `${Math.round(output.latencyMS)} ms` : "—"}</dd></div><div><dt>First token</dt><dd>{native?.firstTokenMS === undefined ? "—" : `${Math.round(native.firstTokenMS)} ms`}</dd></div><div><dt>Input tokens</dt><dd>{String(usage?.input_tokens ?? usage?.prompt_tokens ?? usage?.total_input_tokens ?? "—")}</dd></div><div><dt>Output tokens</dt><dd>{String(usage?.output_tokens ?? usage?.completion_tokens ?? usage?.total_output_tokens ?? "—")}</dd></div>{textEndpoint && <><div><dt>Estimated token cost</dt><dd>{estimateCost(pricing, typeof inputTokens === "number" ? inputTokens : undefined, typeof outputTokens === "number" ? outputTokens : undefined)}</dd></div><div><dt>Finalized cost</dt><dd>See Usage &amp; spend</dd></div></>}</dl>{native?.events.length ? <details><summary>Native events ({native.events.length}/{native.eventCount})</summary><pre>{native.events.map((event) => `${event.event}: ${event.data}`).join("\n\n")}</pre></details> : null}</section></div>
     {code && <CodeDialog {...code} onClose={() => setCode(undefined)} />}
   </div>;
 }

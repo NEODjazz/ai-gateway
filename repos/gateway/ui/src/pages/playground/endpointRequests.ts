@@ -21,6 +21,8 @@ export async function readAttachment(file: File, kind: "image" | "audio" | "docu
 export function buildEndpointRequest(endpoint: SpecializedEndpoint, model: string, input: string, settings: EndpointSettings, attachments: Attachment[] = [], mask?: Attachment, history: unknown[] = [], previousID = ""): { path: string; body: Record<string, unknown>; headers?: Record<string, string> } {
   if (!["a2a", "mcp"].includes(endpoint) && !model.trim()) throw new Error("Select a model before sending a request.");
   if (!["transcription", "mcp"].includes(endpoint) && !input.trim()) throw new Error("Enter input before sending a request.");
+  if (new TextEncoder().encode(input).length > 1024 * 1024) throw new Error("Prompt exceeds the 1 MiB Playground limit.");
+  if (new TextEncoder().encode(settings.instructions).length > 65536) throw new Error("Instructions exceed the 64 KiB Playground limit.");
   const extras = settings.advanced.trim() ? jsonObject(settings.advanced, "Advanced parameters") : {};
   const protectedFields = ["model", "provider", "input", "messages", "system", "system_instruction", "prompt", "file", "images", "mask", "stream", "max_tokens", "generation_config", "previous_interaction_id", "arguments", "temperature", "top_p", "instructions", "dimensions", "voice", "response_format", "speed", "n", "quality", "size", "language", "encoding_format", "jsonrpc", "id", "method", "params", "__proto__", "prototype", "constructor"];
   for (const name of Object.keys(extras)) if (protectedFields.includes(name)) throw new Error(`Configure ${name} with its dedicated control.`);
@@ -66,6 +68,7 @@ export function buildEndpointRequest(endpoint: SpecializedEndpoint, model: strin
     path += `/${encodeURIComponent(settings.server)}/tools/${encodeURIComponent(settings.tool)}`;
     return { path, body: { ...extras, arguments: jsonObject(settings.arguments, "Tool arguments") }, headers: { "Idempotency-Key": `playground-${crypto.randomUUID()}` } };
   }
+  if (new TextEncoder().encode(JSON.stringify(body)).length > 24 * 1024 * 1024) throw new Error("Request exceeds the 24 MiB Playground limit.");
   return { path, body };
 }
 

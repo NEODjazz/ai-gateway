@@ -15,13 +15,14 @@ import { EndpointPlayground } from "./playground/EndpointPlayground";
 import { endpointPaths, type SpecializedEndpoint } from "./playground/endpointRequests";
 import { CompliancePlayground } from "./playground/CompliancePlayground";
 import { ComparePlayground } from "./playground/ComparePlayground";
+import { CopyOutput, OutputDetails } from "./playground/OutputDetails";
 import { CodeDialog } from "./playground/CodeDialog";
 import { runText, type TextRun } from "./playground/runText";
 import { buildTextRequest, playgroundConnection, textEndpointPaths, type GenerationSettings, type KeySource, type Message } from "./playground/requests";
 
 type PlaygroundMode = "chat" | "responses";
 type ModelList = { data?: Array<{ id: string }> };
-type TranscriptTurn = { id: number; role: "user" | "assistant"; content: string; wire: Message; reasoning?: string; response?: string };
+type TranscriptTurn = { id: number; role: "user" | "assistant"; content: string; wire: Message; reasoning?: string; response?: Record<string, unknown> };
 type RunMetadata = TextRun;
 
 function sessionID() {
@@ -145,7 +146,7 @@ export function PlaygroundPage() {
       if (mode === "responses" && result.id) setPreviousResponseID(result.id);
       const userTurn: TranscriptTurn = { id: ++turnID.current, role: "user", content: input + (attachments.length ? `\nAttachments: ${attachments.map((item) => item.filename).join(", ")}` : ""), wire: { role: "user", content: conversationInput(input, attachments) } };
       const choice = (result.response.choices as { message?: Message }[] | undefined)?.[0]?.message;
-      const assistantTurn: TranscriptTurn = { id: ++turnID.current, role: "assistant", content: result.text, reasoning: result.reasoning, response: JSON.stringify(result.response, null, 2).slice(0, 65536),
+      const assistantTurn: TranscriptTurn = { id: ++turnID.current, role: "assistant", content: result.text, reasoning: result.reasoning, response: result.response,
         wire: { ...choice, role: "assistant", content: mode === "responses" && Array.isArray(result.response.output) ? "" : choice?.content ?? result.text, ...(mode === "responses" && Array.isArray(result.response.output) ? { responseItems: result.response.output } : {}) } };
       const retained = retainConversation([...transcript, userTurn, assistantTurn]);
       setTranscript(retained.turns); setHistoryDropped((value) => value + retained.dropped); setAttachments([]); if (attachmentInput.current) attachmentInput.current.value = "";
@@ -209,7 +210,7 @@ export function PlaygroundPage() {
           <label htmlFor="playground-instructions">System instructions<GravityThemeScope className="gravity-playground-control"><TextArea id="playground-instructions" controlProps={{ "aria-label": "Instructions" }} size="l" disabled={running} rows={2} value={instructions} onUpdate={setInstructions} placeholder="Optional system instructions" /></GravityThemeScope></label>
           <section className="playground-output" aria-label="Playground conversation">
             {!transcript.length && !pendingOutput && <div className="playground-empty"><h3>Start a conversation</h3><p>Choose a model and send a prompt. Conversation content stays in memory.</p><div className="playground-suggestions">{["Explain a complex idea simply", "Draft a short project update", "Review a function for edge cases"].map((prompt) => <button type="button" key={prompt} disabled={running} onClick={() => setMessage(prompt)}>{prompt}</button>)}</div></div>}
-            <div className="playground-transcript">{transcript.map((turn) => <article className={`playground-turn ${turn.role}`} key={turn.id}><strong>{turn.role === "user" ? "User" : "Assistant"}</strong><pre>{turn.content || "No text output"}</pre>{turn.reasoning && <details><summary>Reasoning</summary><pre>{turn.reasoning}</pre></details>}{turn.wire.tool_calls != null && <details open><summary>Tool calls</summary><pre>{JSON.stringify(turn.wire.tool_calls, null, 2)}</pre></details>}{turn.response && <details><summary>Response details</summary><pre>{turn.response}</pre></details>}</article>)}{pendingOutput && <article className={`playground-turn assistant${running ? " streaming" : ""}`}><strong>Assistant <span>{running ? "streaming" : "partial response"}</span></strong><pre>{pendingOutput}</pre></article>}</div>
+            <div className="playground-transcript">{transcript.map((turn) => <article className={`playground-turn ${turn.role}`} key={turn.id}><strong>{turn.role === "user" ? "User" : "Assistant"}</strong><pre>{turn.content || "No text output"}</pre>{turn.reasoning && <details><summary>Reasoning</summary><pre>{turn.reasoning}</pre></details>}{turn.role === "assistant" && <><CopyOutput label={`Copy response ${turn.id}`} text={turn.content} /><OutputDetails payload={turn.response || turn.wire} /></>}{turn.response && <details><summary>Response details</summary><pre>{JSON.stringify(turn.response, null, 2).slice(0, 65536)}</pre></details>}</article>)}{pendingOutput && <article className={`playground-turn assistant${running ? " streaming" : ""}`}><strong>Assistant <span>{running ? "streaming" : "partial response"}</span></strong><pre>{pendingOutput}</pre></article>}</div>
           </section>
           {historyDropped > 0 && <p className="muted">{historyDropped} earlier turns were removed from browser history to keep it bounded. {mode === "responses" && apiContinuity ? "API continuation uses the saved response ID." : "New requests include only the retained browser history."}</p>}
           <label>Images or PDF<input ref={attachmentInput} aria-label="Conversation attachments" type="file" multiple accept="image/png,image/jpeg,image/gif,image/webp,application/pdf" disabled={running || readingAttachments} onChange={async (event) => {

@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { APIClient } from "../../api/client";
 import { ComparePlayground } from "./ComparePlayground";
@@ -77,6 +77,22 @@ describe("Compare Playground", () => {
     await act(async () => { deferred[0](answer("Previous scope")); deferred[1](answer("Previous scope")); });
     expect(screen.queryByText("Previous scope")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Model 1")).toHaveTextContent("gamma");
+  });
+  it("shares attachments between panels, retains them in typed history and clears the file field", async () => {
+    const mock = vi.spyOn(globalThis, "fetch").mockImplementation(async () => answer("Attachment answer"));
+    setup(); const field = screen.getByLabelText("Comparison attachments") as HTMLInputElement;
+    const pdf = new File(["pdf"], "brief.pdf", { type: "application/pdf" });
+    fireEvent.change(field, { target: { files: [pdf] } });
+    await screen.findByText("brief.pdf");
+    await userEvent.click(screen.getByRole("button", { name: "Compare models" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Compare models" })).toBeDisabled());
+    expect(await screen.findAllByText("Attachment answer")).toHaveLength(2);
+    const first = mock.mock.calls.map(([, options]) => JSON.parse(String(options?.body)));
+    expect(first[0].messages[0].content).toEqual(first[1].messages[0].content);
+    expect(first[0].messages[0].content[1]).toMatchObject({ type: "input_file", filename: "brief.pdf", file_data: "data:application/pdf;base64,cGRm" });
+    expect(field.value).toBe("");
+    await send("Follow up"); await waitFor(() => expect(mock).toHaveBeenCalledTimes(4));
+    expect(JSON.parse(String(mock.mock.calls[2][1]?.body)).messages[0].content).toEqual(first[0].messages[0].content);
   });
   it("exports quoted CSV with formula protection and revokes the download URL", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async () => answer('=SUM(1,2)\n"quoted"'));

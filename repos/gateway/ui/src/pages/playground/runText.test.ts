@@ -47,6 +47,18 @@ describe("Playground text execution", () => {
     expect(result).toMatchObject({ text: "JSON answer", streamed: false });
     expect(result.firstTokenMS).toBeUndefined(); expect(fetchMock).toHaveBeenCalledOnce();
   });
+  it("renders refusals in JSON and streamed Chat while preserving the refusal field", async () => {
+    const mock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response('{"choices":[{"message":{"role":"assistant","content":null,"refusal":"Cannot assist"}}]}'));
+    expect((await runText(connection(), "chat", { model: "model" }, options())).text).toBe("Cannot assist");
+    mock.mockResolvedValueOnce(sse([{ choices: [{ delta: { refusal: "Cannot assist" }, finish_reason: "stop" }] }]));
+    const streamed = await runText(connection(), "chat", { model: "model", stream: true }, options());
+    expect(streamed.text).toBe("Cannot assist");
+    expect(streamed.response.choices).toEqual([{ message: { role: "assistant", content: null, refusal: "Cannot assist" }, finish_reason: "stop" }]);
+  });
+  it("renders Responses refusals and retains JSON reasoning summaries separately", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ output: [{ type: "reasoning", summary: [{ type: "summary_text", text: "Summary" }] }, { type: "message", content: [{ type: "refusal", refusal: "Cannot assist" }] }] })));
+    expect(await runText(connection(), "responses", { model: "model" }, options())).toMatchObject({ text: "Cannot assist", reasoning: "Summary" });
+  });
   it("does not treat nested Responses failure as a success", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(sse([{ type: "response.failed", response: { status: "failed", error: { message: "Failed upstream" } } }]));
     await expect(runText(connection(), "responses", { model: "model", stream: true }, options())).rejects.toThrow("Failed upstream");

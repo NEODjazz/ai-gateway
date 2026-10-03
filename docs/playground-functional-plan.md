@@ -85,6 +85,9 @@ compatibility must be distinguished from merely having an endpoint selector.
   includes MCP idempotency and saves speech responses as binary files.
 - [x] Added conversation image/PDF uploads, bounded browser history and explicit
   token-cost estimates using user-provided rates; bounded JSON/binary/SSE reads.
+- [x] Added shared comparison attachments, refusal rendering, citations, safe image
+  output, copy controls and bounded native conversation history; speech download
+  names reflect the returned media type.
 - [ ] Finish media/tool output, policy selection and full conversation verification.
 - [ ] Complete endpoint-specific execution and media/tool handling.
 - [ ] Complete comparison, compliance and agent views.
