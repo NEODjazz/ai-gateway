@@ -484,3 +484,13 @@ textarea { resize: vertical; }
 .sso-dialog > .modal-heading { position: sticky; top: -24px; z-index: 3; background: white; padding: 16px 0; margin-top: -16px; }
 .sso-dialog > .modal-actions { position: sticky; bottom: -24px; z-index: 3; background: white; padding: 16px 0; margin-bottom: -16px; border-top: 1px solid #edf0f2; }
 .sso-dialog .error-state { position: sticky; top: 50px; z-index: 2; }
+
+/* Policy testing uses the same cards and controls as the conversation. */
+.playground-compliance { display: grid; gap: 20px; margin-top: 20px; }
+.playground-compliance-connection, .playground-compliance-filters { display: grid; gap: 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.playground-compliance-connection p { grid-column: 1 / -1; }
+.playground-case-list { max-height: 480px; overflow: auto; }
+.playground-policy-case { border: 1px solid var(--line); border-radius: 8px; padding: 16px; margin-top: 12px; }
+.playground-policy-case pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.playground-policy-case > .muted { display: block; margin-top: 8px; }
+@media (max-width: 700px) { .playground-compliance-connection, .playground-compliance-filters { grid-template-columns: minmax(0, 1fr); } }

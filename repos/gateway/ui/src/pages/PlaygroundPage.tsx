@@ -8,6 +8,7 @@ import { PageTabs } from "../components/PageTabs";
 import { ToolbarIconButton } from "../components/ToolbarIconButton";
 import { GravityThemeScope } from "../components/GravityThemeScope";
 import { AreaControl, SelectControl, TextControl } from "./playground/Controls";
+import { CompliancePlayground } from "./playground/CompliancePlayground";
 import { ComparePlayground } from "./playground/ComparePlayground";
 import { CodeDialog } from "./playground/CodeDialog";
 import { runText, type TextRun } from "./playground/runText";
@@ -33,8 +34,9 @@ export function PlaygroundPage() {
   const connection = useMemo(() => playgroundConnection(sessionClient, appliedConnection.source, appliedConnection.key, appliedConnection.url), [sessionClient, appliedConnection]);
   const client = connection.client;
   const [mode, setMode] = useState<PlaygroundMode>("chat");
-  const [view, setView] = useState<"chat" | "compare">("chat");
+  const [view, setView] = useState<"chat" | "compare" | "compliance">("chat");
   const [visitedCompare, setVisitedCompare] = useState(false);
+  const [visitedCompliance, setVisitedCompliance] = useState(false);
   const [models, setModels] = useState<string[]>([]);
   const [modelsError, setModelsError] = useState("");
   const [loadingModels, setLoadingModels] = useState(true);
@@ -159,7 +161,7 @@ export function PlaygroundPage() {
   </>;
   return <>
     <PageHeader eyebrow="Inference" title="Playground" description="Explore models, tune requests and inspect live responses." />
-    <PageTabs label="Playground workspace" value={view} items={[{ value: "chat", label: "Chat" }, { value: "compare", label: "Compare" }]} onUpdate={(next) => { if (running) abortRef.current?.abort(); setCodeRequest(undefined); if (next === "compare") setVisitedCompare(true); setView(next); }} />
+    <PageTabs label="Playground workspace" value={view} items={[{ value: "chat", label: "Chat" }, { value: "compare", label: "Compare" }, { value: "compliance", label: "Compliance" }]} onUpdate={(next) => { if (running) abortRef.current?.abort(); setCodeRequest(undefined); if (next === "compare") setVisitedCompare(true); if (next === "compliance") setVisitedCompliance(true); setView(next); }} />
     {view === "chat" && <div className="playground-workspace playground-config-layout">
       <aside className="playground-side-panel" aria-label="Playground configuration">
         <section className="playground-parameters-card">
@@ -205,6 +207,7 @@ export function PlaygroundPage() {
       </div>
     </div>}
     {visitedCompare && <div style={view !== "compare" ? { display: "none" } : undefined}><ComparePlayground active={view === "compare"} connection={connection} models={models} connectionControls={view === "compare" ? connectionControls : null} connectionChanged={connectionChanged} />{view === "compare" && error && <p role="alert" className="form-error">{error}</p>}</div>}
+    {visitedCompliance && <div style={view !== "compliance" ? { display: "none" } : undefined}><CompliancePlayground active={view === "compliance"} connection={connection} connectionChanged={connectionChanged} connectionControls={view === "compliance" ? connectionControls : null} /></div>}
     {codeRequest && <CodeDialog {...codeRequest} onClose={() => setCodeRequest(undefined)} />}
   </>;
 }

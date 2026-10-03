@@ -77,6 +77,8 @@ compatibility must be distinguished from merely having an endpoint selector.
   or individual settings, partial success, cancellation and CSV export.
 - [x] Shared bounded text/tool stream handling between conversation and comparison;
   interrupted streams fail and cancelled transports cannot publish late text.
+- [x] Added quick and batch policy checks, bounded concurrency, editable test
+  suites, search, filters, CSV import/template/export and explicit failure states.
 - [ ] Finish media/tool output, policy selection and full conversation verification.
 - [ ] Complete endpoint-specific execution and media/tool handling.
 - [ ] Complete comparison, compliance and agent views.
