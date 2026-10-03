@@ -58,7 +58,9 @@ stored encrypted in durable admin state using `CREDENTIAL_ENCRYPTION_KEY`, with
 agent-specific authenticated binding. A2A execution uses the saved instructions,
 temperature and maximum output tokens. Metadata/list responses omit instruction
 content; global administrators can explicitly read configurations through
-`GET /admin/v1/agent-profiles/{id}` with `Cache-Control: no-store`. Existing PUT
+`GET /admin/v1/agent-profiles/{id}` with `Cache-Control: no-store`. List
+clients must read the list's `content_stored` boolean: it is now true if any
+profile has saved instructions, rather than always false. Existing PUT
 clients preserve instructions and generation settings when those fields are
 omitted; an empty instructions string or generation object clears them. Metadata-only
 profiles keep admin-state version 1. Configured instructions or generation require

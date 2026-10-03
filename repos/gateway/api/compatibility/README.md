@@ -19,3 +19,15 @@ for the 0.1.474 update. New findings still fail CI.
 
 Remove these accepted findings once the 0.1.474 contract is the comparison
 baseline. Do not use this list for unrelated API changes.
+
+## Saved agent instructions
+
+The separate `agent-configuration-err-ignore.txt` file accepts exactly one
+error-level finding on `GET /admin/v1/agent-profiles`: `content_stored` can now
+be true when an agent has explicitly configured encrypted instructions. Its
+previous constant false value described metadata-only profiles. Clients must
+read this boolean rather than assume false; omitted instructions retain the
+legacy metadata-only behavior. Instruction text remains absent from this list.
+The compatibility workflow uses this anchored finding only; its WARN threshold
+and all other checks remain unchanged. Remove the exception when the comparison
+baseline includes saved agent configuration.

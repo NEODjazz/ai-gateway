@@ -55,6 +55,7 @@ jobs:
           fail-on: WARN
           allow-external-refs: false
           review: false
+          err-ignore: repos/gateway/api/compatibility/agent-configuration-err-ignore.txt
 
   smoke-scripts:
     name: Smoke script contracts
