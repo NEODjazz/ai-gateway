@@ -104,6 +104,10 @@ compatibility must be distinguished from merely having an endpoint selector.
   and task refresh/cancel, explicit bounded batch inference and connection code.
   Unsaved drafts cannot execute; credential changes discard late reads/results.
   The existing one-generation A2A path still has no MCP execution loop.
+- [x] Added model/agent comparison with shared attachments and independent A2A
+  tasks; model tool calls require per-panel approval/decline and explicit typed
+  continuation. Pending calls/tasks block new shared prompts; individual panels
+  can be cleared without discarding successful results in other panels.
 - [ ] Finish media/tool output, policy selection and full conversation verification.
 - [ ] Complete endpoint-specific execution and media/tool handling.
 - [ ] Complete comparison, compliance and agent views.

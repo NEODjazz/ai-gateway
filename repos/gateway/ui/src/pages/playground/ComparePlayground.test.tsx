@@ -12,6 +12,85 @@ function answer(text: string) { return new Response(JSON.stringify({ choices: [{
 async function send(text: string) { await userEvent.type(screen.getByLabelText("Comparison prompt"), text); await userEvent.click(screen.getByRole("button", { name: "Compare models" })); }
 
 describe("Compare Playground", () => {
+  it("requires per-panel tool approval, reuses retry identity and continues without a phantom user", async () => {
+    let alphaRuns = 0, executions = 0;
+    const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json" } });
+    const mock = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, options) => {
+      if (String(url).endsWith("/tools")) return json({ tools: [{ name: "lookup", inputSchema: { type: "object" } }] });
+      if (String(url).endsWith("/tools/lookup")) { executions++; return executions === 1 ? json({ error: { message: "MCP temporarily offline" } }, 503) : json({ content: [{ type: "text", text: "Tool output" }] }); }
+      const body = JSON.parse(String(options?.body));
+      if (body.model !== "alpha") return answer("Beta answer");
+      return ++alphaRuns === 1 ? json({ choices: [{ message: { content: null, tool_calls: [{ id: "call-alpha", type: "function", function: { name: "lookup", arguments: '{"query":"demo"}' } }] } }] }) : answer("Final alpha answer");
+    });
+    setup(); const first = within(screen.getByRole("region", { name: "Comparison 1" }));
+    await userEvent.click(first.getByText("Tools, resources and policies"));
+    await userEvent.type(first.getByLabelText("Tool discovery server"), "weather"); await userEvent.click(first.getByRole("button", { name: "Load MCP tools" }));
+    await userEvent.click(await first.findByLabelText("MCP function lookup")); await send("Same prompt");
+    await screen.findByText("Beta answer"); const approvals = within(await screen.findByRole("region", { name: "Comparison 1 tool approvals" }));
+    expect(executions).toBe(0); expect(screen.getByLabelText("Comparison prompt")).toBeDisabled();
+    expect(approvals.getByRole("button", { name: "Continue comparison 1 with tool results" })).toBeDisabled();
+    await userEvent.click(approvals.getByRole("button", { name: "Execute lookup" })); expect(await approvals.findByRole("alert")).toHaveTextContent("MCP temporarily offline");
+    await userEvent.click(approvals.getByRole("button", { name: "Retry lookup" })); await userEvent.click(approvals.getByRole("button", { name: "Continue comparison 1 with tool results" }));
+    expect(await screen.findByText("Final alpha answer")).toBeInTheDocument(); expect(screen.getByLabelText("Comparison prompt")).toBeEnabled();
+    const toolRequests = mock.mock.calls.filter(([url]) => String(url).endsWith("/tools/lookup"));
+    expect(new Headers(toolRequests[0][1]?.headers).get("Idempotency-Key")).toBe(new Headers(toolRequests[1][1]?.headers).get("Idempotency-Key"));
+    const continued = mock.mock.calls.filter(([url]) => url === "/v1/chat/completions").map(([, options]) => JSON.parse(String(options?.body))).find((body) => body.messages.at(-1).role === "tool");
+    expect(continued.messages.map((turn: { role: string }) => turn.role)).toEqual(["user", "assistant", "tool"]); expect(continued.messages.at(-1).tool_call_id).toBe("call-alpha");
+    expect(mock.mock.calls.filter(([, options]) => String(options?.body).includes('"model":"beta"'))).toHaveLength(1);
+  });
+  it("allows only decline for unbound functions and keeps a failed continuation recoverable", async () => {
+    let count = 0;
+    const mock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, options) => {
+      if (JSON.parse(String(options?.body)).model === "beta") return answer("Other model answer");
+      count++;
+      return count === 1 ? new Response(JSON.stringify({ choices: [{ message: { tool_calls: [{ id: "call-one", type: "function", function: { name: "unknown", arguments: "{}" } }] } }] }), { headers: { "Content-Type": "application/json" } }) : count === 2 ? new Response('{"error":{"message":"Continuation offline"}}', { status: 503 }) : answer("Recovered answer");
+    });
+    setup(); await send("Review"); const approvals = within(await screen.findByRole("region", { name: "Comparison 1 tool approvals" }));
+    expect(approvals.getByRole("button", { name: "Execute unknown" })).toBeDisabled();
+    await userEvent.click(approvals.getByRole("button", { name: "Decline unknown" })); await userEvent.click(approvals.getByRole("button", { name: "Continue comparison 1 with tool results" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Continuation offline"); expect(screen.getByLabelText("Comparison prompt")).toBeDisabled();
+    await userEvent.click(approvals.getByRole("button", { name: "Continue comparison 1 with tool results" })); await screen.findByText("Recovered answer");
+    expect(mock.mock.calls).toHaveLength(4); expect(screen.getByLabelText("Comparison prompt")).toBeEnabled();
+  });
+  it("compares a model and saved agent with shared attachments and independent continuation", async () => {
+    const catalog = { mcp_servers: [], mcp_toolsets: [], policies: [], tags: [], agents: [{ id: "writer", name: "Writer", model: "alpha", execution_supported: true }], truncated: false };
+    const mock = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, options) => {
+      if (String(url).includes("catalog")) return new Response(JSON.stringify(catalog));
+      const body = JSON.parse(String(options?.body));
+      if (String(url).startsWith("/a2a/")) return new Response(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { task: { id: "task-writer", contextId: "ctx-writer", status: { state: "TASK_STATE_COMPLETED" }, artifacts: [{ parts: [{ text: "Agent answer" }] }] } } }));
+      return answer("Model answer");
+    });
+    setup(); await userEvent.click(screen.getByRole("button", { name: "Load authorized agents" }));
+    const second = within(screen.getByRole("region", { name: "Comparison 2" }));
+    await userEvent.click(second.getByLabelText("Comparison type 2")); await userEvent.click(screen.getByRole("option", { name: "Saved agent" }));
+    await userEvent.click(second.getByLabelText("Agent 2")); await userEvent.click(screen.getByRole("option", { name: "Writer · alpha" }));
+    expect(second.queryByText("Model settings")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Comparison attachments"), { target: { files: [new File(["pdf"], "brief.pdf", { type: "application/pdf" })] } });
+    await screen.findByText("brief.pdf"); await send("Shared prompt");
+    expect(await screen.findByText("Agent answer")).toBeInTheDocument(); await screen.findByText("Model answer");
+    expect(second.getAllByText("Not reported")).toHaveLength(2);
+    const first = mock.mock.calls.find(([url]) => url === "/a2a/writer");
+    expect(new Headers(first?.[1]?.headers).get("A2A-Version")).toBe("1.0");
+    expect(JSON.parse(String(first?.[1]?.body)).params.message.parts).toEqual([{ text: "Shared prompt" }, { raw: "cGRm", filename: "brief.pdf", mediaType: "application/pdf" }]);
+    await send("Follow up"); await waitFor(() => expect(mock.mock.calls.filter(([url]) => url === "/a2a/writer")).toHaveLength(2));
+    const continued = mock.mock.calls.filter(([url]) => url === "/a2a/writer")[1];
+    expect(JSON.parse(String(continued[1]?.body)).params.message).toMatchObject({ taskId: "task-writer", contextId: "ctx-writer", parts: [{ text: "Follow up" }] });
+  });
+  it("blocks shared prompts for pending agent tasks and resumes after verified task refresh", async () => {
+    let taskState = "TASK_STATE_WORKING";
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url, options) => {
+      const body = JSON.parse(String(options?.body));
+      if (!String(url).startsWith("/a2a/")) return answer("Model succeeded");
+      const task = { id: "task-one", contextId: "ctx-one", status: { state: taskState }, artifacts: taskState === "TASK_STATE_COMPLETED" ? [{ parts: [{ text: "Task complete" }] }] : [] };
+      return new Response(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: body.method === "GetTask" ? task : { task } }));
+    });
+    setup(); const second = within(screen.getByRole("region", { name: "Comparison 2" }));
+    await userEvent.click(second.getByLabelText("Comparison type 2")); await userEvent.click(screen.getByRole("option", { name: "Saved agent" }));
+    await userEvent.type(second.getByLabelText("Agent 2"), "writer"); await send("Start");
+    await screen.findByText("Model succeeded"); expect(screen.getByLabelText("Comparison prompt")).toBeDisabled(); expect(second.getByRole("button", { name: "Cancel comparison 2 task" })).toBeEnabled();
+    taskState = "TASK_STATE_COMPLETED"; await userEvent.click(second.getByRole("button", { name: "Refresh comparison 2 task" }));
+    await screen.findByText("Task complete"); expect(screen.getByLabelText("Comparison prompt")).toBeEnabled();
+  });
   it("runs panels concurrently with isolated sessions and preserves typed histories", async () => {
     const deferred: ((response: Response) => void)[] = [];
     const mock = vi.spyOn(globalThis, "fetch").mockImplementation(() => new Promise<Response>((resolve) => deferred.push(resolve)));

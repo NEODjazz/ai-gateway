@@ -251,3 +251,10 @@ prompts with two concurrent requests, normal billing, cancellation, per-test
 errors and CSV export. Connect examples omit credentials and saved instructions.
 The current A2A path performs one generation; its governance profile is not an
 MCP execution loop. Instruction-template profiles remain visibly unavailable.
+
+Compare can mix models and authorized saved agents. A2A panels use server-side
+configuration and verified task continuity, and mark tokens/first-token timing
+as unreported. Each model panel reviews its own MCP calls, preserves idempotency
+on retries and sends typed tool results only on explicit continuation. Pending
+tools/tasks block new shared prompts; clearing a panel resets only its history.
+CSV exports distinguish model and agent targets and include agent task state.
