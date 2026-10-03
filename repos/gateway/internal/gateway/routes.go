@@ -289,6 +289,7 @@ var gatewayRoutes = []routeDefinition{
 	{RouteContract{http.MethodPut, "/admin/v1/tool-policies/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.PutToolPolicy) }},
 	{RouteContract{http.MethodDelete, "/admin/v1/tool-policies/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.DeleteToolPolicy) }},
 	{RouteContract{http.MethodGet, "/admin/v1/agent-profiles"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListAgentProfiles) }},
+	{RouteContract{http.MethodGet, "/admin/v1/agent-profiles/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GetAgentProfile) }},
 	{RouteContract{http.MethodPut, "/admin/v1/agent-profiles/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.PutAgentProfile) }},
 	{RouteContract{http.MethodDelete, "/admin/v1/agent-profiles/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.DeleteAgentProfile) }},
 	{RouteContract{http.MethodGet, "/admin/v1/mcp/servers"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListMCPServers) }},

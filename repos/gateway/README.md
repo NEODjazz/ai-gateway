@@ -53,7 +53,14 @@ permission examples, see [MCP integration](../../docs/mcp.md).
 - `GET /admin/v1/anonymizer/rules`
 
 A2A 1.0 direct discovery and synchronous or durable asynchronous `SendMessage` are available for
-enabled agent profiles that do not reference an instruction template. The
+enabled agent profiles that do not reference an instruction template. Optional agent instructions are
+stored encrypted in durable admin state using `CREDENTIAL_ENCRYPTION_KEY`, with
+agent-specific authenticated binding. A2A execution uses the saved instructions,
+temperature and maximum output tokens. Metadata/list responses omit instruction
+content; global administrators can explicitly read configurations through
+`GET /admin/v1/agent-profiles/{id}` with `Cache-Control: no-store`. Existing PUT
+clients preserve instructions and generation settings when those fields are
+omitted; an empty instructions string or generation object clears them. The
 profile ID is carried as the declared interface tenant. Execution uses the
 shared Responses authentication, model authorization, quota, guardrail,
 routing and billing path. With durable task and background-response storage,

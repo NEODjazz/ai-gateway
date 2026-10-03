@@ -413,7 +413,11 @@ func (h Handler) sendA2AMessage(w http.ResponseWriter, r *http.Request, request 
 		model = stored.Model
 		input = a2aResponseInput(existing.History, content)
 	}
-	responseRequest := openai.ResponseRequest{Model: model, Input: input}
+	responseRequest := openai.ResponseRequest{Model: model, Input: input, Instructions: profile.Instructions}
+	if profile.Generation != nil {
+		responseRequest.Temperature = profile.Generation.Temperature
+		responseRequest.MaxOutputTokens = profile.Generation.MaxOutputTokens
+	}
 	if stream {
 		responseRequest.Stream = true
 		transformer := newA2AStreamTransformer(h, r.Context(), request, profile, stored, existing, continuation)

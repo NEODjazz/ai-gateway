@@ -95,6 +95,9 @@ compatibility must be distinguished from merely having an endpoint selector.
   on retries and typed tool-result continuation in Chat and both Responses modes.
   Resource selection survives workspace tabs and resets on credential/model changes.
   Bounded history removes whole conversation groups without orphan tool results.
+- [x] Extended saved agent configurations with encrypted instructions and bounded
+  generation settings applied by A2A; administrator-only reads, legacy update
+  preservation, ciphertext binding and real PostgreSQL restoration have tests.
 - [ ] Finish media/tool output, policy selection and full conversation verification.
 - [ ] Complete endpoint-specific execution and media/tool handling.
 - [ ] Complete comparison, compliance and agent views.

@@ -4730,7 +4730,7 @@ paths:
     get:
       operationId: listAgentProfiles
       tags: [Agent templates]
-      summary: List metadata-only profiles for external agent runtimes
+      summary: List agent profile metadata and execution support
       responses:
         '200': {description: Agent profiles and execution boundary, content: {application/json: {schema: {$ref: '#/components/schemas/AgentProfileList'}}}}
         '401': {$ref: '#/components/responses/Unauthorized'}
@@ -4738,11 +4738,22 @@ paths:
         '503': {$ref: '#/components/responses/ManagementUnavailable'}
   /admin/v1/agent-profiles/{id}:
     parameters: [{$ref: '#/components/parameters/AccessEntryID'}]
+    get:
+      operationId: getAgentProfile
+      tags: [Agent templates]
+      summary: Read an agent configuration as a global administrator
+      description: Returns profile metadata and decrypted instructions. Responses use Cache-Control no-store. Organization administrators and inference-only credentials cannot read this configuration.
+      responses:
+        '200': {description: Agent configuration, content: {application/json: {schema: {$ref: '#/components/schemas/AgentProfileConfiguration'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
     put:
       operationId: putAgentProfile
       tags: [Agent templates]
-      summary: Create or update an external-runtime profile
-      description: The referenced enabled tool policy is copied into the profile. Prompt content, memory, vector data and workflow state are not accepted.
+      summary: Create or update an agent profile
+      description: The referenced enabled tool policy is copied into the profile. Optional instructions are encrypted using CREDENTIAL_ENCRYPTION_KEY and omitted from mutation and list responses. Omitting instructions or generation preserves existing settings; an empty instructions string or generation object clears them. Instruction-template references cannot be combined with stored instructions. Memory, vector data and workflow state are not accepted.
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AgentProfileInput'}}}}
       responses:
         '200': {description: Materialized agent profile saved, content: {application/json: {schema: {$ref: '#/components/schemas/AgentProfile'}}}}
@@ -13259,7 +13270,9 @@ components:
         name: {type: string, minLength: 1, maxLength: 256}
         description: {type: string, maxLength: 1024}
         model: {type: string, minLength: 1, maxLength: 256}
-        instructions_template_id: {type: string, maxLength: 256, description: Opaque reference only; instruction content is not stored.}
+        instructions_template_id: {type: string, maxLength: 256, description: Opaque reference only; template execution is not supported.}
+        instructions: {type: string, maxLength: 65536, writeOnly: true, description: At most 64 KiB in UTF-8. Requires durable encryption; omit to preserve or send an empty string to clear.}
+        generation: {$ref: '#/components/schemas/AgentGeneration'}
         tool_policy_id: {type: string, minLength: 1, maxLength: 128}
         max_iterations: {type: integer, minimum: 1, maximum: 50}
         tags: {type: array, maxItems: 256, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 512}}
@@ -13271,21 +13284,35 @@ components:
           required: [id, allowed_tools, max_tool_calls, policy_materialized_at, execution_supported, content_stored]
           properties:
             id: {type: string}
+            instructions_configured: {type: boolean}
             allowed_tools: {type: array, items: {type: string}}
             denied_tools: {type: array, items: {type: string}}
             approval_required: {type: array, items: {type: string}}
             max_tool_calls: {type: integer, minimum: 1, maximum: 1000}
             policy_materialized_at: {type: string, format: date-time}
-            execution_supported: {type: boolean, const: false}
-            content_stored: {type: boolean, const: false}
+            execution_supported: {type: boolean}
+            content_stored: {type: boolean}
     AgentProfileList:
       type: object
       additionalProperties: false
       required: [data, execution_supported, content_stored]
       properties:
         data: {type: array, items: {$ref: '#/components/schemas/AgentProfile'}}
-        execution_supported: {type: boolean, const: false}
-        content_stored: {type: boolean, const: false}
+        execution_supported: {type: boolean}
+        content_stored: {type: boolean}
+    AgentGeneration:
+      type: object
+      additionalProperties: false
+      properties:
+        temperature: {type: number, minimum: 0, maximum: 2}
+        max_output_tokens: {type: integer, minimum: 1, maximum: 1000000}
+    AgentProfileConfiguration:
+      type: object
+      additionalProperties: false
+      required: [profile, instructions]
+      properties:
+        profile: {$ref: '#/components/schemas/AgentProfile'}
+        instructions: {type: string, maxLength: 65536}
     MCPServerInput:
       type: object
       additionalProperties: false
