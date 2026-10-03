@@ -42,6 +42,34 @@ it, and Up/Down/Home/End move among children. In compact mode group buttons open
 a Gravity UI popup with the same authorized links; Escape closes it and returns
 focus. Both navigation modes scroll independently of the fixed account footer.
 
+## Playground
+
+The configuration rail controls Chat Completions and Responses requests. It
+supports optional temperature and Top P, output limits, JSON object/schema
+output, streaming and advanced JSON. Dedicated controls cannot be overridden by
+advanced parameters; other fields are forwarded unchanged for authoritative
+Gateway/provider validation. Empty optional values retain provider defaults.
+
+Use the current UI session for this Gateway or apply an independent test virtual
+key and optional base URL. Test keys stay in component memory. A custom URL
+requires an explicit test key; console credentials and browser cookies are not
+forwarded. A failed test key does not sign out the console. Model discovery uses
+cancellation and generation checks to discard obsolete results.
+
+Responses can continue with `previous_response_id` or browser conversation
+history. Clear resets the session and continuity. Enter sends a message,
+Shift+Enter inserts a newline, and Stop cancels the request. Failed responses
+never become successful transcript turns or continuation IDs. Text output is
+separate from reasoning and function-argument stream events.
+
+Get code exports cURL, Python or JavaScript with `GATEWAY_API_KEY` as an environment
+variable; it never includes the active credential. Response metadata displays
+reported token usage and measured latency/first-token time. Missing usage stays
+unavailable, and finalized costs remain in Usage & spend.
+
+The complete implementation requirements and pending work are tracked in
+[the Playground functional plan](../../../docs/playground-functional-plan.md).
+
 ## Dependency override
 
 The lockfile pins the navigation package's codemod dependency to `jscodeshift 17.4.0`.

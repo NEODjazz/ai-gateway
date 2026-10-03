@@ -9,6 +9,7 @@ export type RequestOptions = Omit<RequestInit, "body"> & { body?: unknown };
 export type BinaryResponse = { body: Blob; contentType: string };
 export type SSEEvent = { event: string; data: string };
 export type StreamResult<T> = { streamed: true } | { streamed: false; data: T };
+export type ClientOptions = { credentials?: RequestCredentials; sessionEvents?: boolean };
 
 function parseSSEBlock(block: string): SSEEvent | undefined {
   let event = "message";
@@ -22,7 +23,7 @@ function parseSSEBlock(block: string): SSEEvent | undefined {
 }
 
 export class APIClient {
-  constructor(private readonly getToken: () => string) {}
+  constructor(private readonly getToken: () => string, private readonly options: ClientOptions = {}) {}
 
   private headers(options: RequestOptions, accept: string): Headers {
     const headers = new Headers(options.headers);
@@ -43,10 +44,10 @@ export class APIClient {
     } catch {
       // Keep the bounded generic error; upstream response bodies are not exposed.
     }
-    if (response.status === 409 && code === "revision_conflict") {
+    if (this.options.sessionEvents !== false && response.status === 409 && code === "revision_conflict") {
       window.dispatchEvent(new CustomEvent("control-plane-conflict"));
     }
-    if (response.status === 401) {
+    if (this.options.sessionEvents !== false && response.status === 401) {
       window.dispatchEvent(new CustomEvent("control-plane-session-expired"));
     }
     throw new APIError(response.status, code, message);
@@ -54,6 +55,7 @@ export class APIClient {
 
   async request<T>(path: string, options: RequestOptions = {}): Promise<T> {
     const response = await fetch(path, {
+      credentials: this.options.credentials,
       ...options,
       headers: this.headers(options, "application/json"),
       body: options.body === undefined ? undefined : JSON.stringify(options.body)
@@ -65,6 +67,7 @@ export class APIClient {
 
   async requestForm<T>(path: string, body: FormData, options: Omit<RequestInit, "body"> = {}): Promise<T> {
     const response = await fetch(path, {
+      credentials: this.options.credentials,
       ...options,
       headers: this.headers(options, "application/json"),
       body
@@ -76,6 +79,7 @@ export class APIClient {
 
   async download(path: string, options: Omit<RequestInit, "body"> = {}): Promise<BinaryResponse> {
     const response = await fetch(path, {
+      credentials: this.options.credentials,
       ...options,
       headers: this.headers(options, "application/octet-stream")
     });
@@ -83,8 +87,20 @@ export class APIClient {
     return { body: await response.blob(), contentType: response.headers.get("Content-Type") || "application/octet-stream" };
   }
 
+  async requestBinary(path: string, options: RequestOptions): Promise<BinaryResponse> {
+    const response = await fetch(path, {
+      credentials: this.options.credentials,
+      ...options,
+      headers: this.headers(options, "application/octet-stream"),
+      body: options.body === undefined ? undefined : JSON.stringify(options.body)
+    });
+    if (!response.ok) return this.throwResponseError(response);
+    return { body: await response.blob(), contentType: response.headers.get("Content-Type") || "application/octet-stream" };
+  }
+
   async stream<T = never>(path: string, options: RequestOptions, onEvent: (event: SSEEvent) => void, acceptJSONFallback = false): Promise<StreamResult<T>> {
     const response = await fetch(path, {
+      credentials: this.options.credentials,
       ...options,
       headers: this.headers(options, "text/event-stream"),
       body: options.body === undefined ? undefined : JSON.stringify(options.body)

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Checkbox, Select, TextArea, TextInput } from "@gravity-ui/uikit";
 import type { SSEEvent } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
@@ -7,6 +7,9 @@ import { GatewayButton } from "../components/GatewayButton";
 import { PageTabs } from "../components/PageTabs";
 import { ToolbarIconButton } from "../components/ToolbarIconButton";
 import { GravityThemeScope } from "../components/GravityThemeScope";
+import { AreaControl, SelectControl, TextControl } from "./playground/Controls";
+import { CodeDialog } from "./playground/CodeDialog";
+import { buildTextRequest, playgroundConnection, textEndpointPaths, type GenerationSettings, type KeySource } from "./playground/requests";
 
 type PlaygroundMode = "chat" | "responses";
 type ModelList = { data?: Array<{ id: string }> };
@@ -14,7 +17,7 @@ type TranscriptTurn = { id: number; role: "user" | "assistant"; content: string 
 type Usage = { prompt_tokens?: number; completion_tokens?: number; input_tokens?: number; output_tokens?: number; total_tokens?: number };
 type ChatResponse = { id?: string; model?: string; choices?: Array<{ message?: { content?: unknown; tool_calls?: unknown } }>; usage?: Usage };
 type ResponsesResponse = { id?: string; model?: string; output_text?: string; output?: unknown; usage?: Usage };
-type RunMetadata = { id?: string; model?: string; usage?: Usage; streamed: boolean };
+type RunMetadata = { id?: string; model?: string; usage?: Usage; streamed: boolean; latencyMS?: number; firstTokenMS?: number };
 const maximumTranscriptTurns = 40;
 const maximumVisibleEvents = 50;
 
@@ -29,25 +32,25 @@ function textContent(value: unknown): string {
   if (!value || typeof value !== "object") return "";
   const record = value as Record<string, unknown>;
   if (typeof record.text === "string") return record.text;
-  if (typeof record.content === "string") return record.content;
+  if (typeof record.content === "string" || Array.isArray(record.content)) return textContent(record.content);
   return "";
-}
-
-function optionalNumber(value: string): number | undefined {
-  if (!value.trim()) return undefined;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 function parseEvent(event: SSEEvent): Record<string, unknown> | undefined {
   if (event.data === "[DONE]") return undefined;
-  try { return JSON.parse(event.data) as Record<string, unknown>; }
+  try {
+    const payload: unknown = JSON.parse(event.data);
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new Error("Expected an event object");
+    return payload as Record<string, unknown>;
+  }
   catch { throw new Error(`Malformed streaming event: ${event.data.slice(0, 160)}`); }
 }
 
 function streamError(event: SSEEvent, payload: Record<string, unknown>) {
-  const error = payload.error;
-  if (event.event !== "error" && !error) return;
+  const response = payload.response && typeof payload.response === "object" ? payload.response as Record<string, unknown> : undefined;
+  const failed = payload.type === "response.failed" || response?.status === "failed";
+  const error = payload.error || response?.error;
+  if (event.event !== "error" && !error && !failed) return;
   if (error && typeof error === "object") {
     const message = (error as Record<string, unknown>).message;
     throw new Error(typeof message === "string" ? message : "Streaming request failed");
@@ -55,8 +58,11 @@ function streamError(event: SSEEvent, payload: Record<string, unknown>) {
   throw new Error(typeof error === "string" ? error : "Streaming request failed");
 }
 
-function streamText(mode: PlaygroundMode, payload: Record<string, unknown>): string {
-  if (mode === "responses") return typeof payload.delta === "string" ? payload.delta : "";
+function streamText(mode: PlaygroundMode, payload: Record<string, unknown>, event: SSEEvent): string {
+  if (mode === "responses") {
+    const type = typeof payload.type === "string" ? payload.type : event.event;
+    return ["response.output_text.delta", "response.refusal.delta"].includes(type) && typeof payload.delta === "string" ? payload.delta : "";
+  }
   const choices = payload.choices;
   if (!Array.isArray(choices) || !choices.length || !choices[0] || typeof choices[0] !== "object") return "";
   return textContent((choices[0] as Record<string, unknown>).delta);
@@ -68,7 +74,13 @@ function completedResponse(payload: Record<string, unknown>): ResponsesResponse 
 }
 
 export function PlaygroundPage() {
-  const { client } = useAuth();
+  const { client: sessionClient } = useAuth();
+  const [keySource, setKeySource] = useState<KeySource>("session");
+  const [testKey, setTestKey] = useState("");
+  const [baseURL, setBaseURL] = useState("");
+  const [appliedConnection, setAppliedConnection] = useState({ source: "session" as KeySource, key: "", url: "" });
+  const connection = useMemo(() => playgroundConnection(sessionClient, appliedConnection.source, appliedConnection.key, appliedConnection.url), [sessionClient, appliedConnection]);
+  const client = connection.client;
   const [mode, setMode] = useState<PlaygroundMode>("chat");
   const [models, setModels] = useState<string[]>([]);
   const [modelsError, setModelsError] = useState("");
@@ -78,6 +90,12 @@ export function PlaygroundPage() {
   const [message, setMessage] = useState("");
   const [maxTokens, setMaxTokens] = useState("256");
   const [temperature, setTemperature] = useState("");
+  const [topP, setTopP] = useState("");
+  const [responseFormat, setResponseFormat] = useState<GenerationSettings["responseFormat"]>("text");
+  const [schema, setSchema] = useState("");
+  const [advanced, setAdvanced] = useState("");
+  const [apiContinuity, setAPIContinuity] = useState(true);
+  const [codeRequest, setCodeRequest] = useState<{ path: string; body: unknown; baseURL: string }>();
   const [streaming, setStreaming] = useState(true);
   const [transcript, setTranscript] = useState<TranscriptTurn[]>([]);
   const [pendingOutput, setPendingOutput] = useState("");
@@ -89,24 +107,33 @@ export function PlaygroundPage() {
   const [activeSessionID, setActiveSessionID] = useState(sessionID);
   const [previousResponseID, setPreviousResponseID] = useState("");
   const abortRef = useRef<AbortController | undefined>(undefined);
+  const modelAbortRef = useRef<AbortController | undefined>(undefined);
+  const modelGeneration = useRef(0);
+  const firstTokenMS = useRef<number | undefined>(undefined);
+  const startedAt = useRef(0);
   const turnID = useRef(0);
 
   async function loadModels() {
+    const generation = ++modelGeneration.current;
+    modelAbortRef.current?.abort();
+    const controller = new AbortController(); modelAbortRef.current = controller;
     setLoadingModels(true); setModelsError("");
     try {
-      const payload = await client.request<ModelList>("/v1/models");
+      const payload = await client.request<ModelList>(connection.path("/v1/models"), { signal: controller.signal });
+      if (generation !== modelGeneration.current) return;
       const available = [...new Set((payload.data || []).map((item) => item.id.trim()).filter(Boolean))].sort();
       setModels(available);
       setModel((current) => available.includes(current) ? current : available[0] || "");
-    } catch (cause) { setModelsError(cause instanceof Error ? cause.message : "Could not load models"); }
-    finally { setLoadingModels(false); }
+    } catch (cause) { if (generation === modelGeneration.current && !controller.signal.aborted) { setModels([]); setModel(""); setModelsError(cause instanceof Error ? cause.message : "Could not load models"); } }
+    finally { if (generation === modelGeneration.current) setLoadingModels(false); }
   }
 
-  useEffect(() => { void loadModels(); }, [client]);
-  useEffect(() => () => { abortRef.current?.abort(); }, []);
+  useEffect(() => { void loadModels(); return () => { modelGeneration.current++; modelAbortRef.current?.abort(); }; }, [connection]);
+  useEffect(() => () => { abortRef.current?.abort(); abortRef.current = undefined; }, []);
 
   function newSession() {
     abortRef.current?.abort();
+    abortRef.current = undefined; setRunning(false);
     setTranscript([]); setPendingOutput(""); setMetadata(undefined); setEvents([]); setEventCount(0); setError("");
     setPreviousResponseID(""); setActiveSessionID(sessionID());
     turnID.current = 0;
@@ -117,39 +144,35 @@ export function PlaygroundPage() {
     setMode(next); newSession();
   }
 
-  function requestSettings() {
-    return { limit: optionalNumber(maxTokens), heat: optionalNumber(temperature) };
+  function applyConnection() {
+    try {
+      playgroundConnection(sessionClient, keySource, testKey, baseURL);
+      newSession(); setModels([]); setModel("");
+      setAppliedConnection({ source: keySource, key: keySource === "custom" ? testKey : "", url: baseURL });
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not configure connection"); }
   }
 
-  function chatBody(input: string, stream: boolean) {
-    const { limit, heat } = requestSettings();
-    const messages = [
-      ...(instructions.trim() ? [{ role: "system", content: instructions.trim() }] : []),
-      ...transcript.map((turn) => ({ role: turn.role, content: turn.content })),
-      { role: "user", content: input }
-    ];
-    return { model, messages, stream, ...(limit === undefined ? {} : { max_completion_tokens: limit }), ...(heat === undefined ? {} : { temperature: heat }) };
+  function requestBody(input: string, stream: boolean) {
+    return buildTextRequest({ endpoint: mode, model, input, instructions, streaming: stream,
+      history: transcript.map((turn) => ({ role: turn.role, content: turn.content })),
+      previousResponseID: apiContinuity ? previousResponseID : "",
+      settings: { maxTokens, temperature, topP, responseFormat, schema, advanced } });
   }
 
-  function responsesBody(input: string, stream: boolean) {
-    const { limit, heat } = requestSettings();
-    return {
-      model, input, stream,
-      ...(instructions.trim() ? { instructions: instructions.trim() } : {}),
-      ...(previousResponseID ? { previous_response_id: previousResponseID } : {}),
-      ...(limit === undefined ? {} : { max_output_tokens: limit }),
-      ...(heat === undefined ? {} : { temperature: heat })
-    };
+  function getCode() {
+    try { setCodeRequest({ path: textEndpointPaths[mode], body: requestBody(message.trim() || "Your message", streaming), baseURL: connection.baseURL }); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : "Could not generate code"); }
   }
 
   async function runStream(input: string, controller: AbortController): Promise<{ output: string; metadata: RunMetadata; events: SSEEvent[]; eventCount: number }> {
-    const path = mode === "chat" ? "/v1/chat/completions" : "/v1/responses";
-    const body = mode === "chat" ? chatBody(input, true) : responsesBody(input, true);
+    const path = connection.path(textEndpointPaths[mode]);
+    const body = requestBody(input, true);
     let output = "";
     let responseMetadata: RunMetadata = { streamed: true, model };
     const received: SSEEvent[] = [];
     let receivedCount = 0;
     const streamResult = await client.stream<ChatResponse | ResponsesResponse>(path, { method: "POST", headers: { "X-Session-ID": activeSessionID }, body, signal: controller.signal }, (streamEvent) => {
+      if (abortRef.current !== controller || controller.signal.aborted) return;
       if (streamEvent.data === "[DONE]") return;
       receivedCount++;
       received.push(streamEvent);
@@ -157,7 +180,9 @@ export function PlaygroundPage() {
       const payload = parseEvent(streamEvent);
       if (!payload) return;
       streamError(streamEvent, payload);
-      output += streamText(mode, payload);
+      const delta = streamText(mode, payload, streamEvent);
+      if (delta && firstTokenMS.current === undefined) firstTokenMS.current = performance.now() - startedAt.current;
+      output += delta;
       if (mode === "responses") {
         const completed = completedResponse(payload);
         if (completed) {
@@ -196,59 +221,97 @@ export function PlaygroundPage() {
   async function runJSON(input: string, controller: AbortController): Promise<{ output: string; metadata: RunMetadata }> {
     const options = { method: "POST", headers: { "X-Session-ID": activeSessionID }, signal: controller.signal };
     if (mode === "chat") {
-      const response = await client.request<ChatResponse>("/v1/chat/completions", { ...options, body: chatBody(input, false) });
+      const response = await client.request<ChatResponse>(connection.path("/v1/chat/completions"), { ...options, body: requestBody(input, false) });
       const responseMessage = response.choices?.[0]?.message;
       return { output: textContent(responseMessage?.content) || JSON.stringify(responseMessage?.tool_calls || response, null, 2), metadata: { id: response.id, model: response.model || model, usage: response.usage, streamed: false } };
     }
-    const response = await client.request<ResponsesResponse>("/v1/responses", { ...options, body: responsesBody(input, false) });
-    setPreviousResponseID(response.id || "");
+    const response = await client.request<ResponsesResponse>(connection.path("/v1/responses"), { ...options, body: requestBody(input, false) });
     return { output: response.output_text || textContent(response.output) || JSON.stringify(response.output || response, null, 2), metadata: { id: response.id, model: response.model || model, usage: response.usage, streamed: false } };
   }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
+    if (connectionChanged) { setError("Apply connection changes before sending a request."); return; }
     const input = message.trim();
-    if (!model.trim() || !input) return;
+    if (running || !model.trim() || !input) return;
     const controller = new AbortController();
     abortRef.current = controller;
+    startedAt.current = performance.now(); firstTokenMS.current = undefined;
     setRunning(true); setError(""); setPendingOutput(""); setMetadata(undefined); setEvents([]); setEventCount(0);
     try {
       const result = streaming ? await runStream(input, controller) : await runJSON(input, controller);
+      if (abortRef.current !== controller || controller.signal.aborted) return;
       if (mode === "responses" && result.metadata.id) setPreviousResponseID(result.metadata.id);
       const userTurn: TranscriptTurn = { id: ++turnID.current, role: "user", content: input };
       const assistantTurn: TranscriptTurn = { id: ++turnID.current, role: "assistant", content: result.output };
       setTranscript((current) => [...current, userTurn, assistantTurn].slice(-maximumTranscriptTurns));
-      setPendingOutput(""); setMetadata(result.metadata); setMessage("");
+      setPendingOutput(""); setMetadata({ ...result.metadata, latencyMS: performance.now() - startedAt.current, firstTokenMS: firstTokenMS.current }); setMessage("");
       if ("events" in result && Array.isArray(result.events)) setEvents(result.events as SSEEvent[]);
       if ("eventCount" in result && typeof result.eventCount === "number") setEventCount(result.eventCount);
     } catch (cause) {
+      if (abortRef.current !== controller) return;
       const aborted = cause && typeof cause === "object" && "name" in cause && cause.name === "AbortError";
       setError(aborted ? "Request cancelled" : cause instanceof Error ? cause.message : "Request failed");
     } finally {
-      if (abortRef.current === controller) abortRef.current = undefined;
-      setRunning(false);
+      if (abortRef.current === controller) { abortRef.current = undefined; setRunning(false); }
     }
   }
 
   const usage = metadata?.usage;
-  const calculatedTokens = (usage?.prompt_tokens || usage?.input_tokens || 0) + (usage?.completion_tokens || usage?.output_tokens || 0);
-  const tokenCount = usage?.total_tokens ?? (calculatedTokens || undefined);
+  const inputTokens = usage?.prompt_tokens ?? usage?.input_tokens;
+  const outputTokens = usage?.completion_tokens ?? usage?.output_tokens;
+  const tokenCount = usage?.total_tokens ?? (inputTokens === undefined && outputTokens === undefined ? undefined : (inputTokens ?? 0) + (outputTokens ?? 0));
+  const connectionChanged = keySource !== appliedConnection.source || (keySource === "custom" && testKey !== appliedConnection.key) || baseURL !== appliedConnection.url;
   return <>
-    <PageHeader eyebrow="Inference" title="Playground" description="Test models and deployments with production-compatible request settings." />
-    <div className="playground-selection-bar"><label>Model<div className="playground-model-control"><GravityThemeScope className="gravity-playground-control"><Select aria-label="Model" size="l" width="max" filterable loading={loadingModels} disabled={running || loadingModels || !models.length} value={model ? [model] : []} options={models.map((item) => ({ value: item, content: item }))} placeholder={loadingModels ? "Loading models…" : "Select an authorized model"} onUpdate={([value]) => { setModel(value || ""); setPreviousResponseID(""); }} /></GravityThemeScope><ToolbarIconButton icon="refresh" label="Refresh models" disabled={loadingModels} onClick={() => void loadModels()} /></div><span className="playground-model-help">{models.length ? `${models.length.toLocaleString()} authorized model${models.length === 1 ? "" : "s"}` : "Manual model entry is available"}</span></label><label>Deployment<GravityThemeScope className="gravity-playground-control"><Select aria-label="Deployment" size="l" width="max" disabled value={["automatic"]} options={[{ value: "automatic", content: "Automatic gateway routing" }]} /></GravityThemeScope><span className="playground-model-help">Resolved by routing policy</span></label><GatewayButton view="outlined" size="l" disabled={running} onClick={newSession}>Clear</GatewayButton></div>
-    {modelsError && <p className="form-error" role="status">Model discovery: {modelsError}</p>}
-    <div className="playground-workspace">
-      <form className="playground-conversation-card" onSubmit={submit}>
-        <label htmlFor="playground-instructions">System instructions<GravityThemeScope className="gravity-playground-control"><TextArea id="playground-instructions" controlProps={{ "aria-label": "Instructions" }} size="l" disabled={running} rows={3} value={instructions} onUpdate={setInstructions} placeholder={mode === "chat" ? "Optional system message" : "Optional Responses instructions"} /></GravityThemeScope></label>
-        <div className="playground-output-heading"><div><h2>Conversation</h2><span className="muted">Session <code>{activeSessionID}</code></span></div></div>
-        <section className="playground-output" aria-label="Playground conversation">{!transcript.length && !pendingOutput && <p className="playground-empty">Run a request to start an in-memory conversation. Prompt and response content is not persisted by the console.</p>}<div className="playground-transcript">{transcript.map((turn) => <article className={`playground-turn ${turn.role}`} key={turn.id}><strong>{turn.role === "user" ? "User" : "Assistant"}</strong><pre>{turn.content}</pre></article>)}{pendingOutput && <article className="playground-turn assistant streaming"><strong>Assistant <span>streaming</span></strong><pre>{pendingOutput}</pre></article>}</div></section>
-        <div className="playground-composer"><GravityThemeScope className="gravity-playground-control"><TextArea id="playground-message" controlProps={{ "aria-label": "Message", required: true }} size="l" disabled={running} rows={4} value={message} onUpdate={setMessage} placeholder="Ask the model…" /></GravityThemeScope><GatewayButton size="l" type="submit" disabled={running || !model.trim() || !message.trim()}>{running ? "Running…" : transcript.length ? "Send message" : "Run request"}</GatewayButton>{running && <GatewayButton type="button" view="outlined" size="l" onClick={() => abortRef.current?.abort()}>Stop</GatewayButton>}</div>
-        {error && <p role="alert" className="form-error">{error}</p>}
-      </form>
-      <aside className="playground-side-panel">
-        <section className="playground-parameters-card"><h2>Parameters</h2><PageTabs className="playground-api-tabs" label="Playground API" value={mode} items={[{ value: "chat", label: "Chat Completions" }, { value: "responses", label: "Responses API" }]} onUpdate={changeMode} /><label>Response format<GravityThemeScope className="gravity-playground-control"><Select aria-label="Response format" size="l" width="max" disabled value={["text"]} options={[{ value: "text", content: "Text" }]} /></GravityThemeScope></label><label>Temperature<GravityThemeScope className="gravity-playground-control"><TextInput aria-label="Temperature" size="l" disabled={running} type="number" controlProps={{ min: 0, max: 2, step: 0.1 }} value={temperature} onUpdate={setTemperature} placeholder="Provider default" /></GravityThemeScope></label><label>Maximum output tokens<GravityThemeScope className="gravity-playground-control"><TextInput aria-label="Maximum output tokens" size="l" disabled={running} type="number" controlProps={{ min: 1, step: 1 }} value={maxTokens} onUpdate={setMaxTokens} placeholder="Provider default" /></GravityThemeScope></label><GravityThemeScope className="gravity-playground-control"><Checkbox controlProps={{ "aria-label": "Stream response" }} size="l" disabled={running} checked={streaming} onUpdate={setStreaming}>Streaming: {streaming ? "On" : "Off"}</Checkbox></GravityThemeScope><p className="muted playground-default-note">Leave optional settings blank to use provider defaults for models that restrict custom sampling values.</p></section>
-        <section className="playground-metadata-card"><h2>Response metadata</h2><dl className="playground-metadata"><div><dt>API</dt><dd>{mode === "chat" ? "Chat Completions" : "Responses"}{metadata?.streamed ? " · streamed" : ""}</dd></div><div><dt>Deployment</dt><dd>Gateway-selected</dd></div><div><dt>Upstream model</dt><dd>{metadata?.model || model || "—"}</dd></div><div><dt>Response ID</dt><dd>{metadata?.id || "—"}</dd></div><div><dt>Tokens</dt><dd>{tokenCount ?? "—"}</dd></div></dl>{events.length > 0 && <details className="playground-events"><summary>Stream events ({events.length}{eventCount > events.length ? "+" : ""})</summary><pre>{events.map((item) => `${item.event}: ${item.data}`).join("\n\n")}</pre></details>}</section>
+    <PageHeader eyebrow="Inference" title="Playground" description="Explore models, tune requests and inspect live responses." />
+    <div className="playground-workspace playground-config-layout">
+      <aside className="playground-side-panel" aria-label="Playground configuration">
+        <section className="playground-parameters-card">
+          <h2>Configurations</h2>
+          <SelectControl label="Virtual key source" value={keySource} disabled={running} options={[{ value: "session", content: "Current UI session" }, { value: "custom", content: "Test API key" }]} onUpdate={(value) => { setKeySource(value); if (value === "session") { setBaseURL(""); setTestKey(""); } }} />
+          {keySource === "custom" && <TextControl label="Test API key" type="password" disabled={running} autoComplete="off" value={testKey} onUpdate={setTestKey} placeholder="Enter a gateway virtual key" />}
+          <TextControl label="Custom gateway base URL" disabled={running || keySource === "session"} value={baseURL} onUpdate={setBaseURL} placeholder="Optional custom gateway URL" />
+          {connectionChanged && <GatewayButton disabled={running} onClick={applyConnection}>Apply connection</GatewayButton>}
+          <p className="playground-default-note muted">Active: {connection.source === "session" ? "current UI session" : "test API key"}{connection.baseURL ? ` · ${connection.baseURL}` : " · this gateway"}. Test keys stay in memory.</p>
+          <PageTabs className="playground-api-tabs" label="Playground API" value={mode} items={[{ value: "chat", label: "Chat Completions" }, { value: "responses", label: "Responses API" }]} onUpdate={changeMode} />
+          <label>Model<div className="playground-model-control">
+            <GravityThemeScope className="gravity-playground-control">{!loadingModels && !models.length
+              ? <TextInput aria-label="Model" size="l" disabled={running} value={model} onUpdate={(value) => { setModel(value); setPreviousResponseID(""); }} placeholder="Enter a model ID" />
+              : <Select aria-label="Model" size="l" width="max" filterable loading={loadingModels} disabled={running || loadingModels} value={model ? [model] : []} options={models.map((item) => ({ value: item, content: item }))} placeholder="Select an authorized model" onUpdate={([value]) => { setModel(value || ""); newSession(); }} />}
+            </GravityThemeScope><ToolbarIconButton icon="refresh" label="Refresh models" disabled={running || loadingModels} onClick={() => void loadModels()} />
+          </div><span className="playground-model-help">{models.length ? `${models.length.toLocaleString()} authorized model${models.length === 1 ? "" : "s"}` : "Model access is checked by the gateway"}</span></label>
+          {modelsError && <p className="form-error" role="status">Model discovery: {modelsError}</p>}
+          <TextControl label="Temperature" disabled={running} type="number" controlProps={{ min: 0, max: 2, step: 0.1 }} value={temperature} onUpdate={setTemperature} placeholder="Provider default" />
+          <TextControl label="Maximum output tokens" disabled={running} type="number" controlProps={{ min: 1, step: 1 }} value={maxTokens} onUpdate={setMaxTokens} placeholder="Provider default" />
+          <TextControl label="Top P" disabled={running} type="number" controlProps={{ min: 0, max: 1, step: 0.05 }} value={topP} onUpdate={setTopP} placeholder="Provider default" />
+          <SelectControl label="Response format" value={responseFormat} disabled={running} options={[{ value: "text", content: "Text" }, { value: "json_object", content: "JSON object" }, { value: "json_schema", content: "JSON schema" }]} onUpdate={setResponseFormat} />
+          {responseFormat === "json_schema" && <AreaControl label="Output JSON schema" rows={5} disabled={running} value={schema} onUpdate={setSchema} placeholder='{ "type": "object", "properties": {} }' />}
+          <GravityThemeScope className="gravity-playground-control"><Checkbox controlProps={{ "aria-label": "Stream response" }} size="l" disabled={running} checked={streaming} onUpdate={setStreaming}>Stream response</Checkbox></GravityThemeScope>
+          {mode === "responses" && <GravityThemeScope className="gravity-playground-control"><Checkbox controlProps={{ "aria-label": "Use API session management" }} disabled={running} checked={apiContinuity} onUpdate={(value) => { setAPIContinuity(value); setPreviousResponseID(""); }}>Use API session management</Checkbox></GravityThemeScope>}
+          <details className="playground-advanced"><summary>Advanced parameters</summary><AreaControl label="Advanced parameters JSON" rows={6} disabled={running} value={advanced} onUpdate={setAdvanced} placeholder='{ "reasoning_effort": "low" }' /><p className="muted">Parameters are sent unchanged. Unsupported settings return a gateway or provider error.</p></details>
+          <p className="muted playground-default-note">Leave optional settings blank to use provider defaults.</p>
+        </section>
       </aside>
+      <div className="playground-main-panel">
+        <form className="playground-conversation-card" onSubmit={submit}>
+          <div className="playground-output-heading"><div><h2>Conversation</h2><span className="muted">Session <code>{activeSessionID}</code></span></div><div className="playground-actions"><GatewayButton view="outlined" disabled={running} onClick={newSession}>Clear</GatewayButton><GatewayButton view="outlined" disabled={running || !model.trim()} onClick={getCode}>Get code</GatewayButton></div></div>
+          <label htmlFor="playground-instructions">System instructions<GravityThemeScope className="gravity-playground-control"><TextArea id="playground-instructions" controlProps={{ "aria-label": "Instructions" }} size="l" disabled={running} rows={2} value={instructions} onUpdate={setInstructions} placeholder="Optional system instructions" /></GravityThemeScope></label>
+          <section className="playground-output" aria-label="Playground conversation">
+            {!transcript.length && !pendingOutput && <div className="playground-empty"><h3>Start a conversation</h3><p>Choose a model and send a prompt. Conversation content stays in memory.</p><div className="playground-suggestions">{["Explain a complex idea simply", "Draft a short project update", "Review a function for edge cases"].map((prompt) => <button type="button" key={prompt} disabled={running} onClick={() => setMessage(prompt)}>{prompt}</button>)}</div></div>}
+            <div className="playground-transcript">{transcript.map((turn) => <article className={`playground-turn ${turn.role}`} key={turn.id}><strong>{turn.role === "user" ? "User" : "Assistant"}</strong><pre>{turn.content}</pre></article>)}{pendingOutput && <article className={`playground-turn assistant${running ? " streaming" : ""}`}><strong>Assistant <span>{running ? "streaming" : "partial response"}</span></strong><pre>{pendingOutput}</pre></article>}</div>
+          </section>
+          <div className="playground-composer"><GravityThemeScope className="gravity-playground-control"><TextArea id="playground-message" controlProps={{ "aria-label": "Message", required: true }} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); if (!running) event.currentTarget.form?.requestSubmit(); } }} size="l" disabled={running} rows={4} value={message} onUpdate={setMessage} placeholder="Send a message… Shift+Enter for a new line" /></GravityThemeScope><GatewayButton size="l" type="submit" disabled={running || connectionChanged || !model.trim() || !message.trim()}>{running ? "Running…" : transcript.length ? "Send message" : "Run request"}</GatewayButton>{running && <GatewayButton type="button" view="outlined" size="l" onClick={() => abortRef.current?.abort()}>Stop</GatewayButton>}</div>
+          {error && <p role="alert" className="form-error">{error}</p>}
+        </form>
+        <section className="playground-metadata-card"><h2>Response metadata</h2><dl className="playground-metadata">
+          <div><dt>API</dt><dd>{mode === "chat" ? "Chat Completions" : "Responses"}{metadata?.streamed ? " · streamed" : ""}</dd></div>
+          <div><dt>Upstream model</dt><dd>{metadata?.model || model || "—"}</dd></div><div><dt>Response ID</dt><dd>{metadata?.id || "—"}</dd></div>
+          <div><dt>Input tokens</dt><dd>{inputTokens ?? "—"}</dd></div><div><dt>Output tokens</dt><dd>{outputTokens ?? "—"}</dd></div><div><dt>Tokens</dt><dd>{tokenCount ?? "—"}</dd></div>
+          <div><dt>Total latency</dt><dd>{metadata?.latencyMS === undefined ? "—" : `${Math.round(metadata.latencyMS)} ms`}</dd></div><div><dt>Time to first token</dt><dd>{metadata?.firstTokenMS === undefined ? "—" : `${Math.round(metadata.firstTokenMS)} ms`}</dd></div>
+          <div><dt>Finalized cost</dt><dd>See Usage &amp; spend</dd></div>
+        </dl>{events.length > 0 && <details className="playground-events"><summary>Stream events ({events.length}{eventCount > events.length ? "+" : ""})</summary><pre>{events.map((item) => `${item.event}: ${item.data}`).join("\n\n")}</pre></details>}</section>
+      </div>
     </div>
+    {codeRequest && <CodeDialog {...codeRequest} onClose={() => setCodeRequest(undefined)} />}
   </>;
 }

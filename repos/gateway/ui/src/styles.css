@@ -411,6 +411,23 @@ textarea { resize: vertical; }
 .playground-events { margin-top: 16px; color: #536473; }
 .playground-events summary { cursor: pointer; font-size: 12px; font-weight: 700; }
 .playground-events pre { max-height: 280px; overflow: auto; padding: 12px; border-radius: 8px; background: #10202b; color: #dce9e6; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; }
+.playground-config-layout { grid-template-columns: minmax(260px, 320px) minmax(0, 1fr); }
+.playground-main-panel { display: grid; gap: 20px; min-width: 0; }
+.playground-config-layout .playground-conversation-card { min-width: 0; }
+.playground-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.playground-config-layout .playground-metadata-card { min-height: 0; }
+.playground-config-layout .playground-metadata { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 24px; }
+.playground-advanced summary { cursor: pointer; font-weight: 600; }
+.playground-advanced > label { margin-top: 12px; }
+.playground-advanced p { font-size: 12px; line-height: 1.5; }
+.playground-empty h3 { margin: 0 0 8px; font-size: 19px; color: var(--text); }
+.playground-suggestions { display: grid; gap: 8px; margin: 24px auto 0; max-width: 420px; }
+.playground-suggestions button { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; background: white; color: #425762; text-align: left; cursor: pointer; }
+.playground-suggestions button:hover { background: #e7f5f2; }
+.playground-code-dialog { width: min(850px, 94vw); }
+.playground-code-dialog pre { max-height: 55vh; overflow: auto; border-radius: 8px; padding: 16px; background: #10202b; color: #dce9e6; white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 900px) { .playground-config-layout { grid-template-columns: 1fr; } }
+@media (max-width: 600px) { .playground-config-layout .playground-metadata { grid-template-columns: 1fr; } .playground-actions { justify-content: flex-start; } .playground-config-layout .playground-output-heading { flex-direction: column; } }
 .login-page { min-height: 100vh; display: grid; place-items: center; padding: 24px; background: radial-gradient(circle at 20% 15%, #dff7f1, transparent 30%), #f4f7f8; }
 .login-card { width: min(440px, 100%); padding: 34px; background: white; border: 1px solid #dce4e8; border-radius: 16px; box-shadow: 0 24px 70px rgba(29, 51, 63, .12); }
 .login-card h1 { margin: 14px 0 4px; }

@@ -1,6 +1,43 @@
 import { APIClient, APIError } from "./client";
 
 describe("APIClient", () => {
+  it("sends a JSON request and receives binary audio without decoding it as JSON", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(new Uint8Array([0, 255, 17]), { status: 200, headers: { "Content-Type": "audio/mpeg" } }));
+    const result = await new APIClient(() => "inference-key", { credentials: "omit", sessionEvents: false }).requestBinary("/v1/audio/speech", { method: "POST", body: { model: "speech", input: "Hello", voice: "alloy" } });
+    expect(result.contentType).toBe("audio/mpeg");
+    const bytes = await new Promise<ArrayBuffer>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as ArrayBuffer);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsArrayBuffer(result.body);
+    });
+    expect(new Uint8Array(bytes)).toEqual(new Uint8Array([0, 255, 17]));
+    const options = fetchMock.mock.calls[0][1]!;
+    expect(options.credentials).toBe("omit");
+    expect(options.method).toBe("POST");
+    expect(JSON.parse(String(options.body))).toEqual({ model: "speech", input: "Hello", voice: "alloy" });
+    expect(new Headers(options.headers).get("Accept")).toBe("application/octet-stream");
+  });
+
+  it.each([401, 409])("keeps an independent test credential failure (%s) from changing the console session", async (status) => {
+    const expired = vi.fn(), conflict = vi.fn();
+    window.addEventListener("control-plane-session-expired", expired);
+    window.addEventListener("control-plane-conflict", conflict);
+    try {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ error: { code: status === 401 ? "unauthorized" : "revision_conflict", message: "Test credential failed" } }), { status }));
+      await expect(new APIClient(() => "test-key", { sessionEvents: false }).request("/v1/models")).rejects.toThrow("Test credential failed");
+      expect(expired).not.toHaveBeenCalled(); expect(conflict).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener("control-plane-session-expired", expired);
+      window.removeEventListener("control-plane-conflict", conflict);
+    }
+  });
+
+  it("uses the same bounded API error for a failed binary request", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ error: { code: "provider_failed", message: "Speech unavailable" } }), { status: 502 }));
+    await expect(new APIClient(() => "x").requestBinary("/v1/audio/speech", { method: "POST", body: {} })).rejects.toThrow("Speech unavailable");
+  });
+
   it("sends bearer and JSON headers", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "Content-Type": "application/json" } }));
     await new APIClient(() => "admin-token").request("/admin/v1/test", { method: "POST", body: { value: 1 } });
