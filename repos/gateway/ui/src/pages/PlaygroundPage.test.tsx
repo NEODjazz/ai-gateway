@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AuthProvider } from "../auth/AuthContext";
 import { PlaygroundPage } from "./PlaygroundPage";
@@ -19,6 +19,37 @@ function streamResponse(chunks: string[]) {
 }
 
 describe("PlaygroundPage", () => {
+  it("clears the browser file input after success so the same file can be selected again", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (path) => path === "/v1/models" ? new Response('{"data":[{"id":"model"}]}') : new Response('{"choices":[{"message":{"content":"Done"}}]}', { headers: { "Content-Type": "application/json" } }));
+    authenticated(); await screen.findByText("1 authorized model");
+    const input = screen.getByLabelText("Conversation attachments") as HTMLInputElement;
+    const file = new File(["%PDF-test"], "report.pdf", { type: "application/pdf" });
+    await userEvent.upload(input, file); await screen.findByRole("button", { name: "Remove conversation attachments" });
+    expect(input.files).toHaveLength(1);
+    await userEvent.click(screen.getByRole("button", { name: "Run request" })); await screen.findByText("Done");
+    expect(input).toHaveValue(""); expect(input.files).toHaveLength(0);
+    await userEvent.upload(input, file); expect(await screen.findByRole("button", { name: "Remove conversation attachments" })).toBeInTheDocument();
+  });
+  it.each(["chat", "responses"])("sends image/PDF attachments in the %s dialect and clears successful attachments", async (endpoint) => {
+    const mock = vi.spyOn(globalThis, "fetch").mockImplementation(async (path) => path === "/v1/models" ? new Response('{"data":[{"id":"model"}]}') : new Response(JSON.stringify(endpoint === "chat" ? { choices: [{ message: { content: "Attachment answer" } }] } : { output_text: "Attachment answer" }), { headers: { "Content-Type": "application/json" } }));
+    authenticated(); await screen.findByText("1 authorized model");
+    if (endpoint === "responses") await userEvent.click(screen.getByRole("tab", { name: "Responses API" }));
+    fireEvent.change(screen.getByLabelText("Conversation attachments"), { target: { files: [new File(["image"], "input.png", { type: "image/png" }), new File(["%PDF-test"], "report.pdf", { type: "application/pdf" })] } });
+    await screen.findByRole("button", { name: "Remove conversation attachments" });
+    await userEvent.type(screen.getByLabelText("Message"), "Describe"); await userEvent.click(screen.getByRole("button", { name: "Run request" }));
+    expect(await screen.findByText("Attachment answer")).toBeInTheDocument();
+    const request = JSON.parse(String(mock.mock.calls.find(([path]) => path === (endpoint === "chat" ? "/v1/chat/completions" : "/v1/responses"))![1]?.body));
+    const parts = endpoint === "chat" ? request.messages[0].content : request.input[0].content;
+    expect(parts[1].type).toBe(endpoint === "chat" ? "image_url" : "input_image"); expect(parts[2].type).toBe("input_file");
+    expect(screen.queryByRole("button", { name: "Remove conversation attachments" })).not.toBeInTheDocument();
+  });
+  it("shows a cost estimate using the entered rates and provider usage", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (path) => path === "/v1/models" ? new Response('{"data":[{"id":"model"}]}') : new Response('{"choices":[{"message":{"content":"Answer"}}],"usage":{"prompt_tokens":1000,"completion_tokens":500}}', { headers: { "Content-Type": "application/json" } }));
+    authenticated(); await screen.findByText("1 authorized model"); await userEvent.click(screen.getByText("Cost estimate"));
+    await userEvent.type(screen.getByLabelText("Input price per million tokens"), "2"); await userEvent.type(screen.getByLabelText("Output price per million tokens"), "8");
+    await userEvent.type(screen.getByLabelText("Message"), "Estimate"); await userEvent.click(screen.getByRole("button", { name: "Run request" }));
+    expect(await screen.findByText("0.006000 USD")).toBeInTheDocument();
+  });
   it("does not turn a failed Responses stream into a successful conversation or continuation", async () => {
     let attempt = 0;
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (path) => {

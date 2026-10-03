@@ -5,7 +5,7 @@ export class APIError extends Error {
   }
 }
 
-export type RequestOptions = Omit<RequestInit, "body"> & { body?: unknown };
+export type RequestOptions = Omit<RequestInit, "body"> & { body?: unknown; maximumResponseBytes?: number };
 export type BinaryResponse = { body: Blob; contentType: string };
 export type SSEEvent = { event: string; data: string };
 export type StreamResult<T> = { streamed: true } | { streamed: false; data: T };
@@ -34,11 +34,11 @@ export class APIClient {
     return headers;
   }
 
-  private async throwResponseError(response: Response): Promise<never> {
+  private async throwResponseError(response: Response, maximumResponseBytes?: number): Promise<never> {
     let code = "request_failed";
     let message = `Request failed with status ${response.status}`;
     try {
-      const payload = await response.json() as { error?: { code?: string; message?: string } };
+      const payload = await this.json<{ error?: { code?: string; message?: string } }>(response, maximumResponseBytes === undefined ? undefined : Math.min(maximumResponseBytes, 64 * 1024));
       code = payload.error?.code || code;
       message = payload.error?.message || message;
     } catch {
@@ -53,16 +53,40 @@ export class APIClient {
     throw new APIError(response.status, code, message);
   }
 
-  async request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  private async limitedBytes(response: Response, limit: number): Promise<Uint8Array<ArrayBuffer>[]> {
+    const declared = Number(response.headers.get("Content-Length"));
+    if (declared > limit) { await response.body?.cancel().catch(() => undefined); throw new APIError(response.status, "response_too_large", "Response exceeds the Playground size limit"); }
+    if (!response.body) return [];
+    const reader = response.body.getReader(), chunks: Uint8Array<ArrayBuffer>[] = [];
+    let size = 0, complete = false;
+    try {
+      while (true) {
+        const { value, done } = await reader.read(); if (done) break;
+        size += value.byteLength;
+        if (size > limit) throw new APIError(response.status, "response_too_large", "Response exceeds the Playground size limit");
+        chunks.push(value.slice());
+      }
+      complete = true; return chunks;
+    } finally { if (!complete) await reader.cancel().catch(() => undefined); reader.releaseLock(); }
+  }
+
+  private async json<T>(response: Response, limit?: number): Promise<T> {
+    if (limit === undefined) return response.json() as Promise<T>;
+    const decoder = new TextDecoder(); let text = "";
+    for (const chunk of await this.limitedBytes(response, limit)) text += decoder.decode(chunk, { stream: true });
+    text += decoder.decode(); return JSON.parse(text) as T;
+  }
+
+  async request<T>(path: string, { maximumResponseBytes, ...options }: RequestOptions = {}): Promise<T> {
     const response = await fetch(path, {
       credentials: this.options.credentials,
       ...options,
       headers: this.headers(options, "application/json"),
       body: options.body === undefined ? undefined : JSON.stringify(options.body)
     });
-    if (!response.ok) return this.throwResponseError(response);
+    if (!response.ok) return this.throwResponseError(response, maximumResponseBytes);
     if (response.status === 204) return undefined as T;
-    return response.json() as Promise<T>;
+    return this.json<T>(response, maximumResponseBytes);
   }
 
   async requestForm<T>(path: string, body: FormData, options: Omit<RequestInit, "body"> = {}): Promise<T> {
@@ -87,29 +111,31 @@ export class APIClient {
     return { body: await response.blob(), contentType: response.headers.get("Content-Type") || "application/octet-stream" };
   }
 
-  async requestBinary(path: string, options: RequestOptions): Promise<BinaryResponse> {
+  async requestBinary(path: string, { maximumResponseBytes, ...options }: RequestOptions): Promise<BinaryResponse> {
     const response = await fetch(path, {
       credentials: this.options.credentials,
       ...options,
       headers: this.headers(options, "application/octet-stream"),
       body: options.body === undefined ? undefined : JSON.stringify(options.body)
     });
-    if (!response.ok) return this.throwResponseError(response);
-    return { body: await response.blob(), contentType: response.headers.get("Content-Type") || "application/octet-stream" };
+    if (!response.ok) return this.throwResponseError(response, maximumResponseBytes);
+    const contentType = response.headers.get("Content-Type") || "application/octet-stream";
+    const body = maximumResponseBytes === undefined ? await response.blob() : new Blob(await this.limitedBytes(response, maximumResponseBytes), { type: contentType });
+    return { body, contentType };
   }
 
-  async stream<T = never>(path: string, options: RequestOptions, onEvent: (event: SSEEvent) => void, acceptJSONFallback = false): Promise<StreamResult<T>> {
+  async stream<T = never>(path: string, { maximumResponseBytes, ...options }: RequestOptions, onEvent: (event: SSEEvent) => void, acceptJSONFallback = false): Promise<StreamResult<T>> {
     const response = await fetch(path, {
       credentials: this.options.credentials,
       ...options,
       headers: this.headers(options, "text/event-stream"),
       body: options.body === undefined ? undefined : JSON.stringify(options.body)
     });
-    if (!response.ok) return this.throwResponseError(response);
+    if (!response.ok) return this.throwResponseError(response, maximumResponseBytes);
     const contentType = response.headers.get("Content-Type")?.toLowerCase() || "";
     if (!contentType.includes("text/event-stream")) {
       if (acceptJSONFallback && contentType.includes("application/json")) {
-        return { streamed: false, data: await response.json() as T };
+        return { streamed: false, data: await this.json<T>(response, maximumResponseBytes) };
       }
       throw new APIError(response.status, "invalid_stream", "Expected a text/event-stream response");
     }
@@ -123,9 +149,12 @@ export class APIClient {
       if (event) onEvent(event);
     };
     let completed = false;
+    let receivedBytes = 0;
     try {
       while (true) {
         const { done, value } = await reader.read();
+        receivedBytes += value?.byteLength || 0;
+        if (maximumResponseBytes !== undefined && receivedBytes > maximumResponseBytes) throw new APIError(response.status, "response_too_large", "Stream exceeds the Playground size limit");
         buffer += decoder.decode(value, { stream: !done });
         let boundary = buffer.replace(/\r\n/g, "\n").indexOf("\n\n");
         while (boundary >= 0) {

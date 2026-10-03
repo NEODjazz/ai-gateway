@@ -5,16 +5,18 @@ import { GravityThemeScope } from "../../components/GravityThemeScope";
 import { AreaControl, SelectControl, TextControl } from "./Controls";
 import { buildTextRequest, defaultGenerationSettings, type GenerationSettings, type Message, type PlaygroundConnection } from "./requests";
 import { runText, type TextRun } from "./runText";
+import { PricingControls, defaultPricing, estimateCost, type PricingInputs } from "./PriceEstimate";
+import { retainConversation } from "./attachments";
 import { csvCell } from "../../csv";
 
 type Panel = {
   id: number; model: string; settings: GenerationSettings; instructions: string; sessionID: string;
-  history: Message[]; pending: string; lastPrompt?: string; result?: TextRun; error: string; status: "idle" | "running" | "complete" | "failed" | "cancelled";
+  historyDropped: number; pricing: PricingInputs; history: Message[]; pending: string; lastPrompt?: string; result?: TextRun; error: string; status: "idle" | "running" | "complete" | "failed" | "cancelled";
 };
 
 function newPanel(id: number, model: string): Panel {
   return { id, model, settings: { ...defaultGenerationSettings }, instructions: "", sessionID: `playground-compare-${crypto.randomUUID()}`,
-    history: [], pending: "", error: "", status: "idle" };
+    historyDropped: 0, pricing: { ...defaultPricing }, history: [], pending: "", error: "", status: "idle" };
 }
 
 export function ComparePlayground({ connection, models, connectionControls, connectionChanged, active = true }: {
@@ -75,7 +77,8 @@ export function ComparePlayground({ connection, models, connectionControls, conn
         if (generation.current !== activeGeneration) return;
         const choice = (result.response.choices as { message?: Message }[] | undefined)?.[0]?.message;
         const assistant: Message = { ...choice, role: "assistant", content: choice?.content ?? result.text };
-        setPanels((current) => current.map((item) => item.id === panel.id ? { ...item, result, pending: "", status: "complete", history: [...item.history, { role: "user", content: input }, assistant].slice(-40) } : item));
+        const retained = retainConversation([...panel.history, { role: "user", content: input }, assistant]);
+        setPanels((current) => current.map((item) => item.id === panel.id ? { ...item, historyDropped: item.historyDropped + retained.dropped, result, pending: "", status: "complete", history: retained.turns } : item));
       } catch (cause) {
         if (generation.current === activeGeneration) setPanels((current) => current.map((item) => item.id === panel.id ? { ...item, status: controller.signal.aborted ? "cancelled" : "failed", error: cause instanceof Error ? cause.message : "Request failed" } : item));
       } finally { if (controllers.current.get(panel.id) === controller) controllers.current.delete(panel.id); }
@@ -84,10 +87,10 @@ export function ComparePlayground({ connection, models, connectionControls, conn
   }
 
   function exportResults() {
-    const rows = [["model", "status", "prompt", "response", "error", "input_tokens", "output_tokens", "latency_ms", "first_token_ms"]];
+    const rows = [["model", "status", "prompt", "response", "error", "input_tokens", "output_tokens", "latency_ms", "first_token_ms", "estimated_token_cost"]];
     const csv = rows[0].map(csvCell).join(",") + "\r\n" + panels.map((panel) => [panel.model, panel.status, panel.lastPrompt, panel.result?.text || panel.pending, panel.error,
       panel.result?.usage?.prompt_tokens ?? panel.result?.usage?.input_tokens, panel.result?.usage?.completion_tokens ?? panel.result?.usage?.output_tokens,
-      panel.result?.latencyMS, panel.result?.firstTokenMS].map(csvCell).join(",")).join("\r\n") + "\r\n";
+      panel.result?.latencyMS, panel.result?.firstTokenMS, estimateCost(panel.pricing, panel.result?.usage?.prompt_tokens ?? panel.result?.usage?.input_tokens, panel.result?.usage?.completion_tokens ?? panel.result?.usage?.output_tokens)].map(csvCell).join(",")).join("\r\n") + "\r\n";
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
     const link = document.createElement("a"); link.href = url; link.download = "ai-gateway-comparison.csv"; link.click(); URL.revokeObjectURL(url);
   }
@@ -99,7 +102,7 @@ export function ComparePlayground({ connection, models, connectionControls, conn
         setSync(value); if (value) setPanels((current) => current.map((panel) => ({ ...panel, settings: { ...current[0].settings }, instructions: current[0].instructions })));
       }}>Sync settings across models</Checkbox></GravityThemeScope>
       <GravityThemeScope><Checkbox controlProps={{ "aria-label": "Stream comparison" }} checked={stream} disabled={running} onUpdate={setStream}>Stream responses</Checkbox></GravityThemeScope>
-      <div className="playground-actions"><GatewayButton view="outlined" disabled={running || !panels.some((panel) => panel.lastPrompt)} onClick={exportResults}>Export results</GatewayButton><GatewayButton view="outlined" disabled={running} onClick={() => { setPanels((current) => current.map((panel) => ({ ...newPanel(panel.id, panel.model), settings: panel.settings, instructions: panel.instructions }))); setError(""); }}>Clear all chats</GatewayButton><GatewayButton view="outlined" disabled={running || panels.length >= 3} onClick={() => {
+      <div className="playground-actions"><GatewayButton view="outlined" disabled={running || !panels.some((panel) => panel.lastPrompt)} onClick={exportResults}>Export results</GatewayButton><GatewayButton view="outlined" disabled={running} onClick={() => { setPanels((current) => current.map((panel) => ({ ...newPanel(panel.id, panel.model), settings: panel.settings, instructions: panel.instructions, pricing: panel.pricing }))); setError(""); }}>Clear all chats</GatewayButton><GatewayButton view="outlined" disabled={running || panels.length >= 3} onClick={() => {
         const id = nextID.current++; setPanels((current) => [...current, { ...newPanel(id, models[current.length] || models[0] || ""), ...(sync ? { settings: { ...current[0].settings }, instructions: current[0].instructions } : {}) }]);
       }}>Add comparison</GatewayButton></div>
     </div>
@@ -117,6 +120,8 @@ export function ComparePlayground({ connection, models, connectionControls, conn
           {panel.settings.responseFormat === "json_schema" && <AreaControl label={`Output schema ${index + 1}`} rows={3} value={panel.settings.schema} disabled={running} onUpdate={(schema) => settings(panel.id, { schema })} />}
           <AreaControl label={`Advanced parameters ${index + 1}`} rows={3} value={panel.settings.advanced} disabled={running} onUpdate={(advanced) => settings(panel.id, { advanced })} />
         </details>
+        <PricingControls label={` ${index + 1}`} disabled={running} value={panel.pricing} onUpdate={(pricing) => setPanels((current) => current.map((item) => item.id === panel.id ? { ...item, pricing } : item))} />
+        {panel.historyDropped > 0 && <p className="muted">{panel.historyDropped} earlier turns removed to keep browser history bounded.</p>}
         <div className="playground-comparison-output" aria-live="polite">
           {!panel.history.length && !panel.pending && <p className="muted">Send the same prompt to compare responses.</p>}
           {panel.history.map((turn, turnIndex) => <article className={`playground-turn ${turn.role}`} key={turnIndex}><strong>{turn.role}</strong><pre>{typeof turn.content === "string" ? turn.content : turn.tool_calls ? "Tool call returned" : "No text output"}</pre></article>)}
@@ -129,6 +134,7 @@ export function ComparePlayground({ connection, models, connectionControls, conn
           <div><dt>Reasoning tokens</dt><dd>{panel.result.usage?.completion_tokens_details?.reasoning_tokens ?? panel.result.usage?.output_tokens_details?.reasoning_tokens ?? "—"}</dd></div>
           <div><dt>Latency</dt><dd>{Math.round(panel.result.latencyMS)} ms</dd></div>
           <div><dt>First token</dt><dd>{panel.result.firstTokenMS === undefined ? "—" : `${Math.round(panel.result.firstTokenMS)} ms`}</dd></div>
+          <div><dt>Estimated token cost</dt><dd>{estimateCost(panel.pricing, panel.result.usage?.prompt_tokens ?? panel.result.usage?.input_tokens, panel.result.usage?.completion_tokens ?? panel.result.usage?.output_tokens)}</dd></div>
           <div><dt>Finalized cost</dt><dd>See Usage &amp; spend</dd></div>
         </dl>}
       </section>)}

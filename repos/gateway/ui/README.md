@@ -67,6 +67,25 @@ variable; it never includes the active credential. Response metadata displays
 reported token usage and measured latency/first-token time. Missing usage stays
 unavailable, and finalized costs remain in Usage & spend.
 
+Image/PDF conversation uploads accept up to five files and 8 MiB total. Retained
+browser history is limited to 40 turns and 32 MiB, with visible notification when
+old pairs are dropped. Prompts are limited to 1 MiB, instructions to 64 KiB and
+outgoing text requests to 24 MiB. Playground JSON, binary and stream reads have
+explicit byte limits. Cost estimates require entered input/output rates and
+reported usage, are labeled estimates and exclude non-token billing adjustments.
+
+Compare runs up to three models in parallel with separate sessions, synchronized
+or individual generation settings, per-panel pricing and errors, cancellation,
+history and CSV results. Compliance runs policy checks without model generation,
+with categorized suites, CSV import/export, at most three concurrent checks and
+distinct allowed, blocked, failed and cancelled outcomes.
+
+The endpoint selector also provides native Messages/Interactions and image,
+embedding, speech, transcription, A2A and MCP forms. These construct their actual
+public request dialects. Speech responses stay binary; MCP execution requires an
+explicit click and a unique idempotency key. Code exports preserve these details
+and offer a bounded preview plus a complete download.
+
 The complete implementation requirements and pending work are tracked in
 [the Playground functional plan](../../../docs/playground-functional-plan.md).
 

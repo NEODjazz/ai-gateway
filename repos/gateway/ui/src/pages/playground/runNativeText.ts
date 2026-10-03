@@ -15,12 +15,12 @@ export async function runNativeText(connection: PlaygroundConnection, endpoint: 
   const bound = (addition: string) => { characters += addition.length; if (characters > maximumCharacters) throw new Error("Native output exceeds the 2 MiB Playground limit."); };
   const fail = (payload: Record<string, unknown>) => { const failure = record(payload.error); if (failure || payload.status === "failed") throw new Error(typeof failure?.message === "string" ? failure.message : "Native request failed"); };
   const accept = (payload: Record<string, unknown>) => {
-    active(); if (!record(payload)) throw new Error("Invalid native response"); fail(payload); response = payload;
+    active(); if (!record(payload)) throw new Error("Invalid native response"); fail(payload); if (JSON.stringify(payload).length > maximumCharacters) throw new Error("Native output exceeds the 2 MiB Playground limit."); response = payload;
     text = endpoint === "messages" ? publicText(payload.content) : interactionText(payload, "model_output");
     reasoning = endpoint === "messages" && Array.isArray(payload.content) ? payload.content.filter((item) => record(item)?.type === "thinking").map((item) => record(item)?.thinking || "").join("\n") : interactionText(payload, "thought");
     if (text.length + reasoning.length > maximumCharacters) throw new Error("Native output exceeds the 2 MiB Playground limit."); onText(text);
   };
-  const options = { method: "POST", body, signal };
+  const options = { maximumResponseBytes: 32 * 1024 * 1024, method: "POST", body, signal };
   const path = connection.path(endpoint === "messages" ? "/v1/messages" : "/v1/interactions");
   if (!body.stream) accept(await connection.client.request<Record<string, unknown>>(path, options));
   else {
@@ -56,7 +56,7 @@ export async function runNativeText(connection: PlaygroundConnection, endpoint: 
           else { if (firstTokenMS === undefined) firstTokenMS = performance.now() - start; text += delta.text; onText(text); }
         }
         const interaction = record(payload.interaction);
-        if (interaction) { fail(interaction); response = interaction; }
+        if (interaction) { fail(interaction); if (JSON.stringify(interaction).length > maximumCharacters) throw new Error("Native output exceeds the 2 MiB Playground limit."); response = interaction; }
         if (["interaction.completed", "interaction.incomplete"].includes(type)) terminal = true;
       }
     }, true);

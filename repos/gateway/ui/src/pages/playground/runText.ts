@@ -53,7 +53,7 @@ export async function runText(connection: PlaygroundConnection, endpoint: TextEn
   let terminal = false;
   const ensureActive = () => { if (signal.aborted) throw new DOMException("Request cancelled", "AbortError"); };
   const append = (delta: string) => {
-    if (text.length + delta.length > maxOutputCharacters) throw new Error("Text output exceeds the 2 MiB Playground limit.");
+    if (text.length + reasoning.length + toolCharacters + delta.length > maxOutputCharacters) throw new Error("Text output exceeds the 2 MiB Playground limit.");
     if (delta && firstTokenMS === undefined) firstTokenMS = clock() - start;
     text += delta; onText(text);
   };
@@ -61,6 +61,7 @@ export async function runText(connection: PlaygroundConnection, endpoint: TextEn
     ensureActive();
     if (!object(payload)) throw new Error("Invalid response: expected a JSON object");
     responseError(payload);
+    if (JSON.stringify(payload).length > maxOutputCharacters) throw new Error("Structured response exceeds the 2 MiB Playground limit.");
     response = payload;
     const message = object((Array.isArray(payload.choices) ? object(payload.choices[0]) : undefined)?.message);
     text = endpoint === "chat" ? contentText(message?.content) : typeof payload.output_text === "string" ? payload.output_text : contentText(payload.output);
@@ -68,7 +69,7 @@ export async function runText(connection: PlaygroundConnection, endpoint: TextEn
     reasoning = contentText(message?.reasoning_content || message?.reasoning);
     onText(text);
   };
-  const options = { method: "POST", body, signal, headers: { "X-Session-ID": sessionID } };
+  const options = { maximumResponseBytes: 32 * 1024 * 1024, method: "POST", body, signal, headers: { "X-Session-ID": sessionID } };
   let streamed = false;
   if (!body.stream) {
     acceptJSON(await connection.client.request<Record<string, unknown>>(connection.path(textEndpointPaths[endpoint]), options));
@@ -86,11 +87,12 @@ export async function runText(connection: PlaygroundConnection, endpoint: TextEn
         if (["response.completed", "response.incomplete"].includes(type)) terminal = true;
         if (["response.output_text.delta", "response.refusal.delta"].includes(type) && typeof payload.delta === "string") append(payload.delta);
         if (type === "response.reasoning_summary_text.delta" && typeof payload.delta === "string") {
-          if (reasoning.length + payload.delta.length > maxOutputCharacters) throw new Error("Reasoning output exceeds the Playground limit.");
+          if (text.length + reasoning.length + toolCharacters + payload.delta.length > maxOutputCharacters) throw new Error("Reasoning output exceeds the Playground limit.");
           reasoning += payload.delta;
         }
         const completed = object(payload.response);
         if (completed) {
+          if (JSON.stringify(completed).length > maxOutputCharacters) throw new Error("Structured response exceeds the 2 MiB Playground limit.");
           response = completed;
           if (!text && (type === "response.completed" || type === "response.incomplete")) {
             text = typeof completed.output_text === "string" ? completed.output_text : contentText(completed.output);
@@ -106,7 +108,7 @@ export async function runText(connection: PlaygroundConnection, endpoint: TextEn
         const delta = object(firstChoice?.delta);
         append(contentText(delta?.content));
         const reasoningDelta = contentText(delta?.reasoning_content || delta?.reasoning);
-        if (reasoning.length + reasoningDelta.length > maxOutputCharacters) throw new Error("Reasoning output exceeds the Playground limit.");
+        if (text.length + reasoning.length + toolCharacters + reasoningDelta.length > maxOutputCharacters) throw new Error("Reasoning output exceeds the Playground limit.");
         reasoning += reasoningDelta;
         if (Array.isArray(delta?.tool_calls)) for (const entry of delta.tool_calls) {
           const item = object(entry), fn = object(item?.function);
@@ -115,7 +117,7 @@ export async function runText(connection: PlaygroundConnection, endpoint: TextEn
           if (typeof item.id === "string") { toolCharacters += item.id.length - call.id.length; call.id = item.id; }
           if (typeof fn?.name === "string") { toolCharacters += fn.name.length; call.function.name += fn.name; }
           if (typeof fn?.arguments === "string") { toolCharacters += fn.arguments.length; call.function.arguments += fn.arguments; }
-          if (toolCharacters > maxOutputCharacters) throw new Error("Tool arguments exceed the Playground limit.");
+          if (text.length + reasoning.length + toolCharacters > maxOutputCharacters) throw new Error("Tool arguments exceed the Playground limit.");
           toolCalls.set(index, call);
         }
         if (firstChoice?.finish_reason != null) { response.finish_reason = firstChoice.finish_reason; terminal = true; }

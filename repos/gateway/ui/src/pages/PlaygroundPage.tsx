@@ -8,6 +8,9 @@ import { PageTabs } from "../components/PageTabs";
 import { ToolbarIconButton } from "../components/ToolbarIconButton";
 import { GravityThemeScope } from "../components/GravityThemeScope";
 import { AreaControl, SelectControl, TextControl } from "./playground/Controls";
+import { conversationAttachments, conversationInput, retainConversation } from "./playground/attachments";
+import type { Attachment } from "./playground/endpointRequests";
+import { PricingControls, defaultPricing, estimateCost } from "./playground/PriceEstimate";
 import { EndpointPlayground } from "./playground/EndpointPlayground";
 import { endpointPaths, type SpecializedEndpoint } from "./playground/endpointRequests";
 import { CompliancePlayground } from "./playground/CompliancePlayground";
@@ -18,9 +21,8 @@ import { buildTextRequest, playgroundConnection, textEndpointPaths, type Generat
 
 type PlaygroundMode = "chat" | "responses";
 type ModelList = { data?: Array<{ id: string }> };
-type TranscriptTurn = { id: number; role: "user" | "assistant"; content: string; wire: Message; reasoning?: string; response?: Record<string, unknown> };
+type TranscriptTurn = { id: number; role: "user" | "assistant"; content: string; wire: Message; reasoning?: string; response?: string };
 type RunMetadata = TextRun;
-const maximumTranscriptTurns = 40;
 
 function sessionID() {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return `playground-${crypto.randomUUID()}`;
@@ -46,6 +48,10 @@ export function PlaygroundPage() {
   const [model, setModel] = useState("");
   const [instructions, setInstructions] = useState("");
   const [message, setMessage] = useState("");
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [readingAttachments, setReadingAttachments] = useState(false);
+  const [historyDropped, setHistoryDropped] = useState(0);
+  const [pricing, setPricing] = useState(defaultPricing);
   const [maxTokens, setMaxTokens] = useState("256");
   const [temperature, setTemperature] = useState("");
   const [topP, setTopP] = useState("");
@@ -68,6 +74,8 @@ export function PlaygroundPage() {
   const modelAbortRef = useRef<AbortController | undefined>(undefined);
   const modelGeneration = useRef(0);
   const turnID = useRef(0);
+  const attachmentGeneration = useRef(0);
+  const attachmentInput = useRef<HTMLInputElement>(null);
 
   async function loadModels() {
     const generation = ++modelGeneration.current;
@@ -75,7 +83,7 @@ export function PlaygroundPage() {
     const controller = new AbortController(); modelAbortRef.current = controller;
     setLoadingModels(true); setModelsError("");
     try {
-      const payload = await client.request<ModelList>(connection.path("/v1/models"), { signal: controller.signal });
+      const payload = await client.request<ModelList>(connection.path("/v1/models"), { signal: controller.signal, maximumResponseBytes: 8 * 1024 * 1024 });
       if (generation !== modelGeneration.current) return;
       const available = [...new Set((payload.data || []).map((item) => item.id.trim()).filter(Boolean))].sort();
       setModels(available);
@@ -85,11 +93,12 @@ export function PlaygroundPage() {
   }
 
   useEffect(() => { void loadModels(); return () => { modelGeneration.current++; modelAbortRef.current?.abort(); }; }, [connection]);
-  useEffect(() => () => { abortRef.current?.abort(); abortRef.current = undefined; }, []);
+  useEffect(() => () => { attachmentGeneration.current++; abortRef.current?.abort(); abortRef.current = undefined; }, []);
 
   function newSession() {
     abortRef.current?.abort();
     abortRef.current = undefined; setRunning(false);
+    attachmentGeneration.current++; if (attachmentInput.current) attachmentInput.current.value = ""; setAttachments([]); setReadingAttachments(false); setHistoryDropped(0);
     setTranscript([]); setPendingOutput(""); setMetadata(undefined); setEvents([]); setEventCount(0); setError("");
     setPreviousResponseID(""); setActiveSessionID(sessionID());
     turnID.current = 0;
@@ -103,20 +112,21 @@ export function PlaygroundPage() {
   function applyConnection() {
     try {
       playgroundConnection(sessionClient, keySource, testKey, baseURL);
-      newSession(); setModels([]); setModel("");
+      newSession(); setPricing(defaultPricing); setModels([]); setModel("");
       setAppliedConnection({ source: keySource, key: keySource === "custom" ? testKey : "", url: baseURL });
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not configure connection"); }
   }
 
   function requestBody(input: string, stream: boolean) {
-    return buildTextRequest({ endpoint: mode, model, input, instructions, streaming: stream,
+    if (new TextEncoder().encode(input).length > 1024 * 1024) throw new Error("Prompt exceeds the 1 MiB Playground limit.");
+    return buildTextRequest({ endpoint: mode, model, input: conversationInput(input, attachments), instructions, streaming: stream,
       history: transcript.map((turn) => turn.wire),
       previousResponseID: apiContinuity ? previousResponseID : "",
       settings: { maxTokens, temperature, topP, responseFormat, schema, advanced } });
   }
 
   function getCode() {
-    try { setCodeRequest({ path: textEndpointPaths[mode], body: requestBody(message.trim() || "Your message", streaming), baseURL: connection.baseURL }); }
+    try { setCodeRequest({ path: textEndpointPaths[mode], body: requestBody(message.trim() || (attachments.length ? "" : "Your message"), streaming), baseURL: connection.baseURL }); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "Could not generate code"); }
   }
 
@@ -124,7 +134,7 @@ export function PlaygroundPage() {
     event.preventDefault();
     if (connectionChanged) { setError("Apply connection changes before sending a request."); return; }
     const input = message.trim();
-    if (running || !model.trim() || !input) return;
+    if (running || readingAttachments || !model.trim() || (!input && !attachments.length)) return;
     const controller = new AbortController();
     abortRef.current = controller;
     setRunning(true); setError(""); setPendingOutput(""); setMetadata(undefined); setEvents([]); setEventCount(0);
@@ -133,11 +143,12 @@ export function PlaygroundPage() {
         onText: (text) => { if (abortRef.current === controller && !controller.signal.aborted) setPendingOutput(text); } });
       if (abortRef.current !== controller || controller.signal.aborted) return;
       if (mode === "responses" && result.id) setPreviousResponseID(result.id);
-      const userTurn: TranscriptTurn = { id: ++turnID.current, role: "user", content: input, wire: { role: "user", content: input } };
+      const userTurn: TranscriptTurn = { id: ++turnID.current, role: "user", content: input + (attachments.length ? `\nAttachments: ${attachments.map((item) => item.filename).join(", ")}` : ""), wire: { role: "user", content: conversationInput(input, attachments) } };
       const choice = (result.response.choices as { message?: Message }[] | undefined)?.[0]?.message;
-      const assistantTurn: TranscriptTurn = { id: ++turnID.current, role: "assistant", content: result.text, reasoning: result.reasoning, response: result.response,
-        wire: { ...choice, role: "assistant", content: choice?.content ?? result.text, ...(mode === "responses" && Array.isArray(result.response.output) ? { responseItems: result.response.output } : {}) } };
-      setTranscript((current) => [...current, userTurn, assistantTurn].slice(-maximumTranscriptTurns));
+      const assistantTurn: TranscriptTurn = { id: ++turnID.current, role: "assistant", content: result.text, reasoning: result.reasoning, response: JSON.stringify(result.response, null, 2).slice(0, 65536),
+        wire: { ...choice, role: "assistant", content: mode === "responses" && Array.isArray(result.response.output) ? "" : choice?.content ?? result.text, ...(mode === "responses" && Array.isArray(result.response.output) ? { responseItems: result.response.output } : {}) } };
+      const retained = retainConversation([...transcript, userTurn, assistantTurn]);
+      setTranscript(retained.turns); setHistoryDropped((value) => value + retained.dropped); setAttachments([]); if (attachmentInput.current) attachmentInput.current.value = "";
       setPendingOutput(""); setMetadata(result); setMessage("");
       if ("events" in result && Array.isArray(result.events)) setEvents(result.events as SSEEvent[]);
       if ("eventCount" in result && typeof result.eventCount === "number") setEventCount(result.eventCount);
@@ -175,8 +186,8 @@ export function PlaygroundPage() {
           <PageTabs className="playground-api-tabs" label="Playground API" value={mode} items={[{ value: "chat", label: "Chat Completions" }, { value: "responses", label: "Responses API" }]} onUpdate={changeMode} />
           <label>Model<div className="playground-model-control">
             <GravityThemeScope className="gravity-playground-control">{!loadingModels && !models.length
-              ? <TextInput aria-label="Model" size="l" disabled={running} value={model} onUpdate={(value) => { setModel(value); newSession(); }} placeholder="Enter a model ID" />
-              : <Select aria-label="Model" size="l" width="max" filterable loading={loadingModels} disabled={running || loadingModels} value={model ? [model] : []} options={models.map((item) => ({ value: item, content: item }))} placeholder="Select an authorized model" onUpdate={([value]) => { setModel(value || ""); newSession(); }} />}
+              ? <TextInput aria-label="Model" size="l" disabled={running} value={model} onUpdate={(value) => { setModel(value); setPricing(defaultPricing); newSession(); }} placeholder="Enter a model ID" />
+              : <Select aria-label="Model" size="l" width="max" filterable loading={loadingModels} disabled={running || loadingModels} value={model ? [model] : []} options={models.map((item) => ({ value: item, content: item }))} placeholder="Select an authorized model" onUpdate={([value]) => { setModel(value || ""); setPricing(defaultPricing); newSession(); }} />}
             </GravityThemeScope><ToolbarIconButton icon="refresh" label="Refresh models" disabled={running || loadingModels} onClick={() => void loadModels()} />
           </div><span className="playground-model-help">{models.length ? `${models.length.toLocaleString()} authorized model${models.length === 1 ? "" : "s"}` : "Model access is checked by the gateway"}</span></label>
           {modelsError && <p className="form-error" role="status">Model discovery: {modelsError}</p>}
@@ -188,6 +199,7 @@ export function PlaygroundPage() {
           <GravityThemeScope className="gravity-playground-control"><Checkbox controlProps={{ "aria-label": "Stream response" }} size="l" disabled={running} checked={streaming} onUpdate={setStreaming}>Stream response</Checkbox></GravityThemeScope>
           {mode === "responses" && <GravityThemeScope className="gravity-playground-control"><Checkbox controlProps={{ "aria-label": "Use API session management" }} disabled={running} checked={apiContinuity} onUpdate={(value) => { setAPIContinuity(value); setPreviousResponseID(""); }}>Use API session management</Checkbox></GravityThemeScope>}
           <details className="playground-advanced"><summary>Advanced parameters</summary><AreaControl label="Advanced parameters JSON" rows={6} disabled={running} value={advanced} onUpdate={setAdvanced} placeholder='{ "reasoning_effort": "low" }' /><p className="muted">Parameters are sent unchanged. Unsupported settings return a gateway or provider error.</p></details>
+          <PricingControls value={pricing} onUpdate={setPricing} disabled={running} />
           <p className="muted playground-default-note">Leave optional settings blank to use provider defaults.</p>
         </section>
       </aside>
@@ -197,17 +209,25 @@ export function PlaygroundPage() {
           <label htmlFor="playground-instructions">System instructions<GravityThemeScope className="gravity-playground-control"><TextArea id="playground-instructions" controlProps={{ "aria-label": "Instructions" }} size="l" disabled={running} rows={2} value={instructions} onUpdate={setInstructions} placeholder="Optional system instructions" /></GravityThemeScope></label>
           <section className="playground-output" aria-label="Playground conversation">
             {!transcript.length && !pendingOutput && <div className="playground-empty"><h3>Start a conversation</h3><p>Choose a model and send a prompt. Conversation content stays in memory.</p><div className="playground-suggestions">{["Explain a complex idea simply", "Draft a short project update", "Review a function for edge cases"].map((prompt) => <button type="button" key={prompt} disabled={running} onClick={() => setMessage(prompt)}>{prompt}</button>)}</div></div>}
-            <div className="playground-transcript">{transcript.map((turn) => <article className={`playground-turn ${turn.role}`} key={turn.id}><strong>{turn.role === "user" ? "User" : "Assistant"}</strong><pre>{turn.content || "No text output"}</pre>{turn.reasoning && <details><summary>Reasoning</summary><pre>{turn.reasoning}</pre></details>}{turn.wire.tool_calls != null && <details open><summary>Tool calls</summary><pre>{JSON.stringify(turn.wire.tool_calls, null, 2)}</pre></details>}{turn.response && <details><summary>Response details</summary><pre>{JSON.stringify(turn.response, null, 2).slice(0, 65536)}</pre></details>}</article>)}{pendingOutput && <article className={`playground-turn assistant${running ? " streaming" : ""}`}><strong>Assistant <span>{running ? "streaming" : "partial response"}</span></strong><pre>{pendingOutput}</pre></article>}</div>
+            <div className="playground-transcript">{transcript.map((turn) => <article className={`playground-turn ${turn.role}`} key={turn.id}><strong>{turn.role === "user" ? "User" : "Assistant"}</strong><pre>{turn.content || "No text output"}</pre>{turn.reasoning && <details><summary>Reasoning</summary><pre>{turn.reasoning}</pre></details>}{turn.wire.tool_calls != null && <details open><summary>Tool calls</summary><pre>{JSON.stringify(turn.wire.tool_calls, null, 2)}</pre></details>}{turn.response && <details><summary>Response details</summary><pre>{turn.response}</pre></details>}</article>)}{pendingOutput && <article className={`playground-turn assistant${running ? " streaming" : ""}`}><strong>Assistant <span>{running ? "streaming" : "partial response"}</span></strong><pre>{pendingOutput}</pre></article>}</div>
           </section>
-          <div className="playground-composer"><GravityThemeScope className="gravity-playground-control"><TextArea id="playground-message" controlProps={{ "aria-label": "Message", required: true }} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); if (!running) event.currentTarget.form?.requestSubmit(); } }} size="l" disabled={running} rows={4} value={message} onUpdate={setMessage} placeholder="Send a message… Shift+Enter for a new line" /></GravityThemeScope><GatewayButton size="l" type="submit" disabled={running || connectionChanged || !model.trim() || !message.trim()}>{running ? "Running…" : transcript.length ? "Send message" : "Run request"}</GatewayButton>{running && <GatewayButton type="button" view="outlined" size="l" onClick={() => abortRef.current?.abort()}>Stop</GatewayButton>}</div>
+          {historyDropped > 0 && <p className="muted">{historyDropped} earlier turns were removed from browser history to keep it bounded. {mode === "responses" && apiContinuity ? "API continuation uses the saved response ID." : "New requests include only the retained browser history."}</p>}
+          <label>Images or PDF<input ref={attachmentInput} aria-label="Conversation attachments" type="file" multiple accept="image/png,image/jpeg,image/gif,image/webp,application/pdf" disabled={running || readingAttachments} onChange={async (event) => {
+            const files = [...(event.currentTarget.files || [])]; const current = ++attachmentGeneration.current; setAttachments([]); setReadingAttachments(true);
+            try { const loaded = await conversationAttachments(files); if (current === attachmentGeneration.current) { setAttachments(loaded); setError(""); } }
+            catch (cause) { if (current === attachmentGeneration.current) { if (attachmentInput.current) attachmentInput.current.value = ""; setError(cause instanceof Error ? cause.message : "Attachment failed"); } }
+            finally { if (current === attachmentGeneration.current) setReadingAttachments(false); }
+          }} /><span className="muted">Up to 5 attachments, 8 MiB total. Model and provider compatibility is checked by the gateway.</span></label>
+          {attachments.length > 0 && <div className="playground-actions">{attachments.map((item) => <span key={item.filename}>{item.filename}</span>)}<GatewayButton view="flat" disabled={running} onClick={() => { attachmentGeneration.current++; if (attachmentInput.current) attachmentInput.current.value = ""; setAttachments([]); setReadingAttachments(false); }}>Remove conversation attachments</GatewayButton></div>}
+          <div className="playground-composer"><GravityThemeScope className="gravity-playground-control"><TextArea id="playground-message" controlProps={{ "aria-label": "Message", required: !attachments.length }} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); if (!running) event.currentTarget.form?.requestSubmit(); } }} size="l" disabled={running} rows={4} value={message} onUpdate={setMessage} placeholder="Send a message… Shift+Enter for a new line" /></GravityThemeScope><GatewayButton size="l" type="submit" disabled={running || readingAttachments || connectionChanged || !model.trim() || (!message.trim() && !attachments.length)}>{running ? "Running…" : transcript.length ? "Send message" : "Run request"}</GatewayButton>{running && <GatewayButton type="button" view="outlined" size="l" onClick={() => abortRef.current?.abort()}>Stop</GatewayButton>}</div>
           {error && <p role="alert" className="form-error">{error}</p>}
         </form>
         <section className="playground-metadata-card"><h2>Response metadata</h2><dl className="playground-metadata">
           <div><dt>API</dt><dd>{mode === "chat" ? "Chat Completions" : "Responses"}{metadata?.streamed ? " · streamed" : ""}</dd></div>
           <div><dt>Upstream model</dt><dd>{metadata?.model || model || "—"}</dd></div><div><dt>Response ID</dt><dd>{metadata?.id || "—"}</dd></div>
-          <div><dt>Input tokens</dt><dd>{inputTokens ?? "—"}</dd></div><div><dt>Output tokens</dt><dd>{outputTokens ?? "—"}</dd></div><div><dt>Tokens</dt><dd>{tokenCount ?? "—"}</dd></div>
+          <div><dt>Input tokens</dt><dd>{inputTokens ?? "—"}</dd></div><div><dt>Output tokens</dt><dd>{outputTokens ?? "—"}</dd></div><div><dt>Tokens</dt><dd>{tokenCount ?? "—"}</dd></div><div><dt>Reasoning tokens</dt><dd>{usage?.completion_tokens_details?.reasoning_tokens ?? usage?.output_tokens_details?.reasoning_tokens ?? "—"}</dd></div>
           <div><dt>Total latency</dt><dd>{metadata?.latencyMS === undefined ? "—" : `${Math.round(metadata.latencyMS)} ms`}</dd></div><div><dt>Time to first token</dt><dd>{metadata?.firstTokenMS === undefined ? "—" : `${Math.round(metadata.firstTokenMS)} ms`}</dd></div>
-          <div><dt>Finalized cost</dt><dd>See Usage &amp; spend</dd></div>
+          <div><dt>Estimated token cost</dt><dd>{estimateCost(pricing, inputTokens, outputTokens)}</dd></div><div><dt>Finalized cost</dt><dd>See Usage &amp; spend</dd></div>
         </dl>{events.length > 0 && <details className="playground-events"><summary>Stream events ({events.length}{eventCount > events.length ? "+" : ""})</summary><pre>{events.map((item) => `${item.event}: ${item.data}`).join("\n\n")}</pre></details>}</section>
       </div>
     </div>}

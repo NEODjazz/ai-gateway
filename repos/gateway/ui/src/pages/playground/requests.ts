@@ -75,6 +75,8 @@ export function buildTextRequest({ endpoint, model, input, instructions, history
   endpoint: TextEndpoint; model: string; input: unknown; instructions: string; history?: Message[];
   previousResponseID?: string; streaming: boolean; settings: GenerationSettings;
 }): Record<string, unknown> {
+  if (typeof input === "string" && new TextEncoder().encode(input).length > 1024 * 1024) throw new Error("Prompt exceeds the 1 MiB Playground limit.");
+  if (new TextEncoder().encode(instructions).length > 64 * 1024) throw new Error("Instructions exceed the 64 KiB Playground limit.");
   if (!model.trim()) throw new Error("Select a model before sending a request.");
   const limit = optionalNumber(settings.maxTokens, "Maximum output tokens", 1, Number.MAX_SAFE_INTEGER, true);
   const temperature = optionalNumber(settings.temperature, "Temperature", 0, 2);
@@ -105,6 +107,7 @@ export function buildTextRequest({ endpoint, model, input, instructions, history
     if (limit !== undefined) body.max_output_tokens = limit;
     if (settings.responseFormat !== "text") body.text = { format };
   }
+  if (new TextEncoder().encode(JSON.stringify(body)).length > 24 * 1024 * 1024) throw new Error("Request exceeds 24 MiB. Clear history or remove attachments before sending.");
   return body;
 }
 

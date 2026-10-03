@@ -83,6 +83,8 @@ compatibility must be distinguished from merely having an endpoint selector.
   speech, transcription, A2A and MCP, including native streams and media output.
 - [x] Corrected Responses browser history and image input dialects; code export
   includes MCP idempotency and saves speech responses as binary files.
+- [x] Added conversation image/PDF uploads, bounded browser history and explicit
+  token-cost estimates using user-provided rates; bounded JSON/binary/SSE reads.
 - [ ] Finish media/tool output, policy selection and full conversation verification.
 - [ ] Complete endpoint-specific execution and media/tool handling.
 - [ ] Complete comparison, compliance and agent views.

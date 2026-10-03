@@ -63,7 +63,7 @@ export async function runCompliance(connection: PlaygroundConnection, cases: Com
       const start = performance.now();
       if (signal.aborted) { onResult({ id: item.id, status: "cancelled", latencyMS: 0 }); continue; }
       try {
-        const result = await connection.client.request<{ allowed: boolean; checks: Record<string, string>; execution_id: string; anonymized_text?: string; replacements?: number }>(connection.path("/guardrails/apply_guardrail"), { method: "POST", signal, body: { guardrail_name: policy, text: item.prompt, ...(model ? { model } : {}) } });
+        const result = await connection.client.request<{ allowed: boolean; checks: Record<string, string>; execution_id: string; anonymized_text?: string; replacements?: number }>(connection.path("/guardrails/apply_guardrail"), { maximumResponseBytes: 1024 * 1024, method: "POST", signal, body: { guardrail_name: policy, text: item.prompt, ...(model ? { model } : {}) } });
         if (signal.aborted) { onResult({ id: item.id, status: "cancelled", latencyMS: performance.now() - start }); continue; }
         if (typeof result?.allowed !== "boolean") throw new Error("Guardrail returned an invalid result.");
         onResult({ id: item.id, status: result.allowed ? "allowed" : "blocked", matched: result.allowed === (item.expected === "allow"), checks: result.checks, executionID: result.execution_id,

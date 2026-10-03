@@ -1,6 +1,27 @@
 import { APIClient, APIError } from "./client";
 
 describe("APIClient", () => {
+  it("bounds JSON and binary responses before buffering oversized content", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response('"oversized"'));
+    const client = new APIClient(() => "test-key");
+    await expect(client.request("/test", { maximumResponseBytes: 4 })).rejects.toMatchObject({ code: "response_too_large" });
+    await expect(client.requestBinary("/test", { maximumResponseBytes: 4 })).rejects.toMatchObject({ code: "response_too_large" });
+    expect(fetchMock.mock.calls[0][1]).not.toHaveProperty("maximumResponseBytes");
+  });
+  it("cancels an oversized declared response before reading it", async () => {
+    const cancel = vi.fn();
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(new ReadableStream({ cancel }), { headers: { "Content-Length": "100" } }));
+    await expect(new APIClient(() => "").request("/test", { maximumResponseBytes: 10 })).rejects.toMatchObject({ code: "response_too_large" });
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+  it("bounds streamed wire bytes and JSON fallback responses", async () => {
+    const mock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response('data: {"text":"too long"}\n\n', { headers: { "Content-Type": "text/event-stream" } }));
+    const client = new APIClient(() => ""), callback = vi.fn();
+    await expect(client.stream("/test", { maximumResponseBytes: 4 }, callback, true)).rejects.toMatchObject({ code: "response_too_large" });
+    expect(callback).not.toHaveBeenCalled();
+    mock.mockResolvedValue(new Response('{"text":"too long"}', { headers: { "Content-Type": "application/json" } }));
+    await expect(client.stream("/test", { maximumResponseBytes: 4 }, callback, true)).rejects.toMatchObject({ code: "response_too_large" });
+  });
   it("sends a JSON request and receives binary audio without decoding it as JSON", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(new Uint8Array([0, 255, 17]), { status: 200, headers: { "Content-Type": "audio/mpeg" } }));
     const result = await new APIClient(() => "inference-key", { credentials: "omit", sessionEvents: false }).requestBinary("/v1/audio/speech", { method: "POST", body: { model: "speech", input: "Hello", voice: "alloy" } });

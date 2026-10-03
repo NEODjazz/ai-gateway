@@ -14,6 +14,10 @@ describe("Playground requests", () => {
     expect(omitted).not.toHaveProperty("max_completion_tokens"); expect(omitted).not.toHaveProperty("temperature");
     expect(request("responses", { temperature: "0", topP: "0" })).toMatchObject({ temperature: 0, top_p: 0 });
   });
+  it("rejects oversized prompt and instructions before provider transport", () => {
+    expect(() => request("chat", {}, { input: "x".repeat(1024 * 1024 + 1) })).toThrow("1 MiB");
+    expect(() => request("responses", {}, { instructions: "x".repeat(64 * 1024 + 1) })).toThrow("64 KiB");
+  });
   it.each([
     { maxTokens: "NaN" }, { maxTokens: "1.5" }, { maxTokens: "0" }, { maxTokens: "9007199254740992" },
     { temperature: "Infinity" }, { temperature: "-1" }, { temperature: "2.01" }, { topP: "-0.1" }, { topP: "1.01" }
