@@ -73,6 +73,10 @@ compatibility must be distinguished from merely having an endpoint selector.
 - [x] Added validated text request construction and credential-free code export.
 - [x] Implemented the configuration rail and text conversation; verified Enter,
   streaming output, metadata and code dialog in an isolated browser preview.
+- [x] Implemented text-model comparison with independent sessions, synchronized
+  or individual settings, partial success, cancellation and CSV export.
+- [x] Shared bounded text/tool stream handling between conversation and comparison;
+  interrupted streams fail and cancelled transports cannot publish late text.
 - [ ] Finish media/tool output, policy selection and full conversation verification.
 - [ ] Complete endpoint-specific execution and media/tool handling.
 - [ ] Complete comparison, compliance and agent views.

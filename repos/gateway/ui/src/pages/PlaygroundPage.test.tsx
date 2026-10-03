@@ -106,7 +106,10 @@ describe("PlaygroundPage", () => {
     await userEvent.click(screen.getByRole("button", { name: "Run request" }));
     expect(await screen.findByText("Public answer")).toBeInTheDocument();
     const conversation = screen.getByRole("region", { name: "Playground conversation" });
-    expect(conversation).not.toHaveTextContent("tool-arguments"); expect(conversation).not.toHaveTextContent("private-reasoning");
+    expect(conversation.querySelector(".assistant > pre")).toHaveTextContent("Public answer");
+    expect(conversation.querySelector(".assistant > pre")).not.toHaveTextContent("tool-arguments");
+    expect(conversation.querySelector(".assistant > pre")).not.toHaveTextContent("private-reasoning");
+    expect(screen.getByText("Reasoning").closest("details")).toHaveTextContent("private-reasoning");
     expect(screen.getByText("Input tokens").nextElementSibling).toHaveTextContent("0");
   });
 

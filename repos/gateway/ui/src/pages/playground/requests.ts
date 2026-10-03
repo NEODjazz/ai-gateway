@@ -1,7 +1,7 @@
 import { APIClient } from "../../api/client";
 
 export type TextEndpoint = "chat" | "responses";
-export type Message = { role: string; content: unknown; tool_calls?: unknown; tool_call_id?: string };
+export type Message = { role: string; content: unknown; tool_calls?: unknown; tool_call_id?: string; reasoning?: unknown; reasoning_content?: unknown; refusal?: unknown; annotations?: unknown; audio?: unknown; function_call?: unknown };
 export type GenerationSettings = {
   maxTokens: string;
   temperature: string;
