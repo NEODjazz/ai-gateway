@@ -30,7 +30,13 @@ instructions retain metadata-only storage behavior. Instruction text remains
 absent from list and PUT responses.
 
 The compatibility workflow loads the adjacent error and warning lists. Each
-entry is an anchored, escaped literal finding, including the four agent flag
+entry identifies one concrete operation and finding, including the four agent flag
 changes; the WARN threshold and all other checks remain unchanged. New paths,
 fields, status codes or values still fail the gate. Remove the accepted findings
 when the comparison baseline includes these contracts.
+
+The files use the CLI's operation-and-description format, with unescaped path
+parameters. Verification with oasdiff v1.26.1 accepted the reviewed contract and
+rejected three temporary unreviewed changes: deleting `/v1/models`, narrowing
+the agent iteration limit and changing the agent-list response status. No broad
+endpoint exclusions or severity overrides are configured.
