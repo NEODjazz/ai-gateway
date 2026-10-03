@@ -61,6 +61,10 @@ func (h Handler) PlaygroundCatalog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.APIKey = ""
+	if h.adminState != nil && h.adminState.Refresh(r.Context()) != nil {
+		writeError(w, http.StatusServiceUnavailable, "admin_state_unavailable", "resource configuration is unavailable")
+		return
+	}
 	if !h.prepareAccessGroups(w, &req) || model != "" && !h.authorizeModel(w, req, model) || !h.authorizeRateLimit(w, r.Context(), req, 0) {
 		return
 	}

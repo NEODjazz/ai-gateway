@@ -163,6 +163,9 @@ func (r *AgentRegistry) PutAgentProfile(id string, item AgentProfile) (AgentProf
 		if value := item.Generation.MaxOutputTokens; value != nil && (*value < 1 || *value > 1000000) {
 			return AgentProfile{}, errInvalidAgentEntry
 		}
+		if item.Generation.Temperature == nil && item.Generation.MaxOutputTokens == nil {
+			item.Generation = nil
+		}
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()

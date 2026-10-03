@@ -23,7 +23,7 @@ describe("Endpoint request dialects", () => {
   });
   it("uses the supported A2A RPC dialect and requires MCP idempotency", () => {
     const agent = buildEndpointRequest("a2a", "", "Question", { ...defaultEndpointSettings, agent: "research" });
-    expect(agent.path).toBe("/a2a/research"); expect(agent.body).toMatchObject({ jsonrpc: "2.0", method: "SendMessage", params: { tenant: "research", message: { role: "ROLE_USER", parts: [{ text: "Question" }] } } });
+    expect(agent.path).toBe("/a2a/research"); expect(agent.headers).toEqual({ "A2A-Version": "1.0" }); expect(agent.body).toMatchObject({ jsonrpc: "2.0", method: "SendMessage", params: { tenant: "research", message: { role: "ROLE_USER", parts: [{ text: "Question" }] } } });
     const first = buildEndpointRequest("mcp", "", "", { ...defaultEndpointSettings, server: "server", tool: "lookup", arguments: '{"query":"test"}' });
     const second = buildEndpointRequest("mcp", "", "", { ...defaultEndpointSettings, server: "server", tool: "lookup" });
     expect(first).toMatchObject({ path: "/v1/mcp/servers/server/tools/lookup", body: { arguments: { query: "test" } } });

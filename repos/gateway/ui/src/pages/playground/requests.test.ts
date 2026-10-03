@@ -109,3 +109,11 @@ describe("Playground connection", () => {
     expect(requestCode("curl", "/v1/chat/completions", body)).not.toContain("\n+");
   });
 });
+
+describe("A2A code export headers", () => {
+  it.each(["curl", "python", "javascript"] as const)("includes the required version in %s without allowing credential overrides", (language) => {
+    expect(requestCode(language, "/a2a/research", {}, "", { "A2A-Version": "1.0" })).toContain("A2A-Version");
+    expect(() => requestCode(language, "/a2a/research", {}, "", { "A2A-Version": "other" })).toThrow("Unsupported");
+    expect(() => requestCode(language, "/a2a/research", {}, "", { Authorization: "override" })).toThrow("Unsupported");
+  });
+});

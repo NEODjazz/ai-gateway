@@ -129,6 +129,10 @@ type a2aRPCResponse struct {
 }
 
 func (h Handler) A2AAgentCard(w http.ResponseWriter, r *http.Request) {
+	if h.adminState != nil && h.adminState.Refresh(r.Context()) != nil {
+		writeError(w, http.StatusServiceUnavailable, "admin_state_unavailable", "agent configuration is unavailable")
+		return
+	}
 	profile, ok := h.a2aProfile(r.PathValue("agent"))
 	if !ok {
 		http.NotFound(w, r)
@@ -195,6 +199,10 @@ func (h Handler) A2AJSONRPC(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Header.Get("A2A-Version") != a2aProtocolVersion {
 		h.writeA2AError(w, request.ID, http.StatusBadRequest, -32009, "Version not supported")
+		return
+	}
+	if h.adminState != nil && h.adminState.Refresh(r.Context()) != nil {
+		h.writeA2AError(w, request.ID, http.StatusServiceUnavailable, -32603, "Agent configuration is unavailable")
 		return
 	}
 	profile, ok := h.a2aProfile(r.PathValue("agent"))

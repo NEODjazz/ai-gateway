@@ -18,6 +18,7 @@ import (
 )
 
 const adminStateSchemaVersion = 1
+const agentConfigurationAdminStateSchemaVersion = 2
 
 type AdminStateController interface {
 	AdminState(context.Context) (json.RawMessage, int64, error)
@@ -169,13 +170,42 @@ func (r *AdminStateRuntime) refreshLocked(ctx context.Context, force bool) error
 	if !force && revision <= r.revision {
 		return nil
 	}
+	return r.applyPayload(payload, revision)
+}
+
+// Refresh reads the controller before taking the registry update lock. Public
+// inference must not hold this lock while contacting the control plane.
+func (r *AdminStateRuntime) Refresh(ctx context.Context) error {
+	payload, revision, err := r.controller.AdminState(ctx)
+	if err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if revision <= r.revision {
+		return nil
+	}
+	return r.applyPayload(payload, revision)
+}
+
+func (r *AdminStateRuntime) applyPayload(payload json.RawMessage, revision int64) error {
 	if len(payload) != 0 {
 		var snapshot adminStateSnapshot
 		if err := json.Unmarshal(payload, &snapshot); err != nil {
 			return err
 		}
-		if snapshot.SchemaVersion != adminStateSchemaVersion {
+		if snapshot.SchemaVersion != adminStateSchemaVersion && snapshot.SchemaVersion != agentConfigurationAdminStateSchemaVersion {
 			return errors.New("unsupported admin state schema version")
+		}
+		if snapshot.SchemaVersion == adminStateSchemaVersion {
+			if len(snapshot.AgentInstructions) != 0 {
+				return errors.New("agent configuration requires admin state version 2")
+			}
+			for _, profile := range snapshot.AgentProfiles {
+				if profile.Generation != nil || profile.InstructionsConfigured {
+					return errors.New("agent configuration requires admin state version 2")
+				}
+			}
 		}
 		if err := r.apply(snapshot); err != nil {
 			return err
@@ -196,6 +226,9 @@ func (r *AdminStateRuntime) marshal() (json.RawMessage, error) {
 func (r *AdminStateRuntime) snapshot() (adminStateSnapshot, error) {
 	snapshot := adminStateSnapshot{SchemaVersion: adminStateSchemaVersion, Projects: r.access.Projects(), AccessGroups: r.access.Groups(), PolicyAttachments: r.access.PolicyAttachments(), Tags: r.access.Tags(), MCPServers: r.mcp.Servers(), MCPToolsets: r.mcp.Toolsets(), ToolPolicies: r.agents.ToolPolicies(), AgentProfiles: r.agents.AgentProfiles()}
 	for index, profile := range snapshot.AgentProfiles {
+		if profile.Generation != nil || profile.Instructions != "" {
+			snapshot.SchemaVersion = agentConfigurationAdminStateSchemaVersion
+		}
 		if profile.Instructions == "" {
 			continue
 		}

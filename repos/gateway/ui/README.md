@@ -236,3 +236,7 @@ without an empty user message. Tool results are limited to 128 KiB per call and
 history drops complete user/assistant/tool groups within its existing limits.
 Resource selections survive workspace-tab changes and reset on identity, model
 or endpoint changes, including a model changed by refreshed discovery.
+
+A2A requests and code exports include the mandatory `A2A-Version: 1.0` header.
+Generated headers allow only that fixed version and MCP idempotency; they cannot
+override authorization.

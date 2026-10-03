@@ -98,6 +98,8 @@ compatibility must be distinguished from merely having an endpoint selector.
 - [x] Extended saved agent configurations with encrypted instructions and bounded
   generation settings applied by A2A; administrator-only reads, legacy update
   preservation, ciphertext binding and real PostgreSQL restoration have tests.
+- [x] Corrected mandatory A2A protocol headers, live public registry refresh and
+  versioned configuration compatibility to avoid stale or silently lost settings.
 - [ ] Finish media/tool output, policy selection and full conversation verification.
 - [ ] Complete endpoint-specific execution and media/tool handling.
 - [ ] Complete comparison, compliance and agent views.

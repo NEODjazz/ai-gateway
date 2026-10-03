@@ -60,7 +60,12 @@ temperature and maximum output tokens. Metadata/list responses omit instruction
 content; global administrators can explicitly read configurations through
 `GET /admin/v1/agent-profiles/{id}` with `Cache-Control: no-store`. Existing PUT
 clients preserve instructions and generation settings when those fields are
-omitted; an empty instructions string or generation object clears them. The
+omitted; an empty instructions string or generation object clears them. Metadata-only
+profiles keep admin-state version 1. Configured instructions or generation require
+version 2; older binaries reject that state instead of dropping configuration.
+Clear both settings before rolling back to an older binary. Public A2A execution,
+MCP operations and resource discovery refresh durable registry revisions before
+using their configuration; control-plane failures stop those calls. The
 profile ID is carried as the declared interface tenant. Execution uses the
 shared Responses authentication, model authorization, quota, guardrail,
 routing and billing path. With durable task and background-response storage,

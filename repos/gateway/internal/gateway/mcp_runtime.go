@@ -47,6 +47,10 @@ func (h Handler) ListMCPServerTools(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.APIKey = ""
+	if h.adminState != nil && h.adminState.Refresh(r.Context()) != nil {
+		writeError(w, http.StatusServiceUnavailable, "admin_state_unavailable", "MCP configuration is unavailable")
+		return
+	}
 	if !h.prepareAccessGroups(w, &req) {
 		return
 	}
@@ -148,6 +152,10 @@ func (h Handler) CallMCPServerTool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.APIKey = ""
+	if h.adminState != nil && h.adminState.Refresh(r.Context()) != nil {
+		writeError(w, http.StatusServiceUnavailable, "admin_state_unavailable", "MCP configuration is unavailable")
+		return
+	}
 	if !h.prepareAccessGroups(w, &req) {
 		return
 	}

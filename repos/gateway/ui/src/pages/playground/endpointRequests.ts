@@ -62,7 +62,7 @@ export function buildEndpointRequest(endpoint: SpecializedEndpoint, model: strin
   } else if (endpoint === "a2a") {
     if (!safeID.test(settings.agent)) throw new Error("Enter a valid agent ID.");
     path += `/${encodeURIComponent(settings.agent)}`;
-    return { path, body: { ...extras, jsonrpc: "2.0", id: crypto.randomUUID(), method: "SendMessage", params: { tenant: settings.agent, message: { messageId: crypto.randomUUID(), role: "ROLE_USER", parts: [{ text: input }] }, configuration: { acceptedOutputModes: ["text/plain"] } } } };
+    return { path, headers: { "A2A-Version": "1.0" }, body: { ...extras, jsonrpc: "2.0", id: crypto.randomUUID(), method: "SendMessage", params: { tenant: settings.agent, message: { messageId: crypto.randomUUID(), role: "ROLE_USER", parts: [{ text: input }] }, configuration: { acceptedOutputModes: ["text/plain"] } } } };
   } else {
     if (!safeID.test(settings.server) || !safeID.test(settings.tool)) throw new Error("Enter a valid MCP server ID and tool name.");
     path += `/${encodeURIComponent(settings.server)}/tools/${encodeURIComponent(settings.tool)}`;

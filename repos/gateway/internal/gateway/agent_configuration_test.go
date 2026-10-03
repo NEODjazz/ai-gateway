@@ -138,7 +138,7 @@ func TestAgentConfigurationAdminAPIEncryptedAndPreserved(t *testing.T) {
 		t.Fatal("explicit configuration clear failed")
 	}
 	saved, _ = agents.AgentProfile("research")
-	if saved.Instructions != "" || saved.ContentStored || saved.InstructionsConfigured || saved.Generation.Temperature != nil || saved.Generation.MaxOutputTokens != nil {
+	if saved.Instructions != "" || saved.ContentStored || saved.InstructionsConfigured || saved.Generation != nil {
 		t.Fatal("configuration did not clear")
 	}
 }

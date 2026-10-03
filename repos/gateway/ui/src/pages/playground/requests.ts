@@ -156,7 +156,7 @@ export function requestCode(language: "curl" | "python" | "javascript", path: st
     return (language === "curl" ? "#!/usr/bin/env bash\nset -euo pipefail\n\n" : "") + preflight + "\n\n" + requestCode(language, path, body, baseURL, additionalHeaders, binaryOutput);
   }
   const url = gatewayPath(baseURL || window.location.origin, path);
-  for (const [name, value] of Object.entries(additionalHeaders)) if (name !== "Idempotency-Key" || !/^[\x21-\x7e]{1,128}$/.test(value)) throw new Error("Unsupported code export header.");
+  for (const [name, value] of Object.entries(additionalHeaders)) if (!(name === "Idempotency-Key" && /^[\x21-\x7e]{1,128}$/.test(value) || name === "A2A-Version" && value === "1.0")) throw new Error("Unsupported code export header.");
   const headerJSON = JSON.stringify(additionalHeaders);
   const curlHeaders = Object.entries(additionalHeaders).map(([name, value]) => `  -H ${shellQuote(`${name}: ${value}`)} \\\n`).join("");
   const payload = JSON.stringify(body, null, 2);

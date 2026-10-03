@@ -64,6 +64,12 @@ describe("Endpoint Playground", () => {
     await screen.findByText("input.wav · audio/wav"); await run(); expect(await screen.findByText("Transcript text")).toBeInTheDocument();
     expect(JSON.parse(String(mock.mock.calls[0][1]?.body))).toMatchObject({ file: { filename: "input.wav", media_type: "audio/wav" }, response_format: "verbose_json" });
   });
+  it("sends the mandatory A2A version and includes it in exported code", async () => {
+    const mock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_path, options) => new Headers(options?.headers).get("A2A-Version") === "1.0" ? new Response('{"jsonrpc":"2.0","result":{"message":{"parts":[{"text":"Versioned response"}]}}}') : new Response('{"error":{"message":"Version not supported"}}', { status: 400 }));
+    setup("a2a"); await userEvent.type(screen.getByLabelText("Agent ID"), "research"); await userEvent.type(screen.getByLabelText("Endpoint input"), "Question");
+    await userEvent.click(screen.getByRole("button", { name: "Get endpoint code" })); expect(await screen.findByLabelText("Request code")).toHaveTextContent("A2A-Version: 1.0"); await userEvent.keyboard("{Escape}");
+    await run(); await screen.findByText("Versioned response"); expect(mock).toHaveBeenCalledOnce();
+  });
   it("does not interpret a JSON-RPC error as an empty successful agent response", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response('{"jsonrpc":"2.0","error":{"code":-32005,"message":"Agent unavailable"}}'));
     setup("a2a"); await userEvent.type(screen.getByLabelText("Agent ID"), "research"); await userEvent.type(screen.getByLabelText("Endpoint input"), "Question"); await run();
