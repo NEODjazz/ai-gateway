@@ -210,3 +210,14 @@ tool calls, safe output images and URL citations are shown separately; copy
 controls report clipboard failures. Native Messages/Interactions conversations
 retain bounded visible history. Speech download filenames use the returned MIME
 type rather than the current form setting.
+
+Playground resource discovery uses the selected credential and requires explicit
+loading. MCP toolsets filter server and tool choices; selected schemas are sent
+as model functions without changing semantic constraints. Function-name grants
+and MCP runtime grants are distinct. Select at most 32 tools and 1 MiB of total
+definitions. Responses supports owned vector stores, automatic code containers
+with selected files, and existing container IDs. Resource pagination and scope
+changes discard stale data. Up to four additional policies can check the current
+text prompt before generation; failures and blocks stop the request. Exported
+code includes those checks. Selected request tags are metadata labels; they do
+not change credential tags, mandatory policies or billing attribution.

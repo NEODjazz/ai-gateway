@@ -260,6 +260,10 @@ func validGuardrailName(value string) bool {
 	return true
 }
 
+func guardrailPolicyMatch(req modules.RequestContext, model string) PolicyMatchContext {
+	return PolicyMatchContext{OrganizationID: req.OrganizationID, TeamID: req.TeamID, UserID: req.UserID, CredentialID: req.CredentialID, CredentialAlias: req.CredentialAlias, Model: model, Tags: req.Tags}
+}
+
 func (h Handler) authorizeGuardrailPolicy(w http.ResponseWriter, req modules.RequestContext, name, model string) bool {
 	if hasRole(req.Roles, "admin") {
 		return true
@@ -268,7 +272,7 @@ func (h Handler) authorizeGuardrailPolicy(w http.ResponseWriter, req modules.Req
 		writeError(w, http.StatusServiceUnavailable, "policy_unavailable", "policy attachment registry is unavailable")
 		return false
 	}
-	match := PolicyMatchContext{TeamID: req.TeamID, CredentialID: req.CredentialID, CredentialAlias: req.CredentialAlias, Model: model, Tags: req.Tags}
+	match := guardrailPolicyMatch(req, model)
 	resolution := h.resolvePolicyAttachmentSet(h.access.MatchingPolicyAttachments(match), match)
 	if !resolution.Enforceable {
 		writeError(w, http.StatusServiceUnavailable, "policy_unavailable", "an attached policy is missing or disabled")

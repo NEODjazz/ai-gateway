@@ -500,3 +500,5 @@ textarea { resize: vertical; }
 .playground-native-output pre, .playground-native-text { white-space: pre-wrap; overflow-wrap: anywhere; }
 .playground-generated-image { display: block; max-width: 100%; max-height: 600px; object-fit: contain; margin-bottom: 12px; }
 .playground-main-panel details > pre { max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.playground-resource-list { display: grid; gap: 8px; max-height: 240px; overflow-y: auto; margin: 12px 0; }

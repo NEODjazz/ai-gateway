@@ -141,7 +141,18 @@ export function playgroundConnection(sessionClient: APIClient, source: KeySource
 
 function shellQuote(value: string) { return `'${value.replace(/'/g, `'"'"'`)}'`; }
 
-export function requestCode(language: "curl" | "python" | "javascript", path: string, body: unknown, baseURL = "", additionalHeaders: Record<string, string> = {}, binaryOutput = false): string {
+export type CodeCheck = { path: string; body: unknown };
+export function requestCode(language: "curl" | "python" | "javascript", path: string, body: unknown, baseURL = "", additionalHeaders: Record<string, string> = {}, binaryOutput = false, checks: CodeCheck[] = []): string {
+  if (checks.length) {
+    if (checks.length > 4 || checks.some((check) => check.path !== "/guardrails/apply_guardrail")) throw new Error("Unsupported code export preflight.");
+    const preflight = checks.map((check) => {
+      const example = requestCode(language, check.path, check.body, baseURL);
+      if (language === "curl") return example.replace(/^curl /, "curl --fail-with-body ") + " | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin).get(\"allowed\") is True else 1)'";
+      if (language === "python") return example.replace("    print(response.read().decode())", '    decision = json.load(response)\n    if decision.get("allowed") is not True: raise RuntimeError("Prompt policy did not allow generation")');
+      return "{\n" + example.replace("console.log(await response.text());", 'if ((await response.json())?.allowed !== true) throw new Error("Prompt policy did not allow generation");') + "\n}";
+    }).join("\n\n");
+    return (language === "curl" ? "#!/usr/bin/env bash\nset -euo pipefail\n\n" : "") + preflight + "\n\n" + requestCode(language, path, body, baseURL, additionalHeaders, binaryOutput);
+  }
   const url = gatewayPath(baseURL || window.location.origin, path);
   for (const [name, value] of Object.entries(additionalHeaders)) if (name !== "Idempotency-Key" || !/^[\x21-\x7e]{1,128}$/.test(value)) throw new Error("Unsupported code export header.");
   const headerJSON = JSON.stringify(additionalHeaders);

@@ -33,7 +33,7 @@ export function CopyOutput({ text, label = "Copy output" }: { text: string; labe
   const [status, setStatus] = useState("");
   return <div className="playground-actions"><GatewayButton view="flat" disabled={!text} aria-label={label} onClick={async () => {
     try { await navigator.clipboard.writeText(text); setStatus("Copied"); } catch { setStatus("Could not copy output. Select the text to copy it."); }
-  }}>{label}</GatewayButton>{status && <span role="status">{status}</span>}</div>;
+  }}>Copy output</GatewayButton>{status && <span role="status">{status}</span>}</div>;
 }
 
 export function OutputDetails({ payload }: { payload: unknown }) {

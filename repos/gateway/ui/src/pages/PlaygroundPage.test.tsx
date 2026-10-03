@@ -19,6 +19,29 @@ function streamResponse(chunks: string[]) {
 }
 
 describe("PlaygroundPage", () => {
+  it("stops generation when an additional prompt policy blocks or fails, and exports preflight checks", async () => {
+    const mock = vi.spyOn(globalThis, "fetch").mockImplementation(async (path) => {
+      if (path === "/v1/models") return new Response('{"data":[{"id":"model"}]}');
+      if (String(path).includes("playground/catalog")) return new Response('{"mcp_servers":[],"mcp_toolsets":[],"agents":[],"tags":[],"policies":["strict"],"truncated":false}');
+      return new Response('{"allowed":false}');
+    });
+    authenticated(); await screen.findByText("1 authorized model");
+    await userEvent.click(screen.getByText("Tools, resources and policies"));
+    await userEvent.click(screen.getByRole("button", { name: "Load resource catalog" }));
+    await userEvent.click(await screen.findByLabelText("Prompt policy strict"));
+    await userEvent.type(screen.getByLabelText("Message"), "Check prompt");
+    await userEvent.click(screen.getByRole("button", { name: "Get code" }));
+    expect(await screen.findByLabelText("Request code")).toHaveTextContent("apply_guardrail");
+    await userEvent.keyboard("{Escape}");
+    await userEvent.click(screen.getByRole("button", { name: "Run request" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("blocked by policy strict");
+    expect(mock.mock.calls.some(([path]) => path === "/v1/chat/completions")).toBe(false);
+    expect(screen.getByLabelText("Message")).toHaveValue("Check prompt");
+    mock.mockImplementation(async () => new Response('{"error":{"message":"Scanner unavailable"}}', { status: 503 }));
+    await userEvent.click(screen.getByRole("button", { name: "Run request" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Scanner unavailable");
+    expect(mock.mock.calls.some(([path]) => path === "/v1/chat/completions")).toBe(false);
+  });
   it("clears the browser file input after success so the same file can be selected again", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (path) => path === "/v1/models" ? new Response('{"data":[{"id":"model"}]}') : new Response('{"choices":[{"message":{"content":"Done"}}]}', { headers: { "Content-Type": "application/json" } }));
     authenticated(); await screen.findByText("1 authorized model");

@@ -2897,6 +2897,29 @@ paths:
             text/plain:
               schema:
                 type: string
+  /v1/playground/catalog:
+    get:
+      operationId: getPlaygroundCatalog
+      tags: [Models, MCP]
+      summary: Discover resources selectable by the current Playground identity
+      description: Applies credential, model, access-group, tag and policy attachment scope. Returns registry names without credentials, MCP URLs or agent instructions. Does not contact providers or MCP servers. Each list is bounded to 256 entries; truncation and unavailable policy discovery are explicit.
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: model, in: query, schema: {type: string, maxLength: 256}}
+      responses:
+        '200':
+          description: Credential-scoped selectable resources
+          headers:
+            Cache-Control: {schema: {type: string, enum: [no-store]}}
+            X-Execution-ID: {$ref: '#/components/headers/XExecutionID'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PlaygroundCatalog'}
+        default:
+          description: Invalid query, authentication, access policy or rate-limit failure
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
   /v1/models:
     get:
       operationId: listModels
@@ -9465,6 +9488,49 @@ components:
         object: {type: string, const: model}
         created: {type: integer, format: int64}
         owned_by: {type: string}
+    PlaygroundResource:
+      type: object
+      required: [id, name]
+      properties:
+        id: {type: string, minLength: 1, maxLength: 128}
+        name: {type: string, maxLength: 256}
+    PlaygroundCatalog:
+      type: object
+      required: [mcp_servers, mcp_toolsets, policies, tags, agents, truncated]
+      properties:
+        mcp_servers:
+          type: array
+          maxItems: 256
+          items: {$ref: '#/components/schemas/PlaygroundResource'}
+        mcp_toolsets:
+          type: array
+          maxItems: 256
+          items:
+            allOf:
+              - {$ref: '#/components/schemas/PlaygroundResource'}
+              - type: object
+                required: [server_ids, tool_grants]
+                properties:
+                  server_ids: {type: array, maxItems: 256, items: {type: string, maxLength: 128}}
+                  tool_grants:
+                    type: object
+                    maxProperties: 256
+                    additionalProperties: {type: array, maxItems: 256, items: {type: string, maxLength: 256}}
+        policies: {type: array, maxItems: 256, items: {type: string, maxLength: 128}}
+        policy_error: {type: string}
+        tags: {type: array, maxItems: 256, items: {type: string, maxLength: 512}}
+        agents:
+          type: array
+          maxItems: 256
+          items:
+            allOf:
+              - {$ref: '#/components/schemas/PlaygroundResource'}
+              - type: object
+                required: [model, execution_supported]
+                properties:
+                  model: {type: string, maxLength: 256}
+                  execution_supported: {type: boolean}
+        truncated: {type: boolean}
     ModelsResponse:
       type: object
       required: [object, data]

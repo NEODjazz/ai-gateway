@@ -15,6 +15,9 @@ import { EndpointPlayground } from "./playground/EndpointPlayground";
 import { endpointPaths, type SpecializedEndpoint } from "./playground/endpointRequests";
 import { CompliancePlayground } from "./playground/CompliancePlayground";
 import { ComparePlayground } from "./playground/ComparePlayground";
+import { ResourceControls } from "./playground/ResourceControls";
+import { checkPolicies, emptyResources, policyChecks, withResources } from "./playground/resources";
+import type { CodeCheck } from "./playground/requests";
 import { CopyOutput, OutputDetails } from "./playground/OutputDetails";
 import { CodeDialog } from "./playground/CodeDialog";
 import { runText, type TextRun } from "./playground/runText";
@@ -59,8 +62,9 @@ export function PlaygroundPage() {
   const [responseFormat, setResponseFormat] = useState<GenerationSettings["responseFormat"]>("text");
   const [schema, setSchema] = useState("");
   const [advanced, setAdvanced] = useState("");
+  const [resources, setResources] = useState(emptyResources);
   const [apiContinuity, setAPIContinuity] = useState(true);
-  const [codeRequest, setCodeRequest] = useState<{ path: string; body: unknown; baseURL: string }>();
+  const [codeRequest, setCodeRequest] = useState<{ path: string; body: unknown; baseURL: string; checks?: CodeCheck[] }>();
   const [streaming, setStreaming] = useState(true);
   const [transcript, setTranscript] = useState<TranscriptTurn[]>([]);
   const [pendingOutput, setPendingOutput] = useState("");
@@ -120,14 +124,14 @@ export function PlaygroundPage() {
 
   function requestBody(input: string, stream: boolean) {
     if (new TextEncoder().encode(input).length > 1024 * 1024) throw new Error("Prompt exceeds the 1 MiB Playground limit.");
-    return buildTextRequest({ endpoint: mode, model, input: conversationInput(input, attachments), instructions, streaming: stream,
+    return withResources(buildTextRequest({ endpoint: mode, model, input: conversationInput(input, attachments), instructions, streaming: stream,
       history: transcript.map((turn) => turn.wire),
       previousResponseID: apiContinuity ? previousResponseID : "",
-      settings: { maxTokens, temperature, topP, responseFormat, schema, advanced } });
+      settings: { maxTokens, temperature, topP, responseFormat, schema, advanced } }), mode, resources);
   }
 
   function getCode() {
-    try { setCodeRequest({ path: textEndpointPaths[mode], body: requestBody(message.trim() || (attachments.length ? "" : "Your message"), streaming), baseURL: connection.baseURL }); }
+    try { setCodeRequest({ path: textEndpointPaths[mode], body: requestBody(message.trim() || (attachments.length ? "" : "Your message"), streaming), baseURL: connection.baseURL, checks: policyChecks(resources.policies, message.trim(), model) }); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "Could not generate code"); }
   }
 
@@ -140,7 +144,9 @@ export function PlaygroundPage() {
     abortRef.current = controller;
     setRunning(true); setError(""); setPendingOutput(""); setMetadata(undefined); setEvents([]); setEventCount(0);
     try {
-      const result = await runText(connection, mode, requestBody(input, streaming), { signal: controller.signal, sessionID: activeSessionID,
+      const body = requestBody(input, streaming);
+      await checkPolicies(connection, resources.policies, input, model, controller.signal);
+      const result = await runText(connection, mode, body, { signal: controller.signal, sessionID: activeSessionID,
         onText: (text) => { if (abortRef.current === controller && !controller.signal.aborted) setPendingOutput(text); } });
       if (abortRef.current !== controller || controller.signal.aborted) return;
       if (mode === "responses" && result.id) setPreviousResponseID(result.id);
@@ -200,6 +206,7 @@ export function PlaygroundPage() {
           <GravityThemeScope className="gravity-playground-control"><Checkbox controlProps={{ "aria-label": "Stream response" }} size="l" disabled={running} checked={streaming} onUpdate={setStreaming}>Stream response</Checkbox></GravityThemeScope>
           {mode === "responses" && <GravityThemeScope className="gravity-playground-control"><Checkbox controlProps={{ "aria-label": "Use API session management" }} disabled={running} checked={apiContinuity} onUpdate={(value) => { setAPIContinuity(value); setPreviousResponseID(""); }}>Use API session management</Checkbox></GravityThemeScope>}
           <details className="playground-advanced"><summary>Advanced parameters</summary><AreaControl label="Advanced parameters JSON" rows={6} disabled={running} value={advanced} onUpdate={setAdvanced} placeholder='{ "reasoning_effort": "low" }' /><p className="muted">Parameters are sent unchanged. Unsupported settings return a gateway or provider error.</p></details>
+          <ResourceControls connection={connection} model={model} endpoint={mode} value={resources} onUpdate={setResources} disabled={running || connectionChanged} />
           <PricingControls value={pricing} onUpdate={setPricing} disabled={running} />
           <p className="muted playground-default-note">Leave optional settings blank to use provider defaults.</p>
         </section>

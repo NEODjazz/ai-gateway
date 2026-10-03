@@ -10,16 +10,18 @@ import { conversationAttachments, conversationInput, retainConversation } from "
 import type { Attachment } from "./endpointRequests";
 import { contentText } from "./runText";
 import { CopyOutput, OutputDetails } from "./OutputDetails";
+import { ResourceControls } from "./ResourceControls";
+import { checkPolicies, emptyResources, policyChecks, withResources, type ResourceSelection } from "./resources";
 import { csvCell } from "../../csv";
 
 type Panel = {
   id: number; model: string; settings: GenerationSettings; instructions: string; sessionID: string;
-  historyDropped: number; pricing: PricingInputs; history: Message[]; pending: string; lastPrompt?: string; result?: TextRun; error: string; status: "idle" | "running" | "complete" | "failed" | "cancelled";
+  resources: ResourceSelection; historyDropped: number; pricing: PricingInputs; history: Message[]; pending: string; lastPrompt?: string; result?: TextRun; error: string; status: "idle" | "running" | "complete" | "failed" | "cancelled";
 };
 
 function newPanel(id: number, model: string): Panel {
   return { id, model, settings: { ...defaultGenerationSettings }, instructions: "", sessionID: `playground-compare-${crypto.randomUUID()}`,
-    historyDropped: 0, pricing: { ...defaultPricing }, history: [], pending: "", error: "", status: "idle" };
+    resources: { ...emptyResources }, historyDropped: 0, pricing: { ...defaultPricing }, history: [], pending: "", error: "", status: "idle" };
 }
 
 export function ComparePlayground({ connection, models, connectionControls, connectionChanged, active = true }: {
@@ -72,7 +74,7 @@ export function ComparePlayground({ connection, models, connectionControls, conn
     const wireInput = conversationInput(input, attachments);
     const displayInput = input + (attachments.length ? `\nAttachments: ${attachments.map((item) => item.filename).join(", ")}` : "");
     let requests: { panel: Panel; body: Record<string, unknown> }[];
-    try { if (new TextEncoder().encode(input).length > 1024 * 1024) throw new Error("Prompt exceeds the 1 MiB Playground limit."); requests = panels.map((panel) => ({ panel, body: buildTextRequest({ endpoint: "chat", model: panel.model, input: wireInput, instructions: panel.instructions, history: panel.history, streaming: stream, settings: panel.settings }) })); }
+    try { if (new TextEncoder().encode(input).length > 1024 * 1024) throw new Error("Prompt exceeds the 1 MiB Playground limit."); requests = panels.map((panel) => ({ panel, body: withResources(buildTextRequest({ endpoint: "chat", model: panel.model, input: wireInput, instructions: panel.instructions, history: panel.history, streaming: stream, settings: panel.settings }), "chat", panel.resources) })); for (const panel of panels) policyChecks(panel.resources.policies, input, panel.model); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "Invalid comparison settings"); return; }
     const activeGeneration = ++generation.current;
     setError(""); setRunning(true);
@@ -80,6 +82,7 @@ export function ComparePlayground({ connection, models, connectionControls, conn
     await Promise.all(requests.map(async ({ panel, body }) => {
       const controller = new AbortController(); controllers.current.set(panel.id, controller);
       try {
+        await checkPolicies(connection, panel.resources.policies, input, panel.model, controller.signal);
         const result = await runText(connection, "chat", body, { signal: controller.signal, sessionID: panel.sessionID,
           onText: (text) => { if (generation.current === activeGeneration) setPanels((current) => current.map((item) => item.id === panel.id ? { ...item, pending: text } : item)); } });
         if (generation.current !== activeGeneration) return;
@@ -110,10 +113,11 @@ export function ComparePlayground({ connection, models, connectionControls, conn
         setSync(value); if (value) setPanels((current) => current.map((panel) => ({ ...panel, settings: { ...current[0].settings }, instructions: current[0].instructions })));
       }}>Sync settings across models</Checkbox></GravityThemeScope>
       <GravityThemeScope><Checkbox controlProps={{ "aria-label": "Stream comparison" }} checked={stream} disabled={running} onUpdate={setStream}>Stream responses</Checkbox></GravityThemeScope>
-      <div className="playground-actions"><GatewayButton view="outlined" disabled={running || !panels.some((panel) => panel.lastPrompt)} onClick={exportResults}>Export results</GatewayButton><GatewayButton view="outlined" disabled={running} onClick={() => { setPanels((current) => current.map((panel) => ({ ...newPanel(panel.id, panel.model), settings: panel.settings, instructions: panel.instructions, pricing: panel.pricing }))); setError(""); clearAttachments(); }}>Clear all chats</GatewayButton><GatewayButton view="outlined" disabled={running || panels.length >= 3} onClick={() => {
+      <div className="playground-actions"><GatewayButton view="outlined" disabled={running || !panels.some((panel) => panel.lastPrompt)} onClick={exportResults}>Export results</GatewayButton><GatewayButton view="outlined" disabled={running} onClick={() => { setPanels((current) => current.map((panel) => ({ ...newPanel(panel.id, panel.model), settings: panel.settings, instructions: panel.instructions, pricing: panel.pricing, resources: panel.resources }))); setError(""); clearAttachments(); }}>Clear all chats</GatewayButton><GatewayButton view="outlined" disabled={running || panels.length >= 3} onClick={() => {
         const id = nextID.current++; setPanels((current) => [...current, { ...newPanel(id, models[current.length] || models[0] || ""), ...(sync ? { settings: { ...current[0].settings }, instructions: current[0].instructions } : {}) }]);
       }}>Add comparison</GatewayButton></div>
     </div>
+    <p className="muted">Generation settings can be synchronized. Tools, prompt policies and prices are configured independently for each panel.</p>
     <div className="playground-comparison-panels" style={{ "--comparison-count": panels.length } as CSSProperties}>
       {panels.map((panel, index) => <section key={panel.id} className="playground-comparison-panel" aria-label={`Comparison ${index + 1}`}>
         <div className="playground-output-heading"><h2>Model {index + 1}</h2><GatewayButton view="flat" aria-label={`Remove comparison ${index + 1}`} disabled={running || panels.length <= 1} onClick={() => setPanels((current) => current.filter((item) => item.id !== panel.id))}>Remove</GatewayButton></div>
@@ -128,11 +132,12 @@ export function ComparePlayground({ connection, models, connectionControls, conn
           {panel.settings.responseFormat === "json_schema" && <AreaControl label={`Output schema ${index + 1}`} rows={3} value={panel.settings.schema} disabled={running} onUpdate={(schema) => settings(panel.id, { schema })} />}
           <AreaControl label={`Advanced parameters ${index + 1}`} rows={3} value={panel.settings.advanced} disabled={running} onUpdate={(advanced) => settings(panel.id, { advanced })} />
         </details>
+        <ResourceControls connection={connection} model={panel.model} endpoint="chat" value={panel.resources} disabled={running || connectionChanged} onUpdate={(resources) => setPanels((current) => current.map((item) => item.id === panel.id ? { ...item, resources } : item))} />
         <PricingControls label={` ${index + 1}`} disabled={running} value={panel.pricing} onUpdate={(pricing) => setPanels((current) => current.map((item) => item.id === panel.id ? { ...item, pricing } : item))} />
         {panel.historyDropped > 0 && <p className="muted">{panel.historyDropped} earlier turns removed to keep browser history bounded.</p>}
         <div className="playground-comparison-output" aria-live="polite">
           {!panel.history.length && !panel.pending && <p className="muted">Send the same prompt to compare responses.</p>}
-          {panel.history.map((turn, turnIndex) => <article className={`playground-turn ${turn.role}`} key={turnIndex}><strong>{turn.role}</strong><pre>{contentText(turn.content) || contentText(turn.refusal) || "No text output"}</pre>{Array.isArray(turn.content) && <p className="muted">Attachments: {turn.content.map((part) => { const item = part as { type?: string; filename?: string }; return item.type === "input_file" ? item.filename : item.type === "image_url" ? "image" : ""; }).filter(Boolean).join(", ")}</p>}{turn.role === "assistant" && <><CopyOutput label={`Copy comparison ${index + 1} turn ${turnIndex + 1}`} text={contentText(turn.content) || contentText(turn.refusal)} />{contentText(turn.reasoning_content || turn.reasoning) && <details><summary>Reasoning</summary><pre>{contentText(turn.reasoning_content || turn.reasoning)}</pre></details>}<OutputDetails payload={turn} /></>}</article>)}
+          {panel.history.map((turn, turnIndex) => <article className={`playground-turn ${turn.role}`} key={turnIndex}><strong>{turn.role}</strong><pre>{contentText(turn.content) || contentText(turn.refusal) || (turn.role === "user" && Array.isArray(turn.content) ? "Attachments only" : "No text output")}</pre>{Array.isArray(turn.content) && <p className="muted">Attachments: {turn.content.map((part) => { const item = part as { type?: string; filename?: string }; return item.type === "input_file" ? item.filename : item.type === "image_url" ? "image" : ""; }).filter(Boolean).join(", ")}</p>}{turn.role === "assistant" && <><CopyOutput label={`Copy comparison ${index + 1} turn ${turnIndex + 1}`} text={contentText(turn.content) || contentText(turn.refusal)} />{contentText(turn.reasoning_content || turn.reasoning) && <details><summary>Reasoning</summary><pre>{contentText(turn.reasoning_content || turn.reasoning)}</pre></details>}<OutputDetails payload={turn} /></>}</article>)}
           {panel.pending && <article className="playground-turn assistant streaming"><strong>{panel.status === "running" ? "Streaming" : "Partial response"}</strong><pre>{panel.pending}</pre></article>}
           {panel.error && <p role="alert" className="form-error">{panel.error}</p>}
         </div>

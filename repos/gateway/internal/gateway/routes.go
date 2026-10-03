@@ -56,6 +56,7 @@ var gatewayRoutes = []routeDefinition{
 	{RouteContract{http.MethodPut, "/scim/v2/Groups/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ReplaceSCIMGroup) }},
 	{RouteContract{http.MethodPatch, "/scim/v2/Groups/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.PatchSCIMGroup) }},
 	{RouteContract{http.MethodDelete, "/scim/v2/Groups/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.DeleteSCIMGroup) }},
+	{RouteContract{http.MethodGet, "/v1/playground/catalog"}, func(h Handler) http.Handler { return http.HandlerFunc(h.PlaygroundCatalog) }},
 	{RouteContract{http.MethodGet, "/v1/models"}, func(h Handler) http.Handler { return http.HandlerFunc(h.Models) }},
 	{RouteContract{http.MethodGet, "/v1/models/{model}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GetModel) }},
 	{RouteContract{http.MethodPost, "/v1/assistants"}, func(h Handler) http.Handler { return http.HandlerFunc(h.CreateAssistant) }},

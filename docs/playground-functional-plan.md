@@ -88,6 +88,9 @@ compatibility must be distinguished from merely having an endpoint selector.
 - [x] Added shared comparison attachments, refusal rendering, citations, safe image
   output, copy controls and bounded native conversation history; speech download
   names reflect the returned media type.
+- [x] Added credential-scoped resource discovery, MCP toolset/schema selection,
+  owned Responses vector/container/file selection and optional prompt checks.
+  Failed or blocked checks stop generation; code export includes the checks.
 - [ ] Finish media/tool output, policy selection and full conversation verification.
 - [ ] Complete endpoint-specific execution and media/tool handling.
 - [ ] Complete comparison, compliance and agent views.
@@ -96,3 +99,18 @@ compatibility must be distinguished from merely having an endpoint selector.
 
 Completion requires working flows and evidence for every requirement above.
 Having a selector, a disabled control or a raw JSON viewer alone is insufficient.
+
+## Scoped resource discovery
+
+`GET /v1/playground/catalog?model=<model-id>` uses the calling credential or
+browser identity, model grants, access groups and credential tags. It returns
+only selectable MCP server/toolset names, authorized guardrail policy names,
+identity tags and enabled agent names. It excludes credentials, MCP URLs, tool
+arguments and agent instructions, and performs no provider or MCP execution.
+Catalog lists are limited to 256 entries each, with explicit truncation. Failed
+policy discovery is reported independently. Responses use `Cache-Control:
+no-store`; callers must reload after changing identity or model.
+
+Guardrail selection and direct application use organization and user bindings
+in addition to key, team, model and tag bindings. Selecting a policy does not
+change mandatory inference policies or the identity's grants.

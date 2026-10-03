@@ -94,6 +94,20 @@ describe("Compare Playground", () => {
     await send("Follow up"); await waitFor(() => expect(mock).toHaveBeenCalledTimes(4));
     expect(JSON.parse(String(mock.mock.calls[2][1]?.body)).messages[0].content).toEqual(first[0].messages[0].content);
   });
+  it("checks prompt policies independently and retains success when another panel is blocked", async () => {
+    const catalog = { mcp_servers: [], mcp_toolsets: [], agents: [], tags: [], policies: ["strict"], truncated: false };
+    const mock = vi.spyOn(globalThis, "fetch").mockImplementation(async (path) => String(path).includes("catalog") ? new Response(JSON.stringify(catalog)) : String(path).includes("apply_guardrail") ? new Response('{"allowed":false}') : answer("Allowed panel"));
+    setup(); const panel = within(screen.getByRole("region", { name: "Comparison 1" }));
+    await userEvent.click(panel.getByText("Tools, resources and policies"));
+    await userEvent.click(panel.getByRole("button", { name: "Load resource catalog" }));
+    await userEvent.click(await panel.findByLabelText("Prompt policy strict"));
+    await send("Policy check");
+    expect(await panel.findByRole("alert")).toHaveTextContent("blocked by policy strict");
+    expect(await screen.findByText("Allowed panel")).toBeInTheDocument();
+    const inference = mock.mock.calls.filter(([path]) => path === "/v1/chat/completions");
+    expect(inference).toHaveLength(1);
+    expect(JSON.parse(String(inference[0][1]?.body)).model).toBe("beta");
+  });
   it("exports quoted CSV with formula protection and revokes the download URL", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async () => answer('=SUM(1,2)\n"quoted"'));
     const create = vi.fn((_blob: Blob) => "blob:test"), revoke = vi.fn();
