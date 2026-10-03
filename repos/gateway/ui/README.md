@@ -13,6 +13,35 @@ available to other authenticated credentials. Hidden navigation is a UX guard,
 while backend RBAC remains authoritative for every operation. The sidebar shows
 the authenticated user, roles, and optional team without exposing a token.
 
+## Sidebar navigation
+
+The sidebar has five labeled sections: **AI Gateway**, **Observability**,
+**Access Control**, **Developer Tools**, and **Settings**. The navigation manifest
+in `src/app/navigation.ts` is independent of route metadata and includes each
+navigable page once. Existing URLs and router capability checks remain unchanged;
+inaccessible links, empty submenus, and empty sections are omitted.
+
+**Models & endpoints** contains Models, Model onboarding, Providers, Credentials,
+Deployments, and Model groups. **Agentic** contains Agent profiles; **MCP** contains
+MCP servers/toolsets; **Tools** contains Search/Tool policies; **Settings** contains
+Router settings, Logging & alerts, and Single sign-on. Response cache and
+Single sign-on are navigation labels for the existing `/cache` and `/settings`
+routes. They do not change the page contracts.
+
+Submenus start collapsed, except the group containing the current route. Boolean
+disclosure preferences are stored under `ai-gateway.sidebar-collapsed.v1` in
+browser local storage; they contain no identity, credential, or authorization data.
+Malformed or unavailable storage falls back to defaults. A route change reopens
+the active group, while a user can deliberately collapse it on the current page.
+Child detail routes keep their parent link selected.
+
+Gravity UI still provides the layout, logo, footer, and compact-mode control.
+The sidebar list uses semantic headings, links, and disclosure buttons with
+`aria-expanded`. Enter/Space toggles groups; Right/Down enters a group, Left closes
+it, and Up/Down/Home/End move among children. In compact mode group buttons open
+a Gravity UI popup with the same authorized links; Escape closes it and returns
+focus. Both navigation modes scroll independently of the fixed account footer.
+
 ## Dependency override
 
 The lockfile pins the navigation package's codemod dependency to `jscodeshift 17.4.0`.

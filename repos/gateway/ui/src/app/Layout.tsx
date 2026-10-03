@@ -1,39 +1,22 @@
 import { useState } from "react";
-import { Outlet, useLocation, useNavigate } from "react-router-dom";
-import { PageLayout, PageLayoutAside, type AsideHeaderItem } from "@gravity-ui/navigation/build/esm/index.js";
+import { Outlet, useNavigate } from "react-router-dom";
+import { PageLayout, PageLayoutAside } from "@gravity-ui/navigation/build/esm/index.js";
 import { Sparkles } from "@gravity-ui/icons";
 import { loginConnectionURL } from "../auth/ssoConnections";
 import { useAuth } from "../auth/AuthContext";
 import { appRoutes, canAccessRoute } from "./routes";
-import { navigationGroups, navigationIcon } from "./navigation";
+import { visibleNavigationSections } from "./navigation";
+import { SidebarNavigation } from "./SidebarNavigation";
 
 export function Layout() {
   const { session, signOut, signingOut, signOutError, ssoConnections, prepareSSOSignIn } = useAuth();
-  const location = useLocation();
   const navigate = useNavigate();
   const [compact, setCompact] = useState(false);
   const routes = appRoutes.filter((route) => route.navigation !== false && canAccessRoute(route, session));
-  const orderedRoutes = navigationGroups.flatMap((group) => routes.filter((route) => route.group === group));
-  const menuItems: AsideHeaderItem[] = orderedRoutes.flatMap((route, index) => {
-    const item: AsideHeaderItem = {
-      id: route.path,
-      title: route.title,
-      icon: navigationIcon(route.path),
-      href: `/ui${route.path}`,
-      current: location.pathname === route.path || (route.path !== "/overview" && location.pathname.startsWith(`${route.path}/`)),
-      rightAdornment: !route.available ? <span className="nav-dot" title="Backend unavailable" /> : undefined,
-      onItemClick: (_item, _collapsed, event) => {
-        event.preventDefault();
-        navigate(route.path);
-      },
-    };
-    const previous = orderedRoutes[index - 1];
-    return previous && previous.group !== route.group ? [{ id: `divider-${route.group}`, title: "", type: "divider" as const }, item] : [item];
-  });
 
   return <PageLayout compact={compact} className="app-shell gravity-app-shell"><nav className="gravity-sidebar-landmark" aria-label="Dashboard"><PageLayoutAside
     logo={{ text: "AI Gateway", icon: Sparkles, href: "/ui/", onClick: (event) => { event.preventDefault(); navigate("/"); } }}
-    menuItems={menuItems}
+    aboveMenuContent={<SidebarNavigation sections={visibleNavigationSections(routes)} compact={compact} />}
     menuOverflow="scroll"
     onChangeCompact={setCompact}
     collapseTitle="Collapse navigation"
