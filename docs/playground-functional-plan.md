@@ -151,6 +151,9 @@ compatibility must be distinguished from merely having an endpoint selector.
   original JSON results in typed model continuation, without browser rounding.
   Object/size validation, explicit approval, cancellation and retry action keys
   remain enforced.
+- [x] Added native Responses MCP approval review, explicit typed approve/decline
+  continuation, submitted-connection binding and background-response provenance.
+  Invalid review batches retain actual output and usage while blocking continuation.
 - [ ] Finish media/tool output, policy selection and full conversation verification.
 - [ ] Complete endpoint-specific execution and media/tool handling.
 - [ ] Complete comparison, compliance and agent views.
@@ -398,3 +401,44 @@ Regression coverage reproduces the original rounding of `9007199254740993` to
 bodies/results, and checks bounded response reads, API errors and cancellation.
 This scope covers direct tool arguments/results; ordinary resource discovery and
 advanced-parameter objects still use the standard browser JSON parser.
+
+
+## Native Responses MCP approvals
+
+Responses tools configured in advanced JSON can return `mcp_approval_request`.
+Playground reviews them alongside selected function calls, with a combined limit
+of 32 calls per response. Each native approval shows its original argument JSON,
+server label and the server URL from the submitted tool definition. A unique
+matching connection and an allowed tool are required; malformed argument objects
+or arguments over 64 KiB can only be declined.
+
+Approve and Decline update browser state without calling either inference or the
+direct MCP endpoint. Every pending call must be resolved before explicit Continue
+sends `mcp_approval_response` with the original approval ID and a boolean decision.
+The provider executes native MCP calls. Direct selected functions retain their
+separate runtime execution and idempotency behavior.
+
+Continuation uses the saved response ID or retained native browser history,
+without adding a user message. The reviewed connection must remain identical;
+changing its URL, approval settings, headers or tool grants blocks continuation
+until its original definition is restored or the conversation is cleared.
+Background resource reads use the originally submitted definitions, even if the
+advanced editor changes while the job is pending. Connection/model/endpoint
+changes reset the conversation, and existing cancellation checks discard late
+results.
+
+Invalid call identities, duplicate IDs, foreign/ambiguous connections and
+excessive batches retain the completed provider output and finalized usage, but
+block new turns and code export until Clear. Transport failures preserve reviewed
+decisions. Native provider continuation has no browser guarantee of exactly-once
+execution: failures after sending an approval warn that a manual retry can repeat
+execution. No automatic retry occurs. Browser connection binding supplements
+existing Gateway credential/tool authorization; the provider validates ownership
+and execution of native approval IDs.
+
+Regression coverage includes both continuity modes, background approvals, mixed
+native/function batches, explicit decisions, changed connections, invalid
+provenance, finalized usage retention and failed continuation. An isolated browser
+preview verified one approval and one decline, no execution before Continue,
+exactly one continuation and zero direct MCP calls. This uses synthetic responses;
+no real provider, remote MCP service or billing was invoked.

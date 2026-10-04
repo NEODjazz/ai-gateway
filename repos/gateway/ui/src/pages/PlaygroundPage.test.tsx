@@ -21,6 +21,68 @@ function streamResponse(chunks: string[]) {
 afterEach(() => document.querySelectorAll('meta[name="ai-gateway-playground-origins"]').forEach((node) => node.remove()));
 
 describe("PlaygroundPage", () => {
+  it("preserves actual output and usage but blocks continuation when native MCP provenance is invalid", async () => {
+    const mock = vi.spyOn(globalThis, "fetch").mockImplementation(async (path) => path === "/v1/models" ? new Response('{"data":[{"id":"model"}]}') : new Response(JSON.stringify({ id: "resp_invalid", status: "completed", output_text: "Provider output retained", output: [{ type: "mcp_approval_request", id: "approval_foreign", name: "search", server_label: "foreign", arguments: "{}" }], usage: { input_tokens: 7, output_tokens: 2 } }), { headers: { "Content-Type": "application/json" } }));
+    authenticated(); await screen.findByText("1 authorized model"); await userEvent.click(screen.getByRole("tab", { name: "Responses API" }));
+    await userEvent.type(screen.getByLabelText("Message"), "Original billed prompt"); await userEvent.click(screen.getByRole("button", { name: "Run request" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Tool review failed"); expect(screen.getByRole("alert")).toHaveTextContent("Clear the conversation");
+    expect(screen.getByText("Provider output retained")).toBeInTheDocument(); expect(screen.getByText("Input tokens").nextElementSibling).toHaveTextContent("7");
+    expect(screen.getByLabelText("Message")).toBeDisabled(); expect(screen.getByRole("button", { name: "Get code" })).toBeDisabled();
+    expect(mock.mock.calls.filter(([path]) => path === "/v1/responses")).toHaveLength(1);
+    await userEvent.click(screen.getByRole("button", { name: "Clear" })); expect(screen.getByLabelText("Message")).toBeEnabled(); expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+  it.each(["api", "browser", "background"])("reviews native MCP approvals in %s Responses without executing before Continue", async (variant) => {
+    const tools = [{ type: "mcp", server_label: "documents", server_url: "https://mcp.example.test", allowed_tools: ["search", "write"], require_approval: "always" }];
+    const approvals = [
+      { id: "approval_search", type: "mcp_approval_request", server_label: "documents", name: "search", arguments: '{"id":9007199254740993}' },
+      { id: "approval_write", type: "mcp_approval_request", server_label: "documents", name: "write", arguments: '{"text":"Review me"}' }
+    ];
+    const advanced = JSON.stringify({ tools, ...(variant === "background" ? { background: true } : {}) });
+    let inference = 0;
+    const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json" } });
+    const mock = vi.spyOn(globalThis, "fetch").mockImplementation(async (path) => {
+      if (path === "/v1/models") return json({ data: [{ id: "model" }] });
+      if (path === "/v1/responses/resp_1") return json({ id: "resp_1", status: "completed", output: approvals });
+      if (path !== "/v1/responses") throw new Error("Unexpected direct tool execution");
+      inference++;
+      return inference === 1 ? json({ id: "resp_1", status: variant === "background" ? "queued" : "completed", ...(variant === "background" ? {} : { output: approvals }) }) : inference === 2 ? json({ error: { message: "Continuation unavailable" } }, 503) : json({ id: "resp_2", status: "completed", output_text: "Reviewed native result" });
+    });
+    authenticated(); await screen.findByText("1 authorized model"); await userEvent.click(screen.getByRole("tab", { name: "Responses API" }));
+    await userEvent.click(screen.getByLabelText("Stream response"));
+    if (variant === "browser") await userEvent.click(screen.getByLabelText("Use API session management"));
+    await userEvent.click(screen.getByText("Advanced parameters"));
+    fireEvent.change(screen.getByLabelText("Advanced parameters JSON"), { target: { value: advanced } });
+    await userEvent.type(screen.getByLabelText("Message"), "Review native actions"); await userEvent.click(screen.getByRole("button", { name: "Run request" }));
+    if (variant === "background") {
+      await screen.findByRole("region", { name: "Background response" });
+      fireEvent.change(screen.getByLabelText("Advanced parameters JSON"), { target: { value: JSON.stringify({ tools: [{ ...tools[0], server_label: "other" }] }) } });
+      await userEvent.click(screen.getByRole("button", { name: "Refresh background response" }));
+    }
+    expect(await screen.findByRole("region", { name: "Tool approvals" })).toHaveTextContent("9007199254740993");
+    expect(screen.getByLabelText("Message")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Continue with tool results" })).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: "Approve search" }));
+    expect(screen.getByRole("button", { name: "Continue with tool results" })).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: "Decline write" })); expect(inference).toBe(1);
+    expect(screen.getByRole("region", { name: "Tool approvals" })).toHaveTextContent("https://mcp.example.test");
+    if (variant !== "background") fireEvent.change(screen.getByLabelText("Advanced parameters JSON"), { target: { value: JSON.stringify({ tools: [{ ...tools[0], server_url: "https://changed.example.test" }] }) } });
+    await userEvent.click(screen.getByRole("button", { name: "Continue with tool results" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("connection changed"); expect(inference).toBe(1);
+    fireEvent.change(screen.getByLabelText("Advanced parameters JSON"), { target: { value: advanced } });
+    await userEvent.click(screen.getByRole("button", { name: "Get code" }));
+    const code = await screen.findByLabelText("Request code"); expect(code).toHaveTextContent("mcp_approval_response"); expect(code).toHaveTextContent("approval_search");
+    await userEvent.keyboard("{Escape}");
+    await userEvent.click(screen.getByRole("button", { name: "Continue with tool results" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Continuation unavailable"); expect(screen.getByRole("alert")).toHaveTextContent("retrying can repeat execution");
+    expect(screen.getByRole("region", { name: "Tool approvals" })).toHaveTextContent("search · approved");
+    await userEvent.click(screen.getByRole("button", { name: "Continue with tool results" })); await screen.findByText("Reviewed native result");
+    expect(screen.queryByRole("region", { name: "Tool approvals" })).not.toBeInTheDocument(); expect(screen.getAllByText("Review native actions")).toHaveLength(1);
+    const bodies = mock.mock.calls.filter(([path]) => path === "/v1/responses").map(([, options]) => JSON.parse(String(options?.body)));
+    const decisions = [{ type: "mcp_approval_response", approval_request_id: "approval_search", approve: true }, { type: "mcp_approval_response", approval_request_id: "approval_write", approve: false }];
+    expect(bodies).toHaveLength(3); expect(bodies[1]).toEqual(bodies[2]); expect(bodies[2].tools).toEqual(tools);
+    expect(bodies[2].input).toEqual(variant === "browser" ? [{ role: "user", content: "Review native actions" }, ...approvals, ...decisions] : decisions);
+    expect(bodies[2].previous_response_id).toBe(variant === "browser" ? undefined : "resp_1");
+  });
   it("blocks new turns for queued Responses, preserves failed refreshes and commits final output once", async () => {
     let inference = 0, reads = 0;
     const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json" } });

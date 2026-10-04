@@ -21,7 +21,7 @@ import { ComparePlayground } from "./playground/ComparePlayground";
 import { ResourceControls } from "./playground/ResourceControls";
 import { checkPolicies, emptyResources, policyChecks, withResources } from "./playground/resources";
 import type { CodeCheck } from "./playground/requests";
-import { executeTool, toolInvocations, toolOutputs, type ToolInvocation } from "./playground/toolCalls";
+import { decideTool, executeTool, toolInvocations, toolOutputs, validateToolContinuation, type ToolInvocation } from "./playground/toolCalls";
 import { CopyOutput, OutputDetails } from "./playground/OutputDetails";
 import { ToolApprovals } from "./playground/ToolApprovals";
 import { CodeDialog } from "./playground/CodeDialog";
@@ -70,6 +70,7 @@ export function PlaygroundPage() {
   const [advanced, setAdvanced] = useState("");
   const [resources, setResources] = useState(emptyResources);
   const [calls, setCalls] = useState<ToolInvocation[]>([]);
+  const [unreviewableTools, setUnreviewableTools] = useState(false);
   const [toolPrompt, setToolPrompt] = useState("");
   const [apiContinuity, setAPIContinuity] = useState(true);
   const [codeRequest, setCodeRequest] = useState<{ path: string; body: unknown; baseURL: string; checks?: CodeCheck[] }>();
@@ -83,7 +84,7 @@ export function PlaygroundPage() {
   const [running, setRunning] = useState(false);
   const [activeSessionID, setActiveSessionID] = useState(sessionID);
   const [previousResponseID, setPreviousResponseID] = useState("");
-  const [pendingResponse, setPendingResponse] = useState<{ result: TextRun; turns: TranscriptTurn[]; prompt?: string; started: number }>();
+  const [pendingResponse, setPendingResponse] = useState<{ result: TextRun; turns: TranscriptTurn[]; prompt?: string; started: number; tools: unknown }>();
   const abortRef = useRef<AbortController | undefined>(undefined);
   const modelAbortRef = useRef<AbortController | undefined>(undefined);
   const modelGeneration = useRef(0);
@@ -114,7 +115,7 @@ export function PlaygroundPage() {
     abortRef.current?.abort();
     abortRef.current = undefined; setRunning(false);
     attachmentGeneration.current++; if (attachmentInput.current) attachmentInput.current.value = ""; setAttachments([]); setReadingAttachments(false); setHistoryDropped(0);
-    setCalls([]); setToolPrompt(""); setTranscript([]); setPendingOutput(""); setMetadata(undefined); setEvents([]); setEventCount(0); setError("");
+    setCalls([]); setUnreviewableTools(false); setToolPrompt(""); setTranscript([]); setPendingOutput(""); setMetadata(undefined); setEvents([]); setEventCount(0); setError("");
     setPreviousResponseID(""); setPendingResponse(undefined); setActiveSessionID(sessionID());
     turnID.current = 0;
   }
@@ -142,11 +143,13 @@ export function PlaygroundPage() {
 
   function requestBody(input: string | undefined, stream: boolean) {
     if (new TextEncoder().encode(input || "").length > 1024 * 1024) throw new Error("Prompt exceeds the 1 MiB Playground limit.");
-    return withResources(buildTextRequest({ endpoint: mode, model, input: input === undefined ? undefined : conversationInput(input, attachments), instructions, streaming: stream,
+    const body = withResources(buildTextRequest({ endpoint: mode, model, input: input === undefined ? undefined : conversationInput(input, attachments), instructions, streaming: stream,
       toolOutputs: input === undefined ? toolOutputs(calls) : [],
       history: transcript.map((turn) => turn.wire),
       previousResponseID: apiContinuity ? previousResponseID : "",
       settings: { maxTokens, temperature, topP, responseFormat, schema, advanced } }), mode, resources);
+    if (input === undefined) validateToolContinuation(calls, body.tools);
+    return body;
   }
 
   function getCode() {
@@ -158,6 +161,7 @@ export function PlaygroundPage() {
     event.preventDefault();
     if (connectionChanged) { setError("Apply connection changes before sending a request."); return; }
     if (pendingResponse) { setError("Refresh or cancel the pending background response before sending a new message."); return; }
+    if (unreviewableTools) { setError("Clear the conversation before continuing after an invalid tool response."); return; }
     if (calls.length) { setError("Resolve the pending tool calls and continue before sending a new message."); return; }
     const input = message.trim();
     if (running || readingAttachments || !model.trim() || (!input && !attachments.length)) return;
@@ -165,34 +169,40 @@ export function PlaygroundPage() {
   }
 
   async function runConversation(input?: string) {
-    if (running || pendingResponse || connectionChanged || abortRef.current) return;
+    if (running || pendingResponse || unreviewableTools || connectionChanged || abortRef.current) return;
     const started = performance.now();
     const controller = new AbortController();
     abortRef.current = controller;
     setRunning(true); setError(""); setPendingOutput(""); setMetadata(undefined); setEvents([]); setEventCount(0);
+    let transportStarted = false;
     try {
       const body = requestBody(input, streaming);
       await checkPolicies(connection, resources.policies, input === undefined ? toolPrompt : input, model, controller.signal);
+      transportStarted = true;
       const result = await runText(connection, mode, body, { signal: controller.signal, sessionID: activeSessionID,
         onText: (text) => { if (abortRef.current === controller && !controller.signal.aborted) setPendingOutput(text); } });
       if (abortRef.current !== controller || controller.signal.aborted) return;
       const submittedTurns: TranscriptTurn[] = input === undefined ? toolOutputs(calls).map((wire) => ({ id: ++turnID.current, role: "tool", content: String(wire.content), wire })) : [{ id: ++turnID.current, role: "user", content: input + (attachments.length ? `\nAttachments: ${attachments.map((item) => item.filename).join(", ")}` : ""), wire: { role: "user", content: conversationInput(input, attachments) } }];
       if (mode === "responses" && responsePending(result.response)) {
-        setPendingResponse({ result, turns: submittedTurns, prompt: input, started });
+        setPendingResponse({ result, turns: submittedTurns, prompt: input, started, tools: body.tools });
         setCalls([]); setMetadata(result); setPendingOutput(result.text); setMessage("");
         setAttachments([]); if (attachmentInput.current) attachmentInput.current.value = "";
-      } else finishConversation(result, submittedTurns, input);
+      } else finishConversation(result, submittedTurns, input, body.tools);
     } catch (cause) {
       if (abortRef.current !== controller) return;
       const aborted = cause && typeof cause === "object" && "name" in cause && cause.name === "AbortError";
-      setError(aborted ? "Request cancelled" : cause instanceof Error ? cause.message : "Request failed");
+      const failure = aborted ? "Request cancelled" : cause instanceof Error ? cause.message : "Request failed";
+      setError(failure + (transportStarted && input === undefined && calls.some((call) => call.nativeApproval && call.approved) ? ". Provider continuation may already have executed approved tools; retrying can repeat execution." : ""));
     } finally {
       if (abortRef.current === controller) { abortRef.current = undefined; setRunning(false); }
     }
   }
 
-  function finishConversation(result: TextRun, turns: TranscriptTurn[], input?: string) {
-    const invocations = toolInvocations(mode, result.response, resources.tools);
+  function finishConversation(result: TextRun, turns: TranscriptTurn[], input: string | undefined, declaredTools: unknown) {
+    let invocations: ToolInvocation[] = [], reviewError = "";
+    try { invocations = toolInvocations(mode, result.response, resources.tools, declaredTools); }
+    catch (cause) { reviewError = `Tool review failed: ${cause instanceof Error ? cause.message : "Invalid tool calls."} Clear the conversation before continuing.`; }
+    setUnreviewableTools(!!reviewError);
     const choice = (result.response.choices as { message?: Message }[] | undefined)?.[0]?.message;
     const assistantTurn: TranscriptTurn = { id: ++turnID.current, role: "assistant", content: result.text, reasoning: result.reasoning, response: result.response,
       wire: { ...choice, role: "assistant", content: mode === "responses" && Array.isArray(result.response.output) ? "" : choice?.content ?? result.text, ...(mode === "responses" && Array.isArray(result.response.output) ? { responseItems: result.response.output } : {}) } };
@@ -204,7 +214,8 @@ export function PlaygroundPage() {
     if ("events" in result && Array.isArray(result.events)) setEvents(result.events as SSEEvent[]);
     if ("eventCount" in result && typeof result.eventCount === "number") setEventCount(result.eventCount);
     setPendingResponse(undefined);
-    if (mode === "responses" && ["failed", "cancelled", "incomplete"].includes(String(result.response.status))) {
+    if (reviewError) setError(reviewError);
+    else if (mode === "responses" && ["failed", "cancelled", "incomplete"].includes(String(result.response.status))) {
       const failure = result.response.error as { message?: unknown } | undefined;
       setError(`Response ${String(result.response.status)}. ${typeof failure?.message === "string" ? failure.message : "Inspect finalized usage before retrying."}`);
     }
@@ -219,14 +230,19 @@ export function PlaygroundPage() {
       result.latencyMS = performance.now() - job.started;
       result.model ||= job.result.model;
       if (responsePending(result.response)) { setPendingResponse({ ...job, result }); setMetadata(result); setPendingOutput(result.text); }
-      else finishConversation(result, job.turns, job.prompt);
+      else finishConversation(result, job.turns, job.prompt, job.tools);
     } catch (cause) {
       if (abortRef.current === controller) setError(controller.signal.aborted ? "Response operation cancelled locally. Server execution may still be active; refresh before retrying." : cause instanceof Error ? cause.message : "Response operation failed.");
     } finally { if (abortRef.current === controller) { abortRef.current = undefined; setRunning(false); } }
   }
 
   async function approveTool(index: number) {
-    if (running || connectionChanged || calls[index].output !== undefined) return;
+    if (running || connectionChanged || !calls[index] || calls[index].issue) return;
+    if (calls[index].nativeApproval) {
+      setCalls((previous) => previous.map((call, position) => position === index ? decideTool(call, true) : call));
+      return;
+    }
+    if (calls[index].output !== undefined) return;
     const controller = new AbortController(); abortRef.current = controller; setRunning(true); setError("");
     const call = calls[index];
     try {
@@ -277,30 +293,30 @@ export function PlaygroundPage() {
           <GravityThemeScope className="gravity-playground-control"><Checkbox controlProps={{ "aria-label": "Stream response" }} size="l" disabled={running} checked={streaming} onUpdate={setStreaming}>Stream response</Checkbox></GravityThemeScope>
           {mode === "responses" && <GravityThemeScope className="gravity-playground-control"><Checkbox controlProps={{ "aria-label": "Use API session management" }} disabled={running} checked={apiContinuity} onUpdate={(value) => { setAPIContinuity(value); setPreviousResponseID(""); }}>Use API session management</Checkbox></GravityThemeScope>}
           <details className="playground-advanced"><summary>Advanced parameters</summary><AreaControl label="Advanced parameters JSON" rows={6} disabled={running} value={advanced} onUpdate={setAdvanced} placeholder='{ "reasoning_effort": "low" }' /><p className="muted">Parameters are sent unchanged. Unsupported settings return a gateway or provider error. Responses background mode requires {`{ "background": true }`} and streaming disabled.</p></details>
-          <ResourceControls connection={connection} model={model} endpoint={mode} value={resources} onUpdate={setResources} disabled={running || connectionChanged || calls.length > 0 || !!pendingResponse} />
+          <ResourceControls connection={connection} model={model} endpoint={mode} value={resources} onUpdate={setResources} disabled={running || connectionChanged || calls.length > 0 || unreviewableTools || !!pendingResponse} />
           <PricingControls value={pricing} onUpdate={setPricing} disabled={running} />
           <p className="muted playground-default-note">Leave optional settings blank to use provider defaults.</p>
         </section>
       </aside>
       <div className="playground-main-panel">
         <form className="playground-conversation-card" onSubmit={submit}>
-          <div className="playground-output-heading"><div><h2>Conversation</h2><span className="muted">Session <code>{activeSessionID}</code></span></div><div className="playground-actions"><GatewayButton view="outlined" disabled={running} onClick={newSession}>Clear</GatewayButton><GatewayButton view="outlined" disabled={running || !!pendingResponse || !model.trim()} onClick={getCode}>Get code</GatewayButton></div></div>
+          <div className="playground-output-heading"><div><h2>Conversation</h2><span className="muted">Session <code>{activeSessionID}</code></span></div><div className="playground-actions"><GatewayButton view="outlined" disabled={running} onClick={newSession}>Clear</GatewayButton><GatewayButton view="outlined" disabled={running || unreviewableTools || !!pendingResponse || !model.trim()} onClick={getCode}>Get code</GatewayButton></div></div>
           <label htmlFor="playground-instructions">System instructions<GravityThemeScope className="gravity-playground-control"><TextArea id="playground-instructions" controlProps={{ "aria-label": "Instructions" }} size="l" disabled={running} rows={2} value={instructions} onUpdate={setInstructions} placeholder="Optional system instructions" /></GravityThemeScope></label>
           <section className="playground-output" aria-label="Playground conversation">
             {!transcript.length && !pendingOutput && !pendingResponse && <div className="playground-empty"><h3>Start a conversation</h3><p>Choose a model and send a prompt. Conversation content stays in memory.</p><div className="playground-suggestions">{["Explain a complex idea simply", "Draft a short project update", "Review a function for edge cases"].map((prompt) => <button type="button" key={prompt} disabled={running} onClick={() => setMessage(prompt)}>{prompt}</button>)}</div></div>}
             <div className="playground-transcript">{transcript.map((turn) => <article className={`playground-turn ${turn.role}`} key={turn.id}><strong>{turn.role === "user" ? "User" : turn.role === "tool" ? "Tool result" : "Assistant"}</strong><pre>{turn.content || "No text output"}</pre>{turn.reasoning && <details><summary>Reasoning</summary><pre>{turn.reasoning}</pre></details>}{turn.role === "assistant" && <><CopyOutput label={`Copy response ${turn.id}`} text={turn.content} /><OutputDetails payload={turn.response || turn.wire} /></>}{turn.response && <details><summary>Response details</summary><pre>{JSON.stringify(turn.response, null, 2).slice(0, 65536)}</pre></details>}</article>)}{pendingResponse?.turns.map((turn) => <article className={`playground-turn ${turn.role}`} key={turn.id}><strong>{turn.role === "user" ? "User" : "Tool result"}</strong><pre>{turn.content}</pre></article>)}{pendingOutput && <article className={`playground-turn assistant${running ? " streaming" : ""}`}><strong>Assistant <span>{running ? "streaming" : "partial response"}</span></strong><pre>{pendingOutput}</pre></article>}</div>
           </section>
           {pendingResponse && <section aria-label="Background response"><p role="status">Response {pendingResponse.result.id} · {String(pendingResponse.result.response.status)}</p><p className="muted">The server is still executing. Refresh or cancel it before starting another turn. Clear removes only browser state and does not cancel server execution.</p><div className="playground-actions"><GatewayButton disabled={running || connectionChanged} onClick={() => void manageResponse("refresh")}>Refresh background response</GatewayButton><GatewayButton view="outlined" disabled={running || connectionChanged} onClick={() => void manageResponse("cancel")}>Cancel background response</GatewayButton></div></section>}
-          <ToolApprovals calls={calls} disabled={running || connectionChanged} onExecute={(index) => void approveTool(index)} onDecline={(index) => setCalls((previous) => previous.map((item, position) => position === index ? { ...item, status: "declined", output: JSON.stringify({ isError: true, error: "User declined tool invocation" }), error: undefined } : item))} onContinue={() => void runConversation()} />
+          <ToolApprovals calls={calls} disabled={running || connectionChanged} onExecute={(index) => void approveTool(index)} onDecline={(index) => setCalls((previous) => previous.map((item, position) => position === index ? decideTool(item, false) : item))} onContinue={() => void runConversation()} />
           {historyDropped > 0 && <p className="muted">{historyDropped} earlier turns were removed from browser history to keep it bounded. {mode === "responses" && apiContinuity ? "API continuation uses the saved response ID." : "New requests include only the retained browser history."}</p>}
-          <label>Images or PDF<input ref={attachmentInput} aria-label="Conversation attachments" type="file" multiple accept="image/png,image/jpeg,image/gif,image/webp,application/pdf" disabled={running || readingAttachments || calls.length > 0 || !!pendingResponse} onChange={async (event) => {
+          <label>Images or PDF<input ref={attachmentInput} aria-label="Conversation attachments" type="file" multiple accept="image/png,image/jpeg,image/gif,image/webp,application/pdf" disabled={running || readingAttachments || calls.length > 0 || unreviewableTools || !!pendingResponse} onChange={async (event) => {
             const files = [...(event.currentTarget.files || [])]; const current = ++attachmentGeneration.current; setAttachments([]); setReadingAttachments(true);
             try { const loaded = await conversationAttachments(files); if (current === attachmentGeneration.current) { setAttachments(loaded); setError(""); } }
             catch (cause) { if (current === attachmentGeneration.current) { if (attachmentInput.current) attachmentInput.current.value = ""; setError(cause instanceof Error ? cause.message : "Attachment failed"); } }
             finally { if (current === attachmentGeneration.current) setReadingAttachments(false); }
           }} /><span className="muted">Up to 5 attachments, 8 MiB total. Model and provider compatibility is checked by the gateway.</span></label>
           {attachments.length > 0 && <div className="playground-actions">{attachments.map((item) => <span key={item.filename}>{item.filename}</span>)}<GatewayButton view="flat" disabled={running} onClick={() => { attachmentGeneration.current++; if (attachmentInput.current) attachmentInput.current.value = ""; setAttachments([]); setReadingAttachments(false); }}>Remove conversation attachments</GatewayButton></div>}
-          <div className="playground-composer"><GravityThemeScope className="gravity-playground-control"><TextArea id="playground-message" controlProps={{ "aria-label": "Message", required: !attachments.length }} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); if (!running) event.currentTarget.form?.requestSubmit(); } }} size="l" disabled={running || calls.length > 0 || !!pendingResponse} rows={4} value={message} onUpdate={setMessage} placeholder="Send a message… Shift+Enter for a new line" /></GravityThemeScope><GatewayButton size="l" type="submit" disabled={running || readingAttachments || connectionChanged || calls.length > 0 || !!pendingResponse || !model.trim() || (!message.trim() && !attachments.length)}>{running ? "Running…" : transcript.length ? "Send message" : "Run request"}</GatewayButton>{running && <GatewayButton type="button" view="outlined" size="l" onClick={() => abortRef.current?.abort()}>Stop</GatewayButton>}</div>
+          <div className="playground-composer"><GravityThemeScope className="gravity-playground-control"><TextArea id="playground-message" controlProps={{ "aria-label": "Message", required: !attachments.length }} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); if (!running) event.currentTarget.form?.requestSubmit(); } }} size="l" disabled={running || calls.length > 0 || unreviewableTools || !!pendingResponse} rows={4} value={message} onUpdate={setMessage} placeholder="Send a message… Shift+Enter for a new line" /></GravityThemeScope><GatewayButton size="l" type="submit" disabled={running || readingAttachments || connectionChanged || calls.length > 0 || unreviewableTools || !!pendingResponse || !model.trim() || (!message.trim() && !attachments.length)}>{running ? "Running…" : transcript.length ? "Send message" : "Run request"}</GatewayButton>{running && <GatewayButton type="button" view="outlined" size="l" onClick={() => abortRef.current?.abort()}>Stop</GatewayButton>}</div>
           {error && <p role="alert" className="form-error">{error}</p>}
         </form>
         <section className="playground-metadata-card"><h2>Response metadata</h2><dl className="playground-metadata">

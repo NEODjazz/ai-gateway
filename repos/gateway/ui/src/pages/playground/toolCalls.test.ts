@@ -1,10 +1,64 @@
 import { APIClient } from "../../api/client";
-import { playgroundConnection } from "./requests";
-import { executeTool, toolInvocations, toolOutputs } from "./toolCalls";
+import { buildTextRequest, defaultGenerationSettings, playgroundConnection } from "./requests";
+import { decideTool, executeTool, toolInvocations, toolOutputs, validateToolContinuation } from "./toolCalls";
 const selected = [{ serverID: "weather", name: "forecast", inputSchema: {} }];
 const response = (id = "call_1", args = '{}', name = "forecast") => ({ choices: [{ message: { tool_calls: [{ id, type: "function", function: { name, arguments: args } }] } }] });
 const connection = playgroundConnection(new APIClient(() => "console-key"), "custom", "test-key", `${window.location.origin}/v1`);
 describe("Playground tool approvals", () => {
+  const nativeTools = [{ type: "mcp", server_label: "documents", server_url: "https://mcp.example.test", allowed_tools: ["document.search"], require_approval: "always" }];
+  const approval = { type: "mcp_approval_request", id: "approval_1", name: "document.search", server_label: "documents", arguments: '{"id":9007199254740993}' };
+  it.each([true, false])("retains the native approval ID and explicit decision %s in both continuity modes", async (approved) => {
+    const [call] = toolInvocations("responses", { output: [approval] }, [], nativeTools);
+    expect(call.nativeApproval).toMatchObject({ serverLabel: "documents", serverURL: "https://mcp.example.test" });
+    expect(call.rawArguments).toBe(approval.arguments); expect(() => toolOutputs([call])).toThrow("Resolve every");
+    const fetch = vi.spyOn(globalThis, "fetch");
+    await expect(executeTool(connection, call, new AbortController().signal)).rejects.toThrow("cannot be executed");
+    const decided = decideTool(call, approved), output = { type: "mcp_approval_response", approval_request_id: approval.id, approve: approved };
+    expect(decided.status).toBe(approved ? "approved" : "declined");
+    for (const previousResponseID of ["resp_1", ""]) {
+      const body = buildTextRequest({ endpoint: "responses", model: "model", history: [{ role: "assistant", content: "", responseItems: [approval] }], toolOutputs: toolOutputs([decided]), previousResponseID, instructions: "", streaming: false, settings: defaultGenerationSettings });
+      expect(body.input).toEqual(previousResponseID ? [output] : [approval, output]);
+    }
+    expect(fetch).not.toHaveBeenCalled();
+    expect(decideTool(decided, !approved).approved).toBe(!approved);
+  });
+  it.each([
+    { ...approval, id: "../unsafe" }, { ...approval, name: "" }, { ...approval, name: "x\n" },
+    { ...approval, server_label: "" }, { ...approval, server_label: "foreign" }, { ...approval, name: "document.delete" }
+  ])("rejects native approval identities or calls outside the submitted connection", (item) => {
+    expect(() => toolInvocations("responses", { output: [item] }, [], nativeTools)).toThrow();
+  });
+  it("rejects duplicate, ambiguous and excessive mixed approval batches", () => {
+    expect(() => toolInvocations("responses", { output: [approval, approval] }, [], nativeTools)).toThrow("duplicate");
+    expect(() => toolInvocations("responses", { output: [approval] }, [], [...nativeTools, ...nativeTools])).toThrow("submitted request");
+    expect(() => toolInvocations("responses", { output: [approval] }, [])).toThrow("submitted request");
+    const functions = Array.from({ length: 32 }, (_, n) => ({ type: "function_call", call_id: `call_${n}`, name: "forecast", arguments: "{}" }));
+    expect(() => toolInvocations("responses", { output: [...functions, approval] }, selected, nativeTools)).toThrow("32");
+  });
+  it("requires all native and direct function choices while preserving distinct output types", () => {
+    const calls = toolInvocations("responses", { output: [approval, { type: "function_call", call_id: "function_1", name: "forecast", arguments: "{}" }] }, selected, nativeTools);
+    expect(() => toolOutputs([decideTool(calls[0], false), calls[1]])).toThrow("Resolve every");
+    expect(toolOutputs([decideTool(calls[0], false), decideTool(calls[1], false)])).toEqual([
+      expect.objectContaining({ responseItems: [{ type: "mcp_approval_response", approval_request_id: "approval_1", approve: false }] }),
+      expect.objectContaining({ tool_call_id: "function_1" })
+    ]);
+    expect(() => decideTool(calls[1], true)).toThrow("explicit execution");
+    expect(() => toolOutputs([{ ...calls[0], output: "untyped result" }])).toThrow("Resolve every MCP");
+  });
+  it.each(["null", "[]", "broken", JSON.stringify({ text: "x".repeat(65536) })])("allows only declining malformed native arguments", (argumentsJSON) => {
+    const [call] = toolInvocations("responses", { output: [{ ...approval, arguments: argumentsJSON }] }, [], nativeTools);
+    expect(call.issue).toBeTruthy(); expect(() => decideTool(call, true)).toThrow("only be declined");
+    expect(toolOutputs([decideTool(call, false)])[0].responseItems).toEqual([{ type: "mcp_approval_response", approval_request_id: "approval_1", approve: false }]);
+    expect(() => toolOutputs([{ ...call, approved: true, output: "wrong" }])).toThrow("Resolve every MCP");
+  });
+  it("prevents replacing, dropping or changing the reviewed MCP connection before continuation", () => {
+    const calls = toolInvocations("responses", { output: [approval] }, [], nativeTools);
+    expect(() => validateToolContinuation(calls, nativeTools)).not.toThrow();
+    expect(() => validateToolContinuation(calls, [{ type: "function", name: "forecast" }, ...nativeTools])).not.toThrow();
+    for (const changed of [undefined, [], [...nativeTools, ...nativeTools], [{ ...nativeTools[0], server_url: "https://other.example.test" }], [{ ...nativeTools[0], require_approval: "never" }]]) {
+      expect(() => validateToolContinuation(calls, changed)).toThrow("connection changed");
+    }
+  });
   it("binds functions only to selected tools, retaining server, arguments and a stable idempotency key", () => {
     const [call] = toolInvocations("chat", response("call_1", '{"city":"Rome"}'), selected);
     expect(call).toMatchObject({ id: "call_1", serverID: "weather", name: "forecast", arguments: { city: "Rome" }, status: "pending" });
