@@ -85,6 +85,7 @@ export function buildTextRequest({ endpoint, model, input, instructions, history
   for (const name of Object.keys(extras)) {
     if (protectedParameters.has(name)) throw new Error(`Configure ${name} with its dedicated control; advanced parameters cannot override it.`);
   }
+  if (endpoint === "responses" && extras.background === true && streaming) throw new Error("Disable Stream response to run a background response.");
   const format: Record<string, unknown> = { type: settings.responseFormat };
   if (settings.responseFormat === "json_schema") {
     const schema = jsonObject(settings.schema, "Output JSON schema");

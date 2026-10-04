@@ -9,6 +9,10 @@ describe("Playground requests", () => {
     expect(request("responses")).toMatchObject({ max_output_tokens: 256, input: "hello", instructions: "Be concise" });
     expect(request("responses")).not.toHaveProperty("max_completion_tokens");
   });
+  it("requires non-streaming background Responses without silently changing the wire request", () => {
+    expect(() => request("responses", { advanced: '{"background":true}' })).toThrow("Disable Stream response");
+    expect(request("responses", { advanced: '{"background":true}' }, { streaming: false })).toMatchObject({ background: true, stream: false });
+  });
   it("leaves optional provider defaults out and preserves zero sampling values", () => {
     const omitted = request("chat", { maxTokens: " ", temperature: "", topP: "" });
     expect(omitted).not.toHaveProperty("max_completion_tokens"); expect(omitted).not.toHaveProperty("temperature");

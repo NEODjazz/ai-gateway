@@ -19,6 +19,59 @@ function streamResponse(chunks: string[]) {
 }
 
 describe("PlaygroundPage", () => {
+  it("blocks new turns for queued Responses, preserves failed refreshes and commits final output once", async () => {
+    let inference = 0, reads = 0;
+    const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json" } });
+    const mock = vi.spyOn(globalThis, "fetch").mockImplementation(async (path) => {
+      if (path === "/v1/models") return json({ data: [{ id: "model" }] });
+      if (path === "/v1/responses/resp_job") {
+        reads++; return reads === 1 ? json({ error: { message: "Read unavailable" } }, 503) : reads === 2 ? json({ id: "resp_job", status: "in_progress" }) : json({ id: "resp_job", status: "completed", output_text: "Final job answer", usage: { input_tokens: 0, output_tokens: 3 } });
+      }
+      inference++; return inference === 1 ? json({ id: "resp_job", status: "queued", usage: { input_tokens: 0, output_tokens: 0 } }) : json({ id: "resp_next", status: "completed", output_text: "Next answer" });
+    });
+    authenticated(); await screen.findByText("1 authorized model"); await userEvent.click(screen.getByRole("tab", { name: "Responses API" }));
+    await userEvent.click(screen.getByLabelText("Stream response")); await userEvent.click(screen.getByText("Advanced parameters"));
+    fireEvent.change(screen.getByLabelText("Advanced parameters JSON"), { target: { value: '{"background":true}' } });
+    await userEvent.type(screen.getByLabelText("Message"), "Original job prompt"); await userEvent.click(screen.getByRole("button", { name: "Run request" }));
+    expect(await screen.findByRole("region", { name: "Background response" })).toHaveTextContent("queued"); expect(screen.getByLabelText("Message")).toBeDisabled();
+    expect(screen.queryByText("No text output")).not.toBeInTheDocument(); expect(screen.getByText("Input tokens").nextElementSibling).toHaveTextContent("—");
+    await userEvent.click(screen.getByRole("button", { name: "Refresh background response" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Read unavailable"); expect(screen.getByRole("region", { name: "Background response" })).toHaveTextContent("queued");
+    await userEvent.click(screen.getByRole("button", { name: "Refresh background response" })); await waitFor(() => expect(screen.getByRole("region", { name: "Background response" })).toHaveTextContent("in_progress"));
+    await userEvent.click(screen.getByRole("button", { name: "Refresh background response" })); await screen.findByText("Final job answer");
+    expect(screen.getAllByText("Original job prompt")).toHaveLength(1); expect(screen.queryByRole("region", { name: "Background response" })).not.toBeInTheDocument();
+    expect(screen.getByText("Input tokens").nextElementSibling).toHaveTextContent("0");
+    await userEvent.type(screen.getByLabelText("Message"), "Follow up"); await userEvent.click(screen.getByRole("button", { name: "Send message" })); await screen.findByText("Next answer");
+    const requests = mock.mock.calls.filter(([path]) => path === "/v1/responses"); expect(requests).toHaveLength(2);
+    expect(JSON.parse(String(requests[1][1]?.body))).toMatchObject({ previous_response_id: "resp_job" });
+  });
+  it("cancels a known background job explicitly and preserves cancellation status and usage", async () => {
+    const json = (value: unknown) => new Response(JSON.stringify(value), { headers: { "Content-Type": "application/json" } });
+    const mock = vi.spyOn(globalThis, "fetch").mockImplementation(async (path) => path === "/v1/models" ? json({ data: [{ id: "model" }] }) : String(path).endsWith("/cancel") ? json({ id: "resp_job", status: "cancelled", usage: { input_tokens: 2, output_tokens: 0 } }) : json({ id: "resp_job", status: "queued" }));
+    authenticated(); await screen.findByText("1 authorized model"); await userEvent.click(screen.getByRole("tab", { name: "Responses API" }));
+    await userEvent.type(screen.getByLabelText("Message"), "Job"); await userEvent.click(screen.getByRole("button", { name: "Run request" })); await screen.findByRole("region", { name: "Background response" });
+    await userEvent.click(screen.getByRole("button", { name: "Cancel background response" })); expect(await screen.findByRole("alert")).toHaveTextContent("cancelled"); expect(screen.getByLabelText("Message")).toBeEnabled();
+    const call = mock.mock.calls.find(([path]) => path === "/v1/responses/resp_job/cancel")!; expect(call[1]?.method).toBe("POST"); expect(call[1]?.body).toBeUndefined();
+    expect(screen.getByText("Output tokens").nextElementSibling).toHaveTextContent("0");
+  });
+  it("keeps a cancellation acknowledgement pending until the server reports a terminal status", async () => {
+    const json = (value: unknown) => new Response(JSON.stringify(value), { headers: { "Content-Type": "application/json" } });
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (path) => path === "/v1/models" ? json({ data: [{ id: "model" }] }) : String(path).endsWith("/cancel") ? json({ id: "resp_job", status: "in_progress" }) : path === "/v1/responses/resp_job" ? json({ id: "resp_job", status: "cancelled" }) : json({ id: "resp_job", status: "queued" }));
+    authenticated(); await screen.findByText("1 authorized model"); await userEvent.click(screen.getByRole("tab", { name: "Responses API" }));
+    await userEvent.type(screen.getByLabelText("Message"), "Job"); await userEvent.click(screen.getByRole("button", { name: "Run request" })); await screen.findByRole("region", { name: "Background response" });
+    await userEvent.click(screen.getByRole("button", { name: "Cancel background response" })); await waitFor(() => expect(screen.getByRole("region", { name: "Background response" })).toHaveTextContent("in_progress"));
+    expect(screen.getByLabelText("Message")).toBeDisabled(); await userEvent.click(screen.getByRole("button", { name: "Refresh background response" })); expect(await screen.findByRole("alert")).toHaveTextContent("cancelled"); expect(screen.getByLabelText("Message")).toBeEnabled();
+  });
+  it("ignores a late lifecycle read after clearing the conversation", async () => {
+    let resolve!: (value: Response) => void;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (path) => path === "/v1/models" ? new Response('{"data":[{"id":"model"}]}') : String(path).includes("resp_job") ? new Promise((done) => resolve = done) : new Response('{"id":"resp_job","status":"queued"}', { headers: { "Content-Type": "application/json" } }));
+    authenticated(); await screen.findByText("1 authorized model"); await userEvent.click(screen.getByRole("tab", { name: "Responses API" }));
+    await userEvent.type(screen.getByLabelText("Message"), "Job"); await userEvent.click(screen.getByRole("button", { name: "Run request" })); await screen.findByRole("region", { name: "Background response" });
+    await userEvent.click(screen.getByRole("button", { name: "Refresh background response" }));
+    await userEvent.click(screen.getByLabelText("Endpoint")); await userEvent.click(screen.getByRole("option", { name: "/v1/chat/completions" }));
+    await act(async () => resolve(new Response('{"id":"resp_job","status":"completed","output_text":"Private late answer"}')));
+    expect(screen.queryByText("Private late answer")).not.toBeInTheDocument(); expect(screen.queryByRole("region", { name: "Background response" })).not.toBeInTheDocument();
+  });
   it.each(["chat", "responses-api", "responses-browser"])("requires approval and continues %s with typed results and no phantom user", async (variant) => {
     const endpoint = variant === "chat" ? "chat" : "responses";
     let inference = 0, toolAttempts = 0;

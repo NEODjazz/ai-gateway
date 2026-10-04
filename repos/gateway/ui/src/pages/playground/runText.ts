@@ -7,7 +7,7 @@ export type ReportedUsage = {
 };
 export type TextRun = {
   text: string; reasoning: string; id?: string; model: string; usage?: ReportedUsage; response: Record<string, unknown>;
-  streamed: boolean; latencyMS: number; firstTokenMS?: number; events: SSEEvent[]; eventCount: number;
+  streamed: boolean; lifecycle?: true; latencyMS: number; firstTokenMS?: number; events: SSEEvent[]; eventCount: number;
 };
 
 const maxEvents = 50;
@@ -37,6 +37,35 @@ function responseError(payload: Record<string, unknown>, event = ""): void {
   throw new Error(typeof message === "string" ? message : typeof failure === "string" ? failure : "Streaming request failed");
 }
 
+export function responsePending(response: Record<string, unknown>): boolean {
+  return response.status === "queued" || response.status === "in_progress";
+}
+function responsePath(id: unknown): string {
+  if (typeof id !== "string" || !/^[A-Za-z0-9_-]{1,256}$/.test(id)) throw new Error("Response lifecycle requires a valid response ID.");
+  return `/v1/responses/${encodeURIComponent(id)}`;
+}
+function textResponseFields(payload: Record<string, unknown>, endpoint: TextEndpoint): { text: string; reasoning: string } {
+  if (!object(payload)) throw new Error("Invalid response: expected a JSON object");
+  if (JSON.stringify(payload).length > maxOutputCharacters) throw new Error("Structured response exceeds the 2 MiB Playground limit.");
+  const message = object((Array.isArray(payload.choices) ? object(payload.choices[0]) : undefined)?.message);
+  const text = endpoint === "chat" ? (contentText(message?.content) || contentText(message?.refusal)) : typeof payload.output_text === "string" ? payload.output_text : contentText(payload.output);
+  const reasoning = contentText(message?.reasoning_content || message?.reasoning) || (endpoint === "responses" && Array.isArray(payload.output) ? payload.output.filter((item) => object(item)?.type === "reasoning").map((item) => contentText(object(item)?.summary)).filter(Boolean).join("\n") : "");
+  if (text.length + reasoning.length > maxOutputCharacters) throw new Error("Text output exceeds the 2 MiB Playground limit.");
+  if (endpoint === "responses" && responsePending(payload)) responsePath(payload.id);
+  return { text, reasoning };
+}
+export async function runResponseResource(connection: PlaygroundConnection, id: string, operation: "refresh" | "cancel", signal: AbortSignal, sessionID: string): Promise<TextRun> {
+  const start = performance.now(), path = responsePath(id);
+  const response = await connection.client.request<Record<string, unknown>>(connection.path(path + (operation === "cancel" ? "/cancel" : "")), {
+    method: operation === "cancel" ? "POST" : "GET", cache: "no-store", signal, maximumResponseBytes: maxOutputCharacters, headers: { "X-Session-ID": sessionID },
+  });
+  if (signal.aborted) throw new DOMException("Request cancelled", "AbortError");
+  if (!object(response) || response.id !== id || !["queued", "in_progress", "completed", "incomplete", "failed", "cancelled"].includes(String(response.status))) throw new Error("Response lifecycle returned a mismatching ID or invalid status.");
+  if (response.status !== "failed") responseError(response);
+  const fields = textResponseFields(response, "responses");
+  return { ...fields, response, id, model: typeof response.model === "string" ? response.model : "", usage: object(response.usage) as ReportedUsage | undefined, streamed: false, lifecycle: true, latencyMS: performance.now() - start, events: [], eventCount: 0 };
+}
+
 function boundedEvent(event: SSEEvent): SSEEvent {
   return { event: event.event, data: event.data.length > maxDisplayedEventCharacters ? `${event.data.slice(0, maxDisplayedEventCharacters)}\n… (event display truncated)` : event.data };
 }
@@ -62,12 +91,8 @@ export async function runText(connection: PlaygroundConnection, endpoint: TextEn
     ensureActive();
     if (!object(payload)) throw new Error("Invalid response: expected a JSON object");
     responseError(payload);
-    if (JSON.stringify(payload).length > maxOutputCharacters) throw new Error("Structured response exceeds the 2 MiB Playground limit.");
-    response = payload;
-    const message = object((Array.isArray(payload.choices) ? object(payload.choices[0]) : undefined)?.message);
-    text = endpoint === "chat" ? (contentText(message?.content) || contentText(message?.refusal)) : typeof payload.output_text === "string" ? payload.output_text : contentText(payload.output);
-    if (text.length > maxOutputCharacters) throw new Error("Text output exceeds the 2 MiB Playground limit.");
-    reasoning = contentText(message?.reasoning_content || message?.reasoning) || (endpoint === "responses" && Array.isArray(payload.output) ? payload.output.filter((item) => object(item)?.type === "reasoning").map((item) => contentText(object(item)?.summary)).filter(Boolean).join("\n") : "");
+    const fields = textResponseFields(payload, endpoint);
+    response = payload; text = fields.text; reasoning = fields.reasoning;
     onText(text);
   };
   const options = { maximumResponseBytes: 32 * 1024 * 1024, method: "POST", body, signal, headers: { "X-Session-ID": sessionID } };

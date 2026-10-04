@@ -24,7 +24,7 @@ import { executeTool, toolInvocations, toolOutputs, type ToolInvocation } from "
 import { CopyOutput, OutputDetails } from "./playground/OutputDetails";
 import { ToolApprovals } from "./playground/ToolApprovals";
 import { CodeDialog } from "./playground/CodeDialog";
-import { runText, type TextRun } from "./playground/runText";
+import { responsePending, runResponseResource, runText, type TextRun } from "./playground/runText";
 import { buildTextRequest, playgroundConnection, textEndpointPaths, type GenerationSettings, type KeySource, type Message } from "./playground/requests";
 
 type PlaygroundMode = "chat" | "responses";
@@ -82,6 +82,7 @@ export function PlaygroundPage() {
   const [running, setRunning] = useState(false);
   const [activeSessionID, setActiveSessionID] = useState(sessionID);
   const [previousResponseID, setPreviousResponseID] = useState("");
+  const [pendingResponse, setPendingResponse] = useState<{ result: TextRun; turns: TranscriptTurn[]; prompt?: string; started: number }>();
   const abortRef = useRef<AbortController | undefined>(undefined);
   const modelAbortRef = useRef<AbortController | undefined>(undefined);
   const modelGeneration = useRef(0);
@@ -113,7 +114,7 @@ export function PlaygroundPage() {
     abortRef.current = undefined; setRunning(false);
     attachmentGeneration.current++; if (attachmentInput.current) attachmentInput.current.value = ""; setAttachments([]); setReadingAttachments(false); setHistoryDropped(0);
     setCalls([]); setToolPrompt(""); setTranscript([]); setPendingOutput(""); setMetadata(undefined); setEvents([]); setEventCount(0); setError("");
-    setPreviousResponseID(""); setActiveSessionID(sessionID());
+    setPreviousResponseID(""); setPendingResponse(undefined); setActiveSessionID(sessionID());
     turnID.current = 0;
   }
 
@@ -155,6 +156,7 @@ export function PlaygroundPage() {
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (connectionChanged) { setError("Apply connection changes before sending a request."); return; }
+    if (pendingResponse) { setError("Refresh or cancel the pending background response before sending a new message."); return; }
     if (calls.length) { setError("Resolve the pending tool calls and continue before sending a new message."); return; }
     const input = message.trim();
     if (running || readingAttachments || !model.trim() || (!input && !attachments.length)) return;
@@ -162,7 +164,8 @@ export function PlaygroundPage() {
   }
 
   async function runConversation(input?: string) {
-    if (running || connectionChanged) return;
+    if (running || pendingResponse || connectionChanged || abortRef.current) return;
+    const started = performance.now();
     const controller = new AbortController();
     abortRef.current = controller;
     setRunning(true); setError(""); setPendingOutput(""); setMetadata(undefined); setEvents([]); setEventCount(0);
@@ -172,18 +175,12 @@ export function PlaygroundPage() {
       const result = await runText(connection, mode, body, { signal: controller.signal, sessionID: activeSessionID,
         onText: (text) => { if (abortRef.current === controller && !controller.signal.aborted) setPendingOutput(text); } });
       if (abortRef.current !== controller || controller.signal.aborted) return;
-      const invocations = toolInvocations(mode, result.response, resources.tools);
       const submittedTurns: TranscriptTurn[] = input === undefined ? toolOutputs(calls).map((wire) => ({ id: ++turnID.current, role: "tool", content: String(wire.content), wire })) : [{ id: ++turnID.current, role: "user", content: input + (attachments.length ? `\nAttachments: ${attachments.map((item) => item.filename).join(", ")}` : ""), wire: { role: "user", content: conversationInput(input, attachments) } }];
-      const choice = (result.response.choices as { message?: Message }[] | undefined)?.[0]?.message;
-      const assistantTurn: TranscriptTurn = { id: ++turnID.current, role: "assistant", content: result.text, reasoning: result.reasoning, response: result.response,
-        wire: { ...choice, role: "assistant", content: mode === "responses" && Array.isArray(result.response.output) ? "" : choice?.content ?? result.text, ...(mode === "responses" && Array.isArray(result.response.output) ? { responseItems: result.response.output } : {}) } };
-      const retained = retainConversation([...transcript, ...submittedTurns, assistantTurn]);
-      if (mode === "responses" && result.id) setPreviousResponseID(result.id);
-      setCalls(invocations); if (input !== undefined) setToolPrompt(input);
-      setTranscript(retained.turns); setHistoryDropped((value) => value + retained.dropped); setAttachments([]); if (attachmentInput.current) attachmentInput.current.value = "";
-      setPendingOutput(""); setMetadata(result); setMessage("");
-      if ("events" in result && Array.isArray(result.events)) setEvents(result.events as SSEEvent[]);
-      if ("eventCount" in result && typeof result.eventCount === "number") setEventCount(result.eventCount);
+      if (mode === "responses" && responsePending(result.response)) {
+        setPendingResponse({ result, turns: submittedTurns, prompt: input, started });
+        setCalls([]); setMetadata(result); setPendingOutput(result.text); setMessage("");
+        setAttachments([]); if (attachmentInput.current) attachmentInput.current.value = "";
+      } else finishConversation(result, submittedTurns, input);
     } catch (cause) {
       if (abortRef.current !== controller) return;
       const aborted = cause && typeof cause === "object" && "name" in cause && cause.name === "AbortError";
@@ -191,6 +188,40 @@ export function PlaygroundPage() {
     } finally {
       if (abortRef.current === controller) { abortRef.current = undefined; setRunning(false); }
     }
+  }
+
+  function finishConversation(result: TextRun, turns: TranscriptTurn[], input?: string) {
+    const invocations = toolInvocations(mode, result.response, resources.tools);
+    const choice = (result.response.choices as { message?: Message }[] | undefined)?.[0]?.message;
+    const assistantTurn: TranscriptTurn = { id: ++turnID.current, role: "assistant", content: result.text, reasoning: result.reasoning, response: result.response,
+      wire: { ...choice, role: "assistant", content: mode === "responses" && Array.isArray(result.response.output) ? "" : choice?.content ?? result.text, ...(mode === "responses" && Array.isArray(result.response.output) ? { responseItems: result.response.output } : {}) } };
+    const retained = retainConversation([...transcript, ...turns, assistantTurn]);
+    if (mode === "responses" && result.id) setPreviousResponseID(result.id);
+    setCalls(invocations); if (input !== undefined) setToolPrompt(input);
+    setTranscript(retained.turns); setHistoryDropped((value) => value + retained.dropped); setAttachments([]); if (attachmentInput.current) attachmentInput.current.value = "";
+    setPendingOutput(""); setMetadata(result); setMessage("");
+    if ("events" in result && Array.isArray(result.events)) setEvents(result.events as SSEEvent[]);
+    if ("eventCount" in result && typeof result.eventCount === "number") setEventCount(result.eventCount);
+    setPendingResponse(undefined);
+    if (mode === "responses" && ["failed", "cancelled", "incomplete"].includes(String(result.response.status))) {
+      const failure = result.response.error as { message?: unknown } | undefined;
+      setError(`Response ${String(result.response.status)}. ${typeof failure?.message === "string" ? failure.message : "Inspect finalized usage before retrying."}`);
+    }
+  }
+  async function manageResponse(operation: "refresh" | "cancel") {
+    if (!pendingResponse || running || connectionChanged || abortRef.current) return;
+    const job = pendingResponse, controller = new AbortController(); abortRef.current = controller;
+    setRunning(true); setError("");
+    try {
+      const result = await runResponseResource(connection, job.result.id!, operation, controller.signal, activeSessionID);
+      if (abortRef.current !== controller || controller.signal.aborted) return;
+      result.latencyMS = performance.now() - job.started;
+      result.model ||= job.result.model;
+      if (responsePending(result.response)) { setPendingResponse({ ...job, result }); setMetadata(result); setPendingOutput(result.text); }
+      else finishConversation(result, job.turns, job.prompt);
+    } catch (cause) {
+      if (abortRef.current === controller) setError(controller.signal.aborted ? "Response operation cancelled locally. Server execution may still be active; refresh before retrying." : cause instanceof Error ? cause.message : "Response operation failed.");
+    } finally { if (abortRef.current === controller) { abortRef.current = undefined; setRunning(false); } }
   }
 
   async function approveTool(index: number) {
@@ -205,7 +236,7 @@ export function PlaygroundPage() {
     } finally { if (abortRef.current === controller) { abortRef.current = undefined; setRunning(false); } }
   }
 
-  const usage = metadata?.usage;
+  const usage = pendingResponse ? undefined : metadata?.usage;
   const inputTokens = usage?.prompt_tokens ?? usage?.input_tokens;
   const outputTokens = usage?.completion_tokens ?? usage?.output_tokens;
   const tokenCount = usage?.total_tokens ?? (inputTokens === undefined && outputTokens === undefined ? undefined : (inputTokens ?? 0) + (outputTokens ?? 0));
@@ -243,37 +274,39 @@ export function PlaygroundPage() {
           {responseFormat === "json_schema" && <AreaControl label="Output JSON schema" rows={5} disabled={running} value={schema} onUpdate={setSchema} placeholder='{ "type": "object", "properties": {} }' />}
           <GravityThemeScope className="gravity-playground-control"><Checkbox controlProps={{ "aria-label": "Stream response" }} size="l" disabled={running} checked={streaming} onUpdate={setStreaming}>Stream response</Checkbox></GravityThemeScope>
           {mode === "responses" && <GravityThemeScope className="gravity-playground-control"><Checkbox controlProps={{ "aria-label": "Use API session management" }} disabled={running} checked={apiContinuity} onUpdate={(value) => { setAPIContinuity(value); setPreviousResponseID(""); }}>Use API session management</Checkbox></GravityThemeScope>}
-          <details className="playground-advanced"><summary>Advanced parameters</summary><AreaControl label="Advanced parameters JSON" rows={6} disabled={running} value={advanced} onUpdate={setAdvanced} placeholder='{ "reasoning_effort": "low" }' /><p className="muted">Parameters are sent unchanged. Unsupported settings return a gateway or provider error.</p></details>
-          <ResourceControls connection={connection} model={model} endpoint={mode} value={resources} onUpdate={setResources} disabled={running || connectionChanged || calls.length > 0} />
+          <details className="playground-advanced"><summary>Advanced parameters</summary><AreaControl label="Advanced parameters JSON" rows={6} disabled={running} value={advanced} onUpdate={setAdvanced} placeholder='{ "reasoning_effort": "low" }' /><p className="muted">Parameters are sent unchanged. Unsupported settings return a gateway or provider error. Responses background mode requires {`{ "background": true }`} and streaming disabled.</p></details>
+          <ResourceControls connection={connection} model={model} endpoint={mode} value={resources} onUpdate={setResources} disabled={running || connectionChanged || calls.length > 0 || !!pendingResponse} />
           <PricingControls value={pricing} onUpdate={setPricing} disabled={running} />
           <p className="muted playground-default-note">Leave optional settings blank to use provider defaults.</p>
         </section>
       </aside>
       <div className="playground-main-panel">
         <form className="playground-conversation-card" onSubmit={submit}>
-          <div className="playground-output-heading"><div><h2>Conversation</h2><span className="muted">Session <code>{activeSessionID}</code></span></div><div className="playground-actions"><GatewayButton view="outlined" disabled={running} onClick={newSession}>Clear</GatewayButton><GatewayButton view="outlined" disabled={running || !model.trim()} onClick={getCode}>Get code</GatewayButton></div></div>
+          <div className="playground-output-heading"><div><h2>Conversation</h2><span className="muted">Session <code>{activeSessionID}</code></span></div><div className="playground-actions"><GatewayButton view="outlined" disabled={running} onClick={newSession}>Clear</GatewayButton><GatewayButton view="outlined" disabled={running || !!pendingResponse || !model.trim()} onClick={getCode}>Get code</GatewayButton></div></div>
           <label htmlFor="playground-instructions">System instructions<GravityThemeScope className="gravity-playground-control"><TextArea id="playground-instructions" controlProps={{ "aria-label": "Instructions" }} size="l" disabled={running} rows={2} value={instructions} onUpdate={setInstructions} placeholder="Optional system instructions" /></GravityThemeScope></label>
           <section className="playground-output" aria-label="Playground conversation">
-            {!transcript.length && !pendingOutput && <div className="playground-empty"><h3>Start a conversation</h3><p>Choose a model and send a prompt. Conversation content stays in memory.</p><div className="playground-suggestions">{["Explain a complex idea simply", "Draft a short project update", "Review a function for edge cases"].map((prompt) => <button type="button" key={prompt} disabled={running} onClick={() => setMessage(prompt)}>{prompt}</button>)}</div></div>}
-            <div className="playground-transcript">{transcript.map((turn) => <article className={`playground-turn ${turn.role}`} key={turn.id}><strong>{turn.role === "user" ? "User" : turn.role === "tool" ? "Tool result" : "Assistant"}</strong><pre>{turn.content || "No text output"}</pre>{turn.reasoning && <details><summary>Reasoning</summary><pre>{turn.reasoning}</pre></details>}{turn.role === "assistant" && <><CopyOutput label={`Copy response ${turn.id}`} text={turn.content} /><OutputDetails payload={turn.response || turn.wire} /></>}{turn.response && <details><summary>Response details</summary><pre>{JSON.stringify(turn.response, null, 2).slice(0, 65536)}</pre></details>}</article>)}{pendingOutput && <article className={`playground-turn assistant${running ? " streaming" : ""}`}><strong>Assistant <span>{running ? "streaming" : "partial response"}</span></strong><pre>{pendingOutput}</pre></article>}</div>
+            {!transcript.length && !pendingOutput && !pendingResponse && <div className="playground-empty"><h3>Start a conversation</h3><p>Choose a model and send a prompt. Conversation content stays in memory.</p><div className="playground-suggestions">{["Explain a complex idea simply", "Draft a short project update", "Review a function for edge cases"].map((prompt) => <button type="button" key={prompt} disabled={running} onClick={() => setMessage(prompt)}>{prompt}</button>)}</div></div>}
+            <div className="playground-transcript">{transcript.map((turn) => <article className={`playground-turn ${turn.role}`} key={turn.id}><strong>{turn.role === "user" ? "User" : turn.role === "tool" ? "Tool result" : "Assistant"}</strong><pre>{turn.content || "No text output"}</pre>{turn.reasoning && <details><summary>Reasoning</summary><pre>{turn.reasoning}</pre></details>}{turn.role === "assistant" && <><CopyOutput label={`Copy response ${turn.id}`} text={turn.content} /><OutputDetails payload={turn.response || turn.wire} /></>}{turn.response && <details><summary>Response details</summary><pre>{JSON.stringify(turn.response, null, 2).slice(0, 65536)}</pre></details>}</article>)}{pendingResponse?.turns.map((turn) => <article className={`playground-turn ${turn.role}`} key={turn.id}><strong>{turn.role === "user" ? "User" : "Tool result"}</strong><pre>{turn.content}</pre></article>)}{pendingOutput && <article className={`playground-turn assistant${running ? " streaming" : ""}`}><strong>Assistant <span>{running ? "streaming" : "partial response"}</span></strong><pre>{pendingOutput}</pre></article>}</div>
           </section>
+          {pendingResponse && <section aria-label="Background response"><p role="status">Response {pendingResponse.result.id} · {String(pendingResponse.result.response.status)}</p><p className="muted">The server is still executing. Refresh or cancel it before starting another turn. Clear removes only browser state and does not cancel server execution.</p><div className="playground-actions"><GatewayButton disabled={running || connectionChanged} onClick={() => void manageResponse("refresh")}>Refresh background response</GatewayButton><GatewayButton view="outlined" disabled={running || connectionChanged} onClick={() => void manageResponse("cancel")}>Cancel background response</GatewayButton></div></section>}
           <ToolApprovals calls={calls} disabled={running || connectionChanged} onExecute={(index) => void approveTool(index)} onDecline={(index) => setCalls((previous) => previous.map((item, position) => position === index ? { ...item, status: "declined", output: JSON.stringify({ isError: true, error: "User declined tool invocation" }), error: undefined } : item))} onContinue={() => void runConversation()} />
           {historyDropped > 0 && <p className="muted">{historyDropped} earlier turns were removed from browser history to keep it bounded. {mode === "responses" && apiContinuity ? "API continuation uses the saved response ID." : "New requests include only the retained browser history."}</p>}
-          <label>Images or PDF<input ref={attachmentInput} aria-label="Conversation attachments" type="file" multiple accept="image/png,image/jpeg,image/gif,image/webp,application/pdf" disabled={running || readingAttachments || calls.length > 0} onChange={async (event) => {
+          <label>Images or PDF<input ref={attachmentInput} aria-label="Conversation attachments" type="file" multiple accept="image/png,image/jpeg,image/gif,image/webp,application/pdf" disabled={running || readingAttachments || calls.length > 0 || !!pendingResponse} onChange={async (event) => {
             const files = [...(event.currentTarget.files || [])]; const current = ++attachmentGeneration.current; setAttachments([]); setReadingAttachments(true);
             try { const loaded = await conversationAttachments(files); if (current === attachmentGeneration.current) { setAttachments(loaded); setError(""); } }
             catch (cause) { if (current === attachmentGeneration.current) { if (attachmentInput.current) attachmentInput.current.value = ""; setError(cause instanceof Error ? cause.message : "Attachment failed"); } }
             finally { if (current === attachmentGeneration.current) setReadingAttachments(false); }
           }} /><span className="muted">Up to 5 attachments, 8 MiB total. Model and provider compatibility is checked by the gateway.</span></label>
           {attachments.length > 0 && <div className="playground-actions">{attachments.map((item) => <span key={item.filename}>{item.filename}</span>)}<GatewayButton view="flat" disabled={running} onClick={() => { attachmentGeneration.current++; if (attachmentInput.current) attachmentInput.current.value = ""; setAttachments([]); setReadingAttachments(false); }}>Remove conversation attachments</GatewayButton></div>}
-          <div className="playground-composer"><GravityThemeScope className="gravity-playground-control"><TextArea id="playground-message" controlProps={{ "aria-label": "Message", required: !attachments.length }} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); if (!running) event.currentTarget.form?.requestSubmit(); } }} size="l" disabled={running || calls.length > 0} rows={4} value={message} onUpdate={setMessage} placeholder="Send a message… Shift+Enter for a new line" /></GravityThemeScope><GatewayButton size="l" type="submit" disabled={running || readingAttachments || connectionChanged || calls.length > 0 || !model.trim() || (!message.trim() && !attachments.length)}>{running ? "Running…" : transcript.length ? "Send message" : "Run request"}</GatewayButton>{running && <GatewayButton type="button" view="outlined" size="l" onClick={() => abortRef.current?.abort()}>Stop</GatewayButton>}</div>
+          <div className="playground-composer"><GravityThemeScope className="gravity-playground-control"><TextArea id="playground-message" controlProps={{ "aria-label": "Message", required: !attachments.length }} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); if (!running) event.currentTarget.form?.requestSubmit(); } }} size="l" disabled={running || calls.length > 0 || !!pendingResponse} rows={4} value={message} onUpdate={setMessage} placeholder="Send a message… Shift+Enter for a new line" /></GravityThemeScope><GatewayButton size="l" type="submit" disabled={running || readingAttachments || connectionChanged || calls.length > 0 || !!pendingResponse || !model.trim() || (!message.trim() && !attachments.length)}>{running ? "Running…" : transcript.length ? "Send message" : "Run request"}</GatewayButton>{running && <GatewayButton type="button" view="outlined" size="l" onClick={() => abortRef.current?.abort()}>Stop</GatewayButton>}</div>
           {error && <p role="alert" className="form-error">{error}</p>}
         </form>
         <section className="playground-metadata-card"><h2>Response metadata</h2><dl className="playground-metadata">
           <div><dt>API</dt><dd>{mode === "chat" ? "Chat Completions" : "Responses"}{metadata?.streamed ? " · streamed" : ""}</dd></div>
           <div><dt>Upstream model</dt><dd>{metadata?.model || model || "—"}</dd></div><div><dt>Response ID</dt><dd>{metadata?.id || "—"}</dd></div>
+          <div><dt>Status</dt><dd>{String(metadata?.response.status ?? (metadata ? "Response received" : "—"))}</dd></div>
           <div><dt>Input tokens</dt><dd>{inputTokens ?? "—"}</dd></div><div><dt>Output tokens</dt><dd>{outputTokens ?? "—"}</dd></div><div><dt>Tokens</dt><dd>{tokenCount ?? "—"}</dd></div><div><dt>Reasoning tokens</dt><dd>{usage?.completion_tokens_details?.reasoning_tokens ?? usage?.output_tokens_details?.reasoning_tokens ?? "—"}</dd></div>
-          <div><dt>Total latency</dt><dd>{metadata?.latencyMS === undefined ? "—" : `${Math.round(metadata.latencyMS)} ms`}</dd></div><div><dt>Time to first token</dt><dd>{metadata?.firstTokenMS === undefined ? "—" : `${Math.round(metadata.firstTokenMS)} ms`}</dd></div>
+          <div><dt>{pendingResponse ? "Last observation latency" : metadata?.lifecycle ? "Observed completion latency" : "Total latency"}</dt><dd>{metadata?.latencyMS === undefined ? "—" : `${Math.round(metadata.latencyMS)} ms`}</dd></div><div><dt>Time to first token</dt><dd>{metadata?.firstTokenMS === undefined ? "—" : `${Math.round(metadata.firstTokenMS)} ms`}</dd></div>
           <div><dt>Estimated token cost</dt><dd>{estimateCost(pricing, inputTokens, outputTokens)}</dd></div><div><dt>Finalized cost</dt><dd>See Usage &amp; spend</dd></div>
         </dl>{events.length > 0 && <details className="playground-events"><summary>Stream events ({events.length}{eventCount > events.length ? "+" : ""})</summary><pre>{events.map((item) => `${item.event}: ${item.data}`).join("\n\n")}</pre></details>}</section>
       </div>

@@ -1,6 +1,6 @@
 import { APIClient } from "../../api/client";
 import { playgroundConnection } from "./requests";
-import { runText } from "./runText";
+import { runResponseResource, runText } from "./runText";
 
 function sse(events: unknown[]) {
   const encoder = new TextEncoder();
@@ -13,6 +13,28 @@ const connection = () => playgroundConnection(new APIClient(() => "test-key"), "
 const options = () => ({ signal: new AbortController().signal, sessionID: "test-session" });
 
 describe("Playground text execution", () => {
+  it.each(["refresh", "cancel"] as const)("uses the authenticated %s resource operation without replaying generation", async (operation) => {
+    const mock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response('{"id":"resp_1","status":"completed","output_text":"Final","usage":{"input_tokens":0,"output_tokens":2}}'));
+    const result = await runResponseResource(connection(), "resp_1", operation, options().signal, "test-session");
+    expect(result).toMatchObject({ id: "resp_1", text: "Final", usage: { input_tokens: 0 }, streamed: false });
+    expect(mock.mock.calls[0][0]).toBe(`/v1/responses/resp_1${operation === "cancel" ? "/cancel" : ""}`);
+    expect(mock.mock.calls[0][1]?.method).toBe(operation === "cancel" ? "POST" : "GET");
+    expect(mock.mock.calls[0][1]?.body).toBeUndefined();
+    expect(new Headers(mock.mock.calls[0][1]?.headers).get("Authorization")).toBe("Bearer test-key");
+  });
+  it("retains failed lifecycle status and rejects mismatches, missing identities and late cancelled reads", async () => {
+    const mock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response('{"id":"resp_1","status":"failed","error":{"message":"Upstream failed"}}'));
+    expect(await runResponseResource(connection(), "resp_1", "refresh", options().signal, "test-session")).toMatchObject({ response: { status: "failed", error: { message: "Upstream failed" } } });
+    for (const payload of [{ id: "other", status: "completed" }, { id: "resp_1", status: "unknown" }]) {
+      mock.mockResolvedValueOnce(new Response(JSON.stringify(payload)));
+      await expect(runResponseResource(connection(), "resp_1", "refresh", options().signal, "test-session")).rejects.toThrow("mismatching ID or invalid status");
+    }
+    mock.mockResolvedValueOnce(new Response('{"status":"queued"}'));
+    await expect(runText(connection(), "responses", { model: "model" }, options())).rejects.toThrow("valid response ID");
+    await expect(runResponseResource(connection(), "../bad", "refresh", options().signal, "test-session")).rejects.toThrow("valid response ID");
+    const abort = new AbortController(); mock.mockImplementation(async () => { abort.abort(); return new Response('{}'); });
+    await expect(runResponseResource(connection(), "resp_1", "refresh", abort.signal, "test-session")).rejects.toMatchObject({ name: "AbortError" });
+  });
   it("collects public text, usage-only events and latency independently of reasoning", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(sse([
       { id: "chat-1", choices: [{ delta: { reasoning_content: "Reasoning" } }] },

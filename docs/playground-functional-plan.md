@@ -127,6 +127,10 @@ compatibility must be distinguished from merely having an endpoint selector.
   access occurs before a user action. Credential changes discard late tickets,
   stop tracks and revoke local audio URLs. Partial interrupted output is retained
   with unavailable metrics; provider completion supplies actual token counts.
+- [x] Added background Responses pending state, authenticated resource refresh and
+  explicit cancellation. Pending work blocks new turns; failed or mismatching
+  reads preserve known jobs, late results cannot replace a new conversation, and
+  finalized output is committed once with honest status and usage.
 - [ ] Finish media/tool output, policy selection and full conversation verification.
 - [ ] Complete endpoint-specific execution and media/tool handling.
 - [ ] Complete comparison, compliance and agent views.
@@ -214,3 +218,22 @@ binds its selected dialect inside the encrypted ticket. Current OpenAI-compatibl
 connections omit the legacy beta header. Azure deployment URL and API version
 remain configured by the administrator and must support the selected dialect.
 The native bearer `/v1/realtime` handshake is unchanged.
+
+
+## Background Responses in Playground
+
+Set `{"background": true}` in Responses advanced JSON and disable streaming.
+The selected deployment must support background execution. Queued/in-progress
+responses keep their resource ID and block another turn. Refresh reads that ID;
+Cancel sends the resource cancellation request without resubmitting generation.
+Refresh/cancel errors preserve the known job for another read. Response identity
+and status are checked before updating the conversation. A successful cancellation
+request can still return an active status; the UI waits for a terminal state.
+Pending usage remains unavailable instead of implying finalized zero usage.
+Completion latency after manual refresh includes time until the observation and
+is labelled accordingly; it is not a provider execution timing measurement.
+Clearing, changing model/credential or switching endpoints removes local state
+and ignores late results; it does not automatically cancel server execution.
+
+The pending → in-progress → completed UI was verified in an isolated browser
+preview using synthetic jobs. No real provider or billing call was made.
