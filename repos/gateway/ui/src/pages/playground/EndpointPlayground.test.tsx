@@ -35,11 +35,11 @@ describe("Endpoint Playground", () => {
     await run(); await screen.findByText("Retry succeeded");
     const requests = mock.mock.calls.filter(([path]) => path === "/v1/interactions"); expect(requests).toHaveLength(2); expect(requests[1][1]?.body).toBe(requests[0][1]?.body); expect(screen.queryByRole("region", { name: "Failed interaction output" })).not.toBeInTheDocument();
   });
-  it.each(["messages", "interactions_api", "interactions_browser", "interactions_background", "interactions_api_failed", "interactions_browser_failed"])("preserves exact %s arguments, binds definitions and keeps manual results on retry", async (variant) => {
-    const reportedFailure = variant.endsWith("_failed"); variant = variant.replace("_failed", "");
+  it.each(["messages", "interactions_api", "interactions_browser", "interactions_background", "interactions_api_failed", "interactions_browser_failed", "interactions_api_queued_failed", "interactions_browser_queued_failed"])("preserves exact %s arguments, binds definitions and keeps manual results on retry", async (variant) => {
+    const queuedFailure = variant.endsWith("_queued_failed"), reportedFailure = variant.endsWith("_failed"); variant = variant.replace("_queued_failed", "").replace("_failed", "");
     const endpoint = variant === "messages" ? "messages" : "interactions";
     const tool = endpoint === "messages" ? { name: "query", input_schema: { type: "object", properties: { id: { type: "integer" } } } } : { type: "function", name: "query", parameters: { type: "object", properties: { id: { type: "integer" } } } };
-    const advanced = JSON.stringify({ tools: [tool], ...(variant === "interactions_browser" ? { store: false } : {}), ...(variant === "interactions_background" ? { background: true } : {}) });
+    const advanced = JSON.stringify({ tools: [tool], ...(variant === "interactions_browser" ? { store: false } : {}), ...(variant === "interactions_background" || queuedFailure ? { background: true } : {}) });
     const args = '{ "id":9007199254740993,"amount":0.1234567890123456789012345 }';
     const response = endpoint === "messages" ? `{"content":[{"type":"text","text":"Actual native answer"},{"type":"tool_use","id":"call","name":"query","input":${args}}],"usage":{"input_tokens":8,"output_tokens":3}}`
       : `{"id":"native_job","status":"completed","steps":[{"type":"model_output","content":[{"type":"text","text":"Actual native answer"}]},{"type":"function_call","id":"call","name":"query","arguments":${args}}],"usage":{"total_input_tokens":8,"total_output_tokens":3}}`;
@@ -47,12 +47,13 @@ describe("Endpoint Playground", () => {
     let creates = 0;
     const mock = vi.spyOn(globalThis, "fetch").mockImplementation(async (path) => {
       if (path === "/v1/interactions/native_job") return nativeJSON(response);
+      if (path === "/v1/interactions/interaction_failed_continuation") return nativeJSON({ id: "interaction_failed_continuation", status: "failed", steps: [{ type: "model_output", content: [{ type: "text", text: "Partial native continuation output" }] }], usage: { total_input_tokens: 7, total_output_tokens: 3 }, error: { message: "Native continuation unavailable" } });
       if (path !== `/v1/${endpoint}`) throw new Error("Unexpected direct tool execution");
       return ++creates === 1 ? nativeJSON(variant === "interactions_background" ? { id: "native_job", status: "queued" } : response)
-        : creates === 2 ? reportedFailure ? nativeJSON({ id: "interaction_failed_continuation", status: "failed", steps: [{ type: "model_output", content: [{ type: "text", text: "Partial native continuation output" }] }], usage: { total_input_tokens: 7, total_output_tokens: 3 }, error: { message: "Native continuation unavailable" } }) : new Response('{"error":{"message":"Native continuation unavailable"}}', { status: 503 }) : nativeJSON(final);
+        : creates === 2 ? queuedFailure ? nativeJSON({ id: "interaction_failed_continuation", status: "queued" }) : reportedFailure ? nativeJSON({ id: "interaction_failed_continuation", status: "failed", steps: [{ type: "model_output", content: [{ type: "text", text: "Partial native continuation output" }] }], usage: { total_input_tokens: 7, total_output_tokens: 3 }, error: { message: "Native continuation unavailable" } }) : new Response('{"error":{"message":"Native continuation unavailable"}}', { status: 503 }) : nativeJSON(final);
     });
     setup(endpoint);
-    if (variant === "interactions_background") await userEvent.click(screen.getByLabelText("Stream native response"));
+    if (variant === "interactions_background" || queuedFailure) await userEvent.click(screen.getByLabelText("Stream native response"));
     fireEvent.change(screen.getByLabelText("Endpoint parameters JSON"), { target: { value: advanced } });
     await userEvent.type(screen.getByLabelText("Endpoint input"), "Review native query"); await run();
     if (variant === "interactions_background") {
@@ -75,7 +76,9 @@ describe("Endpoint Playground", () => {
     expect(code).toHaveTextContent("9007199254740993"); if (endpoint === "messages" || variant === "interactions_browser") expect(code).toHaveTextContent("0.1234567890123456789012345"); expect(code).not.toHaveTextContent("test-key");
     await userEvent.click(screen.getByRole("tab", { name: "JavaScript" })); expect(code).not.toHaveTextContent("JSON.stringify(");
     await userEvent.click(screen.getByRole("tab", { name: "Python" })); expect(code).toHaveTextContent("body.encode()"); await userEvent.keyboard("{Escape}");
-    await userEvent.click(screen.getByRole("button", { name: "Continue native tool results" })); expect(await screen.findByRole("alert")).toHaveTextContent("Native continuation unavailable");
+    await userEvent.click(screen.getByRole("button", { name: "Continue native tool results" }));
+    if (queuedFailure) { await screen.findByRole("region", { name: "Background interaction" }); expect(screen.queryByRole("region", { name: "Native tool results" })).not.toBeInTheDocument(); expect(creates).toBe(2); await userEvent.click(screen.getByRole("button", { name: "Refresh background interaction" })); }
+    expect(await screen.findByRole("alert")).toHaveTextContent("Native continuation unavailable");
     expect(screen.getByLabelText("Tool result call")).toHaveValue('rows: 9007199254740993\n<not-json>');
     if (reportedFailure) { expect(screen.getByRole("region", { name: "Failed interaction output" })).toHaveTextContent("Partial native continuation output"); expect(screen.getByText("Input tokens").nextElementSibling).toHaveTextContent("7"); }
     await userEvent.click(screen.getByRole("button", { name: "Continue native tool results" })); await screen.findByText("Native result received");

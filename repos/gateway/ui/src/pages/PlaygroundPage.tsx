@@ -84,7 +84,7 @@ export function PlaygroundPage() {
   const [running, setRunning] = useState(false);
   const [activeSessionID, setActiveSessionID] = useState(sessionID);
   const [previousResponseID, setPreviousResponseID] = useState("");
-  const [pendingResponse, setPendingResponse] = useState<{ result: TextRun; turns: TranscriptTurn[]; prompt?: string; started: number; tools: unknown; attachments: Attachment[] }>();
+  const [pendingResponse, setPendingResponse] = useState<{ result: TextRun; turns: TranscriptTurn[]; prompt?: string; started: number; tools: unknown; attachments: Attachment[]; calls: ToolInvocation[] }>();
   const abortRef = useRef<AbortController | undefined>(undefined);
   const modelAbortRef = useRef<AbortController | undefined>(undefined);
   const modelGeneration = useRef(0);
@@ -188,7 +188,7 @@ export function PlaygroundPage() {
       if (abortRef.current !== controller || controller.signal.aborted) return;
       const submittedTurns: TranscriptTurn[] = input === undefined ? toolOutputs(calls).map((wire) => ({ id: ++turnID.current, role: "tool", content: String(wire.content), wire })) : [{ id: ++turnID.current, role: "user", content: input + (attachments.length ? `\nAttachments: ${attachments.map((item) => item.filename).join(", ")}` : ""), wire: { role: "user", content: conversationInput(input, attachments) } }];
       if (mode === "responses" && responsePending(result.response)) {
-        setPendingResponse({ result, turns: submittedTurns, prompt: input, started, tools: body.tools, attachments });
+        setPendingResponse({ result, turns: submittedTurns, prompt: input, started, tools: body.tools, attachments, calls });
         setCalls([]); setMetadata(result); setPendingOutput(result.text); setMessage("");
         setAttachments([]); if (attachmentInput.current) attachmentInput.current.value = "";
       } else finishConversation(result, submittedTurns, input, body.tools);
@@ -206,9 +206,10 @@ export function PlaygroundPage() {
     if (mode === "responses" && result.response.status === "failed") {
       setPendingOutput(""); setMetadata(result); setEvents(result.events); setEventCount(result.eventCount); setPendingResponse(undefined);
       if (input !== undefined) setMessage(input);
-      if (pendingResponse) setAttachments(pendingResponse.attachments);
+      if (pendingResponse) { setAttachments(pendingResponse.attachments); setCalls(pendingResponse.calls); }
       const failure = result.response.error as { message?: unknown } | undefined;
-      setError(`Response failed. ${typeof failure?.message === "string" ? failure.message : "Inspect finalized usage before retrying."}` + (input === undefined && calls.some((call) => call.nativeApproval && call.approved) ? " Provider continuation may already have executed approved tools; retrying can repeat execution." : ""));
+      const submittedCalls = pendingResponse?.calls ?? calls;
+      setError(`Response failed. ${typeof failure?.message === "string" ? failure.message : "Inspect finalized usage before retrying."}` + (input === undefined && submittedCalls.some((call) => call.nativeApproval && call.approved) ? " Provider continuation may already have executed approved tools; retrying can repeat execution." : ""));
       return;
     }
     let invocations: ToolInvocation[] = [], reviewError = "";

@@ -181,6 +181,11 @@ compatibility must be distinguished from merely having an endpoint selector.
   not advance conversation history or continuity. Direct failures retain reviewed
   tool results; background prompt failures restore their prompt and attachments.
   Repeating execution requires an explicit user action.
+- [x] Preserved reviewed tool results and approval decisions across failed
+  background continuations in Responses and Interactions. Pending work hides the
+  review controls; a failed terminal read restores them for explicit retry using
+  the last successful continuity ID. Results, original definitions and numeric
+  literals survive both API-managed and browser-managed history.
 - [ ] Finish media/tool output, policy selection and full conversation verification.
 - [ ] Complete endpoint-specific execution and media/tool handling.
 - [ ] Complete comparison, compliance and agent views.
@@ -333,6 +338,24 @@ latency includes the time until refresh. Clearing only removes local state.
 
 The native queued → in-progress → completed flow was verified with synthetic
 Interactions in the browser; no real provider or billing call was made.
+
+Background tool continuations retain the submitted review state separately from
+the pending resource. On a failed terminal read, the console restores reviewed
+manual function/custom results, native MCP approve/decline decisions, and native
+Interactions function results. The failed resource ID and partial output do not
+advance successful history. Retrying requires Continue; the console does not
+execute tools again automatically. Provider-managed approvals retain their warning
+that repeating a continuation may repeat provider-side execution.
+
+Regression tests cover queued failures in both continuity modes, exact JSON
+arguments, original definitions, empty/manual outputs and approvals. Retries are
+checked against the original submitted body. An isolated browser verified a
+Responses tool call → reviewed result → queued continuation → failed refresh →
+explicit successful retry under the real console CSP. Its create calls used the
+Gateway handler and HTTP provider adapter; resource reads came from a synthetic
+lifecycle fixture. The fixture recorded three creates, one resource read, one
+explicit retry and no changed continuation. No real provider, credential, billing
+or deployment state was involved. Public API contracts remain unchanged.
 
 
 ## Saved-agent MCP execution

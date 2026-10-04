@@ -94,21 +94,23 @@ describe("PlaygroundPage", () => {
     expect(mock.mock.calls.filter(([path]) => path === "/v1/responses")).toHaveLength(1);
     await userEvent.click(screen.getByRole("button", { name: "Clear" })); expect(screen.getByLabelText("Message")).toBeEnabled(); expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
-  it.each(["api", "browser", "background"])("reviews native MCP approvals in %s Responses without executing before Continue", async (variant) => {
+  it.each(["api", "browser", "background", "api_queued_failed", "browser_queued_failed"])("reviews native MCP approvals in %s Responses without executing before Continue", async (variant) => {
+    const queuedFailure = variant.endsWith("_queued_failed"); variant = variant.replace("_queued_failed", "");
     const tools = [{ type: "mcp", server_label: "documents", server_url: "https://mcp.example.test", allowed_tools: ["search", "write"], require_approval: "always" }];
     const approvals = [
       { id: "approval_search", type: "mcp_approval_request", server_label: "documents", name: "search", arguments: '{"id":9007199254740993}' },
       { id: "approval_write", type: "mcp_approval_request", server_label: "documents", name: "write", arguments: '{"text":"Review me"}' }
     ];
-    const advanced = JSON.stringify({ tools, ...(variant === "background" ? { background: true } : {}) });
+    const advanced = JSON.stringify({ tools, ...(variant === "background" || queuedFailure ? { background: true } : {}) });
     let inference = 0;
     const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json" } });
     const mock = vi.spyOn(globalThis, "fetch").mockImplementation(async (path) => {
       if (path === "/v1/models") return json({ data: [{ id: "model" }] });
       if (path === "/v1/responses/resp_1") return json({ id: "resp_1", status: "completed", output: approvals });
+      if (path === "/v1/responses/resp_approval_failed") return json({ id: "resp_approval_failed", status: "failed", usage: { input_tokens: 7, output_tokens: 3 }, error: { message: "Continuation unavailable" } });
       if (path !== "/v1/responses") throw new Error("Unexpected direct tool execution");
       inference++;
-      return inference === 1 ? json({ id: "resp_1", status: variant === "background" ? "queued" : "completed", ...(variant === "background" ? {} : { output: approvals }) }) : inference === 2 ? json({ error: { message: "Continuation unavailable" } }, 503) : json({ id: "resp_2", status: "completed", output_text: "Reviewed native result" });
+      return inference === 1 ? json({ id: "resp_1", status: variant === "background" ? "queued" : "completed", ...(variant === "background" ? {} : { output: approvals }) }) : inference === 2 ? queuedFailure ? json({ id: "resp_approval_failed", status: "queued" }) : json({ error: { message: "Continuation unavailable" } }, 503) : json({ id: "resp_2", status: "completed", output_text: "Reviewed native result" });
     });
     authenticated(); await screen.findByText("1 authorized model"); await userEvent.click(screen.getByRole("tab", { name: "Responses API" }));
     await userEvent.click(screen.getByLabelText("Stream response"));
@@ -136,6 +138,7 @@ describe("PlaygroundPage", () => {
     const code = await screen.findByLabelText("Request code"); expect(code).toHaveTextContent("mcp_approval_response"); expect(code).toHaveTextContent("approval_search");
     await userEvent.keyboard("{Escape}");
     await userEvent.click(screen.getByRole("button", { name: "Continue with tool results" }));
+    if (queuedFailure) { await screen.findByRole("region", { name: "Background response" }); expect(screen.queryByRole("region", { name: "Tool approvals" })).not.toBeInTheDocument(); expect(inference).toBe(2); await userEvent.click(screen.getByRole("button", { name: "Refresh background response" })); }
     expect(await screen.findByRole("alert")).toHaveTextContent("Continuation unavailable"); expect(screen.getByRole("alert")).toHaveTextContent("retrying can repeat execution");
     expect(screen.getByRole("region", { name: "Tool approvals" })).toHaveTextContent("search · approved");
     await userEvent.click(screen.getByRole("button", { name: "Continue with tool results" })); await screen.findByText("Reviewed native result");
@@ -146,14 +149,14 @@ describe("PlaygroundPage", () => {
     expect(bodies[2].input).toEqual(variant === "browser" ? [{ role: "user", content: "Review native actions" }, ...approvals, ...decisions] : decisions);
     expect(bodies[2].previous_response_id).toBe(variant === "browser" ? undefined : "resp_1");
   });
-  it.each(["chat", "api", "browser", "background", "api_failed", "browser_failed"])("requires explicit function results in %s and preserves their original definition and arguments", async (variant) => {
-    const reportedFailure = variant.endsWith("_failed"); variant = variant.replace("_failed", "");
+  it.each(["chat", "api", "browser", "background", "api_failed", "browser_failed", "api_queued_failed", "browser_queued_failed"])("requires explicit function results in %s and preserves their original definition and arguments", async (variant) => {
+    const queuedFailure = variant.endsWith("_queued_failed"), reportedFailure = variant.endsWith("_failed"); variant = variant.replace("_queued_failed", "").replace("_failed", "");
     const fn = { name: "query", parameters: { type: "object", properties: { id: { type: "integer" } }, required: ["id"] } };
     const tools = [variant === "chat" ? { type: "function", function: fn } : { type: "function", ...fn }];
     const rawArguments = '{"id":9007199254740993}';
     const calls = variant === "chat" ? [{ id: "manual_1", type: "function", function: { name: "query", arguments: rawArguments } }, { id: "manual_2", type: "function", function: { name: "query", arguments: "{}" } }]
       : [{ type: "function_call", call_id: "manual_1", name: "query", arguments: rawArguments }, { type: "function_call", call_id: "manual_2", name: "query", arguments: "{}" }];
-    const advanced = JSON.stringify({ tools, ...(variant === "background" ? { background: true } : {}) });
+    const advanced = JSON.stringify({ tools, ...(variant === "background" || queuedFailure ? { background: true } : {}) });
     const result = 'rows: 9007199254740993\n<not-json>';
     const endpoint = variant === "chat" ? "/v1/chat/completions" : "/v1/responses";
     const first = variant === "chat" ? { choices: [{ message: { role: "assistant", content: null, tool_calls: calls } }] }
@@ -163,9 +166,10 @@ describe("PlaygroundPage", () => {
     const mock = vi.spyOn(globalThis, "fetch").mockImplementation(async (path) => {
       if (path === "/v1/models") return json({ data: [{ id: "model" }] });
       if (path === "/v1/responses/resp_manual") return json(first);
+      if (path === "/v1/responses/resp_failed_continuation") return json({ id: "resp_failed_continuation", status: "failed", output_text: "Partial continuation output", usage: { input_tokens: 7, output_tokens: 3 }, error: { message: "Function continuation unavailable" } });
       if (path !== endpoint) throw new Error("Unexpected automatic function execution");
       return ++runs === 1 ? json(variant === "background" ? { id: "resp_manual", status: "queued" } : first)
-        : runs === 2 ? reportedFailure ? json({ id: "resp_failed_continuation", status: "failed", output_text: "Partial continuation output", usage: { input_tokens: 7, output_tokens: 3 }, error: { message: "Function continuation unavailable" } }) : json({ error: { message: "Function continuation unavailable" } }, 503)
+        : runs === 2 ? queuedFailure ? json({ id: "resp_failed_continuation", status: "queued" }) : reportedFailure ? json({ id: "resp_failed_continuation", status: "failed", output_text: "Partial continuation output", usage: { input_tokens: 7, output_tokens: 3 }, error: { message: "Function continuation unavailable" } }) : json({ error: { message: "Function continuation unavailable" } }, 503)
           : json(variant === "chat" ? { choices: [{ message: { content: "Function results received" } }] } : { id: "resp_done", status: "completed", output_text: "Function results received" });
     });
     authenticated(); await screen.findByText("1 authorized model");
@@ -193,7 +197,9 @@ describe("PlaygroundPage", () => {
     await userEvent.click(screen.getByRole("button", { name: "Get code" }));
     expect(await screen.findByLabelText("Request code")).toHaveTextContent(variant === "chat" ? "tool_call_id" : "function_call_output");
     expect(screen.getByLabelText("Request code")).toHaveTextContent("9007199254740993"); expect(screen.getByLabelText("Request code")).not.toHaveTextContent("playground-token"); await userEvent.keyboard("{Escape}");
-    await userEvent.click(screen.getByRole("button", { name: "Continue with tool results" })); expect(await screen.findByRole("alert")).toHaveTextContent("Function continuation unavailable");
+    await userEvent.click(screen.getByRole("button", { name: "Continue with tool results" }));
+    if (queuedFailure) { await screen.findByRole("region", { name: "Background response" }); expect(screen.queryByRole("region", { name: "Tool approvals" })).not.toBeInTheDocument(); expect(runs).toBe(2); await userEvent.click(screen.getByRole("button", { name: "Refresh background response" })); }
+    expect(await screen.findByRole("alert")).toHaveTextContent("Function continuation unavailable");
     expect(screen.getByLabelText("Function tool result manual_1")).toHaveValue(result);
     if (reportedFailure) { expect(screen.getByRole("region", { name: "Failed response output" })).toHaveTextContent("Partial continuation output"); expect(screen.getByText("Input tokens").nextElementSibling).toHaveTextContent("7"); }
     await userEvent.click(screen.getByRole("button", { name: "Continue with tool results" })); await screen.findByText("Function results received");
@@ -207,19 +213,21 @@ describe("PlaygroundPage", () => {
       expect(bodies[2].previous_response_id).toBe(variant === "browser" ? undefined : "resp_manual");
     }
   });
-  it.each(["api", "browser", "background"])("requires explicit custom results in %s Responses, preserving text on retry and binding definitions", async (variant) => {
+  it.each(["api", "browser", "background", "api_queued_failed", "browser_queued_failed"])("requires explicit custom results in %s Responses, preserving text on retry and binding definitions", async (variant) => {
+    const queuedFailure = variant.endsWith("_queued_failed"); variant = variant.replace("_queued_failed", "");
     const tools = [{ type: "custom", name: "query", format: { type: "text" } }];
     const calls = [{ type: "custom_tool_call", id: "output_item", call_id: "custom_1", name: "query", input: 'status:open\nowner:"demo"' }, { type: "custom_tool_call", call_id: "custom_2", name: "query", input: "status:closed" }];
-    const advanced = JSON.stringify({ tools, ...(variant === "background" ? { background: true } : {}) });
+    const advanced = JSON.stringify({ tools, ...(variant === "background" || queuedFailure ? { background: true } : {}) });
     const originalResult = 'rows: 9007199254740993\nquoted: "exact"\n<not-json>';
     let inference = 0;
     const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json" } });
     const mock = vi.spyOn(globalThis, "fetch").mockImplementation(async (path) => {
       if (path === "/v1/models") return json({ data: [{ id: "model" }] });
       if (path === "/v1/responses/resp_custom") return json({ id: "resp_custom", status: "completed", output: calls, usage: { input_tokens: 8, output_tokens: 4 } });
+      if (path === "/v1/responses/resp_custom_failed") return json({ id: "resp_custom_failed", status: "failed", usage: { input_tokens: 7, output_tokens: 3 }, error: { message: "Custom continuation unavailable" } });
       if (path !== "/v1/responses") throw new Error("Unexpected direct custom tool execution");
       inference++;
-      return inference === 1 ? json({ id: "resp_custom", status: variant === "background" ? "queued" : "completed", ...(variant === "background" ? {} : { output: calls }) }) : inference === 2 ? json({ error: { message: "Custom continuation unavailable" } }, 503) : json({ id: "resp_custom_done", status: "completed", output_text: "Custom results received" });
+      return inference === 1 ? json({ id: "resp_custom", status: variant === "background" ? "queued" : "completed", ...(variant === "background" ? {} : { output: calls }) }) : inference === 2 ? queuedFailure ? json({ id: "resp_custom_failed", status: "queued" }) : json({ error: { message: "Custom continuation unavailable" } }, 503) : json({ id: "resp_custom_done", status: "completed", output_text: "Custom results received" });
     });
     authenticated(); await screen.findByText("1 authorized model"); await userEvent.click(screen.getByRole("tab", { name: "Responses API" }));
     await userEvent.click(screen.getByLabelText("Stream response"));
@@ -251,6 +259,7 @@ describe("PlaygroundPage", () => {
     const code = await screen.findByLabelText("Request code"); expect(code).toHaveTextContent("custom_tool_call_output"); expect(code).toHaveTextContent("9007199254740993"); expect(code).not.toHaveTextContent("playground-token");
     await userEvent.keyboard("{Escape}");
     await userEvent.click(screen.getByRole("button", { name: "Continue with tool results" }));
+    if (queuedFailure) { await screen.findByRole("region", { name: "Background response" }); expect(screen.queryByRole("region", { name: "Tool approvals" })).not.toBeInTheDocument(); expect(inference).toBe(2); await userEvent.click(screen.getByRole("button", { name: "Refresh background response" })); }
     expect(await screen.findByRole("alert")).toHaveTextContent("Custom continuation unavailable"); expect(screen.getByRole("alert")).not.toHaveTextContent("idempotency");
     expect(screen.getByLabelText("Custom tool result custom_1")).toHaveValue(originalResult);
     await userEvent.click(screen.getByRole("button", { name: "Continue with tool results" })); await screen.findByText("Custom results received");

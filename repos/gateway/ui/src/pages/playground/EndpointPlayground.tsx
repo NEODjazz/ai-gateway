@@ -29,7 +29,7 @@ export function EndpointPlayground({ endpoint, connection, connectionChanged, co
   const [history, setHistory] = useState<NativeTurn[]>([]), [previousID, setPreviousID] = useState("");
   const [calls, setCalls] = useState<NativeToolCall[]>([]), [toolResults, setToolResults] = useState<NativeToolResult[]>([]);
   const [unreviewableTools, setUnreviewableTools] = useState(false);
-  const [interactionJob, setInteractionJob] = useState<{ id: string; turn: NativeTurn; store: boolean; tools: unknown; started: number; input: string; attachments: Attachment[] }>();
+  const [interactionJob, setInteractionJob] = useState<{ id: string; turn: NativeTurn; store: boolean; tools: unknown; started: number; input: string; attachments: Attachment[]; calls: NativeToolCall[]; toolResults: NativeToolResult[] }>();
   const [historyDropped, setHistoryDropped] = useState(0), [pricing, setPricing] = useState(defaultPricing);
   const abort = useRef<AbortController | undefined>(undefined), generation = useRef(0), audioURL = useRef<string | undefined>(undefined);
   const attachmentInput = useRef<HTMLInputElement>(null), maskInput = useRef<HTMLInputElement>(null);
@@ -79,7 +79,7 @@ export function EndpointPlayground({ endpoint, connection, connectionChanged, co
         if (current !== generation.current || controller.signal.aborted) return;
         const content = continuing ? nativeToolContent(endpoint, toolResults) : nativeUserContent(endpoint, input, attachments);
         const turn: NativeTurn = { role: continuing ? "tool" : "user", content, text: continuing ? toolResults.map((result) => `${result.id}: ${result.text}`).join("\n") : input || attachments.map((file) => file.filename).join("\n") };
-        if (endpoint === "interactions" && responsePending(native.response)) { setInteractionJob({ id: String(native.response.id), turn, store: request.body.store !== false, started: start, tools: request.body.tools, input, attachments }); setCalls([]); setToolResults([]); }
+        if (endpoint === "interactions" && responsePending(native.response)) { setInteractionJob({ id: String(native.response.id), turn, store: request.body.store !== false, started: start, tools: request.body.tools, input, attachments, calls, toolResults }); setCalls([]); setToolResults([]); }
         else finishNative(native, turn, request.body.store !== false, request.body.tools);
       } else if (endpoint === "a2a") {
         const agent = await runAgentRequest(connection, request, controller.signal);
@@ -119,7 +119,7 @@ export function EndpointPlayground({ endpoint, connection, connectionChanged, co
   function finishNative(native: NativeTextRun, turn: NativeTurn, store: boolean, tools: unknown) {
     if (endpoint !== "messages" && endpoint !== "interactions") return;
     if (endpoint === "interactions" && native.response.status === "failed") {
-      if (interactionJob) { setInput(interactionJob.input); setAttachments(interactionJob.attachments); }
+      if (interactionJob) { setInput(interactionJob.input); setAttachments(interactionJob.attachments); setCalls(interactionJob.calls); setToolResults(interactionJob.toolResults); }
       setInteractionJob(undefined);
       setError(`Interaction failed. ${String(object(native.response.error)?.message || "Inspect finalized usage before retrying.")}`);
       return;
