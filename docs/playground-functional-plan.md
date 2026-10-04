@@ -131,6 +131,10 @@ compatibility must be distinguished from merely having an endpoint selector.
   explicit cancellation. Pending work blocks new turns; failed or mismatching
   reads preserve known jobs, late results cannot replace a new conversation, and
   finalized output is committed once with honest status and usage.
+- [x] Added background Interactions resource refresh/cancel with native steps,
+  checked IDs/statuses, preserved read errors and credential-scope cancellation.
+  Terminal failure/cancellation can omit steps without corrupting conversation
+  replay; ordinary malformed response content remains rejected.
 - [ ] Finish media/tool output, policy selection and full conversation verification.
 - [ ] Complete endpoint-specific execution and media/tool handling.
 - [ ] Complete comparison, compliance and agent views.
@@ -237,3 +241,17 @@ and ignores late results; it does not automatically cancel server execution.
 
 The pending → in-progress → completed UI was verified in an isolated browser
 preview using synthetic jobs. No real provider or billing call was made.
+
+
+Background Interactions use the same explicit non-streaming configuration in
+native advanced JSON. Pending jobs preserve the original prompt/tool result and
+block another turn. Refresh and cancel use the original interaction resource ID
+without replaying generation. A terminal read applies native output steps and
+stored continuity once. Final failed/cancelled/incomplete responses may contain
+no steps; missing content in ordinary successful replies is still invalid.
+Late reads after a credential/model change cannot publish private results.
+Pending token usage remains unavailable, and manually observed completion
+latency includes the time until refresh. Clearing only removes local state.
+
+The native queued → in-progress → completed flow was verified with synthetic
+Interactions in the browser; no real provider or billing call was made.

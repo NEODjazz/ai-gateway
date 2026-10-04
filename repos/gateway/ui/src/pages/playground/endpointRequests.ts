@@ -30,6 +30,7 @@ export function buildEndpointRequest(endpoint: SpecializedEndpoint, model: strin
   const extras = settings.advanced.trim() ? jsonObject(settings.advanced, "Advanced parameters") : {};
   const protectedFields = ["model", "provider", "input", "messages", "system", "system_instruction", "prompt", "file", "images", "mask", "stream", "max_tokens", "generation_config", "previous_interaction_id", "arguments", "temperature", "top_p", "instructions", "dimensions", "voice", "response_format", "speed", "n", "quality", "size", "language", "encoding_format", "jsonrpc", "id", "method", "params", "__proto__", "prototype", "constructor"];
   for (const name of Object.keys(extras)) if (protectedFields.includes(name)) throw new Error(`Configure ${name} with its dedicated control.`);
+  if (endpoint === "interactions" && extras.background === true && settings.stream) throw new Error("Disable Stream native response to run a background interaction.");
   const body: Record<string, unknown> = { ...extras, model: model.trim() };
   let path = endpointPaths[endpoint];
   if (endpoint === "messages" || endpoint === "interactions") {

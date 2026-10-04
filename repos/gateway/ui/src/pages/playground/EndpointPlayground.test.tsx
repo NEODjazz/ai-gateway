@@ -9,6 +9,35 @@ function setup(endpoint: SpecializedEndpoint) { return render(<EndpointPlaygroun
 const nativeJSON = (value: unknown) => new Response(typeof value === "string" ? value : JSON.stringify(value), { headers: { "Content-Type": "application/json" } });
 const run = () => userEvent.click(screen.getByRole("button", { name: "Run endpoint request" }));
 describe("Endpoint Playground", () => {
+  it("blocks queued interaction turns, preserves read errors and applies completed steps exactly once", async () => {
+    let reads = 0, creates = 0;
+    const mock = vi.spyOn(globalThis, "fetch").mockImplementation(async (path) => {
+      if (path === "/v1/interactions/job") { reads++; return reads === 1 ? new Response('{"error":{"message":"Read unavailable"}}', { status: 503 }) : nativeJSON({ id: "job", status: "completed", steps: [{ type: "model_output", content: [{ type: "text", text: "Final background answer" }] }], usage: { total_input_tokens: 0, total_output_tokens: 4 } }); }
+      creates++; return creates === 1 ? nativeJSON({ id: "job", status: "queued", usage: { total_input_tokens: 0, total_output_tokens: 0 } }) : nativeJSON({ id: "next", status: "completed", steps: [{ type: "model_output", content: [{ type: "text", text: "Follow up answer" }] }] });
+    });
+    setup("interactions"); await userEvent.click(screen.getByLabelText("Stream native response")); fireEvent.change(screen.getByLabelText("Endpoint parameters JSON"), { target: { value: '{"background":true}' } });
+    await userEvent.type(screen.getByLabelText("Endpoint input"), "Original background prompt"); await run();
+    expect(await screen.findByRole("region", { name: "Background interaction" })).toHaveTextContent("queued"); expect(screen.getByLabelText("Endpoint input")).toBeDisabled(); expect(screen.getByText("Input tokens").nextElementSibling).toHaveTextContent("—");
+    await userEvent.click(screen.getByRole("button", { name: "Refresh background interaction" })); expect(await screen.findByRole("alert")).toHaveTextContent("Read unavailable"); expect(screen.getByRole("region", { name: "Background interaction" })).toHaveTextContent("queued");
+    await userEvent.click(screen.getByRole("button", { name: "Refresh background interaction" })); await screen.findByText("Final background answer"); expect(screen.getAllByText("Original background prompt")).toHaveLength(1); expect(screen.queryByRole("region", { name: "Background interaction" })).not.toBeInTheDocument(); expect(screen.getByText("Input tokens").nextElementSibling).toHaveTextContent("0");
+    await userEvent.type(screen.getByLabelText("Endpoint input"), "Follow up"); await run(); await screen.findByText("Follow up answer");
+    const requests = mock.mock.calls.filter(([path]) => path === "/v1/interactions"); expect(requests).toHaveLength(2); expect(JSON.parse(String(requests[1][1]?.body))).toMatchObject({ previous_interaction_id: "job" });
+  });
+  it("keeps acknowledged interaction cancellation pending until a terminal resource read", async () => {
+    const mock = vi.spyOn(globalThis, "fetch").mockImplementation(async (path) => String(path).endsWith("/cancel") ? nativeJSON({ id: "job", status: "in_progress" }) : path === "/v1/interactions/job" ? nativeJSON({ id: "job", status: "cancelled", usage: { total_input_tokens: 2, total_output_tokens: 0 } }) : nativeJSON({ id: "job", status: "queued" }));
+    setup("interactions"); await userEvent.type(screen.getByLabelText("Endpoint input"), "Job"); await run(); await screen.findByRole("region", { name: "Background interaction" });
+    await userEvent.click(screen.getByRole("button", { name: "Cancel background interaction" })); await waitFor(() => expect(screen.getByRole("region", { name: "Background interaction" })).toHaveTextContent("in_progress")); expect(screen.getByLabelText("Endpoint input")).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: "Refresh background interaction" })); expect(await screen.findByRole("alert")).toHaveTextContent("cancelled"); expect(screen.getByLabelText("Endpoint input")).toBeEnabled(); expect(screen.getByText("Output tokens").nextElementSibling).toHaveTextContent("0");
+    const call = mock.mock.calls.find(([path]) => path === "/v1/interactions/job/cancel")!; expect(call[1]?.method).toBe("POST"); expect(call[1]?.body).toBeUndefined();
+  });
+  it("drops a late interaction read after the credential scope changes", async () => {
+    let resolve!: (value: Response) => void;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (path) => path === "/v1/interactions/job" ? new Promise((done) => resolve = done) : nativeJSON({ id: "job", status: "queued" }));
+    const view = setup("interactions"); await userEvent.type(screen.getByLabelText("Endpoint input"), "Job"); await run(); await screen.findByRole("region", { name: "Background interaction" }); await userEvent.click(screen.getByRole("button", { name: "Refresh background interaction" }));
+    view.rerender(<EndpointPlayground endpoint="interactions" connection={playgroundConnection(new APIClient(() => "new-test-key"), "session", "", "")} models={["model"]} connectionControls={null} connectionChanged={false} />);
+    await act(async () => resolve(nativeJSON({ id: "job", status: "completed", steps: [{ type: "model_output", content: [{ type: "text", text: "Private late result" }] }] })));
+    expect(screen.queryByText("Private late result")).not.toBeInTheDocument(); expect(screen.queryByRole("region", { name: "Background interaction" })).not.toBeInTheDocument();
+  });
   it("renders generated image output safely and preserves the image dialect", async () => {
     const mock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response('{"data":[{"b64_json":"AA==","revised_prompt":"Revised"}]}'));
     setup("images"); await userEvent.type(screen.getByLabelText("Endpoint input"), "Generate a skyline"); await run();

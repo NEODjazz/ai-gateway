@@ -1,12 +1,34 @@
 import type { SSEEvent } from "../../api/client";
 import type { PlaygroundConnection } from "./requests";
-import { contentText } from "./runText";
+import { contentText, responsePending } from "./runText";
 
-export type NativeTextRun = { text: string; reasoning: string; response: Record<string, unknown>; events: SSEEvent[]; eventCount: number; latencyMS: number; firstTokenMS?: number };
+export type NativeTextRun = { text: string; reasoning: string; response: Record<string, unknown>; events: SSEEvent[]; eventCount: number; latencyMS: number; lifecycle?: true; firstTokenMS?: number };
 const maximumCharacters = 2 * 1024 * 1024;
 function record(value: unknown): Record<string, unknown> | undefined { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined; }
 function publicText(content: unknown): string { return Array.isArray(content) ? content.filter((item) => record(item)?.type === "text").map(contentText).join("\n") : ""; }
 function interactionText(response: Record<string, unknown>, type: string): string { return Array.isArray(response.steps) ? response.steps.filter((item) => record(item)?.type === type).map(contentText).join("\n") : ""; }
+
+function interactionPath(id: unknown): string {
+  if (typeof id !== "string" || !/^[A-Za-z0-9._:-]{1,256}$/.test(id) || id === "." || id === "..") throw new Error("Interaction lifecycle requires a valid interaction ID.");
+  return `/v1/interactions/${encodeURIComponent(id)}`;
+}
+function nativeFields(payload: Record<string, unknown>, endpoint: "messages" | "interactions"): { text: string; reasoning: string } {
+  if (!record(payload)) throw new Error("Invalid native response");
+  if (JSON.stringify(payload).length > maximumCharacters) throw new Error("Native output exceeds the 2 MiB Playground limit.");
+  const text = endpoint === "messages" ? publicText(payload.content) : interactionText(payload, "model_output");
+  const reasoning = endpoint === "messages" && Array.isArray(payload.content) ? payload.content.filter((item) => record(item)?.type === "thinking").map((item) => record(item)?.thinking || "").join("\n") : interactionText(payload, "thought");
+  if (text.length + reasoning.length > maximumCharacters) throw new Error("Native output exceeds the 2 MiB Playground limit.");
+  if (endpoint === "interactions" && responsePending(payload)) interactionPath(payload.id);
+  return { text, reasoning };
+}
+export async function runInteractionResource(connection: PlaygroundConnection, id: string, operation: "refresh" | "cancel", signal: AbortSignal): Promise<NativeTextRun> {
+  const start = performance.now(), path = interactionPath(id);
+  const response = await connection.client.request<Record<string, unknown>>(connection.path(path + (operation === "cancel" ? "/cancel" : "")), { method: operation === "cancel" ? "POST" : "GET", cache: "no-store", signal, maximumResponseBytes: maximumCharacters });
+  if (signal.aborted) throw new DOMException("Request cancelled", "AbortError");
+  if (!record(response) || response.id !== id || !["queued", "in_progress", "completed", "incomplete", "requires_action", "failed", "cancelled"].includes(String(response.status))) throw new Error("Interaction lifecycle returned a mismatching ID or invalid status.");
+  if (response.status !== "failed" && record(response.error)) throw new Error(String(record(response.error)?.message || "Interaction resource failed"));
+  return { ...nativeFields(response, "interactions"), response, events: [], eventCount: 0, latencyMS: performance.now() - start, lifecycle: true };
+}
 
 export async function runNativeText(connection: PlaygroundConnection, endpoint: "messages" | "interactions", body: Record<string, unknown>, signal: AbortSignal, onText: (text: string) => void): Promise<NativeTextRun> {
   const start = performance.now(), events: SSEEvent[] = [], blocks = new Map<number, Record<string, unknown>>(), argumentsByIndex = new Map<number, string>();
@@ -15,10 +37,8 @@ export async function runNativeText(connection: PlaygroundConnection, endpoint: 
   const bound = (addition: string) => { characters += addition.length; if (characters > maximumCharacters) throw new Error("Native output exceeds the 2 MiB Playground limit."); };
   const fail = (payload: Record<string, unknown>) => { const failure = record(payload.error); if (failure || payload.status === "failed") throw new Error(typeof failure?.message === "string" ? failure.message : "Native request failed"); };
   const accept = (payload: Record<string, unknown>) => {
-    active(); if (!record(payload)) throw new Error("Invalid native response"); fail(payload); if (JSON.stringify(payload).length > maximumCharacters) throw new Error("Native output exceeds the 2 MiB Playground limit."); response = payload;
-    text = endpoint === "messages" ? publicText(payload.content) : interactionText(payload, "model_output");
-    reasoning = endpoint === "messages" && Array.isArray(payload.content) ? payload.content.filter((item) => record(item)?.type === "thinking").map((item) => record(item)?.thinking || "").join("\n") : interactionText(payload, "thought");
-    if (text.length + reasoning.length > maximumCharacters) throw new Error("Native output exceeds the 2 MiB Playground limit."); onText(text);
+    active(); if (!record(payload)) throw new Error("Invalid native response"); fail(payload);
+    const fields = nativeFields(payload, endpoint); response = payload; text = fields.text; reasoning = fields.reasoning; onText(text);
   };
   const options = { maximumResponseBytes: 32 * 1024 * 1024, method: "POST", body, signal };
   const path = connection.path(endpoint === "messages" ? "/v1/messages" : "/v1/interactions");

@@ -10,6 +10,11 @@ describe("Endpoint request dialects", () => {
   it("uses native interaction generation_config and continuation identifiers", () => {
     expect(buildEndpointRequest("interactions", "model", "follow up", { ...defaultEndpointSettings, instructions: "Concise", temperature: "0" }, [], undefined, [], "previous").body).toEqual({ model: "model", input: "follow up", previous_interaction_id: "previous", system_instruction: "Concise", stream: true, generation_config: { max_output_tokens: 256, temperature: 0 } });
   });
+  it("rejects streaming background Interactions without silently rewriting parameters", () => {
+    const settings = { ...defaultEndpointSettings, advanced: '{"background":true}' };
+    expect(() => buildEndpointRequest("interactions", "model", "Job", settings)).toThrow("Disable Stream native response");
+    expect(buildEndpointRequest("interactions", "model", "Job", { ...settings, stream: false }).body).toMatchObject({ background: true, stream: false });
+  });
   it("omits filenames from image payloads while preserving mask and image content", () => {
     const file = { filename: "input.png", media_type: "image/png", data_base64: "AA==" };
     expect(buildEndpointRequest("image-edits", "image-model", "Edit", defaultEndpointSettings, [file], file).body).toEqual({ model: "image-model", prompt: "Edit", n: 1, response_format: "b64_json", images: [{ media_type: "image/png", data_base64: "AA==" }], mask: { media_type: "image/png", data_base64: "AA==" } });

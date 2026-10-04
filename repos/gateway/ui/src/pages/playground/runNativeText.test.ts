@@ -1,11 +1,28 @@
 import { APIClient } from "../../api/client";
 import { playgroundConnection } from "./requests";
-import { runNativeText } from "./runNativeText";
+import { runInteractionResource, runNativeText } from "./runNativeText";
 
 const connection = () => playgroundConnection(new APIClient(() => "test-key"), "session", "", "");
 const options = () => new AbortController().signal;
 function stream(events: unknown[]) { return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""), { headers: { "Content-Type": "text/event-stream" } }); }
 describe("Native text execution", () => {
+  it.each(["refresh", "cancel"] as const)("uses authenticated interaction %s without generating again", async (operation) => {
+    const mock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response('{"id":"job:1.2","status":"completed","steps":[{"type":"model_output","content":[{"type":"text","text":"Final"}]}]}'));
+    expect(await runInteractionResource(connection(), "job:1.2", operation, options())).toMatchObject({ text: "Final", response: { status: "completed" }, lifecycle: true });
+    expect(mock.mock.calls[0][0]).toBe(`/v1/interactions/job%3A1.2${operation === "cancel" ? "/cancel" : ""}`);
+    expect(mock.mock.calls[0][1]?.method).toBe(operation === "cancel" ? "POST" : "GET"); expect(mock.mock.calls[0][1]?.body).toBeUndefined();
+    expect(new Headers(mock.mock.calls[0][1]?.headers).get("Authorization")).toBe("Bearer test-key");
+  });
+  it("retains failed status and rejects invalid identities, mismatched reads and late cancellation", async () => {
+    const mock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response('{"id":"job","status":"failed","error":{"message":"Upstream failed"}}'));
+    expect(await runInteractionResource(connection(), "job", "refresh", options())).toMatchObject({ response: { status: "failed", error: { message: "Upstream failed" } } });
+    for (const payload of [{ id: "other", status: "completed" }, { id: "job", status: "unknown" }]) { mock.mockResolvedValueOnce(new Response(JSON.stringify(payload))); await expect(runInteractionResource(connection(), "job", "refresh", options())).rejects.toThrow("mismatching ID or invalid status"); }
+    for (const id of ["../bad", ".", ".."]) await expect(runInteractionResource(connection(), id, "refresh", options())).rejects.toThrow("valid interaction ID");
+    mock.mockResolvedValueOnce(new Response('{"status":"queued"}'));
+    await expect(runNativeText(connection(), "interactions", { model: "model" }, options(), () => {})).rejects.toThrow("valid interaction ID");
+    const abort = new AbortController(); mock.mockImplementation(async () => { abort.abort(); return new Response('{}'); });
+    await expect(runInteractionResource(connection(), "job", "refresh", abort.signal)).rejects.toMatchObject({ name: "AbortError" });
+  });
   it("assembles Messages tools, reasoning signatures and usage without mixing them into text", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(stream([
       { type: "message_start", message: { id: "message", usage: { input_tokens: 0 } } },
