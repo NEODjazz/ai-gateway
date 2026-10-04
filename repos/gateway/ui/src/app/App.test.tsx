@@ -1,7 +1,8 @@
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AuthProvider } from "../auth/AuthContext";
 import { App } from "./App";
+import { GravityThemeScope } from "../components/GravityThemeScope";
 
 const adminSession = { user_id: "admin-user", roles: ["admin"], allowed_models: ["gpt"], allowed_tools: [], capabilities: ["admin", "api_docs", "inference", "team_directory"] };
 const teamSession = { user_id: "team-user", team_id: "team-a", roles: ["team_admin"], allowed_models: ["gpt"], allowed_tools: [], capabilities: ["api_docs", "inference", "team_directory"] };
@@ -14,6 +15,30 @@ function mockConsole(session = adminSession) {
 }
 
 describe("App", () => {
+  it("uses compact navigation on narrow screens, restores desktop choice and cleans up its breakpoint listener", async () => {
+    let change: (event: MediaQueryListEvent) => void = () => {};
+    const add = vi.fn((_type: string, listener: EventListenerOrEventListenerObject) => { change = listener as (event: MediaQueryListEvent) => void; });
+    const remove = vi.fn();
+    const original = window.matchMedia;
+    vi.spyOn(window, "matchMedia").mockImplementation((query) => query === "(max-width: 767px)"
+      ? { ...original(query), matches: true, addEventListener: add, removeEventListener: remove } : original(query));
+    history.replaceState({}, "", "/ui/overview"); sessionStorage.setItem("ai-gateway.admin-token", "test-token"); mockConsole();
+    const view = render(<GravityThemeScope><AuthProvider><App /></AuthProvider></GravityThemeScope>);
+    const navigation = await screen.findByRole("navigation", { name: "Dashboard" });
+    expect(screen.queryByRole("button", { name: "Expand navigation" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Collapse navigation" })).not.toBeInTheDocument();
+    await userEvent.click(within(navigation).getByRole("button", { name: "Models & endpoints" }));
+    expect(await screen.findByRole("dialog", { name: "Models & endpoints navigation" })).toContainElement(screen.getByRole("link", { name: "Providers" }));
+    act(() => change({ matches: false } as MediaQueryListEvent));
+    expect(screen.queryByRole("dialog", { name: "Models & endpoints navigation" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Collapse navigation" }));
+    expect(screen.getByRole("button", { name: "Expand navigation" })).toBeInTheDocument();
+    act(() => change({ matches: true } as MediaQueryListEvent));
+    expect(screen.queryByRole("button", { name: "Expand navigation" })).not.toBeInTheDocument();
+    act(() => change({ matches: false } as MediaQueryListEvent));
+    expect(screen.getByRole("button", { name: "Expand navigation" })).toBeInTheDocument();
+    view.unmount(); expect(add).toHaveBeenCalledWith("change", change); expect(remove).toHaveBeenCalledWith("change", change);
+  });
   it("shows the token gate without authentication", async () => {
     history.replaceState({}, "", "/ui/");
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ enabled: false, start_url: "/auth/sso/start" }), { status: 200 }));
