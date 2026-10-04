@@ -20,6 +20,23 @@ func TestAdminUIIsDisabledUnlessEnabledOnHandler(t *testing.T) {
 	}
 }
 
+func TestAdminUIStylesDoNotRequireRuntimeStylesheetImports(t *testing.T) {
+	handler := Routes(NewHandler(modules.NewPipeline(nil), modelsProvider{}).WithAdminUI())
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/ui/assets/app.css", nil))
+	if response.Code != http.StatusOK || response.Body.Len() == 0 {
+		t.Fatalf("stylesheet status=%d bytes=%d", response.Code, response.Body.Len())
+	}
+	if !strings.Contains(response.Header().Get("Content-Security-Policy"), "style-src 'self'") {
+		t.Fatal("stylesheet must retain the same-origin content security policy")
+	}
+	// Vite resolves local stylesheet imports during the build. Runtime imports
+	// introduce another resource dependency that may be blocked by the UI CSP.
+	if strings.Contains(strings.ToLower(response.Body.String()), "@import") {
+		t.Fatal("the embedded stylesheet must be self-contained, without runtime @import dependencies")
+	}
+}
+
 func TestAdminUIServesEmbeddedSameOriginAssets(t *testing.T) {
 	handler := Routes(NewHandler(modules.NewPipeline(nil), modelsProvider{}).WithAdminUI())
 	redirect := httptest.NewRecorder()

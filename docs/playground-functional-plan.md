@@ -442,3 +442,14 @@ provenance, finalized usage retention and failed continuation. An isolated brows
 preview verified one approval and one decline, no execution before Continue,
 exactly one continuation and zero direct MCP calls. This uses synthetic responses;
 no real provider, remote MCP service or billing was invoked.
+
+
+## Self-contained console styles
+
+The console retains its existing system-font fallback and no longer imports an
+external font stylesheet at runtime. The previous import was blocked by the
+existing same-origin stylesheet CSP on every page load. CSP remains unchanged.
+The served embedded CSS has a regression test that rejects unresolved runtime
+stylesheet imports; local imports must be resolved by the existing UI build.
+Browser verification under the current CSP confirmed zero external font requests,
+zero external stylesheets and successful Playground rendering.
