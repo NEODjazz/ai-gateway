@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"bytes"
 	"encoding/json"
 	"math"
 	"mime"
@@ -310,8 +311,12 @@ func InteractionFromResponse(response ResponseResponse) InteractionResponse {
 		case "function_call":
 			arguments := any(item.Arguments)
 			var decoded any
-			if json.Unmarshal([]byte(item.Arguments), &decoded) == nil {
-				arguments = decoded
+			if json.Valid([]byte(item.Arguments)) {
+				decoder := json.NewDecoder(bytes.NewReader([]byte(item.Arguments)))
+				decoder.UseNumber()
+				if decoder.Decode(&decoded) == nil {
+					arguments = decoded
+				}
 			}
 			id := item.CallID
 			if id == "" {

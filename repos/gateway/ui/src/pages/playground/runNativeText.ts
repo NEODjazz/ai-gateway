@@ -1,3 +1,4 @@
+import { parseExactObject, parseNativeJSON, stringifyExactJSON } from "./exactJSON";
 import type { SSEEvent } from "../../api/client";
 import type { PlaygroundConnection } from "./requests";
 import { contentText, responsePending } from "./runText";
@@ -14,7 +15,7 @@ function interactionPath(id: unknown): string {
 }
 function nativeFields(payload: Record<string, unknown>, endpoint: "messages" | "interactions"): { text: string; reasoning: string } {
   if (!record(payload)) throw new Error("Invalid native response");
-  if (JSON.stringify(payload).length > maximumCharacters) throw new Error("Native output exceeds the 2 MiB Playground limit.");
+  if (stringifyExactJSON(payload).length > maximumCharacters) throw new Error("Native output exceeds the 2 MiB Playground limit.");
   const text = endpoint === "messages" ? publicText(payload.content) : interactionText(payload, "model_output");
   const reasoning = endpoint === "messages" && Array.isArray(payload.content) ? payload.content.filter((item) => record(item)?.type === "thinking").map((item) => record(item)?.thinking || "").join("\n") : interactionText(payload, "thought");
   if (text.length + reasoning.length > maximumCharacters) throw new Error("Native output exceeds the 2 MiB Playground limit.");
@@ -23,7 +24,7 @@ function nativeFields(payload: Record<string, unknown>, endpoint: "messages" | "
 }
 export async function runInteractionResource(connection: PlaygroundConnection, id: string, operation: "refresh" | "cancel", signal: AbortSignal): Promise<NativeTextRun> {
   const start = performance.now(), path = interactionPath(id);
-  const response = await connection.client.request<Record<string, unknown>>(connection.path(path + (operation === "cancel" ? "/cancel" : "")), { method: operation === "cancel" ? "POST" : "GET", cache: "no-store", signal, maximumResponseBytes: maximumCharacters });
+  const response = await connection.client.request<Record<string, unknown>>(connection.path(path + (operation === "cancel" ? "/cancel" : "")), { method: operation === "cancel" ? "POST" : "GET", cache: "no-store", signal, maximumResponseBytes: maximumCharacters, parseJSON: parseNativeJSON });
   if (signal.aborted) throw new DOMException("Request cancelled", "AbortError");
   if (!record(response) || response.id !== id || !["queued", "in_progress", "completed", "incomplete", "requires_action", "failed", "cancelled"].includes(String(response.status))) throw new Error("Interaction lifecycle returned a mismatching ID or invalid status.");
   if (response.status !== "failed" && record(response.error)) throw new Error(String(record(response.error)?.message || "Interaction resource failed"));
@@ -40,14 +41,14 @@ export async function runNativeText(connection: PlaygroundConnection, endpoint: 
     active(); if (!record(payload)) throw new Error("Invalid native response"); fail(payload);
     const fields = nativeFields(payload, endpoint); response = payload; text = fields.text; reasoning = fields.reasoning; onText(text);
   };
-  const options = { maximumResponseBytes: 32 * 1024 * 1024, method: "POST", body, signal };
+  const options = { maximumResponseBytes: 32 * 1024 * 1024, method: "POST", body, signal, headers: endpoint === "messages" ? { "anthropic-version": "2023-06-01" } : undefined, encodeJSON: stringifyExactJSON, parseJSON: parseNativeJSON };
   const path = connection.path(endpoint === "messages" ? "/v1/messages" : "/v1/interactions");
   if (!body.stream) accept(await connection.client.request<Record<string, unknown>>(path, options));
   else {
     const result = await connection.client.stream<Record<string, unknown>>(path, options, (event) => {
       active(); if (event.data === "[DONE]") return;
       let payload: Record<string, unknown> | undefined;
-      try { payload = record(JSON.parse(event.data)); } catch { throw new Error("Malformed native stream event"); }
+      try { payload = record(parseNativeJSON(event.data)); } catch { throw new Error("Malformed native stream event"); }
       if (!payload) throw new Error("Malformed native stream event"); fail(payload);
       eventCount++; events.push({ event: event.event, data: event.data.slice(0, 8192) }); if (events.length > 50) events.shift();
       const type = String(payload.type || payload.event_type || event.event), delta = record(payload.delta);
@@ -95,7 +96,7 @@ export async function runNativeText(connection: PlaygroundConnection, endpoint: 
           }
         }
         const interaction = record(payload.interaction);
-        if (interaction) { fail(interaction); if (JSON.stringify(interaction).length > maximumCharacters) throw new Error("Native output exceeds the 2 MiB Playground limit."); response = interaction; }
+        if (interaction) { fail(interaction); if (stringifyExactJSON(interaction).length > maximumCharacters) throw new Error("Native output exceeds the 2 MiB Playground limit."); response = interaction; }
         if (["interaction.completed", "interaction.incomplete"].includes(type)) terminal = true;
       }
     }, true);
@@ -103,11 +104,11 @@ export async function runNativeText(connection: PlaygroundConnection, endpoint: 
     else {
       if (!terminal) throw new Error("Native stream ended before completion.");
       if (endpoint === "messages") {
-        for (const [index, json] of argumentsByIndex) { try { blocks.get(index)!.input = JSON.parse(json); } catch { throw new Error("Native tool arguments contain invalid JSON"); } }
+        for (const [index, json] of argumentsByIndex) { try { blocks.get(index)!.input = parseExactObject(json); } catch { blocks.get(index)!.input = json; } }
         response.content = [...blocks.entries()].sort(([a], [b]) => a - b).map(([, value]) => value);
       } else {
         if (!Array.isArray(response.steps)) {
-          for (const [index, json] of argumentsByIndex) { try { blocks.get(index)!.arguments = JSON.parse(json); } catch { throw new Error("Native tool arguments contain invalid JSON"); } }
+          for (const [index, json] of argumentsByIndex) { try { blocks.get(index)!.arguments = parseExactObject(json); } catch { blocks.get(index)!.arguments = json; } }
           response.steps = blocks.size ? [...blocks.entries()].sort(([a], [b]) => a - b).map(([, value]) => value) : [...(text ? [{ type: "model_output", content: [{ type: "text", text }] }] : []), ...(reasoning ? [{ type: "thought", content: [{ type: "text", text: reasoning }] }] : [])];
         }
         accept(response);

@@ -5,7 +5,7 @@ export class APIError extends Error {
   }
 }
 
-export type RequestOptions = Omit<RequestInit, "body"> & { body?: unknown; maximumResponseBytes?: number };
+export type RequestOptions = Omit<RequestInit, "body"> & { body?: unknown; maximumResponseBytes?: number; encodeJSON?: (body: unknown) => string; parseJSON?: (text: string) => unknown };
 export type BinaryResponse = { body: Blob; contentType: string };
 export type SSEEvent = { event: string; data: string };
 export type StreamResult<T> = { streamed: true } | { streamed: false; data: T };
@@ -70,9 +70,9 @@ export class APIClient {
     } finally { if (!complete) await reader.cancel().catch(() => undefined); reader.releaseLock(); }
   }
 
-  private async json<T>(response: Response, limit?: number): Promise<T> {
-    if (limit === undefined) return response.json() as Promise<T>;
-    return JSON.parse(await this.text(response, limit)) as T;
+  private async json<T>(response: Response, limit?: number, parse?: (text: string) => unknown): Promise<T> {
+    if (limit === undefined && !parse) return response.json() as Promise<T>;
+    return (parse ?? JSON.parse)(await this.text(response, limit)) as T;
   }
 
   private async text(response: Response, limit?: number): Promise<string> {
@@ -83,7 +83,7 @@ export class APIClient {
   }
 
   async request<T>(path: string, options: RequestOptions = {}): Promise<T> {
-    return this.jsonRequest<T>(path, options, options.body === undefined ? undefined : JSON.stringify(options.body));
+    return this.jsonRequest<T>(path, options, options.body === undefined ? undefined : (options.encodeJSON ?? JSON.stringify)(options.body));
   }
 
   // Validate pre-encoded JSON without replacing its original numeric literals.
@@ -97,7 +97,7 @@ export class APIClient {
     });
   }
 
-  private async jsonRequest<T>(path: string, { maximumResponseBytes, ...options }: RequestOptions, body: string | undefined, readResponse: (response: Response, limit?: number) => Promise<T> = (response, limit) => this.json<T>(response, limit)): Promise<T> {
+  private async jsonRequest<T>(path: string, { maximumResponseBytes, encodeJSON: _encodeJSON, parseJSON, ...options }: RequestOptions, body: string | undefined, readResponse: ((response: Response, limit?: number) => Promise<T>) | undefined = undefined): Promise<T> {
     const response = await fetch(path, {
       credentials: this.options.credentials,
       ...options,
@@ -106,7 +106,7 @@ export class APIClient {
     });
     if (!response.ok) return this.throwResponseError(response, maximumResponseBytes);
     if (response.status === 204) return undefined as T;
-    return readResponse(response, maximumResponseBytes);
+    return readResponse ? readResponse(response, maximumResponseBytes) : this.json<T>(response, maximumResponseBytes, parseJSON);
   }
 
   async requestForm<T>(path: string, body: FormData, options: Omit<RequestInit, "body"> = {}): Promise<T> {
@@ -131,12 +131,12 @@ export class APIClient {
     return { body: await response.blob(), contentType: response.headers.get("Content-Type") || "application/octet-stream" };
   }
 
-  async requestBinary(path: string, { maximumResponseBytes, ...options }: RequestOptions): Promise<BinaryResponse> {
+  async requestBinary(path: string, { maximumResponseBytes, encodeJSON, parseJSON: _parseJSON, ...options }: RequestOptions): Promise<BinaryResponse> {
     const response = await fetch(path, {
       credentials: this.options.credentials,
       ...options,
       headers: this.headers(options, "application/octet-stream"),
-      body: options.body === undefined ? undefined : JSON.stringify(options.body)
+      body: options.body === undefined ? undefined : (encodeJSON ?? JSON.stringify)(options.body)
     });
     if (!response.ok) return this.throwResponseError(response, maximumResponseBytes);
     const contentType = response.headers.get("Content-Type") || "application/octet-stream";
@@ -144,18 +144,18 @@ export class APIClient {
     return { body, contentType };
   }
 
-  async stream<T = never>(path: string, { maximumResponseBytes, ...options }: RequestOptions, onEvent: (event: SSEEvent) => void, acceptJSONFallback = false): Promise<StreamResult<T>> {
+  async stream<T = never>(path: string, { maximumResponseBytes, encodeJSON, parseJSON, ...options }: RequestOptions, onEvent: (event: SSEEvent) => void, acceptJSONFallback = false): Promise<StreamResult<T>> {
     const response = await fetch(path, {
       credentials: this.options.credentials,
       ...options,
       headers: this.headers(options, "text/event-stream"),
-      body: options.body === undefined ? undefined : JSON.stringify(options.body)
+      body: options.body === undefined ? undefined : (encodeJSON ?? JSON.stringify)(options.body)
     });
     if (!response.ok) return this.throwResponseError(response, maximumResponseBytes);
     const contentType = response.headers.get("Content-Type")?.toLowerCase() || "";
     if (!contentType.includes("text/event-stream")) {
       if (acceptJSONFallback && contentType.includes("application/json")) {
-        return { streamed: false, data: await this.json<T>(response, maximumResponseBytes) };
+        return { streamed: false, data: await this.json<T>(response, maximumResponseBytes, parseJSON) };
       }
       throw new APIError(response.status, "invalid_stream", "Expected a text/event-stream response");
     }

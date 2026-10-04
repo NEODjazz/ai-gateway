@@ -147,7 +147,7 @@ export function playgroundConnection(sessionClient: APIClient, source: KeySource
 function shellQuote(value: string) { return `'${value.replace(/'/g, `'"'"'`)}'`; }
 
 export type CodeCheck = { path: string; body: unknown };
-export function requestCode(language: "curl" | "python" | "javascript", path: string, body: unknown, baseURL = "", additionalHeaders: Record<string, string> = {}, binaryOutput = false, checks: CodeCheck[] = []): string {
+export function requestCode(language: "curl" | "python" | "javascript", path: string, body: unknown, baseURL = "", additionalHeaders: Record<string, string> = {}, binaryOutput = false, checks: CodeCheck[] = [], bodyJSON?: string): string {
   if (checks.length) {
     if (checks.length > 4 || checks.some((check) => check.path !== "/guardrails/apply_guardrail")) throw new Error("Unsupported code export preflight.");
     const preflight = checks.map((check) => {
@@ -156,14 +156,15 @@ export function requestCode(language: "curl" | "python" | "javascript", path: st
       if (language === "python") return example.replace("    print(response.read().decode())", '    decision = json.load(response)\n    if decision.get("allowed") is not True: raise RuntimeError("Prompt policy did not allow generation")');
       return "{\n" + example.replace("console.log(await response.text());", 'if ((await response.json())?.allowed !== true) throw new Error("Prompt policy did not allow generation");') + "\n}";
     }).join("\n\n");
-    return (language === "curl" ? "#!/usr/bin/env bash\nset -euo pipefail\n\n" : "") + preflight + "\n\n" + requestCode(language, path, body, baseURL, additionalHeaders, binaryOutput);
+    return (language === "curl" ? "#!/usr/bin/env bash\nset -euo pipefail\n\n" : "") + preflight + "\n\n" + requestCode(language, path, body, baseURL, additionalHeaders, binaryOutput, [], bodyJSON);
   }
   const url = gatewayPath(baseURL || window.location.origin, path);
-  for (const [name, value] of Object.entries(additionalHeaders)) if (!(name === "Idempotency-Key" && /^[\x21-\x7e]{1,128}$/.test(value) || name === "A2A-Version" && value === "1.0")) throw new Error("Unsupported code export header.");
+  for (const [name, value] of Object.entries(additionalHeaders)) if (!(name === "Idempotency-Key" && /^[\x21-\x7e]{1,128}$/.test(value) || name === "A2A-Version" && value === "1.0" || name === "anthropic-version" && value === "2023-06-01")) throw new Error("Unsupported code export header.");
   const headerJSON = JSON.stringify(additionalHeaders);
   const curlHeaders = Object.entries(additionalHeaders).map(([name, value]) => `  -H ${shellQuote(`${name}: ${value}`)} \\\n`).join("");
-  const payload = JSON.stringify(body, null, 2);
+  const payload = bodyJSON ?? JSON.stringify(body, null, 2);
+  if (bodyJSON !== undefined) JSON.parse(bodyJSON);
   if (language === "curl") return `curl ${shellQuote(url)} \\\n  -H "Authorization: Bearer $GATEWAY_API_KEY" \\\n  -H 'Content-Type: application/json' \\\n${curlHeaders}  --data-raw ${shellQuote(payload)}${binaryOutput ? " --output ai-gateway-output.bin" : ""}`;
-  if (language === "python") return `import json, os, urllib.request\n\nbody = json.loads(${JSON.stringify(payload)})\nrequest = urllib.request.Request(\n    ${JSON.stringify(url)},\n    data=json.dumps(body).encode(),\n    headers={"Authorization": "Bearer " + os.environ["GATEWAY_API_KEY"], "Content-Type": "application/json", **json.loads(${JSON.stringify(headerJSON)})},\n    method="POST",\n)\nwith urllib.request.urlopen(request, timeout=120) as response:\n${binaryOutput ? '    with open("ai-gateway-output.bin", "wb") as output:\n        output.write(response.read())' : "    print(response.read().decode())"}`;
-  return `const response = await fetch(${JSON.stringify(url)}, {\n  method: "POST",\n  headers: {\n    Authorization: "Bearer " + process.env.GATEWAY_API_KEY,\n    "Content-Type": "application/json",\n    ...${headerJSON},\n  },\n  body: JSON.stringify(${payload}),\n});\nif (!response.ok) throw new Error("Request failed: " + response.status);\n${binaryOutput ? 'const { writeFile } = await import("node:fs/promises");\nawait writeFile("ai-gateway-output.bin", Buffer.from(await response.arrayBuffer()));' : "console.log(await response.text());"}`;
+  if (language === "python") return `import json, os, urllib.request\n\nbody = ${bodyJSON === undefined ? `json.loads(${JSON.stringify(payload)})` : JSON.stringify(payload)}\nrequest = urllib.request.Request(\n    ${JSON.stringify(url)},\n    data=${bodyJSON === undefined ? "json.dumps(body).encode()" : "body.encode()"},\n    headers={"Authorization": "Bearer " + os.environ["GATEWAY_API_KEY"], "Content-Type": "application/json", **json.loads(${JSON.stringify(headerJSON)})},\n    method="POST",\n)\nwith urllib.request.urlopen(request, timeout=120) as response:\n${binaryOutput ? '    with open("ai-gateway-output.bin", "wb") as output:\n        output.write(response.read())' : "    print(response.read().decode())"}`;
+  return `const response = await fetch(${JSON.stringify(url)}, {\n  method: "POST",\n  headers: {\n    Authorization: "Bearer " + process.env.GATEWAY_API_KEY,\n    "Content-Type": "application/json",\n    ...${headerJSON},\n  },\n  body: ${bodyJSON === undefined ? `JSON.stringify(${payload})` : JSON.stringify(payload)},\n});\nif (!response.ok) throw new Error("Request failed: " + response.status);\n${binaryOutput ? 'const { writeFile } = await import("node:fs/promises");\nawait writeFile("ai-gateway-output.bin", Buffer.from(await response.arrayBuffer()));' : "console.log(await response.text());"}`;
 }

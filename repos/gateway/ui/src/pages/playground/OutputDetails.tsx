@@ -52,11 +52,11 @@ export function CopyOutput({ text, label = "Copy output" }: { text: string; labe
   }}>Copy output</GatewayButton>{status && <span role="status">{status}</span>}</div>;
 }
 
-export function OutputDetails({ payload, connection, disabled = false }: { payload: unknown; connection?: PlaygroundConnection; disabled?: boolean }) {
+export function OutputDetails({ payload, connection, disabled = false, encodeJSON = (value) => JSON.stringify(value, null, 2) }: { payload: unknown; connection?: PlaygroundConnection; disabled?: boolean; encodeJSON?: (value: unknown) => string }) {
   const details = outputDetails(payload);
   const response = payload && typeof payload === "object" ? payload as Record<string, unknown> : {};
   return <>
-    {details.tools.length > 0 && <details open><summary>Tool calls and results</summary><pre>{JSON.stringify(details.tools, null, 2).slice(0, 65536)}</pre></details>}
+    {details.tools.length > 0 && <details open><summary>Tool calls and results</summary><pre>{encodeJSON(details.tools).slice(0, 65536)}</pre></details>}
     {details.citations.length > 0 && <div className="playground-citations"><strong>Sources</strong><ul>{details.citations.map((source) => <li key={source.url}><a href={source.url} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer">{source.title}</a></li>)}</ul></div>}
     {details.files.length > 0 && <FileResults files={details.files} connection={connection} disabled={disabled} responseID={typeof response.id === "string" ? response.id : ""} stored={response.store !== false} />}
     {details.filesTruncated && <p className="muted">Only the first 32 file citations are shown.</p>}

@@ -1,8 +1,9 @@
+import { exactObjectText, stringifyExactJSON } from "./exactJSON";
 import type { Attachment } from "./endpointRequests";
 
 export type NativeEndpoint = "messages" | "interactions";
 export type NativeTurn = { role: "user" | "assistant" | "tool"; content: unknown; text?: string; reasoning?: string };
-export type NativeToolCall = { id: string; name: string; arguments: Record<string, unknown> };
+export type NativeToolCall = { id: string; name: string; arguments: Record<string, unknown>; rawArguments: string; definition?: string; issue?: string };
 export type NativeToolResult = { id: string; text: string; declined: boolean };
 function record(value: unknown): Record<string, unknown> | undefined { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined; }
 
@@ -25,7 +26,7 @@ export function nativeUserContent(endpoint: NativeEndpoint, text: string, files:
   })];
 }
 
-export function nativeToolCalls(endpoint: NativeEndpoint, payload: Record<string, unknown>): NativeToolCall[] {
+export function nativeToolCalls(endpoint: NativeEndpoint, payload: Record<string, unknown>, tools: unknown = []): NativeToolCall[] {
   const content = endpoint === "messages" ? payload.content : payload.steps;
   if (!Array.isArray(content)) throw new Error("Native response is missing conversation content.");
   const calls: NativeToolCall[] = [], seen = new Set<string>();
@@ -33,8 +34,11 @@ export function nativeToolCalls(endpoint: NativeEndpoint, payload: Record<string
     const item = record(value);
     if (item?.type !== (endpoint === "messages" ? "tool_use" : "function_call")) continue;
     const args = endpoint === "messages" ? item.input : item.arguments;
-    if (calls.length >= 32 || typeof item.id !== "string" || !/^[A-Za-z0-9._:-]{1,128}$/.test(item.id) || seen.has(item.id) || typeof item.name !== "string" || !/^[A-Za-z0-9_-]{1,64}$/.test(item.name) || !record(args) || new TextEncoder().encode(JSON.stringify(args)).length > 65536) throw new Error("Native response contains an invalid or oversized tool call. Clear the conversation before retrying.");
-    seen.add(item.id); calls.push({ id: item.id, name: item.name, arguments: args as Record<string, unknown> });
+    if (calls.length >= 32 || typeof item.id !== "string" || !/^[A-Za-z0-9._:-]{1,128}$/.test(item.id) || seen.has(item.id) || typeof item.name !== "string" || !/^[A-Za-z0-9_-]{1,64}$/.test(item.name) || !record(args) || new TextEncoder().encode(exactObjectText(args)).length > 65536) throw new Error("Native response contains an invalid or oversized tool call. Clear the conversation before retrying.");
+    const definitions = nativeDefinitions(endpoint, tools, item.name);
+    seen.add(item.id); calls.push({ id: item.id, name: item.name, arguments: args as Record<string, unknown>, rawArguments: exactObjectText(args),
+      definition: definitions.length === 1 ? stringifyExactJSON(definitions[0]) : undefined,
+      issue: definitions.length === 1 ? undefined : "This call is not declared as one tool in the submitted request. It can only be declined." });
   }
   return calls;
 }
@@ -60,10 +64,23 @@ export function nativeHistory(endpoint: NativeEndpoint, turns: NativeTurn[]): un
         if (!Array.isArray(step.content) || step.content.some((part) => record(part)?.type !== "text" || typeof record(part)?.text !== "string")) throw new Error("Interaction output cannot be replayed as text. Use stored continuity or clear the conversation.");
         return [{ role: "assistant", content: step.content.map((part) => ({ type: "output_text", text: record(part)!.text })) }];
       }
-      if (step?.type === "function_call") return [{ type: "function_call", call_id: step.id, name: step.name, arguments: JSON.stringify(step.arguments) }];
+      if (step?.type === "function_call") return [{ type: "function_call", call_id: step.id, name: step.name, arguments: exactObjectText(step.arguments) }];
       // Thought summaries are display-only; they are not signed reasoning items.
       if (step?.type === "thought") return [];
       throw new Error("Interaction contains a step that cannot be replayed. Use stored continuity or clear the conversation.");
     });
   });
+}
+
+function nativeDefinitions(endpoint: NativeEndpoint, tools: unknown, name: string) {
+  return Array.isArray(tools) ? tools.filter((tool) => record(tool)?.name === name && (endpoint === "messages" || record(tool)?.type === "function")) : [];
+}
+
+export function validateNativeContinuation(endpoint: NativeEndpoint, calls: NativeToolCall[], results: NativeToolResult[], tools: unknown) {
+  for (const call of calls) {
+    if (call.issue && !results.find((result) => result.id === call.id)?.declined) throw new Error("This native tool call can only be declined.");
+    if (call.definition === undefined) continue;
+    const definitions = nativeDefinitions(endpoint, tools, call.name);
+    if (definitions.length !== 1 || stringifyExactJSON(definitions[0]) !== call.definition) throw new Error("The native tool definition changed after this call was requested. Restore its original configuration or clear the conversation.");
+  }
 }

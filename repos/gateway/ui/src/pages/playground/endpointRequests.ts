@@ -76,7 +76,7 @@ export function buildEndpointRequest(endpoint: SpecializedEndpoint, model: strin
     return { path, body: { ...extras, arguments: jsonObject(settings.arguments, "Tool arguments") }, headers: { "Idempotency-Key": `playground-${crypto.randomUUID()}` } };
   }
   if (new TextEncoder().encode(JSON.stringify(body)).length > 24 * 1024 * 1024) throw new Error("Request exceeds the 24 MiB Playground limit.");
-  return { path, body };
+  return { path, body, ...(endpoint === "messages" ? { headers: { "anthropic-version": "2023-06-01" } } : {}) };
 }
 
 export function safeMediaURL(value: unknown): string | undefined {

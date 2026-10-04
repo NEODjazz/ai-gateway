@@ -128,3 +128,15 @@ describe("A2A code export headers", () => {
     expect(() => requestCode(language, "/a2a/research", {}, "", { Authorization: "override" })).toThrow("Unsupported");
   });
 });
+
+describe("Exact native request exports", () => {
+  it("executes exported JavaScript with the exact native JSON body", async () => {
+    const payload = '{"messages":[{"role":"assistant","content":[{"type":"tool_use","id":"call","name":"query","input":{"id":9007199254740993,"amount":0.1234567890123456789012345}}]}]}';
+    const code = requestCode("javascript", "/v1/messages", JSON.parse(payload), "", {}, false, [], payload);
+    let sent: RequestInit | undefined;
+    const execute = new (Object.getPrototypeOf(async () => {}).constructor)("fetch", "process", "console", code);
+    await execute(async (_path: string, options: RequestInit) => { sent = options; return { ok: true, text: async () => "Synthetic response" }; }, { env: { GATEWAY_API_KEY: "synthetic-export-key" } }, { log: () => {} });
+    expect(sent?.body).toBe(payload); expect(new Headers(sent?.headers).get("Authorization")).toBe("Bearer synthetic-export-key");
+    expect(() => requestCode("curl", "/v1/messages", {}, "", {}, false, [], "{")).toThrow();
+  });
+});

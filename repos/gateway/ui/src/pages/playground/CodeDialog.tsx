@@ -4,10 +4,10 @@ import { ModalFrame } from "../../components/ModalFrame";
 import { PageTabs } from "../../components/PageTabs";
 import { requestCode, type CodeCheck } from "./requests";
 
-export function CodeDialog({ path, body, baseURL, headers, binaryOutput, checks, onClose }: { path: string; body: unknown; baseURL: string; headers?: Record<string, string>; binaryOutput?: boolean; checks?: CodeCheck[]; onClose: () => void }) {
+export function CodeDialog({ path, body, baseURL, headers, binaryOutput, checks, bodyJSON, onClose }: { path: string; body: unknown; baseURL: string; headers?: Record<string, string>; binaryOutput?: boolean; checks?: CodeCheck[]; bodyJSON?: string; onClose: () => void }) {
   const [language, setLanguage] = useState<"curl" | "python" | "javascript">("curl");
   const [status, setStatus] = useState("");
-  const code = requestCode(language, path, body, baseURL, headers, binaryOutput, checks);
+  const code = requestCode(language, path, body, baseURL, headers, binaryOutput, checks, bodyJSON);
   async function copy() {
     try { await navigator.clipboard.writeText(code); setStatus("Copied"); }
     catch { setStatus("Copy failed. Select and copy the code manually."); }

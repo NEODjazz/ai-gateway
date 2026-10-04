@@ -168,6 +168,14 @@ compatibility must be distinguished from merely having an endpoint selector.
   ownership. Current model/tool grants, byte limits, cancellation and stale-read
   rejection have regression coverage. Organization-bound ownership is described
   below.
+- [x] Bound native Messages/Interactions tool review to the originally submitted
+  definitions, including background completion. Changed definitions fail before
+  transport; undeclared calls can only be declined. Invalid batches retain actual
+  text and usage and require Clear before another turn.
+- [x] Preserved native tool argument numeric literals in JSON/SSE, browser history,
+  typed replay and code export, including Gateway Messages and Interactions
+  conversion and native Gemini responses. Messages sends its required protocol
+  version header in both live requests and exported code.
 - [ ] Finish media/tool output, policy selection and full conversation verification.
 - [ ] Complete endpoint-specific execution and media/tool handling.
 - [ ] Complete comparison, compliance and agent views.
@@ -569,3 +577,45 @@ The console CSP permits `blob:` only for local image/audio rendering; scripts,
 frames and unapproved connection origins remain restricted.
 Pending reads can be cancelled and cannot publish after a scope change even
 when a transport ignores cancellation.
+
+
+## Native tool review and numeric precision
+
+Messages and Interactions tool calls are bound to exactly one tool declaration
+in their original submitted request. Background Interactions retain that request's
+definitions even if the form changes before refresh. Removing, changing or
+ambiguously declaring a reviewed tool blocks continuation and code export before
+transport. An undeclared call can only be declined; adding a declaration later
+does not authorize it. The browser never executes native functions automatically.
+
+The original JSON text of native `tool_use.input` and `function_call.arguments`
+objects is retained privately in memory. Native response reads, indexed stream
+assembly, conversation details, replay and cURL/Python/JavaScript exports preserve
+large integers and precise decimals. Gateway Messages conversion retains numeric
+literals in incoming history, ordinary responses and SSE; Interactions conversion
+and the native Gemini JSON/final-stream decoder preserve numeric values too.
+Manual tool-result text is forwarded unchanged. Ordinary advanced settings and
+resource metadata continue to use the standard JSON parser.
+
+The existing 32-call, 64 KiB argument and 128 KiB result limits remain enforced.
+Native JSON reads also have a 2 MiB and 128-level depth bound. Native conversation
+retention counts the original argument text within the existing 40-turn/32 MiB
+history limit. Invalid tool IDs, duplicate calls or malformed argument batches
+retain the completed provider's text and actual usage, while new prompts and code
+export stay blocked until Clear. Failed transport preserves reviewed results.
+
+Messages live requests and code examples include `anthropic-version: 2023-06-01`.
+The UI API client gains optional internal JSON codec hooks; default callers retain
+existing behavior. Some internal native argument maps now use `json.Number`
+instead of `float64`. HTTP field names, public request shapes and authentication
+remain unchanged; no new dependency is introduced.
+
+Regression coverage includes native definitions, background provenance, failed
+continuation, malformed completed streams, actual usage retention, exact fetch
+bodies, nested numeric objects, JSON limits and executed JavaScript export.
+Browser verification used the real embedded console CSP, native Messages and
+Interactions handlers and an isolated synthetic HTTP provider. Both native
+continuations retained exact numeric arguments and plain-text results; changing a
+definition made no transport call. Export and history rendering were inspected,
+and the console recorded no errors. No real provider, remote tool service,
+production credentials or billing were used by this verification.

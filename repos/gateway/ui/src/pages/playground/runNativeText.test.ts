@@ -1,11 +1,35 @@
 import { APIClient } from "../../api/client";
 import { playgroundConnection } from "./requests";
+import { exactObjectText, stringifyExactJSON } from "./exactJSON";
 import { runInteractionResource, runNativeText } from "./runNativeText";
 
 const connection = () => playgroundConnection(new APIClient(() => "test-key"), "session", "", "");
 const options = () => new AbortController().signal;
 function stream(events: unknown[]) { return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""), { headers: { "Content-Type": "text/event-stream" } }); }
 describe("Native text execution", () => {
+  it.each(["messages", "interactions"] as const)("retains exact %s streamed numeric argument fragments and sends their original JSON on continuation", async (endpoint) => {
+    const raw = '{"id":9007199254740993,"amount":0.1234567890123456789012345}';
+    const events = endpoint === "messages" ? [
+      { type: "message_start", message: { usage: { input_tokens: 5 } } },
+      { type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "call", name: "query", input: {} } },
+      { type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: raw.slice(0, 20) } },
+      { type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: raw.slice(20) } },
+      { type: "message_delta", usage: { output_tokens: 2 } }, { type: "message_stop" }
+    ] : [
+      { event_type: "step.start", index: 0, step: { type: "function_call", id: "call", name: "query" } },
+      { event_type: "step.delta", index: 0, delta: { type: "arguments_delta", arguments: raw.slice(0, 20) } },
+      { event_type: "step.delta", index: 0, delta: { type: "arguments_delta", arguments: raw.slice(20) } },
+      { event_type: "interaction.completed", interaction: { id: "job", status: "completed", usage: { total_input_tokens: 5, total_output_tokens: 2 } } }
+    ];
+    const mock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(stream(events)).mockResolvedValueOnce(new Response(endpoint === "messages" ? '{"content":[]}' : '{"steps":[]}', { headers: { "Content-Type": "application/json" } }));
+    const run = await runNativeText(connection(), endpoint, { stream: true }, options(), vi.fn());
+    const items = (endpoint === "messages" ? run.response.content : run.response.steps) as Record<string, unknown>[];
+    const field = endpoint === "messages" ? "input" : "arguments";
+    expect(exactObjectText(items[0][field])).toBe(raw);
+    await runNativeText(connection(), endpoint, { stream: false, replay: items }, options(), vi.fn());
+    expect(String(mock.mock.calls[1][1]?.body)).toContain(`"${field}":${raw}`);
+    expect(stringifyExactJSON(run.response)).toContain(raw);
+  });
   it.each(["refresh", "cancel"] as const)("uses authenticated interaction %s without generating again", async (operation) => {
     const mock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response('{"id":"job:1.2","status":"completed","steps":[{"type":"model_output","content":[{"type":"text","text":"Final"}]}]}'));
     expect(await runInteractionResource(connection(), "job:1.2", operation, options())).toMatchObject({ text: "Final", response: { status: "completed" }, lifecycle: true });
@@ -70,11 +94,11 @@ describe("Native text execution", () => {
     mock.mockResolvedValue(stream([{ type: "content_block_start", index: 0, content_block: { type: "text", text: "Initial" } }, { type: "message_stop" }]));
     expect(await runNativeText(connection(), "messages", { stream: true }, options(), vi.fn())).toMatchObject({ firstTokenMS: expect.any(Number), text: "Initial" });
   });
-  it("rejects interaction tool deltas without a matching step or valid JSON", async () => {
+  it("rejects unmatched interaction tool deltas and retains malformed completed arguments for review", async () => {
     const mock = vi.spyOn(globalThis, "fetch").mockResolvedValue(stream([{ event_type: "step.delta", index: 0, delta: { type: "arguments_delta", arguments: "{}" } }]));
     await expect(runNativeText(connection(), "interactions", { stream: true }, options(), vi.fn())).rejects.toThrow("unavailable function");
     mock.mockResolvedValue(stream([{ event_type: "step.start", index: 0, step: { type: "function_call", id: "call", name: "lookup" } }, { event_type: "step.delta", index: 0, delta: { type: "arguments_delta", arguments: "{" } }, { event_type: "interaction.completed", interaction: { status: "completed" } }]));
-    await expect(runNativeText(connection(), "interactions", { stream: true }, options(), vi.fn())).rejects.toThrow("invalid JSON");
+    expect(await runNativeText(connection(), "interactions", { stream: true }, options(), vi.fn())).toMatchObject({ response: { steps: [{ arguments: "{" }] } });
   });
   it("rejects an interrupted stream and an invalid block reference", async () => {
     const mock = vi.spyOn(globalThis, "fetch").mockResolvedValue(stream([{ type: "message_start", message: { id: "partial" } }]));

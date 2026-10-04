@@ -161,3 +161,20 @@ func TestInteractionResponsePreservesStepsAndUsage(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestInteractionConversionPreservesFunctionArgumentNumbers(t *testing.T) {
+	const arguments = `{"id":9007199254740993,"amount":0.1234567890123456789012345}`
+	response := ResponseResponse{ID: "response", Status: "completed", Output: []ResponseOutputItem{{Type: "function_call", CallID: "call", Name: "query", Arguments: arguments}}}
+	interaction := InteractionFromResponse(response)
+	encoded, err := json.Marshal(interaction)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), "9007199254740993") || !strings.Contains(string(encoded), "0.1234567890123456789012345") {
+		t.Fatalf("interaction argument rounded: %s", encoded)
+	}
+	replayed := ResponseFromInteraction(interaction)
+	if len(replayed.Output) != 1 || !strings.Contains(replayed.Output[0].Arguments, "9007199254740993") || !strings.Contains(replayed.Output[0].Arguments, "0.1234567890123456789012345") {
+		t.Fatalf("interaction replay rounded arguments: %+v", replayed.Output)
+	}
+}

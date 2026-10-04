@@ -14,10 +14,10 @@ export function conversationInput(text: string, attachments: Attachment[]): unkn
 }
 
 // A user turn starts a group, including all assistant/tool continuations.
-export function retainConversation<T extends { role: string }>(turns: T[]): { turns: T[]; dropped: number } {
+export function retainConversation<T extends { role: string }>(turns: T[], serialize: (value: unknown) => string = JSON.stringify): { turns: T[]; dropped: number } {
   const retained = turns.slice();
   let dropped = 0;
-  while (retained.length > 40 || new TextEncoder().encode(JSON.stringify(retained)).length > 32 * 1024 * 1024) {
+  while (retained.length > 40 || new TextEncoder().encode(serialize(retained)).length > 32 * 1024 * 1024) {
     const boundary = retained.findIndex((turn, index) => index > 0 && turn.role === "user");
     if (boundary < 0) throw new Error("The latest conversation group exceeds the 40-turn or 32 MiB history limit.");
     retained.splice(0, boundary); dropped += boundary;

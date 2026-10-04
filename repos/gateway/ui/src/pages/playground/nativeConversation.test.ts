@@ -1,4 +1,4 @@
-import { nativeHistory, nativeToolCalls, nativeToolContent, nativeUserContent, type NativeTurn } from "./nativeConversation";
+import { nativeHistory, nativeToolCalls, nativeToolContent, nativeUserContent, validateNativeContinuation, type NativeTurn } from "./nativeConversation";
 import { retainConversation } from "./attachments";
 
 describe("Native conversation contracts", () => {
@@ -9,9 +9,21 @@ describe("Native conversation contracts", () => {
   });
   it("rejects malformed, duplicate and oversized native tool calls", () => {
     const call = { type: "tool_use", id: "call", name: "lookup", input: {} };
-    expect(nativeToolCalls("messages", { content: [call] })).toEqual([{ id: "call", name: "lookup", arguments: {} }]);
+    expect(nativeToolCalls("messages", { content: [call] })).toMatchObject([{ id: "call", name: "lookup", arguments: {}, rawArguments: "{}", issue: expect.stringContaining("only be declined") }]);
     for (const content of [[call, call], [{ ...call, input: [] }], [{ ...call, id: "../escape" }], [{ ...call, input: { text: "x".repeat(65536) } }], Array.from({ length: 33 }, (_, i) => ({ ...call, id: `call-${i}` }))]) expect(() => nativeToolCalls("messages", { content })).toThrow("tool call");
     expect(() => nativeToolCalls("interactions", { outputs: [] })).toThrow("missing");
+  });
+  it.each(["messages", "interactions"] as const)("binds %s manual results to an exact submitted declaration and restricts undeclared calls to decline", (endpoint) => {
+    const tool = endpoint === "messages" ? { name: "lookup", input_schema: { type: "object" } } : { type: "function", name: "lookup", parameters: { type: "object" } };
+    const payload = endpoint === "messages" ? { content: [{ type: "tool_use", id: "call", name: "lookup", input: {} }] } : { steps: [{ type: "function_call", id: "call", name: "lookup", arguments: {} }] };
+    const calls = nativeToolCalls(endpoint, payload, [tool]), results = [{ id: "call", text: "Result", declined: false }];
+    expect(calls[0].issue).toBeUndefined(); expect(() => validateNativeContinuation(endpoint, calls, results, [tool])).not.toThrow();
+    for (const tools of [[], [tool, tool], [{ ...tool, description: "Changed" }]]) expect(() => validateNativeContinuation(endpoint, calls, results, tools)).toThrow("definition changed");
+    for (const tools of [[], [tool, tool]]) {
+      const unbound = nativeToolCalls(endpoint, payload, tools); expect(unbound[0].issue).toContain("only be declined");
+      expect(() => validateNativeContinuation(endpoint, unbound, results, tools)).toThrow("only be declined");
+      expect(() => validateNativeContinuation(endpoint, unbound, [{ ...results[0], declined: true }], tools)).not.toThrow();
+    }
   });
   it("rejects invalid native attachments before request transport", () => {
     const file = { filename: "input.png", media_type: "image/png", data_base64: "AA==" };

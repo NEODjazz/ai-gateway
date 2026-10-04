@@ -195,3 +195,20 @@ describe("APIClient", () => {
     expect(body.locked).toBe(false);
   });
 });
+
+describe("Endpoint-specific JSON transport", () => {
+  it.each([false, true])("uses explicit JSON codecs without sending them as fetch options (stream fallback %s)", async (fallback) => {
+    const text = '{"id":9007199254740993}';
+    const mock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(text, { headers: { "Content-Type": "application/json" } }));
+    const parseJSON = vi.fn((source: string) => ({ original: source })), encodeJSON = vi.fn(() => text);
+    const client = new APIClient(() => "synthetic-key", { credentials: "omit", sessionEvents: false });
+    const options = { body: { id: 9007199254740992 }, method: "POST", maximumResponseBytes: 64, encodeJSON, parseJSON };
+    const result = fallback ? await client.stream("/native", options, vi.fn(), true) : await client.request("/native", options);
+    expect(result).toEqual(fallback ? { streamed: false, data: { original: text } } : { original: text });
+    expect(parseJSON).toHaveBeenCalledWith(text); expect(encodeJSON).toHaveBeenCalledWith(options.body);
+    expect(mock.mock.calls[0][1]?.body).toBe(text); expect(mock.mock.calls[0][1]?.credentials).toBe("omit");
+    expect(mock.mock.calls[0][1]).not.toHaveProperty("parseJSON"); expect(mock.mock.calls[0][1]).not.toHaveProperty("encodeJSON");
+    mock.mockResolvedValue(new Response("x".repeat(65), { headers: { "Content-Type": "application/json" } })); parseJSON.mockClear();
+    await expect(client.request("/native", options)).rejects.toThrow("size limit"); expect(parseJSON).not.toHaveBeenCalled();
+  });
+});

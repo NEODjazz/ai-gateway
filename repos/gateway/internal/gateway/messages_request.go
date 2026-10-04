@@ -506,10 +506,10 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 				}
 			case "tool_use":
 				var block struct {
-					Type  string         `json:"type"`
-					ID    string         `json:"id"`
-					Name  string         `json:"name"`
-					Input map[string]any `json:"input"`
+					Type  string          `json:"type"`
+					ID    string          `json:"id"`
+					Name  string          `json:"name"`
+					Input json.RawMessage `json:"input"`
 				}
 				if err := decodeMessagesValue(raw, &block); err != nil || message.Role != "assistant" || block.ID == "" || block.Name == "" || block.Input == nil {
 					return result, errors.New("invalid or unsupported tool_use block")
@@ -517,11 +517,12 @@ func (request messagesRequest) chatContext(allowPartial bool) (openai.ChatComple
 				if _, duplicate := knownCalls[block.ID]; duplicate {
 					return result, errors.New("invalid or unsupported tool_use block")
 				}
-				knownCalls[block.ID] = messagesKnownToolCall{ToolName: block.Name}
-				args, err := json.Marshal(block.Input)
-				if err != nil {
-					return result, err
+				var input map[string]any
+				if err := decodeMessagesArgumentObject(block.Input, &input); err != nil || input == nil {
+					return result, errors.New("invalid or unsupported tool_use block")
 				}
+				knownCalls[block.ID] = messagesKnownToolCall{ToolName: block.Name}
+				args := bytes.TrimSpace(block.Input)
 				converted.ToolCalls = append(converted.ToolCalls, openai.ToolCall{ID: block.ID, Type: "function", Function: openai.FunctionCall{Name: block.Name, Arguments: string(args)}})
 			case "tool_result":
 				var block struct {
