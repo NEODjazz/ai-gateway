@@ -29,6 +29,11 @@ type AgentGeneration struct {
 	MaxOutputTokens *int     `json:"max_output_tokens,omitempty"`
 }
 
+type AgentMCPTool struct {
+	ServerID string `json:"server_id"`
+	ToolName string `json:"tool_name"`
+}
+
 type AgentProfile struct {
 	ID                     string           `json:"id"`
 	Name                   string           `json:"name"`
@@ -38,6 +43,7 @@ type AgentProfile struct {
 	Instructions           string           `json:"-"`
 	InstructionsConfigured bool             `json:"instructions_configured"`
 	Generation             *AgentGeneration `json:"generation,omitempty"`
+	MCPTools               []AgentMCPTool   `json:"mcp_tools,omitempty"`
 	ToolPolicyID           string           `json:"tool_policy_id"`
 	AllowedTools           []string         `json:"allowed_tools"`
 	DeniedTools            []string         `json:"denied_tools,omitempty"`
@@ -102,6 +108,7 @@ func (r *AgentRegistry) AgentProfile(id string) (AgentProfile, bool) {
 }
 
 func cloneAgentProfile(item AgentProfile) AgentProfile {
+	item.MCPTools = append([]AgentMCPTool(nil), item.MCPTools...)
 	item.AllowedTools = append([]string(nil), item.AllowedTools...)
 	item.DeniedTools = append([]string(nil), item.DeniedTools...)
 	item.ApprovalRequired = append([]string(nil), item.ApprovalRequired...)
@@ -151,6 +158,9 @@ func (r *AgentRegistry) PutAgentProfile(id string, item AgentProfile) (AgentProf
 	item.ToolPolicyID = strings.TrimSpace(item.ToolPolicyID)
 	item.InstructionsTemplateID = strings.TrimSpace(item.InstructionsTemplateID)
 	if !validMCPID(id) || item.Name == "" || len(item.Name) > 256 || len(item.Description) > 1024 || item.Model == "" || len(item.Model) > 256 || !validMCPID(item.ToolPolicyID) || len(item.InstructionsTemplateID) > 256 || !validAccessStrings(item.Tags) || item.MaxIterations < 1 || item.MaxIterations > 50 {
+		return AgentProfile{}, errInvalidAgentEntry
+	}
+	if !validAgentMCPTools(item.MCPTools) {
 		return AgentProfile{}, errInvalidAgentEntry
 	}
 	if len(item.Instructions) > 64<<10 || !utf8.ValidString(item.Instructions) || strings.ContainsRune(item.Instructions, '\x00') || item.Instructions != "" && item.InstructionsTemplateID != "" {
@@ -276,6 +286,7 @@ func (h Handler) PutAgentProfile(w http.ResponseWriter, r *http.Request) {
 		InstructionsTemplateID string           `json:"instructions_template_id,omitempty"`
 		Instructions           *string          `json:"instructions,omitempty"`
 		Generation             *AgentGeneration `json:"generation,omitempty"`
+		MCPTools               *[]AgentMCPTool  `json:"mcp_tools,omitempty"`
 		ToolPolicyID           string           `json:"tool_policy_id"`
 		MaxIterations          int              `json:"max_iterations"`
 		Tags                   []string         `json:"tags,omitempty"`
@@ -298,7 +309,11 @@ func (h Handler) PutAgentProfile(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusServiceUnavailable, "configuration_encryption_unavailable", "durable agent instructions require CREDENTIAL_ENCRYPTION_KEY")
 			return nil, errAgentResponseWritten
 		}
-		return h.agents.PutAgentProfile(r.PathValue("id"), AgentProfile{Name: input.Name, Description: input.Description, Model: input.Model, InstructionsTemplateID: input.InstructionsTemplateID, Instructions: instructions, Generation: generation, ToolPolicyID: input.ToolPolicyID, MaxIterations: input.MaxIterations, Tags: input.Tags, Enabled: input.Enabled})
+		bindings := previous.MCPTools
+		if input.MCPTools != nil {
+			bindings = *input.MCPTools
+		}
+		return h.agents.PutAgentProfile(r.PathValue("id"), AgentProfile{Name: input.Name, Description: input.Description, Model: input.Model, InstructionsTemplateID: input.InstructionsTemplateID, Instructions: instructions, Generation: generation, MCPTools: bindings, ToolPolicyID: input.ToolPolicyID, MaxIterations: input.MaxIterations, Tags: input.Tags, Enabled: input.Enabled})
 	})
 }
 func (h Handler) putAgentEntry(w http.ResponseWriter, r *http.Request, targetType string, save func() (any, error)) {

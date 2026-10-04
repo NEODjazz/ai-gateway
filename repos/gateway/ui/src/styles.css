@@ -509,3 +509,7 @@ textarea { resize: vertical; }
 .playground-tool-approvals { display: grid; gap: 12px; margin: 16px 0; }
 .playground-turn.tool { background: var(--g-color-base-simple-hover, #f5f7f9); }
 .playground-tool-approvals details { margin: 8px 0; }
+
+.playground-agent-mcp-controls { display: grid; align-content: start; gap: 12px; }
+.playground-agent-mcp-controls h3, .playground-agent-mcp-controls p, .playground-agent-mcp-controls ul { margin-top: 0; margin-bottom: 0; }
+.playground-agent-mcp-controls li { overflow-wrap: anywhere; }

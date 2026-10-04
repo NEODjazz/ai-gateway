@@ -100,7 +100,7 @@ func TestPostgresAgentConfigurationEncryptedRestoreIntegration(t *testing.T) {
 	}
 	router := Routes(NewHandler(modulesPipeline("admin"), nil).WithAgentRegistry(agents).WithAdminState(runtime))
 	response := httptest.NewRecorder()
-	router.ServeHTTP(response, httptest.NewRequest(http.MethodPut, "/admin/v1/agent-profiles/research", strings.NewReader(`{"name":"Research","model":"test-model","tool_policy_id":"safe","max_iterations":3,"enabled":true,"instructions":"`+agentFixtureInstructions+`","generation":{"temperature":0,"max_output_tokens":127}}`)))
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodPut, "/admin/v1/agent-profiles/research", strings.NewReader(`{"name":"Research","model":"test-model","tool_policy_id":"safe","max_iterations":3,"enabled":true,"instructions":"`+agentFixtureInstructions+`","generation":{"temperature":0,"max_output_tokens":127},"mcp_tools":[{"server_id":"weather","tool_name":"lookup"}]}`)))
 	if response.Code != http.StatusOK {
 		t.Fatalf("durable profile update failed: status=%d", response.Code)
 	}
@@ -113,6 +113,9 @@ func TestPostgresAgentConfigurationEncryptedRestoreIntegration(t *testing.T) {
 	}
 	_, restored := freshRuntime()
 	saved, ok := restored.AgentProfile("research")
+	if len(saved.MCPTools) != 1 || saved.MCPTools[0].ServerID != "weather" || saved.MCPTools[0].ToolName != "lookup" {
+		t.Fatal("fresh replica lost MCP bindings")
+	}
 	if !ok || saved.Instructions != agentFixtureInstructions || saved.Generation == nil || *saved.Generation.Temperature != 0 || *saved.Generation.MaxOutputTokens != 127 {
 		t.Fatal("fresh replica lost executable configuration")
 	}

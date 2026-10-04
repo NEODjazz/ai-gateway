@@ -821,7 +821,7 @@ func (h Handler) serveResponsesAs(w http.ResponseWriter, r *http.Request, reques
 		return
 	}
 	toolIdentifiers, validTools := responseRequestToolIdentifiers(request)
-	if !h.authorizeTools(w, reqCtx, toolIdentifiers, validTools) {
+	if !h.authorizeAgentResponseTools(w, r, reqCtx, toolIdentifiers, validTools) {
 		return
 	}
 	if !h.authorizeResponseToolResources(w, r.Context(), &reqCtx, &request) {

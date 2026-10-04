@@ -4,13 +4,14 @@ import { optionalNumber, type PlaygroundConnection } from "./requests";
 import { validateConversationFiles } from "./nativeConversation";
 import { contentText } from "./runText";
 
-export type AgentProfile = { id: string; name: string; description?: string; model: string; instructions_template_id?: string; instructions_configured: boolean; generation?: { temperature?: number; max_output_tokens?: number }; tool_policy_id: string; allowed_tools: string[]; denied_tools?: string[]; approval_required?: string[]; max_tool_calls: number; max_iterations: number; tags?: string[]; enabled: boolean; execution_supported: boolean };
+export type AgentMCPTool = { server_id: string; tool_name: string };
+export type AgentProfile = { id: string; name: string; description?: string; model: string; instructions_template_id?: string; instructions_configured: boolean; generation?: { temperature?: number; max_output_tokens?: number }; mcp_tools?: AgentMCPTool[]; tool_policy_id: string; allowed_tools: string[]; denied_tools?: string[]; approval_required?: string[]; max_tool_calls: number; max_iterations: number; tags?: string[]; enabled: boolean; execution_supported: boolean };
 export type AgentPolicy = { id: string; name: string; enabled: boolean; allowed_tools: string[]; denied_tools?: string[]; approval_required?: string[]; max_tool_calls: number };
-export type AgentDraft = { id: string; name: string; description: string; model: string; instructions: string; template: string; temperature: string; maxTokens: string; policy: string; iterations: string; tags: string; enabled: boolean };
-export const emptyAgentDraft: AgentDraft = { id: "", name: "", description: "", model: "", instructions: "", template: "", temperature: "", maxTokens: "", policy: "", iterations: "1", tags: "", enabled: true };
+export type AgentDraft = { id: string; name: string; description: string; model: string; instructions: string; template: string; temperature: string; maxTokens: string; policy: string; iterations: string; tools: AgentMCPTool[]; tags: string; enabled: boolean };
+export const emptyAgentDraft: AgentDraft = { id: "", name: "", description: "", model: "", instructions: "", template: "", temperature: "", maxTokens: "", policy: "", iterations: "1", tools: [], tags: "", enabled: true };
 const safeID = /^[a-zA-Z0-9._-]{1,128}$/;
 export function agentDraft(profile: AgentProfile, instructions: string): AgentDraft {
-  return { id: profile.id, name: profile.name, description: profile.description || "", model: profile.model, instructions, template: profile.instructions_template_id || "", temperature: profile.generation?.temperature === undefined ? "" : String(profile.generation.temperature), maxTokens: profile.generation?.max_output_tokens === undefined ? "" : String(profile.generation.max_output_tokens), policy: profile.tool_policy_id, iterations: String(profile.max_iterations), tags: (profile.tags || []).join(", "), enabled: profile.enabled };
+  return { id: profile.id, name: profile.name, description: profile.description || "", model: profile.model, instructions, template: profile.instructions_template_id || "", temperature: profile.generation?.temperature === undefined ? "" : String(profile.generation.temperature), maxTokens: profile.generation?.max_output_tokens === undefined ? "" : String(profile.generation.max_output_tokens), policy: profile.tool_policy_id, iterations: String(profile.max_iterations), tools: (profile.mcp_tools || []).map((tool) => ({ ...tool })), tags: (profile.tags || []).join(", "), enabled: profile.enabled };
 }
 export function agentBody(draft: AgentDraft) {
   if (!safeID.test(draft.id) || !draft.name.trim() || new TextEncoder().encode(draft.name.trim()).length > 256 || !draft.model.trim() || new TextEncoder().encode(draft.model.trim()).length > 256 || !safeID.test(draft.policy)) throw new Error("Enter a valid agent ID, name, model and tool policy.");
@@ -20,9 +21,13 @@ export function agentBody(draft: AgentDraft) {
   const temperature = optionalNumber(draft.temperature, "Agent temperature", 0, 2), tokens = optionalNumber(draft.maxTokens, "Agent maximum output tokens", 1, 1000000, true);
   const iterations = optionalNumber(draft.iterations, "Agent maximum iterations", 1, 50, true);
   if (iterations === undefined) throw new Error("Enter the agent maximum iterations.");
+  validateAgentMCPTools(draft.tools);
   const tags = [...new Set(draft.tags.split(",").map((value) => value.trim()).filter(Boolean))];
   if (tags.length > 256 || tags.some((value) => new TextEncoder().encode(value).length > 512 || value.includes("\0"))) throw new Error("Agent tags are too large or invalid.");
-  return { name: draft.name.trim(), description: draft.description.trim(), model: draft.model.trim(), instructions: draft.instructions, instructions_template_id: draft.template.trim(), generation: { ...(temperature === undefined ? {} : { temperature }), ...(tokens === undefined ? {} : { max_output_tokens: tokens }) }, tool_policy_id: draft.policy, max_iterations: iterations, tags, enabled: draft.enabled };
+  return { name: draft.name.trim(), description: draft.description.trim(), model: draft.model.trim(), instructions: draft.instructions, instructions_template_id: draft.template.trim(), generation: { ...(temperature === undefined ? {} : { temperature }), ...(tokens === undefined ? {} : { max_output_tokens: tokens }) }, tool_policy_id: draft.policy, mcp_tools: draft.tools.map((tool) => ({ ...tool })), max_iterations: iterations, tags, enabled: draft.enabled };
+}
+export function validateAgentMCPTools(tools: AgentMCPTool[]) {
+  if (tools.length > 32 || tools.some((tool) => !safeID.test(tool.server_id) || !tool.tool_name || tool.tool_name.trim() !== tool.tool_name || new TextEncoder().encode(tool.tool_name).length > 256 || /[\x00-\x1f\x7f]/.test(tool.tool_name)) || new Set(tools.map((tool) => JSON.stringify([tool.server_id, tool.tool_name]))).size !== tools.length) throw new Error("Select up to 32 distinct MCP tools with valid server IDs and names.");
 }
 export type AgentTask = { id: string; contextID: string; state: string };
 export type AgentRun = { text: string; task?: AgentTask; latencyMS: number; response: Record<string, unknown> };

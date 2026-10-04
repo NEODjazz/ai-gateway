@@ -13321,6 +13321,13 @@ components:
         - type: object
           required: [id]
           properties: {id: {type: string}}
+    AgentMCPTool:
+      type: object
+      additionalProperties: false
+      required: [server_id, tool_name]
+      properties:
+        server_id: {type: string, minLength: 1, maxLength: 128}
+        tool_name: {type: string, minLength: 1, maxLength: 256}
     AgentProfileInput:
       type: object
       additionalProperties: false
@@ -13332,6 +13339,12 @@ components:
         instructions_template_id: {type: string, maxLength: 256, description: Opaque reference only; template execution is not supported.}
         instructions: {type: string, maxLength: 65536, writeOnly: true, description: At most 64 KiB in UTF-8. Requires durable encryption; omit to preserve or send an empty string to clear.}
         generation: {$ref: '#/components/schemas/AgentGeneration'}
+        mcp_tools:
+          type: array
+          maxItems: 32
+          uniqueItems: true
+          items: {$ref: '#/components/schemas/AgentMCPTool'}
+          description: Registry server/tool references for bounded synchronous A2A execution. Omit to preserve existing bindings or send an empty array to clear. Current policy and credential grants must allow every binding; approval-required calls stop before execution.
         tool_policy_id: {type: string, minLength: 1, maxLength: 128}
         max_iterations: {type: integer, minimum: 1, maximum: 50}
         tags: {type: array, maxItems: 256, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 512}}

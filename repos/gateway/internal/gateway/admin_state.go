@@ -19,6 +19,7 @@ import (
 
 const adminStateSchemaVersion = 1
 const agentConfigurationAdminStateSchemaVersion = 2
+const agentMCPAdminStateSchemaVersion = 3
 
 type AdminStateController interface {
 	AdminState(context.Context) (json.RawMessage, int64, error)
@@ -194,8 +195,15 @@ func (r *AdminStateRuntime) applyPayload(payload json.RawMessage, revision int64
 		if err := json.Unmarshal(payload, &snapshot); err != nil {
 			return err
 		}
-		if snapshot.SchemaVersion != adminStateSchemaVersion && snapshot.SchemaVersion != agentConfigurationAdminStateSchemaVersion {
+		if snapshot.SchemaVersion != adminStateSchemaVersion && snapshot.SchemaVersion != agentConfigurationAdminStateSchemaVersion && snapshot.SchemaVersion != agentMCPAdminStateSchemaVersion {
 			return errors.New("unsupported admin state schema version")
+		}
+		if snapshot.SchemaVersion < agentMCPAdminStateSchemaVersion {
+			for _, profile := range snapshot.AgentProfiles {
+				if len(profile.MCPTools) > 0 {
+					return errors.New("agent MCP tools require admin state version 3")
+				}
+			}
 		}
 		if snapshot.SchemaVersion == adminStateSchemaVersion {
 			if len(snapshot.AgentInstructions) != 0 {
@@ -227,7 +235,10 @@ func (r *AdminStateRuntime) snapshot() (adminStateSnapshot, error) {
 	snapshot := adminStateSnapshot{SchemaVersion: adminStateSchemaVersion, Projects: r.access.Projects(), AccessGroups: r.access.Groups(), PolicyAttachments: r.access.PolicyAttachments(), Tags: r.access.Tags(), MCPServers: r.mcp.Servers(), MCPToolsets: r.mcp.Toolsets(), ToolPolicies: r.agents.ToolPolicies(), AgentProfiles: r.agents.AgentProfiles()}
 	for index, profile := range snapshot.AgentProfiles {
 		if profile.Generation != nil || profile.Instructions != "" {
-			snapshot.SchemaVersion = agentConfigurationAdminStateSchemaVersion
+			snapshot.SchemaVersion = max(snapshot.SchemaVersion, agentConfigurationAdminStateSchemaVersion)
+		}
+		if len(profile.MCPTools) > 0 {
+			snapshot.SchemaVersion = agentMCPAdminStateSchemaVersion
 		}
 		if profile.Instructions == "" {
 			continue

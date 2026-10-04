@@ -103,7 +103,7 @@ compatibility must be distinguished from merely having an endpoint selector.
 - [x] Added Agent Builder configuration CRUD, saved A2A chat with task continuity
   and task refresh/cancel, explicit bounded batch inference and connection code.
   Unsaved drafts cannot execute; credential changes discard late reads/results.
-  The existing one-generation A2A path still has no MCP execution loop.
+  Saved MCP execution is described below; approval continuation is still pending.
 - [x] Added model/agent comparison with shared attachments and independent A2A
   tasks; model tool calls require per-panel approval/decline and explicit typed
   continuation. Pending calls/tasks block new shared prompts; individual panels
@@ -135,6 +135,11 @@ compatibility must be distinguished from merely having an endpoint selector.
   checked IDs/statuses, preserved read errors and credential-scope cancellation.
   Terminal failure/cancellation can omit steps without corrupting conversation
   replay; ordinary malformed response content remains rejected.
+- [x] Added explicit saved-agent MCP bindings and synchronous model/tool iterations.
+  Every model generation and MCP operation uses existing authentication, policy,
+  quota, billing, audit and idempotency paths. Whole-step validation prevents
+  invalid/approval-required batches from partially executing; loop limits and
+  current policy revocation are enforced. Approval continuation remains pending.
 - [ ] Finish media/tool output, policy selection and full conversation verification.
 - [ ] Complete endpoint-specific execution and media/tool handling.
 - [ ] Complete comparison, compliance and agent views.
@@ -255,3 +260,53 @@ latency includes the time until refresh. Clearing only removes local state.
 
 The native queued → in-progress → completed flow was verified with synthetic
 Interactions in the browser; no real provider or billing call was made.
+
+
+## Saved-agent MCP execution
+
+Agent configuration accepts up to 32 distinct `mcp_tools` bindings containing
+`server_id` and `tool_name`. Omitting the field in an update preserves existing
+bindings; an empty array clears them. Agent Builder discovers servers and tools
+with the active credential, saves references without schemas/secrets, and shows
+saved selections even when discovery fails. Discovery itself uses the existing
+resource billing path. Execution discovers authorized schemas afresh; each server
+is limited to eight discovery pages and definitions to 2 MiB per run.
+
+Saved agents execute MCP functions through synchronous A2A `SendMessage`. Function
+aliases derive from server/tool identity, avoiding collisions across servers;
+private bindings cannot be supplied through the public Responses API. Every
+iteration goes through the normal inference pipeline with a distinct internal
+execution ID. Every tool goes through the MCP runtime's credential/access-group
+ACL, server grants, audit, rate limits, billing and idempotency store. Previous
+model/tool work remains billable when a later iteration fails.
+
+The saved policy is an upper bound. A current policy can revoke a tool, require
+approval or lower maximum calls; expanding a policy does not silently expand a
+saved profile. Limits include all calls in a run and all model generations, with
+a two-minute deadline, 2 MiB response capture and 24 MiB execution history. A tool
+step is validated as a whole before executing any call; a step cannot execute if
+there is no remaining model iteration for its result. Changed bindings/model/
+instructions, disabled agents/policies, malformed arguments, unknown functions,
+repeated call IDs and connector failures stop the run.
+
+Approval-required steps currently return an explicit error before executing any
+of their tools. Durable approval/resume controls remain required for completion.
+Agents with MCP bindings return independent messages and reject task continuation,
+push notifications, streaming and `returnImmediately` until durable loop state
+supports those modes. Their agent cards do not advertise streaming or push.
+This prevents simultaneous task continuations from executing tool side effects
+before the existing final-result compare-and-swap detects a conflict.
+Tool-free agents retain their existing behavior.
+
+Snapshots containing bindings use admin state schema version 3. Older binaries
+fail closed rather than silently dropping these settings; clearing bindings allows
+version 1/2 snapshots again depending on the remaining configuration. This is an
+additive public API field and a configuration compatibility boundary. PostgreSQL
+replica-restoration coverage includes encrypted instructions and MCP references.
+
+Saved-agent verification covers typed model → MCP result → model continuation,
+credential and policy denial, cumulative call/iteration limits, approval stops,
+revoked toolsets, connector changes after discovery, cancellation and private
+binding isolation. The saved MCP selection was added, removed and saved in an
+isolated browser preview with synthetic resources. No real provider or billing
+call was made by this browser verification.

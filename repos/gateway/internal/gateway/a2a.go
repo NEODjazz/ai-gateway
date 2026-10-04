@@ -164,8 +164,8 @@ func (h Handler) a2aAgentCard(r *http.Request, profile AgentProfile) map[string]
 		"name": profile.Name, "description": description, "version": "1.0.0",
 		"supportedInterfaces": []any{map[string]any{"url": endpoint, "protocolBinding": "JSONRPC", "tenant": profile.ID, "protocolVersion": a2aProtocolVersion}},
 		"capabilities": map[string]any{
-			"streaming":         h.a2aTasks != nil && h.a2aTaskConfig.OwnerQuota > 0 && h.a2aTaskConfig.TTL > 0,
-			"pushNotifications": h.a2aPushJobs != nil && h.a2aPushVault != nil, "extendedAgentCard": true,
+			"streaming":         len(profile.MCPTools) == 0 && h.a2aTasks != nil && h.a2aTaskConfig.OwnerQuota > 0 && h.a2aTaskConfig.TTL > 0,
+			"pushNotifications": len(profile.MCPTools) == 0 && h.a2aPushJobs != nil && h.a2aPushVault != nil, "extendedAgentCard": true,
 		},
 		"securitySchemes": map[string]any{"bearer": map[string]any{"httpAuthSecurityScheme": map[string]any{
 			"description": "Gateway virtual key", "scheme": "Bearer",
@@ -272,7 +272,15 @@ func (h Handler) sendA2AMessage(w http.ResponseWriter, r *http.Request, request 
 		h.writeA2AError(w, request.ID, http.StatusBadRequest, -32602, "Invalid parameters")
 		return
 	}
+	if len(profile.MCPTools) > 0 && (continuation || request.Params.Configuration.PushNotificationConfig != nil) {
+		h.writeA2AError(w, request.ID, http.StatusNotImplemented, -32004, "Agents with MCP tools currently require independent messages without task continuation or push notifications")
+		return
+	}
 	returnImmediately := request.Params.Configuration.ReturnImmediately != nil && *request.Params.Configuration.ReturnImmediately
+	if len(profile.MCPTools) > 0 && (stream || returnImmediately) {
+		h.writeA2AError(w, request.ID, http.StatusNotImplemented, -32004, "Agents with MCP tools require synchronous SendMessage")
+		return
+	}
 	if stream && returnImmediately {
 		h.writeA2AError(w, request.ID, http.StatusBadRequest, -32602, "returnImmediately is not valid for streaming")
 		return
@@ -440,7 +448,7 @@ func (h Handler) sendA2AMessage(w http.ResponseWriter, r *http.Request, request 
 		responseRequest.Background = true
 	}
 	var storageErr error
-	h.serveResponsesAs(capture, r, responseRequest, "a2a", func(response openai.ResponseResponse, reqCtx modules.RequestContext) any {
+	h.serveAgentResponsesAs(capture, r, responseRequest, profile, func(response openai.ResponseResponse, reqCtx modules.RequestContext) any {
 		if returnImmediately {
 			task := newPendingA2ATask(request, existing, continuation, response.Status)
 			backgroundResponseID := response.ID
@@ -476,7 +484,7 @@ func (h Handler) sendA2AMessage(w http.ResponseWriter, r *http.Request, request 
 			contextID = newA2AID("ctx")
 		}
 		agentMessage := a2aMessage{MessageID: messageID, ContextID: contextID, Role: "ROLE_AGENT", Parts: []a2aPart{{Text: responseOutputText(response)}}}
-		if h.a2aTasks == nil {
+		if h.a2aTasks == nil || len(profile.MCPTools) > 0 {
 			return a2aRPCResponse{JSONRPC: "2.0", ID: request.ID, Result: map[string]any{"message": agentMessage}}
 		}
 		taskID := request.Params.Message.TaskID
@@ -511,7 +519,7 @@ func (h Handler) sendA2AMessage(w http.ResponseWriter, r *http.Request, request 
 		}
 		storageErr = err
 		return a2aRPCResponse{JSONRPC: "2.0", ID: request.ID, Result: map[string]any{"task": task}}
-	}, nil, nil, false)
+	})
 	if storageErr != nil {
 		copyA2AHeaders(w, capture.header)
 		status := http.StatusServiceUnavailable
