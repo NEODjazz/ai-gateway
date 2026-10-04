@@ -42,7 +42,20 @@ func (r Router) OpenRealtime(ctx context.Context, identity modules.RequestContex
 		attempt.Metadata["provider.realtime_audio_output.enabled"] = boolString(hasCapability(endpoint.Capabilities, "audio"))
 		r.applyCatalogPricing(ctx, &attempt, endpoint, model)
 		providerCtx, finish := r.startProviderCall(ctx, endpoint, "realtime.session")
-		connection, callErr := client.OpenRealtime(providerCtx, attempt.Request.Model)
+		var connection RealtimeConnection
+		var callErr error
+		dialect := attempt.Metadata["gateway.realtime.dialect"]
+		if dialect == "" {
+			connection, callErr = client.OpenRealtime(providerCtx, attempt.Request.Model)
+		} else if dialectClient, supported := client.(interface {
+			OpenRealtimeWithDialect(context.Context, string, string) (RealtimeConnection, error)
+		}); supported {
+			connection, callErr = dialectClient.OpenRealtimeWithDialect(providerCtx, attempt.Request.Model, dialect)
+		} else if dialect == "legacy" {
+			connection, callErr = client.OpenRealtime(providerCtx, attempt.Request.Model)
+		} else {
+			callErr = errors.New("provider does not support the selected realtime dialect")
+		}
 		if callErr != nil {
 			finish(callErr)
 			release()

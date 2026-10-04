@@ -25,10 +25,14 @@ const realtimeBrowserProtocol = "ai-gateway.realtime.v1"
 const realtimeBrowserTicketPrefix = "ai-gateway.realtime.ticket."
 
 type realtimeBrowserBindingKey struct{}
-type realtimeBrowserBinding struct{ ownerKey string }
+type realtimeBrowserBinding struct {
+	ownerKey string
+	dialect  string
+}
 type realtimeBrowserSecret struct {
 	APIKey    string `json:"api_key"`
 	SessionID string `json:"session_id"`
+	Dialect   string `json:"dialect,omitempty"`
 }
 
 func (h Handler) WithRealtimeBrowserTickets(store realtimestate.Store, encryptionKey []byte) (Handler, error) {
@@ -81,14 +85,22 @@ func (h Handler) CreateRealtimeBrowserTicket(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	var input struct {
-		Model  string `json:"model"`
-		Origin string `json:"origin"`
+		Model   string `json:"model"`
+		Origin  string `json:"origin"`
+		Dialect string `json:"dialect"`
 	}
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
 	decoder.DisallowUnknownFields()
 	var extra any
 	if r.URL.RawQuery != "" || decoder.Decode(&input) != nil || decoder.Decode(&extra) != io.EOF {
 		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid realtime browser ticket request")
+		return
+	}
+	if input.Dialect == "" {
+		input.Dialect = "legacy"
+	}
+	if input.Dialect != "current" && input.Dialect != "legacy" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "Realtime dialect must be current or legacy")
 		return
 	}
 	input.Model = strings.TrimSpace(input.Model)
@@ -125,7 +137,7 @@ func (h Handler) CreateRealtimeBrowserTicket(w http.ResponseWriter, r *http.Requ
 	}
 	value := base64.RawURLEncoding.EncodeToString(opaque)
 	ticket := realtimestate.Ticket{Hash: realtimeTicketHash(value), OwnerKey: realtimeTicketOwner(identity), Model: input.Model, Origin: origin, ExpiresAt: time.Now().UTC().Add(realtimestate.TicketTTL).Truncate(time.Microsecond)}
-	plaintext, err := json.Marshal(realtimeBrowserSecret{APIKey: apiKey, SessionID: identity.SessionID})
+	plaintext, err := json.Marshal(realtimeBrowserSecret{APIKey: apiKey, SessionID: identity.SessionID, Dialect: input.Dialect})
 	if err != nil || len(plaintext)+h.realtimeTicketAEAD.NonceSize()+h.realtimeTicketAEAD.Overhead() > realtimestate.MaxPayloadBytes {
 		writeError(w, http.StatusBadRequest, "invalid_request", "The credential exceeds the browser ticket limit")
 		return
@@ -195,7 +207,14 @@ func (h Handler) RealtimeBrowser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "Invalid browser ticket")
 		return
 	}
-	clone := r.Clone(context.WithValue(r.Context(), realtimeBrowserBindingKey{}, realtimeBrowserBinding{ownerKey: ticket.OwnerKey}))
+	if secret.Dialect == "" {
+		secret.Dialect = "legacy"
+	}
+	if secret.Dialect != "current" && secret.Dialect != "legacy" {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "Invalid browser ticket")
+		return
+	}
+	clone := r.Clone(context.WithValue(r.Context(), realtimeBrowserBindingKey{}, realtimeBrowserBinding{ownerKey: ticket.OwnerKey, dialect: secret.Dialect}))
 	clone.Header = r.Header.Clone()
 	clone.Header.Set("Authorization", "Bearer "+secret.APIKey)
 	clone.Header.Set("Sec-WebSocket-Protocol", realtimeBrowserProtocol)

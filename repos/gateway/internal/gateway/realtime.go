@@ -61,6 +61,9 @@ func (h Handler) Realtime(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotImplemented, "unsupported_operation", "realtime sessions are not supported")
 		return
 	}
+	if browser {
+		identity.Metadata["gateway.realtime.dialect"] = browserBinding.dialect
+	}
 	upstream, selected, err := runtime.OpenRealtime(r.Context(), identity, model)
 	if err != nil {
 		writeProviderFailure(w, err)

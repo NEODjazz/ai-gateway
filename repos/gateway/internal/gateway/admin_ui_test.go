@@ -117,6 +117,12 @@ func assertAdminUISecurityHeaders(t *testing.T, headers http.Header, cacheContro
 	if got := headers.Get("Content-Security-Policy"); got != adminUICSP {
 		t.Errorf("unexpected CSP: %q", got)
 	}
+	if got := headers.Get("Permissions-Policy"); got != "camera=(), geolocation=(), microphone=(self)" {
+		t.Errorf("unexpected microphone scope: %q", got)
+	}
+	if !strings.Contains(headers.Get("Content-Security-Policy"), "media-src blob:") || !strings.Contains(headers.Get("Content-Security-Policy"), "connect-src 'self'") {
+		t.Error("local audio playback and same-origin connections must be scoped explicitly")
+	}
 	if got := headers.Get("X-Frame-Options"); got != "DENY" {
 		t.Errorf("unexpected frame policy: %q", got)
 	}

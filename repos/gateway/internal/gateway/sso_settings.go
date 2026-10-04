@@ -380,6 +380,13 @@ func (h Handler) resolveBrowserSSOConnection(r *http.Request, id string) (*Brows
 }
 func (h Handler) browserSSOMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The browser WebSocket authenticates its bound ticket and revalidates the
+		// ticket credential itself. An unrelated or stale console cookie must not
+		// replace that identity or prevent an explicit test-key connection.
+		if r.URL.Path == "/v1/realtime/browser" {
+			next.ServeHTTP(w, r)
+			return
+		}
 		if r.Header.Get("Authorization") == "" {
 			if _, err := r.Cookie(browserSSOSessionCookie); err == nil && !strings.HasPrefix(r.URL.Path, "/auth/sso/") {
 				// The authentication connection comes from the sealed session,

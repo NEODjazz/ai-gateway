@@ -12,7 +12,7 @@ import (
 
 var versionedAsset = regexp.MustCompile(`-[A-Za-z0-9_-]{8,}\.[a-z0-9]+$`)
 
-const adminUICSP = "default-src 'none'; base-uri 'none'; connect-src 'self'; font-src 'self'; form-action 'self'; frame-ancestors 'none'; img-src 'self' data:; script-src 'self'; style-src 'self'"
+const adminUICSP = "default-src 'none'; base-uri 'none'; connect-src 'self'; font-src 'self'; form-action 'self'; frame-ancestors 'none'; img-src 'self' data:; media-src blob:; script-src 'self'; style-src 'self'; worker-src 'self'"
 
 //go:embed adminui/*
 var adminUIAssets embed.FS
@@ -62,7 +62,7 @@ func adminUIAsset(name, contentType string) http.Handler {
 func adminUISecurityHeaders(immutable bool, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Security-Policy", adminUICSP)
-		w.Header().Set("Permissions-Policy", "camera=(), geolocation=(), microphone=()")
+		w.Header().Set("Permissions-Policy", "camera=(), geolocation=(), microphone=(self)")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")

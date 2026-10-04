@@ -1,6 +1,7 @@
 package controlstore
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -41,7 +42,11 @@ func TestPostgresRealtimeBrowserTicketIntegration(t *testing.T) {
 		t.Fatalf("origin binding: %v", err)
 	}
 	var group sync.WaitGroup
-	results := make(chan error, 8)
+	type outcome struct {
+		ticket realtimestate.Ticket
+		err    error
+	}
+	results := make(chan outcome, 8)
 	for index := range 8 {
 		group.Add(1)
 		go func() {
@@ -50,18 +55,22 @@ func TestPostgresRealtimeBrowserTicketIntegration(t *testing.T) {
 			if index%2 == 0 {
 				target = replica
 			}
-			_, err := target.ConsumeRealtimeTicket(t.Context(), ticket.Hash, ticket.Model, ticket.Origin)
-			results <- err
+			item, err := target.ConsumeRealtimeTicket(t.Context(), ticket.Hash, ticket.Model, ticket.Origin)
+			results <- outcome{item, err}
 		}()
 	}
 	group.Wait()
 	close(results)
 	winners := 0
-	for err := range results {
-		if err == nil {
+	for result := range results {
+		if result.err == nil {
 			winners++
-		} else if !errors.Is(err, realtimestate.ErrNotFound) {
-			t.Fatal(err)
+			item := result.ticket
+			if item.Hash != ticket.Hash || item.OwnerKey != ticket.OwnerKey || item.Model != ticket.Model || item.Origin != ticket.Origin || !item.ExpiresAt.Equal(ticket.ExpiresAt) || !bytes.Equal(item.Payload, ticket.Payload) {
+				t.Fatal("PostgreSQL changed ticket ciphertext or authenticated binding fields")
+			}
+		} else if !errors.Is(result.err, realtimestate.ErrNotFound) {
+			t.Fatal(result.err)
 		}
 	}
 	if winners != 1 {

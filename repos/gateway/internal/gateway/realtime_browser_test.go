@@ -80,8 +80,12 @@ func ticketHandler(t *testing.T, auth modules.Module, store realtimestate.Store,
 }
 
 func createBrowserTicket(t *testing.T, h Handler) string {
+	return createBrowserTicketDialect(t, h, "")
+}
+
+func createBrowserTicketDialect(t *testing.T, h Handler, dialect string) string {
 	t.Helper()
-	r := httptest.NewRequest(http.MethodPost, "http://gateway.test/v1/realtime/browser-tickets", strings.NewReader(`{"model":"public-model","origin":"http://gateway.test"}`))
+	r := httptest.NewRequest(http.MethodPost, "http://gateway.test/v1/realtime/browser-tickets", strings.NewReader(`{"model":"public-model","origin":"http://gateway.test","dialect":"`+dialect+`"}`))
 	r.Header.Set("Authorization", "Bearer gateway-key")
 	r.Header.Set("Origin", "http://gateway.test")
 	w := httptest.NewRecorder()
@@ -179,6 +183,7 @@ func TestRealtimeBrowserTicketMintValidationAndAdmission(t *testing.T) {
 		{`{"model":"public-model","origin":"http://gateway.test"}`, "", http.StatusUnauthorized},
 		{`{"model":"other","origin":"http://gateway.test"}`, "gateway-key", http.StatusForbidden},
 		{`{"model":"public-model","origin":"http://other.test"}`, "gateway-key", http.StatusBadRequest},
+		{`{"model":"public-model","origin":"http://gateway.test","dialect":"invalid"}`, "gateway-key", http.StatusBadRequest},
 		{`{"model":"public-model","origin":"http://gateway.test","extra":true}`, "gateway-key", http.StatusBadRequest},
 		{`{"model":"public-model","origin":"http://gateway.test"} {}`, "gateway-key", http.StatusBadRequest},
 	} {
@@ -212,57 +217,72 @@ func TestRealtimeBrowserTicketMintValidationAndAdmission(t *testing.T) {
 }
 
 func TestRealtimeBrowserTicketProxiesAcrossReplicasWithoutExposingTicket(t *testing.T) {
-	upstreamErrors := make(chan error, 1)
-	upstream := httptest.NewServer(websocket.Handler(func(conn *websocket.Conn) {
-		if strings.Contains(conn.Request().Header.Get("Sec-WebSocket-Protocol"), realtimeBrowserTicketPrefix) || conn.Request().Header.Get("Authorization") != "Bearer provider-key" {
-			upstreamErrors <- errors.New("browser ticket or gateway credential reached provider")
-			return
-		}
-		var event string
-		if err := websocket.Message.Receive(conn, &event); err != nil {
-			upstreamErrors <- err
-			return
-		}
-		upstreamErrors <- websocket.Message.Send(conn, `{"type":"session.updated"}`)
-	}))
-	t.Cleanup(upstream.Close)
-	router := provider.New(provider.Config{Endpoints: []config.ProviderEndpointConfig{{Name: "realtime", Type: "openai-compatible", BaseURL: upstream.URL, APIKey: "provider-key", Models: []string{"public-model"}, Capabilities: []string{"realtime"}}}})
-	store := realtimestate.NewMemoryStore(10, 8)
-	auth := &browserTicketAuth{allowed: []string{"public-model"}}
-	issuer := ticketHandler(t, auth, store, strings.Repeat("a", 32), router)
-	replica := ticketHandler(t, auth, store, strings.Repeat("a", 32), router)
-	value := createBrowserTicket(t, issuer)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { r.Host = "gateway.test"; Routes(replica).ServeHTTP(w, r) }))
-	t.Cleanup(server.Close)
-	config, err := websocket.NewConfig("ws"+strings.TrimPrefix(server.URL, "http")+"/v1/realtime/browser?model=public-model", "http://gateway.test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	config.Protocol = []string{realtimeBrowserProtocol, realtimeBrowserTicketPrefix + value}
-	conn, err := websocket.DialConfig(config)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = conn.Close() })
-	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
-	if len(conn.Config().Protocol) != 1 || conn.Config().Protocol[0] != realtimeBrowserProtocol {
-		t.Fatal("handshake exposed ticket or omitted stable protocol")
-	}
-	if err := websocket.Message.Send(conn, `{"type":"session.update","session":{"instructions":"Synthetic fixture"}}`); err != nil {
-		t.Fatal(err)
-	}
-	var event string
-	if err := websocket.Message.Receive(conn, &event); err != nil {
-		t.Fatal(err)
-	}
-	if event != `{"type":"session.updated"}` {
-		t.Fatal("unexpected realtime event")
-	}
-	if err := <-upstreamErrors; err != nil {
-		t.Fatal(err)
-	}
-	if _, err := websocket.DialConfig(config); err == nil {
-		t.Fatal("browser ticket replay connected")
+	for _, dialect := range []string{"", "legacy", "current"} {
+		t.Run("dialect="+dialect, func(t *testing.T) {
+			upstreamErrors := make(chan error, 1)
+			upstream := httptest.NewServer(websocket.Handler(func(conn *websocket.Conn) {
+				if strings.Contains(conn.Request().Header.Get("Sec-WebSocket-Protocol"), realtimeBrowserTicketPrefix) || conn.Request().Header.Get("Authorization") != "Bearer provider-key" {
+					upstreamErrors <- errors.New("browser ticket or gateway credential reached provider")
+					return
+				}
+				wantBeta := "realtime=v1"
+				if dialect == "current" {
+					wantBeta = ""
+				}
+				if conn.Request().Header.Get("OpenAI-Beta") != wantBeta {
+					upstreamErrors <- errors.New("selected browser dialect did not reach the provider")
+					return
+				}
+				var event string
+				if err := websocket.Message.Receive(conn, &event); err != nil {
+					upstreamErrors <- err
+					return
+				}
+				upstreamErrors <- websocket.Message.Send(conn, `{"type":"session.updated"}`)
+			}))
+			t.Cleanup(upstream.Close)
+			router := provider.New(provider.Config{Endpoints: []config.ProviderEndpointConfig{{Name: "realtime", Type: "openai-compatible", BaseURL: upstream.URL, APIKey: "provider-key", Models: []string{"public-model"}, Capabilities: []string{"realtime"}}}})
+			store := realtimestate.NewMemoryStore(10, 8)
+			auth := &browserTicketAuth{allowed: []string{"public-model"}}
+			issuer := ticketHandler(t, auth, store, strings.Repeat("a", 32), router)
+			replica := ticketHandler(t, auth, store, strings.Repeat("a", 32), router)
+			value := createBrowserTicketDialect(t, issuer, dialect)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { r.Host = "gateway.test"; Routes(replica).ServeHTTP(w, r) }))
+			t.Cleanup(server.Close)
+			config, err := websocket.NewConfig("ws"+strings.TrimPrefix(server.URL, "http")+"/v1/realtime/browser?model=public-model", "http://gateway.test")
+			if err != nil {
+				t.Fatal(err)
+			}
+			config.Protocol = []string{realtimeBrowserProtocol, realtimeBrowserTicketPrefix + value}
+			// Browser WebSocket handshakes include origin cookies even when ticket minting
+			// used an explicit test credential with fetch credentials=omit.
+			config.Header = http.Header{"Cookie": []string{browserSSOSessionCookie + "=invalid!.opaque"}}
+			conn, err := websocket.DialConfig(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = conn.Close() })
+			_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+			if len(conn.Config().Protocol) != 1 || conn.Config().Protocol[0] != realtimeBrowserProtocol {
+				t.Fatal("handshake exposed ticket or omitted stable protocol")
+			}
+			if err := websocket.Message.Send(conn, `{"type":"session.update","session":{"instructions":"Synthetic fixture"}}`); err != nil {
+				t.Fatal(err)
+			}
+			var event string
+			if err := websocket.Message.Receive(conn, &event); err != nil {
+				t.Fatal(err)
+			}
+			if event != `{"type":"session.updated"}` {
+				t.Fatal("unexpected realtime event")
+			}
+			if err := <-upstreamErrors; err != nil {
+				t.Fatal(err)
+			}
+			if _, err := websocket.DialConfig(config); err == nil {
+				t.Fatal("browser ticket replay connected")
+			}
+		})
 	}
 }
 

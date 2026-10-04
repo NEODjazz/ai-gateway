@@ -120,7 +120,13 @@ compatibility must be distinguished from merely having an endpoint selector.
   credentials, 30-second expiry, single-use consumption and global/owner limits.
   PostgreSQL consumption is atomic across replicas; credential and model grants
   are revalidated before opening the existing Realtime proxy. Browser Realtime
-  controls and voice handling remain pending.
+  controls and voice handling are implemented below.
+- [x] Added browser Realtime connection/configuration, text turns, explicit
+  response cancellation and bounded voice capture/playback. Capture uses a
+  same-origin hashed AudioWorklet and PCM16/24 kHz conversion; no microphone
+  access occurs before a user action. Credential changes discard late tickets,
+  stop tracks and revoke local audio URLs. Partial interrupted output is retained
+  with unavailable metrics; provider completion supplies actual token counts.
 - [ ] Finish media/tool output, policy selection and full conversation verification.
 - [ ] Complete endpoint-specific execution and media/tool handling.
 - [ ] Complete comparison, compliance and agent views.
@@ -171,3 +177,40 @@ Realtime; issuing a ticket does not run inference or reserve billing. The
 existing proxy enforces policy, rate limits and response billing. The current
 browser origin policy allows the same host only; cross-host browser origins
 are not implicitly trusted.
+
+
+The Realtime UI waits for `session.updated` before sending a turn. It supports
+explicit current/legacy session dialects, text or voice output, editable model,
+voice, instructions and output limit. Voice capture requires a secure browser
+context and explicit microphone permission. Recording is limited to 8 MiB;
+Stop and send commits the audio buffer and requests a response, while Discard
+clears the buffer without inference. Separately billed input transcription is
+not enabled. Response cancellation waits for the provider's final status and
+usage; closing a connection cannot prove that provider execution was free.
+
+Audio output is decoded as PCM16/24 kHz and made available as a local WAV with
+manual playback/download, limited to 8 MiB per response and 16 MiB across
+retained turns. Text history is limited to 2 MiB/40 local turns, outgoing socket
+backlog to 1 MiB and diagnostics to 50 bounded summaries. Local history eviction
+does not delete provider-side conversation items; reconnecting creates a new
+session. Unknown token/audio usage remains `—`; finalized cost belongs to
+Usage & spend. Console permissions allow microphone only for its own origin
+and audio playback only from local blob URLs. Browser connection examples
+exclude actual credentials and issued tickets.
+
+
+Realtime verification uses isolated synthetic HTTP/WebSocket fixtures, without
+calling providers or billing. Browser text flow, synthetic voice output with decoded local WAV playback and
+real AudioWorklet execution under the console CSP were verified; the latter used an offline generated tone.
+Local Chrome fake-device `getUserMedia` remained pending even outside Gateway
+code, so physical microphone capture was not exercised. Recorder/worklet
+regressions cover resampling, chunk flush, late permission grants, cancellation
+and resource cleanup. A real provider/model audio smoke check remains part of
+final environment verification.
+
+Browser ticket requests accept an optional `dialect` (`current` or `legacy`).
+Omitting it retains legacy behavior for existing clients; Playground explicitly
+binds its selected dialect inside the encrypted ticket. Current OpenAI-compatible
+connections omit the legacy beta header. Azure deployment URL and API version
+remain configured by the administrator and must support the selected dialect.
+The native bearer `/v1/realtime` handshake is unchanged.

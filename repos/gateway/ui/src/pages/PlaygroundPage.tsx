@@ -11,6 +11,7 @@ import { AreaControl, SelectControl, TextControl } from "./playground/Controls";
 import { conversationAttachments, conversationInput, retainConversation } from "./playground/attachments";
 import type { Attachment } from "./playground/endpointRequests";
 import { PricingControls, defaultPricing, estimateCost } from "./playground/PriceEstimate";
+import { RealtimePlayground } from "./playground/RealtimePlayground";
 import { EndpointPlayground } from "./playground/EndpointPlayground";
 import { endpointPaths, type SpecializedEndpoint } from "./playground/endpointRequests";
 import { CompliancePlayground } from "./playground/CompliancePlayground";
@@ -44,7 +45,7 @@ export function PlaygroundPage() {
   const [appliedConnection, setAppliedConnection] = useState({ source: "session" as KeySource, key: "", url: "" });
   const connection = useMemo(() => playgroundConnection(sessionClient, appliedConnection.source, appliedConnection.key, appliedConnection.url), [sessionClient, appliedConnection]);
   const client = connection.client;
-  const [endpoint, setEndpoint] = useState<"chat" | "responses" | SpecializedEndpoint>("chat");
+  const [endpoint, setEndpoint] = useState<"chat" | "responses" | "realtime" | SpecializedEndpoint>("chat");
   const [mode, setMode] = useState<PlaygroundMode>("chat");
   const [view, setView] = useState<"chat" | "compare" | "compliance" | "agents">("chat");
   const [visitedCompare, setVisitedCompare] = useState(false);
@@ -219,8 +220,9 @@ export function PlaygroundPage() {
   return <>
     <PageHeader eyebrow="Inference" title="Playground" description="Explore models, tune requests and inspect live responses." />
     <PageTabs label="Playground workspace" value={view} items={[{ value: "chat", label: "Chat" }, { value: "compare", label: "Compare" }, { value: "compliance", label: "Compliance" }, { value: "agents", label: "Agent Builder" }]} onUpdate={(next) => { if (running) abortRef.current?.abort(); setCodeRequest(undefined); if (next === "compare") setVisitedCompare(true); if (next === "compliance") setVisitedCompliance(true); if (next === "agents") setVisitedAgents(true); setView(next); }} />
-    {view === "chat" && <div className="playground-endpoint-selector"><SelectControl label="Endpoint" value={endpoint} options={[{ value: "chat", content: "/v1/chat/completions" }, { value: "responses", content: "/v1/responses" }, ...Object.entries(endpointPaths).map(([value, path]) => ({ value: value as SpecializedEndpoint, content: path }))]} onUpdate={(next) => { newSession(); setEndpoint(next); if (next === "chat" || next === "responses") setMode(next); }} /></div>}
-    {view === "chat" && endpoint !== "chat" && endpoint !== "responses" && <EndpointPlayground key={endpoint} endpoint={endpoint} connection={connection} models={models} connectionControls={connectionControls} connectionChanged={connectionChanged} />}
+    {view === "chat" && <div className="playground-endpoint-selector"><SelectControl label="Endpoint" value={endpoint} options={[{ value: "chat", content: "/v1/chat/completions" }, { value: "responses", content: "/v1/responses" }, { value: "realtime", content: "/v1/realtime" }, ...Object.entries(endpointPaths).map(([value, path]) => ({ value: value as SpecializedEndpoint, content: path }))]} onUpdate={(next) => { newSession(); setEndpoint(next); if (next === "chat" || next === "responses") setMode(next); }} /></div>}
+    {view === "chat" && endpoint !== "chat" && endpoint !== "responses" && endpoint !== "realtime" && <EndpointPlayground key={endpoint} endpoint={endpoint} connection={connection} models={models} connectionControls={connectionControls} connectionChanged={connectionChanged} />}
+    {view === "chat" && endpoint === "realtime" && <RealtimePlayground connection={connection} models={models} connectionControls={connectionControls} connectionChanged={connectionChanged} />}
     {view === "chat" && (endpoint === "chat" || endpoint === "responses") && <div className="playground-workspace playground-config-layout">
       <aside className="playground-side-panel" aria-label="Playground configuration">
         <section className="playground-parameters-card">

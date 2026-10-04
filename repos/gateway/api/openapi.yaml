@@ -1013,6 +1013,7 @@ paths:
               properties:
                 model: {type: string, minLength: 1, maxLength: 256}
                 origin: {type: string, minLength: 1, maxLength: 2048, format: uri}
+                dialect: {type: string, enum: [current, legacy], default: legacy, description: Upstream Realtime wire protocol bound inside the encrypted ticket}
       responses:
         '201':
           description: One-use browser ticket
