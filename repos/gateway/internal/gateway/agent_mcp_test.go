@@ -174,21 +174,24 @@ func TestAgentMCPLoopEnforcesCumulativeLimitAndPolicyRevocation(t *testing.T) {
 }
 
 func TestAgentMCPLoopRejectsUnsupportedExecutionModes(t *testing.T) {
-	for _, method := range []string{"SendStreamingMessage", "SendMessage"} {
+	for _, test := range []struct {
+		method, configuration string
+		status                int
+	}{
+		{"SendMessage", `,"configuration":{"returnImmediately":true}`, http.StatusNotImplemented},
+		{"SendStreamingMessage", `,"configuration":{"returnImmediately":true}`, http.StatusBadRequest},
+		{"SendMessage", `,"configuration":{"pushNotificationConfig":{"url":"https://example.invalid/push"}}`, http.StatusNotImplemented},
+	} {
 		llm := &agentMCPTestProvider{callCount: 1}
 		h, client, _ := agentMCPTestHandler(t, llm, ToolPolicy{}, nil, 2, 3)
-		extra := ""
-		if method == "SendMessage" {
-			extra = `,"configuration":{"returnImmediately":true}`
-		}
-		response := agentMCPSend(h, method, extra)
-		if response.Code != http.StatusNotImplemented || len(llm.requests) != 0 || client.calls != 0 {
+		response := agentMCPSend(h, test.method, test.configuration)
+		if response.Code != test.status || len(llm.requests) != 0 || client.calls != 0 {
 			t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 		}
 		profile, _ := h.agents.AgentProfile("research")
 		card := h.a2aAgentCard(httptest.NewRequest("GET", "/", nil), profile)
-		if card["capabilities"].(map[string]any)["streaming"] != false {
-			t.Fatal("unsupported streaming advertised")
+		if card["capabilities"].(map[string]any)["pushNotifications"] != false {
+			t.Fatal("unsupported push advertised")
 		}
 	}
 }

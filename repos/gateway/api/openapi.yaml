@@ -13384,7 +13384,7 @@ components:
           maxItems: 32
           uniqueItems: true
           items: {$ref: '#/components/schemas/AgentMCPTool'}
-          description: Registry server/tool references for bounded synchronous A2A execution. Omit to preserve existing bindings or send an empty array to clear. Current policy and credential grants must allow every binding; approval-required calls stop before execution.
+          description: Registry server/tool references for bounded A2A task execution via SendMessage JSON or SendStreamingMessage task/status/artifact SSE. Model/tool iterations remain buffered and require durable task, MCP call and audit services. Omit to preserve existing bindings or send an empty array to clear. Current policy and credential grants must allow every binding; approval-required calls stop before execution. Push and returnImmediately are unsupported for MCP-bound agents.
         tool_policy_id: {type: string, minLength: 1, maxLength: 128}
         max_iterations: {type: integer, minimum: 1, maximum: 50}
         tags: {type: array, maxItems: 256, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 512}}

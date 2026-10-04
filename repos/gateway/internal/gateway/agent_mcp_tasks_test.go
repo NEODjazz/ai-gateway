@@ -36,7 +36,7 @@ func agentMCPResultTask(t *testing.T, response *httptest.ResponseRecorder) a2aTa
 
 func agentMCPTaskRPC(h Handler, method string, message a2aMessage, id string) *httptest.ResponseRecorder {
 	params := map[string]any{"tenant": "research"}
-	if method == "SendMessage" {
+	if method == "SendMessage" || method == "SendStreamingMessage" {
 		params["message"] = message
 	} else {
 		params["id"] = id

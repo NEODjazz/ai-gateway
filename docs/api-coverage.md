@@ -61,6 +61,13 @@ availability is not inferred from these tests.
 | RAG ingestion | Atomic durable creation or reuse of owner-scoped UTF-8 files and vector stores with attachment quotas, typed attributes and explicit chunking policy | Background parsing/indexing and binary document formats |
 | RAG query | Owner-scoped semantic retrieval with optional reranking and Chat generation; each stage independently enforces authorization, content policy, quotas, routing and billing, with JSON and SSE output; both formats map model-written source markers to owner-scoped file citation annotations, including incremental SSE before choice completion | Durable precomputed indexes, claim verification and larger retrieval corpora |
 
+Saved agents with MCP bindings support durable `SendMessage` JSON and
+`SendStreamingMessage` task/status/artifact SSE, including approval pauses and
+continuation. Their model/tool iterations are buffered. Their Agent Cards do not
+advertise push delivery, and `returnImmediately` is rejected until a durable
+background worker supports these bound tools. Tool-free agents retain the
+asynchronous and push contracts described above.
+
 ## Provider and catalog capabilities
 
 | Capability | Current implementation | Remaining work |

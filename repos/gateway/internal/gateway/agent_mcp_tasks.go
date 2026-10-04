@@ -170,7 +170,7 @@ func (h Handler) sendAgentMCPTask(w http.ResponseWriter, r *http.Request, reques
 				return
 			}
 			if !h.reconcileAgentMCPTask(w, r, request, stored, task, state) {
-				writeAgentMCPTask(w, request.ID, task)
+				writeAgentMCPReply(w, request, task)
 			}
 			return
 		}
@@ -238,7 +238,7 @@ func (h Handler) sendAgentMCPTask(w http.ResponseWriter, r *http.Request, reques
 					previous, decodeErr := decodeAgentMCPState(existing.Payload)
 					if decodeErr == nil && previous != nil && previous.InitialHash == messageHash {
 						task, _ := decodeA2ATask(existing.Payload)
-						writeAgentMCPTask(w, request.ID, task)
+						writeAgentMCPReply(w, request, task)
 						return
 					}
 				}
@@ -254,17 +254,43 @@ func (h Handler) sendAgentMCPTask(w http.ResponseWriter, r *http.Request, reques
 	run.state.Profile.Instructions = profile.Instructions
 	ctx, cancel := context.WithDeadline(r.Context(), run.state.Deadline)
 	defer cancel()
+	stream := request.Method == "SendStreamingMessage"
+	if stream {
+		if err := startAgentMCPStream(w, request.ID, run.task); err != nil {
+			// A disconnected client must not start effects after its durable claim.
+			cleanup, stop := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
+			defer stop()
+			if err := h.failAgentMCPTask(cleanup, &run, true); err != nil {
+				_ = writeA2AStreamError(w, request.ID, -32603, "Task status is temporarily unavailable; read the task before retrying")
+			}
+			return
+		}
+	}
 	capture := newA2AResponseCapture()
-	h.runAgentMCPTask(agentMCPCapture{capture}, r.WithContext(ctx), request, &run)
+	if ctx.Err() != nil {
+		writeError(capture, http.StatusRequestTimeout, "agent_execution_cancelled", "Agent execution was cancelled")
+	} else {
+		h.runAgentMCPTask(agentMCPCapture{capture}, r.WithContext(ctx), request, &run)
+	}
 	if capture.status != http.StatusOK {
 		cleanup, stop := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
 		defer stop()
 		if a2aTaskPending(run.task.Status.State) {
 			if err := h.failAgentMCPTask(cleanup, &run, errors.Is(ctx.Err(), context.Canceled)); err != nil {
-				h.writeAgentMCPStoreError(w, request.ID, err)
+				if stream {
+					_ = writeA2AStreamError(w, request.ID, -32603, "Task status is temporarily unavailable; read the task before retrying")
+				} else {
+					h.writeAgentMCPStoreError(w, request.ID, err)
+				}
 				return
 			}
 		}
+	}
+	if stream {
+		// Both success and failure states are durable before the final event. Model
+		// responses are buffered per iteration; no partial tool step is published.
+		_ = finishAgentMCPStream(w, request.ID, run.task)
+		return
 	}
 	copyA2AResponse(w, capture, request.ID)
 }
@@ -433,7 +459,7 @@ func (h Handler) reconcileAgentMCPTask(w http.ResponseWriter, r *http.Request, r
 	if request.Method == "GetTask" {
 		writeJSON(w, http.StatusOK, a2aRPCResponse{JSONRPC: "2.0", ID: request.ID, Result: task})
 	} else {
-		writeAgentMCPTask(w, request.ID, task)
+		writeAgentMCPReply(w, request, task)
 	}
 	return true
 }

@@ -162,11 +162,15 @@ func (h Handler) a2aAgentCard(r *http.Request, profile AgentProfile) map[string]
 	if len(tags) == 0 {
 		tags = []string{"agent"}
 	}
+	streaming := h.a2aTasks != nil && h.a2aTaskConfig.OwnerQuota > 0 && h.a2aTaskConfig.TTL > 0
+	if len(profile.MCPTools) > 0 {
+		streaming = streaming && h.mcp != nil && h.mcpCalls != nil && h.mcpRuntime != nil && h.audit != nil
+	}
 	return map[string]any{
 		"name": profile.Name, "description": description, "version": "1.0.0",
 		"supportedInterfaces": []any{map[string]any{"url": endpoint, "protocolBinding": "JSONRPC", "tenant": profile.ID, "protocolVersion": a2aProtocolVersion}},
 		"capabilities": map[string]any{
-			"streaming":         len(profile.MCPTools) == 0 && h.a2aTasks != nil && h.a2aTaskConfig.OwnerQuota > 0 && h.a2aTaskConfig.TTL > 0,
+			"streaming":         streaming,
 			"pushNotifications": len(profile.MCPTools) == 0 && h.a2aPushJobs != nil && h.a2aPushVault != nil, "extendedAgentCard": true,
 		},
 		"securitySchemes": map[string]any{"bearer": map[string]any{"httpAuthSecurityScheme": map[string]any{
@@ -279,12 +283,12 @@ func (h Handler) sendA2AMessage(w http.ResponseWriter, r *http.Request, request 
 		return
 	}
 	returnImmediately := request.Params.Configuration.ReturnImmediately != nil && *request.Params.Configuration.ReturnImmediately
-	if len(profile.MCPTools) > 0 && (stream || returnImmediately) {
-		h.writeA2AError(w, request.ID, http.StatusNotImplemented, -32004, "Agents with MCP tools require synchronous SendMessage")
-		return
-	}
 	if stream && returnImmediately {
 		h.writeA2AError(w, request.ID, http.StatusBadRequest, -32602, "returnImmediately is not valid for streaming")
+		return
+	}
+	if len(profile.MCPTools) > 0 && returnImmediately {
+		h.writeA2AError(w, request.ID, http.StatusNotImplemented, -32004, "Agents with MCP tools do not support background execution")
 		return
 	}
 	if stream && (h.a2aTasks == nil || h.a2aTaskConfig.OwnerQuota < 1 || h.a2aTaskConfig.TTL <= 0) {

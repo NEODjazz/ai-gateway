@@ -190,6 +190,11 @@ compatibility must be distinguished from merely having an endpoint selector.
   native/media endpoints, Realtime, Compare and Agent Builder. Refresh preserves
   explicit selections; changing the connection discards the previous catalog.
   Manual entry does not grant access or replace a rejected model automatically.
+- [x] Added durable saved-agent MCP `SendStreamingMessage`: initial task claim
+  before effects, flushed SSE, settled artifacts/status, approval and replay
+  continuity, disconnect cleanup and failure-safe settlement. Real HTTP and
+  race tests verify flushing/cancellation; PostgreSQL replica coverage runs both
+  JSON and SSE. Playground stream controls still require integration below.
 - [ ] Finish media/tool output, policy selection and full conversation verification.
 - [ ] Complete endpoint-specific execution and media/tool handling.
 - [ ] Complete comparison, compliance and agent views.
@@ -397,7 +402,8 @@ saved selections even when discovery fails. Discovery itself uses the existing
 resource billing path. Execution discovers authorized schemas afresh; each server
 is limited to eight discovery pages and definitions to 2 MiB per run.
 
-Saved agents execute MCP functions through synchronous A2A `SendMessage`. Function
+Saved agents execute MCP functions through A2A `SendMessage` or
+`SendStreamingMessage`. Model/tool iterations remain synchronous. Function
 aliases derive from server/tool identity, avoiding collisions across servers;
 private bindings cannot be supplied through the public Responses API. Every
 iteration goes through the normal inference pipeline with a distinct internal
@@ -451,9 +457,11 @@ Oversized results preserve a bounded terminal task and the last durable intent;
 actual MCP execution results remain in the existing call store. A process crash
 never automatically retries an interrupted tool.
 
-Streaming, push and `returnImmediately` remain unsupported for these MCP agents;
-the agent card does not advertise them. Durable worker/stream execution for those
-modes remains part of the unfinished endpoint/runtime work. Tool-free agents
+Task streaming is supported for these MCP agents when the durable task store,
+MCP runtime, call store and audit service are available. The Agent Card advertises
+that capability only with these prerequisites. Push and `returnImmediately`
+remain unsupported; durable background worker execution and Playground streaming
+controls remain part of the unfinished endpoint/runtime work. Tool-free agents
 retain their existing behavior. This is an intentional response behavior change
 for MCP-bound profiles; clients must handle A2A task results and approval states.
 
@@ -462,6 +470,36 @@ fail closed rather than silently dropping these settings; clearing bindings allo
 version 1/2 snapshots again depending on the remaining configuration. This is an
 additive public API field and a configuration compatibility boundary. PostgreSQL
 replica-restoration coverage includes encrypted instructions and MCP references.
+
+### Saved-agent task streaming
+
+`SendStreamingMessage` returns ordered A2A SSE events with the same request ID.
+The first `task` event is flushed after authentication, model authorization and
+the atomic durable execution claim, before model or tool effects. Completion
+artifacts and the final status are emitted only after persistence. An approval
+pause returns `TASK_STATE_INPUT_REQUIRED` with its existing review challenge;
+the decision can continue over JSON or SSE without changing its task/context.
+Model responses are buffered per iteration, so this mode does not imply token
+deltas, token usage or first-token timing. Streaming controls must report only
+what the chosen protocol supplies.
+
+Initial-message and decision replays return the known durable task without new
+effects. A replay during an active execution may end with WORKING status; it
+does not start a second worker or claim completion. An expired working claim is
+reconciled as failed, without automatically repeating uncertain work. Disconnects
+cancel request-scoped execution and use bounded cancellation-independent cleanup.
+Completed or interrupted effects retain their normal accounting. After the
+stream starts, an execution failure publishes its durable failed/canceled status;
+a persistence failure instead emits a JSON-RPC SSE error and never a successful
+completion. Reads remain necessary when delivery or settlement is uncertain.
+
+Regression tests cover the first flush and durable claim order, real HTTP
+disconnect, approval/decline, replay, tool failure, runtime/ACL denial, failed
+persistence, expired claims and unchanged per-step billing. The required
+PostgreSQL integration test verifies JSON and SSE approval claims across two
+store connections, including duplicate decisions, stale CAS and one durable MCP
+execution. No new public request fields, configuration format or dependency is
+introduced; previously rejected MCP-agent streaming requests now execute.
 
 Saved-agent verification covers typed model → MCP result → model continuation,
 credential and policy denial, cumulative call/iteration limits, durable approvals,
