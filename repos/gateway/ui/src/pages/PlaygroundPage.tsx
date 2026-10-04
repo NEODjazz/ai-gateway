@@ -84,7 +84,7 @@ export function PlaygroundPage() {
   const [running, setRunning] = useState(false);
   const [activeSessionID, setActiveSessionID] = useState(sessionID);
   const [previousResponseID, setPreviousResponseID] = useState("");
-  const [pendingResponse, setPendingResponse] = useState<{ result: TextRun; turns: TranscriptTurn[]; prompt?: string; started: number; tools: unknown }>();
+  const [pendingResponse, setPendingResponse] = useState<{ result: TextRun; turns: TranscriptTurn[]; prompt?: string; started: number; tools: unknown; attachments: Attachment[] }>();
   const abortRef = useRef<AbortController | undefined>(undefined);
   const modelAbortRef = useRef<AbortController | undefined>(undefined);
   const modelGeneration = useRef(0);
@@ -188,7 +188,7 @@ export function PlaygroundPage() {
       if (abortRef.current !== controller || controller.signal.aborted) return;
       const submittedTurns: TranscriptTurn[] = input === undefined ? toolOutputs(calls).map((wire) => ({ id: ++turnID.current, role: "tool", content: String(wire.content), wire })) : [{ id: ++turnID.current, role: "user", content: input + (attachments.length ? `\nAttachments: ${attachments.map((item) => item.filename).join(", ")}` : ""), wire: { role: "user", content: conversationInput(input, attachments) } }];
       if (mode === "responses" && responsePending(result.response)) {
-        setPendingResponse({ result, turns: submittedTurns, prompt: input, started, tools: body.tools });
+        setPendingResponse({ result, turns: submittedTurns, prompt: input, started, tools: body.tools, attachments });
         setCalls([]); setMetadata(result); setPendingOutput(result.text); setMessage("");
         setAttachments([]); if (attachmentInput.current) attachmentInput.current.value = "";
       } else finishConversation(result, submittedTurns, input, body.tools);
@@ -203,6 +203,14 @@ export function PlaygroundPage() {
   }
 
   function finishConversation(result: TextRun, turns: TranscriptTurn[], input: string | undefined, declaredTools: unknown) {
+    if (mode === "responses" && result.response.status === "failed") {
+      setPendingOutput(""); setMetadata(result); setEvents(result.events); setEventCount(result.eventCount); setPendingResponse(undefined);
+      if (input !== undefined) setMessage(input);
+      if (pendingResponse) setAttachments(pendingResponse.attachments);
+      const failure = result.response.error as { message?: unknown } | undefined;
+      setError(`Response failed. ${typeof failure?.message === "string" ? failure.message : "Inspect finalized usage before retrying."}` + (input === undefined && calls.some((call) => call.nativeApproval && call.approved) ? " Provider continuation may already have executed approved tools; retrying can repeat execution." : ""));
+      return;
+    }
     let invocations: ToolInvocation[] = [], reviewError = "";
     try { invocations = toolInvocations(mode, result.response, resources.tools, declaredTools); }
     catch (cause) { reviewError = `Tool review failed: ${cause instanceof Error ? cause.message : "Invalid tool calls."} Clear the conversation before continuing.`; }
@@ -316,8 +324,9 @@ export function PlaygroundPage() {
           <div className="playground-output-heading"><div><h2>Conversation</h2><span className="muted">Session <code>{activeSessionID}</code></span></div><div className="playground-actions"><GatewayButton view="outlined" disabled={running} onClick={newSession}>Clear</GatewayButton><GatewayButton view="outlined" disabled={running || unreviewableTools || !!pendingResponse || !model.trim()} onClick={getCode}>Get code</GatewayButton></div></div>
           <label htmlFor="playground-instructions">System instructions<GravityThemeScope className="gravity-playground-control"><TextArea id="playground-instructions" controlProps={{ "aria-label": "Instructions" }} size="l" disabled={running} rows={2} value={instructions} onUpdate={setInstructions} placeholder="Optional system instructions" /></GravityThemeScope></label>
           <section className="playground-output" aria-label="Playground conversation">
-            {!transcript.length && !pendingOutput && !pendingResponse && <div className="playground-empty"><h3>Start a conversation</h3><p>Choose a model and send a prompt. Conversation content stays in memory.</p><div className="playground-suggestions">{["Explain a complex idea simply", "Draft a short project update", "Review a function for edge cases"].map((prompt) => <button type="button" key={prompt} disabled={running} onClick={() => setMessage(prompt)}>{prompt}</button>)}</div></div>}
+            {!transcript.length && !pendingOutput && !pendingResponse && metadata?.response.status !== "failed" && <div className="playground-empty"><h3>Start a conversation</h3><p>Choose a model and send a prompt. Conversation content stays in memory.</p><div className="playground-suggestions">{["Explain a complex idea simply", "Draft a short project update", "Review a function for edge cases"].map((prompt) => <button type="button" key={prompt} disabled={running} onClick={() => setMessage(prompt)}>{prompt}</button>)}</div></div>}
             <div className="playground-transcript">{transcript.map((turn) => <article className={`playground-turn ${turn.role}`} key={turn.id}><strong>{turn.role === "user" ? "User" : turn.role === "tool" ? "Tool result" : "Assistant"}</strong><pre>{turn.content || "No text output"}</pre>{turn.reasoning && <details><summary>Reasoning</summary><pre>{turn.reasoning}</pre></details>}{turn.role === "assistant" && <><CopyOutput label={`Copy response ${turn.id}`} text={turn.content} /><OutputDetails payload={turn.response || turn.wire} connection={connection} disabled={connectionChanged} /></>}{turn.response && <details><summary>Response details</summary><pre>{JSON.stringify(turn.response, null, 2).slice(0, 65536)}</pre></details>}</article>)}{pendingResponse?.turns.map((turn) => <article className={`playground-turn ${turn.role}`} key={turn.id}><strong>{turn.role === "user" ? "User" : "Tool result"}</strong><pre>{turn.content}</pre></article>)}{pendingOutput && <article className={`playground-turn assistant${running ? " streaming" : ""}`}><strong>Assistant <span>{running ? "streaming" : "partial response"}</span></strong><pre>{pendingOutput}</pre></article>}</div>
+            {metadata?.response.status === "failed" && <section aria-label="Failed response output" className="playground-turn assistant"><strong>Assistant · failed</strong><pre>{metadata.text || "No text output"}</pre>{metadata.reasoning && <details><summary>Reasoning</summary><pre>{metadata.reasoning}</pre></details>}<CopyOutput text={metadata.text} label="Copy failed response" /><OutputDetails payload={metadata.response} connection={connection} disabled={connectionChanged} /><p className="muted">This failed response is excluded from conversation history. Review its reported usage before explicitly retrying.</p></section>}
           </section>
           {pendingResponse && <section aria-label="Background response"><p role="status">Response {pendingResponse.result.id} · {String(pendingResponse.result.response.status)}</p><p className="muted">The server is still executing. Refresh or cancel it before starting another turn. Clear removes only browser state and does not cancel server execution.</p><div className="playground-actions"><GatewayButton disabled={running || connectionChanged} onClick={() => void manageResponse("refresh")}>Refresh background response</GatewayButton><GatewayButton view="outlined" disabled={running || connectionChanged} onClick={() => void manageResponse("cancel")}>Cancel background response</GatewayButton></div></section>}
           <ToolApprovals onResultEdit={manualToolResult} onUseResult={(index) => manualToolResult(index)} calls={calls} disabled={running || connectionChanged} onExecute={(index) => void approveTool(index)} onDecline={(index) => setCalls((previous) => previous.map((item, position) => position === index ? decideTool(item, false) : item))} onContinue={() => void runConversation()} />

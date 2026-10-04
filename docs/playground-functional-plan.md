@@ -176,6 +176,11 @@ compatibility must be distinguished from merely having an endpoint selector.
   typed replay and code export, including Gateway Messages and Interactions
   conversion and native Gemini responses. Messages sends its required protocol
   version header in both live requests and exported code.
+- [x] Retained identified failed Responses and Interactions output and reported
+  usage in JSON, streaming JSON fallback and terminal SSE. Failed executions do
+  not advance conversation history or continuity. Direct failures retain reviewed
+  tool results; background prompt failures restore their prompt and attachments.
+  Repeating execution requires an explicit user action.
 - [ ] Finish media/tool output, policy selection and full conversation verification.
 - [ ] Complete endpoint-specific execution and media/tool handling.
 - [ ] Complete comparison, compliance and agent views.
@@ -184,6 +189,38 @@ compatibility must be distinguished from merely having an endpoint selector.
 
 Completion requires working flows and evidence for every requirement above.
 Having a selector, a disabled control or a raw JSON viewer alone is insufficient.
+
+## Failed text execution and reported usage
+
+A successfully transported Responses or Interactions resource can have status
+`failed` and still contain provider output and token usage. The console displays
+that resource's ID, failed status, partial text, reasoning and reported usage
+alongside its error. Explicit zero token counts remain zero; absent usage stays
+unavailable. A failed resource is not a successful conversation turn and its ID
+must not become the previous response or interaction ID on a subsequent request.
+
+JSON, a JSON response to a streaming request, and recognized terminal SSE events
+follow the same rule. Retention requires a valid resource ID; malformed resources,
+HTTP failures, standalone error events, failures in nonterminal packets and a
+failed final event belonging to a different resource still reject the request.
+Existing output bounds, cancellation and credential-change checks remain active.
+
+The console never automatically repeats failed inference. Direct prompt failures
+keep the draft and attachments; background prompt failures restore the submitted
+draft and attachments when refreshed. Direct tool-continuation failures preserve
+reviewed results and the last successful continuity ID for an explicit retry.
+Native provider approvals warn that a repeat may execute approved tools again.
+The partial failed output can be inspected and copied but is excluded from
+subsequent browser conversation history. Clear removes the failed display.
+
+Regression tests cover these transports, usage with explicit zeros, invalid IDs,
+HTTP errors, stream identity mismatches, explicit retries, reviewed manual results
+and restoration of background prompt attachments. Browser verification used the
+real embedded console and Gateway Responses/Interactions handlers with an
+isolated synthetic provider: both failed streams displayed output and tokens,
+and explicit retries excluded failed resource IDs and output. No real provider
+credentials, inference billing or deployment changes were used. Public API
+contracts and dependencies are unchanged.
 
 ## Scoped resource discovery
 

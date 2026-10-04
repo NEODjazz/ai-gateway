@@ -40,6 +40,10 @@ function responseError(payload: Record<string, unknown>, event = ""): void {
 export function responsePending(response: Record<string, unknown>): boolean {
   return response.status === "queued" || response.status === "in_progress";
 }
+const terminalResponseEvents = ["response.completed", "response.incomplete", "response.failed", "response.cancelled"];
+function identifiedFailedResponse(payload: Record<string, unknown> | undefined): boolean {
+  return payload?.status === "failed" && typeof payload.id === "string" && /^[A-Za-z0-9_-]{1,256}$/.test(payload.id);
+}
 function responsePath(id: unknown): string {
   if (typeof id !== "string" || !/^[A-Za-z0-9_-]{1,256}$/.test(id)) throw new Error("Response lifecycle requires a valid response ID.");
   return `/v1/responses/${encodeURIComponent(id)}`;
@@ -90,7 +94,7 @@ export async function runText(connection: PlaygroundConnection, endpoint: TextEn
   const acceptJSON = (payload: Record<string, unknown>) => {
     ensureActive();
     if (!object(payload)) throw new Error("Invalid response: expected a JSON object");
-    responseError(payload);
+    if (endpoint !== "responses" || !identifiedFailedResponse(payload)) responseError(payload);
     const fields = textResponseFields(payload, endpoint);
     response = payload; text = fields.text; reasoning = fields.reasoning;
     onText(text);
@@ -106,11 +110,14 @@ export async function runText(connection: PlaygroundConnection, endpoint: TextEn
       let payload: Record<string, unknown> | undefined;
       try { payload = object(JSON.parse(event.data)); } catch { throw new Error("Malformed streaming event"); }
       if (!payload) throw new Error("Malformed streaming event");
-      responseError(payload, event.event);
+      const type = typeof payload.type === "string" ? payload.type : event.event;
+      const finalResponse = object(payload.response);
+      const retainedFailure = endpoint === "responses" && terminalResponseEvents.includes(type) && event.event !== "error" && !payload.error && identifiedFailedResponse(finalResponse);
+      if (!retainedFailure) responseError(payload, event.event);
+      if (retainedFailure && response.id !== undefined && response.id !== finalResponse!.id) throw new Error("Final response belongs to another request.");
       eventCount++; events.push(boundedEvent(event)); if (events.length > maxEvents) events.shift();
       if (endpoint === "responses") {
-        const type = typeof payload.type === "string" ? payload.type : event.event;
-        if (["response.completed", "response.incomplete"].includes(type)) terminal = true;
+        if (terminalResponseEvents.includes(type)) terminal = true;
         if (["response.output_text.delta", "response.refusal.delta"].includes(type) && typeof payload.delta === "string") append(payload.delta);
         if (type === "response.reasoning_summary_text.delta" && typeof payload.delta === "string") {
           if (text.length + reasoning.length + toolCharacters + payload.delta.length > maxOutputCharacters) throw new Error("Reasoning output exceeds the Playground limit.");
@@ -120,7 +127,7 @@ export async function runText(connection: PlaygroundConnection, endpoint: TextEn
         if (completed) {
           if (JSON.stringify(completed).length > maxOutputCharacters) throw new Error("Structured response exceeds the 2 MiB Playground limit.");
           response = completed;
-          if (!text && (type === "response.completed" || type === "response.incomplete")) {
+          if (!text && terminalResponseEvents.includes(type)) {
             text = typeof completed.output_text === "string" ? completed.output_text : contentText(completed.output);
             if (text.length > maxOutputCharacters) throw new Error("Text output exceeds the 2 MiB Playground limit.");
             onText(text);

@@ -9,7 +9,34 @@ function setup(endpoint: SpecializedEndpoint) { return render(<EndpointPlaygroun
 const nativeJSON = (value: unknown) => new Response(typeof value === "string" ? value : JSON.stringify(value), { headers: { "Content-Type": "application/json" } });
 const run = () => userEvent.click(screen.getByRole("button", { name: "Run endpoint request" }));
 describe("Endpoint Playground", () => {
-  it.each(["messages", "interactions_api", "interactions_browser", "interactions_background"])("preserves exact %s arguments, binds definitions and keeps manual results on retry", async (variant) => {
+  it.each(["json", "fallback", "stream"])("shows failed Interactions output and actual usage over %s without retrying", async (transport) => {
+    const response = { id: "interaction_failed", status: "failed", steps: [{ type: "model_output", content: [{ type: "text", text: "Retained failed native answer" }] }], usage: { total_input_tokens: 0, total_output_tokens: 3 }, error: { message: "Provider execution failed" } };
+    const mock = vi.spyOn(globalThis, "fetch").mockResolvedValue(transport === "stream"
+      ? new Response(`data: ${JSON.stringify({ event_type: "interaction.failed", interaction: response })}\n\n`, { headers: { "Content-Type": "text/event-stream" } })
+      : nativeJSON(response));
+    setup("interactions"); if (transport === "json") await userEvent.click(screen.getByLabelText("Stream native response"));
+    await userEvent.type(screen.getByLabelText("Endpoint input"), "Billed failed native prompt"); await run();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Interaction failed. Provider execution failed"); expect(screen.getByText("Retained failed native answer")).toBeInTheDocument();
+    expect(screen.getByText("Input tokens").nextElementSibling).toHaveTextContent("0"); expect(screen.getByText("Output tokens").nextElementSibling).toHaveTextContent("3");
+    expect(screen.getByText("Status").nextElementSibling).toHaveTextContent("failed"); expect(screen.queryByRole("region", { name: "Background interaction" })).not.toBeInTheDocument(); expect(mock).toHaveBeenCalledOnce();
+    await userEvent.click(screen.getByRole("button", { name: "Clear endpoint output" })); expect(screen.queryByText("Retained failed native answer")).not.toBeInTheDocument(); expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+  it("restores the prompt and attachments after a background Interaction fails without advancing continuity", async () => {
+    let creates = 0;
+    const mock = vi.spyOn(globalThis, "fetch").mockImplementation(async (path) => path === "/v1/interactions/interaction_background"
+      ? nativeJSON({ id: "interaction_background", status: "failed", usage: { total_input_tokens: 7, total_output_tokens: 0 }, error: { message: "Background failed" } })
+      : nativeJSON(++creates === 1 ? { id: "interaction_background", status: "queued" } : { id: "interaction_retry", status: "completed", steps: [{ type: "model_output", content: [{ type: "text", text: "Retry succeeded" }] }] }));
+    setup("interactions"); await userEvent.click(screen.getByLabelText("Stream native response")); fireEvent.change(screen.getByLabelText("Endpoint parameters JSON"), { target: { value: '{"background":true}' } });
+    await userEvent.upload(screen.getByLabelText("Endpoint attachment"), new File([new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])], "kept.png", { type: "image/png" }));
+    await userEvent.type(screen.getByLabelText("Endpoint input"), "Retained background prompt"); await run();
+    await screen.findByRole("region", { name: "Background interaction" }); expect(screen.queryByText("kept.png · image/png")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Refresh background interaction" })); expect(await screen.findByRole("alert")).toHaveTextContent("Background failed");
+    expect(screen.getByLabelText("Endpoint input")).toHaveValue("Retained background prompt"); expect(screen.getByText("kept.png · image/png")).toBeInTheDocument(); expect(screen.getByText("Input tokens").nextElementSibling).toHaveTextContent("7"); expect(creates).toBe(1);
+    await run(); await screen.findByText("Retry succeeded");
+    const requests = mock.mock.calls.filter(([path]) => path === "/v1/interactions"); expect(requests).toHaveLength(2); expect(requests[1][1]?.body).toBe(requests[0][1]?.body); expect(screen.queryByRole("region", { name: "Failed interaction output" })).not.toBeInTheDocument();
+  });
+  it.each(["messages", "interactions_api", "interactions_browser", "interactions_background", "interactions_api_failed", "interactions_browser_failed"])("preserves exact %s arguments, binds definitions and keeps manual results on retry", async (variant) => {
+    const reportedFailure = variant.endsWith("_failed"); variant = variant.replace("_failed", "");
     const endpoint = variant === "messages" ? "messages" : "interactions";
     const tool = endpoint === "messages" ? { name: "query", input_schema: { type: "object", properties: { id: { type: "integer" } } } } : { type: "function", name: "query", parameters: { type: "object", properties: { id: { type: "integer" } } } };
     const advanced = JSON.stringify({ tools: [tool], ...(variant === "interactions_browser" ? { store: false } : {}), ...(variant === "interactions_background" ? { background: true } : {}) });
@@ -22,7 +49,7 @@ describe("Endpoint Playground", () => {
       if (path === "/v1/interactions/native_job") return nativeJSON(response);
       if (path !== `/v1/${endpoint}`) throw new Error("Unexpected direct tool execution");
       return ++creates === 1 ? nativeJSON(variant === "interactions_background" ? { id: "native_job", status: "queued" } : response)
-        : creates === 2 ? new Response('{"error":{"message":"Native continuation unavailable"}}', { status: 503 }) : nativeJSON(final);
+        : creates === 2 ? reportedFailure ? nativeJSON({ id: "interaction_failed_continuation", status: "failed", steps: [{ type: "model_output", content: [{ type: "text", text: "Partial native continuation output" }] }], usage: { total_input_tokens: 7, total_output_tokens: 3 }, error: { message: "Native continuation unavailable" } }) : new Response('{"error":{"message":"Native continuation unavailable"}}', { status: 503 }) : nativeJSON(final);
     });
     setup(endpoint);
     if (variant === "interactions_background") await userEvent.click(screen.getByLabelText("Stream native response"));
@@ -50,6 +77,7 @@ describe("Endpoint Playground", () => {
     await userEvent.click(screen.getByRole("tab", { name: "Python" })); expect(code).toHaveTextContent("body.encode()"); await userEvent.keyboard("{Escape}");
     await userEvent.click(screen.getByRole("button", { name: "Continue native tool results" })); expect(await screen.findByRole("alert")).toHaveTextContent("Native continuation unavailable");
     expect(screen.getByLabelText("Tool result call")).toHaveValue('rows: 9007199254740993\n<not-json>');
+    if (reportedFailure) { expect(screen.getByRole("region", { name: "Failed interaction output" })).toHaveTextContent("Partial native continuation output"); expect(screen.getByText("Input tokens").nextElementSibling).toHaveTextContent("7"); }
     await userEvent.click(screen.getByRole("button", { name: "Continue native tool results" })); await screen.findByText("Native result received");
     const requests = mock.mock.calls.filter(([path]) => path === `/v1/${endpoint}`);
     expect(requests).toHaveLength(3); if (endpoint === "messages") expect(new Headers(requests[0][1]?.headers).get("anthropic-version")).toBe("2023-06-01"); expect(requests[1][1]?.body).toBe(requests[2][1]?.body);

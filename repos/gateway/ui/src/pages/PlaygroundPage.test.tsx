@@ -21,6 +21,38 @@ function streamResponse(chunks: string[]) {
 afterEach(() => document.querySelectorAll('meta[name="ai-gateway-playground-origins"]').forEach((node) => node.remove()));
 
 describe("PlaygroundPage", () => {
+  it.each(["json", "fallback", "stream"])("shows failed Responses output and real usage over %s without retrying", async (transport) => {
+    const response = { id: "resp_failed", status: "failed", output: [{ type: "message", role: "assistant", content: [{ type: "output_text", text: "Retained failed answer" }] }], usage: { input_tokens: 0, output_tokens: 3 }, error: { message: "Provider execution failed" } };
+    const mock = vi.spyOn(globalThis, "fetch").mockImplementation(async (path) => path === "/v1/models" ? new Response('{"data":[{"id":"model"}]}')
+      : transport === "stream" ? streamResponse([`data: ${JSON.stringify({ type: "response.failed", response })}\n\n`])
+      : new Response(JSON.stringify(response), { headers: { "Content-Type": "application/json" } }));
+    authenticated(); await screen.findByText("1 authorized model"); await userEvent.click(screen.getByRole("tab", { name: "Responses API" }));
+    if (transport === "json") await userEvent.click(screen.getByLabelText("Stream response"));
+    await userEvent.type(screen.getByLabelText("Message"), "Billed failed prompt"); await userEvent.click(screen.getByRole("button", { name: "Run request" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Response failed. Provider execution failed"); expect(screen.getByText("Retained failed answer")).toBeInTheDocument();
+    expect(screen.getByText("Input tokens").nextElementSibling).toHaveTextContent("0"); expect(screen.getByText("Output tokens").nextElementSibling).toHaveTextContent("3");
+    expect(screen.getByRole("region", { name: "Playground conversation" })).toContainElement(screen.getByRole("region", { name: "Failed response output" }));
+    expect(screen.getByText("Status").nextElementSibling).toHaveTextContent("failed"); expect(screen.queryByRole("region", { name: "Background response" })).not.toBeInTheDocument();
+    expect(mock.mock.calls.filter(([path]) => path === "/v1/responses")).toHaveLength(1);
+    await userEvent.click(screen.getByRole("button", { name: "Clear" })); expect(screen.queryByText("Retained failed answer")).not.toBeInTheDocument(); expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+  it("restores the prompt and attachments after a background Response fails without advancing continuity", async () => {
+    let creates = 0;
+    const mock = vi.spyOn(globalThis, "fetch").mockImplementation(async (path) => {
+      if (path === "/v1/models") return new Response('{"data":[{"id":"model"}]}');
+      if (path === "/v1/responses/resp_background") return new Response('{"id":"resp_background","status":"failed","usage":{"input_tokens":7,"output_tokens":0},"error":{"message":"Background failed"}}');
+      return new Response(JSON.stringify(++creates === 1 ? { id: "resp_background", status: "queued" } : { id: "resp_retry", status: "completed", output_text: "Retry succeeded" }), { headers: { "Content-Type": "application/json" } });
+    });
+    authenticated(); await screen.findByText("1 authorized model"); await userEvent.click(screen.getByRole("tab", { name: "Responses API" })); await userEvent.click(screen.getByLabelText("Stream response"));
+    fireEvent.change(screen.getByLabelText("Advanced parameters JSON"), { target: { value: '{"background":true}' } });
+    await userEvent.upload(screen.getByLabelText("Conversation attachments"), new File([new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])], "kept.png", { type: "image/png" }));
+    await userEvent.type(screen.getByLabelText("Message"), "Retained background prompt"); await userEvent.click(screen.getByRole("button", { name: "Run request" }));
+    await screen.findByRole("region", { name: "Background response" }); expect(screen.queryByRole("button", { name: "Remove conversation attachments" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Refresh background response" })); expect(await screen.findByRole("alert")).toHaveTextContent("Background failed");
+    expect(screen.getByLabelText("Message")).toHaveValue("Retained background prompt"); expect(screen.getByText("kept.png")).toBeInTheDocument(); expect(screen.getByText("Input tokens").nextElementSibling).toHaveTextContent("7"); expect(creates).toBe(1);
+    await userEvent.click(screen.getByRole("button", { name: "Run request" })); await screen.findByText("Retry succeeded");
+    const requests = mock.mock.calls.filter(([path]) => path === "/v1/responses"); expect(requests).toHaveLength(2); expect(requests[1][1]?.body).toBe(requests[0][1]?.body); expect(screen.queryByRole("region", { name: "Failed response output" })).not.toBeInTheDocument();
+  });
   it("stores API-managed Responses explicitly, preserves browser store:false and downloads cited files only on demand", async () => {
     const json = (value: unknown) => new Response(JSON.stringify(value), { headers: { "Content-Type": "application/json" } });
     const response = { id: "resp_file", store: true, status: "completed", output: [{ type: "message", role: "assistant", content: [{ type: "output_text", text: "File ready", annotations: [{ type: "container_file_citation", container_id: "cntr_demo", file_id: "cfile_demo", filename: "report.csv" }] }] }] };
@@ -114,7 +146,8 @@ describe("PlaygroundPage", () => {
     expect(bodies[2].input).toEqual(variant === "browser" ? [{ role: "user", content: "Review native actions" }, ...approvals, ...decisions] : decisions);
     expect(bodies[2].previous_response_id).toBe(variant === "browser" ? undefined : "resp_1");
   });
-  it.each(["chat", "api", "browser", "background"])("requires explicit function results in %s and preserves their original definition and arguments", async (variant) => {
+  it.each(["chat", "api", "browser", "background", "api_failed", "browser_failed"])("requires explicit function results in %s and preserves their original definition and arguments", async (variant) => {
+    const reportedFailure = variant.endsWith("_failed"); variant = variant.replace("_failed", "");
     const fn = { name: "query", parameters: { type: "object", properties: { id: { type: "integer" } }, required: ["id"] } };
     const tools = [variant === "chat" ? { type: "function", function: fn } : { type: "function", ...fn }];
     const rawArguments = '{"id":9007199254740993}';
@@ -132,7 +165,7 @@ describe("PlaygroundPage", () => {
       if (path === "/v1/responses/resp_manual") return json(first);
       if (path !== endpoint) throw new Error("Unexpected automatic function execution");
       return ++runs === 1 ? json(variant === "background" ? { id: "resp_manual", status: "queued" } : first)
-        : runs === 2 ? json({ error: { message: "Function continuation unavailable" } }, 503)
+        : runs === 2 ? reportedFailure ? json({ id: "resp_failed_continuation", status: "failed", output_text: "Partial continuation output", usage: { input_tokens: 7, output_tokens: 3 }, error: { message: "Function continuation unavailable" } }) : json({ error: { message: "Function continuation unavailable" } }, 503)
           : json(variant === "chat" ? { choices: [{ message: { content: "Function results received" } }] } : { id: "resp_done", status: "completed", output_text: "Function results received" });
     });
     authenticated(); await screen.findByText("1 authorized model");
@@ -162,6 +195,7 @@ describe("PlaygroundPage", () => {
     expect(screen.getByLabelText("Request code")).toHaveTextContent("9007199254740993"); expect(screen.getByLabelText("Request code")).not.toHaveTextContent("playground-token"); await userEvent.keyboard("{Escape}");
     await userEvent.click(screen.getByRole("button", { name: "Continue with tool results" })); expect(await screen.findByRole("alert")).toHaveTextContent("Function continuation unavailable");
     expect(screen.getByLabelText("Function tool result manual_1")).toHaveValue(result);
+    if (reportedFailure) { expect(screen.getByRole("region", { name: "Failed response output" })).toHaveTextContent("Partial continuation output"); expect(screen.getByText("Input tokens").nextElementSibling).toHaveTextContent("7"); }
     await userEvent.click(screen.getByRole("button", { name: "Continue with tool results" })); await screen.findByText("Function results received");
     expect(screen.queryByRole("region", { name: "Tool approvals" })).not.toBeInTheDocument(); expect(screen.getAllByText("Review function query")).toHaveLength(1);
     const bodies = mock.mock.calls.filter(([path]) => path === endpoint).map(([, options]) => JSON.parse(String(options?.body)));
@@ -453,7 +487,8 @@ describe("PlaygroundPage", () => {
     await userEvent.type(screen.getByLabelText("Message"), "retry me");
     await userEvent.click(screen.getByRole("button", { name: "Run request" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Upstream unavailable");
-    expect(screen.queryByText("failed-id")).not.toBeInTheDocument();
+    expect(screen.getByText("failed-id")).toBeInTheDocument(); expect(screen.getByText("Status").nextElementSibling).toHaveTextContent("failed");
+    expect(screen.getByLabelText("Message")).toHaveValue("retry me");
     await userEvent.click(screen.getByRole("button", { name: "Run request" }));
     expect(await screen.findByText("Recovered")).toBeInTheDocument();
     const body = JSON.parse(String(fetchMock.mock.calls.filter(([path]) => path === "/v1/responses")[1][1]?.body));

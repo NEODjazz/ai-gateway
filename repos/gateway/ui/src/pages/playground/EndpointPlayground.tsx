@@ -29,7 +29,7 @@ export function EndpointPlayground({ endpoint, connection, connectionChanged, co
   const [history, setHistory] = useState<NativeTurn[]>([]), [previousID, setPreviousID] = useState("");
   const [calls, setCalls] = useState<NativeToolCall[]>([]), [toolResults, setToolResults] = useState<NativeToolResult[]>([]);
   const [unreviewableTools, setUnreviewableTools] = useState(false);
-  const [interactionJob, setInteractionJob] = useState<{ id: string; turn: NativeTurn; store: boolean; tools: unknown; started: number }>();
+  const [interactionJob, setInteractionJob] = useState<{ id: string; turn: NativeTurn; store: boolean; tools: unknown; started: number; input: string; attachments: Attachment[] }>();
   const [historyDropped, setHistoryDropped] = useState(0), [pricing, setPricing] = useState(defaultPricing);
   const abort = useRef<AbortController | undefined>(undefined), generation = useRef(0), audioURL = useRef<string | undefined>(undefined);
   const attachmentInput = useRef<HTMLInputElement>(null), maskInput = useRef<HTMLInputElement>(null);
@@ -79,7 +79,7 @@ export function EndpointPlayground({ endpoint, connection, connectionChanged, co
         if (current !== generation.current || controller.signal.aborted) return;
         const content = continuing ? nativeToolContent(endpoint, toolResults) : nativeUserContent(endpoint, input, attachments);
         const turn: NativeTurn = { role: continuing ? "tool" : "user", content, text: continuing ? toolResults.map((result) => `${result.id}: ${result.text}`).join("\n") : input || attachments.map((file) => file.filename).join("\n") };
-        if (endpoint === "interactions" && responsePending(native.response)) { setInteractionJob({ id: String(native.response.id), turn, store: request.body.store !== false, started: start, tools: request.body.tools }); setCalls([]); setToolResults([]); }
+        if (endpoint === "interactions" && responsePending(native.response)) { setInteractionJob({ id: String(native.response.id), turn, store: request.body.store !== false, started: start, tools: request.body.tools, input, attachments }); setCalls([]); setToolResults([]); }
         else finishNative(native, turn, request.body.store !== false, request.body.tools);
       } else if (endpoint === "a2a") {
         const agent = await runAgentRequest(connection, request, controller.signal);
@@ -106,7 +106,7 @@ export function EndpointPlayground({ endpoint, connection, connectionChanged, co
         result = { payload, latencyMS: performance.now() - start };
       }
       if (current !== generation.current || controller.signal.aborted) return;
-      setOutput(result); setPending(""); if (conversationEndpoint && !continuing && !agentMethod && !agentChoices) { setInput(""); setAttachments([]); if (attachmentInput.current) attachmentInput.current.value = ""; }
+      setOutput(result); setPending(""); if (conversationEndpoint && !continuing && !agentMethod && !agentChoices && !(endpoint === "interactions" && result.payload?.status === "failed")) { setInput(""); setAttachments([]); if (attachmentInput.current) attachmentInput.current.value = ""; }
     } catch (cause) {
       if (current === generation.current) {
         const cancelled = endpoint === "a2a" ? "Request cancelled. Server execution may already have completed; refresh a known task before repeating it." : "Request cancelled";
@@ -118,6 +118,12 @@ export function EndpointPlayground({ endpoint, connection, connectionChanged, co
 
   function finishNative(native: NativeTextRun, turn: NativeTurn, store: boolean, tools: unknown) {
     if (endpoint !== "messages" && endpoint !== "interactions") return;
+    if (endpoint === "interactions" && native.response.status === "failed") {
+      if (interactionJob) { setInput(interactionJob.input); setAttachments(interactionJob.attachments); }
+      setInteractionJob(undefined);
+      setError(`Interaction failed. ${String(object(native.response.error)?.message || "Inspect finalized usage before retrying.")}`);
+      return;
+    }
     const response = endpoint === "interactions" && native.response.steps === undefined && ["failed", "cancelled", "incomplete"].includes(String(native.response.status)) ? { ...native.response, steps: [] } : native.response;
     let nextCalls: NativeToolCall[] = [], reviewError = "";
     try { nextCalls = nativeToolCalls(endpoint, response, tools); }
@@ -171,6 +177,7 @@ export function EndpointPlayground({ endpoint, connection, connectionChanged, co
       <div className="playground-actions"><GatewayButton type="submit" disabled={running || reading || connectionChanged || calls.length > 0 || agentPending || !!interactionJob || unreviewableTools}>{running ? "Running…" : endpoint === "mcp" ? "Execute MCP tool" : "Run endpoint request"}</GatewayButton>{running && <GatewayButton view="outlined" onClick={() => abort.current?.abort()}>Stop endpoint request</GatewayButton>}</div>
       {error && <p role="alert" className="form-error">{error}</p>}{pending && <pre className="playground-native-text">{pending}</pre>}
       {conversationEndpoint && <section className="playground-transcript" aria-label={endpoint === "a2a" ? "Agent conversation history" : "Native conversation history"}>{[...history, ...(interactionJob ? [interactionJob.turn] : [])].map((turn, index) => <article className={`playground-turn ${turn.role}`} key={index}><strong>{turn.role === "user" ? "User" : turn.role === "tool" ? "Tool result" : endpoint === "a2a" ? "Agent" : "Assistant"}</strong><pre>{(turn.text ?? contentText(turn.content)) || "No text output"}</pre>{turn.role === "assistant" && <><CopyOutput label={`Copy ${endpoint === "a2a" ? "agent" : "native"} response ${index + 1}`} text={turn.text ?? contentText(turn.content)} />{turn.reasoning && <details><summary>Reasoning</summary><pre>{turn.reasoning}</pre></details>}<OutputDetails payload={{ content: turn.content }} encodeJSON={textEndpoint ? stringifyExactJSON : undefined} /></>}</article>)}</section>}
+      {endpoint === "interactions" && payload?.status === "failed" && <section aria-label="Failed interaction output" className="playground-turn assistant"><strong>Assistant · failed</strong><pre>{native?.text || "No text output"}</pre>{native?.reasoning && <details><summary>Reasoning</summary><pre>{native.reasoning}</pre></details>}<CopyOutput text={native?.text || ""} label="Copy failed interaction" /><OutputDetails payload={payload} encodeJSON={stringifyExactJSON} /><p className="muted">This failed interaction is excluded from conversation history. Review its reported usage before explicitly retrying.</p></section>}
       {interactionJob && <section aria-label="Background interaction"><p role="status">Interaction {interactionJob.id} · {String(payload?.status)}</p><p className="muted">Refresh or cancel this interaction before another turn. Clearing removes local state without cancelling server execution.</p><div className="playground-actions"><GatewayButton disabled={running || connectionChanged} onClick={() => void manageInteraction("refresh")}>Refresh background interaction</GatewayButton><GatewayButton view="outlined" disabled={running || connectionChanged} onClick={() => void manageInteraction("cancel")}>Cancel background interaction</GatewayButton></div></section>}
       {calls.length > 0 && <section className="playground-tool-approvals" aria-label="Native tool results"><h3>Pending tool calls</h3><p className="muted">Review the arguments, supply a result from your tool, or decline the call. Tools do not execute automatically.</p>{calls.map((call) => { const result = toolResults.find((item) => item.id === call.id); return <article className="playground-turn tool" key={call.id}><strong>{call.name} · {call.id}</strong><pre>{call.rawArguments}</pre>{call.issue && <p role="status" className="form-error">{call.issue}</p>}<AreaControl label={`Tool result ${call.id}`} rows={3} value={result?.text || ""} disabled={running || connectionChanged || !!call.issue} onUpdate={(text) => setToolResults((items) => [...items.filter((item) => item.id !== call.id), { id: call.id, text, declined: false }])} /><GatewayButton view="outlined" disabled={running || connectionChanged} onClick={() => setToolResults((items) => [...items.filter((item) => item.id !== call.id), { id: call.id, text: "Tool execution declined by the user.", declined: true }])}>Decline {call.name}</GatewayButton>{result?.declined && <p>Declined</p>}</article>; })}<GatewayButton disabled={running || connectionChanged} onClick={() => void submit(undefined, true)}>Continue native tool results</GatewayButton></section>}
       {historyDropped > 0 && <p className="muted">{historyDropped} earlier turns removed to keep browser history bounded.</p>}

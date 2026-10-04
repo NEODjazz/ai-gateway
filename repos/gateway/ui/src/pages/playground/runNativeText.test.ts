@@ -7,6 +7,15 @@ const connection = () => playgroundConnection(new APIClient(() => "test-key"), "
 const options = () => new AbortController().signal;
 function stream(events: unknown[]) { return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""), { headers: { "Content-Type": "text/event-stream" } }); }
 describe("Native text execution", () => {
+  it.each(["json", "fallback", "stream"])("retains an identified failed Interaction and its actual usage over %s", async (transport) => {
+    const response = { id: "interaction_failed", status: "failed", steps: [{ type: "model_output", content: [{ type: "text", text: "Retained native answer" }] }], usage: { total_input_tokens: 0, total_output_tokens: 3 }, error: { message: "Provider execution failed" } };
+    const mock = vi.spyOn(globalThis, "fetch").mockResolvedValue(transport === "stream"
+      ? stream([{ event_type: "interaction.failed", interaction: response }])
+      : new Response(JSON.stringify(response), { headers: { "Content-Type": "application/json" } }));
+    const onText = vi.fn();
+    expect(await runNativeText(connection(), "interactions", { stream: transport !== "json" }, options(), onText)).toMatchObject({ text: "Retained native answer", response });
+    expect(onText).toHaveBeenLastCalledWith("Retained native answer"); expect(mock).toHaveBeenCalledOnce();
+  });
   it.each(["messages", "interactions"] as const)("retains exact %s streamed numeric argument fragments and sends their original JSON on continuation", async (endpoint) => {
     const raw = '{"id":9007199254740993,"amount":0.1234567890123456789012345}';
     const events = endpoint === "messages" ? [
@@ -29,6 +38,24 @@ describe("Native text execution", () => {
     await runNativeText(connection(), endpoint, { stream: false, replay: items }, options(), vi.fn());
     expect(String(mock.mock.calls[1][1]?.body)).toContain(`"${field}":${raw}`);
     expect(stringifyExactJSON(run.response)).toContain(raw);
+  });
+  it("retains metadata-only failed Interactions but rejects invalid identities and transport failures", async () => {
+    const response = { id: "interaction_failed", status: "failed", usage: { total_input_tokens: 7, total_output_tokens: 0 }, error: { message: "Provider execution failed" } };
+    const json = (payload: unknown, status = 200) => new Response(JSON.stringify(payload), { status, headers: { "Content-Type": "application/json" } });
+    const mock = vi.spyOn(globalThis, "fetch").mockResolvedValue(json(response));
+    expect(await runNativeText(connection(), "interactions", {}, options(), vi.fn())).toMatchObject({ text: "", response });
+    for (const id of [undefined, "../bad", ".", "..", ""]) {
+      mock.mockResolvedValue(json({ ...response, id })); await expect(runNativeText(connection(), "interactions", {}, options(), vi.fn())).rejects.toThrow("Provider execution failed");
+    }
+    mock.mockResolvedValue(json(response, 500)); await expect(runNativeText(connection(), "interactions", {}, options(), vi.fn())).rejects.toThrow("Provider execution failed");
+    mock.mockResolvedValue(json(response)); await expect(runNativeText(connection(), "messages", {}, options(), vi.fn())).rejects.toThrow("Provider execution failed");
+    for (const event of [
+      { event_type: "error", error: { message: "Stream transport failed" }, interaction: response },
+      { event_type: "interaction.created", interaction: response },
+      { event_type: "interaction.failed", interaction: { ...response, status: "completed" } }
+    ]) { mock.mockResolvedValue(stream([event])); await expect(runNativeText(connection(), "interactions", { stream: true }, options(), vi.fn())).rejects.toThrow(/failed|Failed/); }
+    mock.mockResolvedValue(stream([{ event_type: "interaction.created", interaction: { id: "interaction_original", status: "in_progress" } }, { event_type: "interaction.failed", interaction: response }]));
+    await expect(runNativeText(connection(), "interactions", { stream: true }, options(), vi.fn())).rejects.toThrow("another request");
   });
   it.each(["refresh", "cancel"] as const)("uses authenticated interaction %s without generating again", async (operation) => {
     const mock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response('{"id":"job:1.2","status":"completed","steps":[{"type":"model_output","content":[{"type":"text","text":"Final"}]}]}'));

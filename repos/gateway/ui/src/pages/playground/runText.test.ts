@@ -13,6 +13,33 @@ const connection = () => playgroundConnection(new APIClient(() => "test-key"), "
 const options = () => ({ signal: new AbortController().signal, sessionID: "test-session" });
 
 describe("Playground text execution", () => {
+  it.each(["json", "fallback", "stream"])("retains an identified failed Response and its actual usage over %s", async (transport) => {
+    const response = { id: "resp_failed", status: "failed", output: [{ type: "message", role: "assistant", content: [{ type: "output_text", text: "Retained response answer" }] }], usage: { input_tokens: 0, output_tokens: 3 }, error: { message: "Provider execution failed" } };
+    const mock = vi.spyOn(globalThis, "fetch").mockResolvedValue(transport === "stream"
+      ? sse([{ type: "response.failed", response }])
+      : new Response(JSON.stringify(response), { headers: { "Content-Type": "application/json" } }));
+    const onText = vi.fn();
+    expect(await runText(connection(), "responses", { stream: transport !== "json" }, { ...options(), onText })).toMatchObject({ text: "Retained response answer", response, usage: { input_tokens: 0, output_tokens: 3 } });
+    expect(onText).toHaveBeenLastCalledWith("Retained response answer"); expect(mock).toHaveBeenCalledOnce();
+  });
+  it("retains metadata-only failed Responses but rejects invalid identities and transport failures", async () => {
+    const response = { id: "resp_failed", status: "failed", usage: { input_tokens: 7, output_tokens: 0 }, error: { message: "Provider execution failed" } };
+    const json = (payload: unknown, status = 200) => new Response(JSON.stringify(payload), { status, headers: { "Content-Type": "application/json" } });
+    const mock = vi.spyOn(globalThis, "fetch").mockResolvedValue(json(response));
+    expect(await runText(connection(), "responses", {}, options())).toMatchObject({ text: "", usage: { input_tokens: 7, output_tokens: 0 }, response });
+    for (const id of [undefined, "../bad", ""]) {
+      mock.mockResolvedValue(json({ ...response, id })); await expect(runText(connection(), "responses", {}, options())).rejects.toThrow("Provider execution failed");
+    }
+    mock.mockResolvedValue(json(response, 500)); await expect(runText(connection(), "responses", {}, options())).rejects.toThrow("Provider execution failed");
+    mock.mockResolvedValue(json(response)); await expect(runText(connection(), "chat", {}, options())).rejects.toThrow("Provider execution failed");
+    for (const event of [
+      { type: "error", error: { message: "Stream transport failed" }, response },
+      { type: "response.created", response },
+      { type: "response.failed", response: { ...response, status: "completed" } }
+    ]) { mock.mockResolvedValue(sse([event])); await expect(runText(connection(), "responses", { stream: true }, options())).rejects.toThrow(/failed|Failed/); }
+    mock.mockResolvedValue(sse([{ type: "response.created", response: { id: "resp_original", status: "in_progress" } }, { type: "response.failed", response }]));
+    await expect(runText(connection(), "responses", { stream: true }, options())).rejects.toThrow("another request");
+  });
   it.each(["refresh", "cancel"] as const)("uses the authenticated %s resource operation without replaying generation", async (operation) => {
     const mock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response('{"id":"resp_1","status":"completed","output_text":"Final","usage":{"input_tokens":0,"output_tokens":2}}'));
     const result = await runResponseResource(connection(), "resp_1", operation, options().signal, "test-session");

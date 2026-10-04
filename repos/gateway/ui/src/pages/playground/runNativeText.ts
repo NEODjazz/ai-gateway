@@ -9,6 +9,10 @@ function record(value: unknown): Record<string, unknown> | undefined { return va
 function publicText(content: unknown): string { return Array.isArray(content) ? content.filter((item) => record(item)?.type === "text").map(contentText).join("\n") : ""; }
 function interactionText(response: Record<string, unknown>, type: string): string { return Array.isArray(response.steps) ? response.steps.filter((item) => record(item)?.type === type).map(contentText).join("\n") : ""; }
 
+const terminalInteractionEvents = ["interaction.completed", "interaction.incomplete", "interaction.failed", "interaction.cancelled"];
+function identifiedFailedInteraction(payload: Record<string, unknown>): boolean {
+  return payload.status === "failed" && typeof payload.id === "string" && /^[A-Za-z0-9._:-]{1,256}$/.test(payload.id) && payload.id !== "." && payload.id !== "..";
+}
 function interactionPath(id: unknown): string {
   if (typeof id !== "string" || !/^[A-Za-z0-9._:-]{1,256}$/.test(id) || id === "." || id === "..") throw new Error("Interaction lifecycle requires a valid interaction ID.");
   return `/v1/interactions/${encodeURIComponent(id)}`;
@@ -38,7 +42,8 @@ export async function runNativeText(connection: PlaygroundConnection, endpoint: 
   const bound = (addition: string) => { characters += addition.length; if (characters > maximumCharacters) throw new Error("Native output exceeds the 2 MiB Playground limit."); };
   const fail = (payload: Record<string, unknown>) => { const failure = record(payload.error); if (failure || payload.status === "failed") throw new Error(typeof failure?.message === "string" ? failure.message : "Native request failed"); };
   const accept = (payload: Record<string, unknown>) => {
-    active(); if (!record(payload)) throw new Error("Invalid native response"); fail(payload);
+    active(); if (!record(payload)) throw new Error("Invalid native response");
+    if (endpoint !== "interactions" || !identifiedFailedInteraction(payload)) fail(payload);
     const fields = nativeFields(payload, endpoint); response = payload; text = fields.text; reasoning = fields.reasoning; onText(text);
   };
   const options = { maximumResponseBytes: 32 * 1024 * 1024, method: "POST", body, signal, headers: endpoint === "messages" ? { "anthropic-version": "2023-06-01" } : undefined, encodeJSON: stringifyExactJSON, parseJSON: parseNativeJSON };
@@ -96,8 +101,14 @@ export async function runNativeText(connection: PlaygroundConnection, endpoint: 
           }
         }
         const interaction = record(payload.interaction);
-        if (interaction) { fail(interaction); if (stringifyExactJSON(interaction).length > maximumCharacters) throw new Error("Native output exceeds the 2 MiB Playground limit."); response = interaction; }
-        if (["interaction.completed", "interaction.incomplete"].includes(type)) terminal = true;
+        if (interaction) {
+          const retainedFailure = terminalInteractionEvents.includes(type) && identifiedFailedInteraction(interaction);
+          if (!retainedFailure) fail(interaction);
+          if (retainedFailure && response.id !== undefined && response.id !== interaction.id) throw new Error("Final interaction belongs to another request.");
+          if (stringifyExactJSON(interaction).length > maximumCharacters) throw new Error("Native output exceeds the 2 MiB Playground limit.");
+          response = interaction;
+        }
+        if (terminalInteractionEvents.includes(type)) terminal = true;
       }
     }, true);
     if (!result.streamed) accept(result.data);
