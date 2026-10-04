@@ -5,8 +5,8 @@ import { agentRequest, type AgentTask } from "./agents";
 export type SpecializedEndpoint = "messages" | "interactions" | "images" | "image-edits" | "embeddings" | "speech" | "transcription" | "a2a" | "mcp";
 export const endpointPaths: Record<SpecializedEndpoint, string> = { messages: "/v1/messages", interactions: "/v1/interactions", images: "/v1/images/generations", "image-edits": "/v1/images/edits", embeddings: "/v1/embeddings", speech: "/v1/audio/speech", transcription: "/v1/audio/transcriptions", a2a: "/a2a", mcp: "/v1/mcp/servers" };
 export type Attachment = { filename: string; media_type: string; data_base64: string };
-export type EndpointSettings = { instructions: string; limit: string; temperature: string; topP: string; advanced: string; size: string; count: string; quality: string; dimensions: string; voice: string; format: string; speed: string; language: string; agent: string; server: string; tool: string; arguments: string; stream: boolean };
-export const defaultEndpointSettings: EndpointSettings = { instructions: "", limit: "256", temperature: "", topP: "", advanced: "", size: "", count: "1", quality: "", dimensions: "", voice: "alloy", format: "mp3", speed: "1", language: "", agent: "", server: "", tool: "", arguments: "{}", stream: true };
+export type EndpointSettings = { instructions: string; limit: string; temperature: string; topP: string; advanced: string; size: string; count: string; quality: string; dimensions: string; voice: string; format: string; speed: string; language: string; agent: string; server: string; tool: string; arguments: string; stream: boolean; agentStream: boolean };
+export const defaultEndpointSettings: EndpointSettings = { instructions: "", limit: "256", temperature: "", topP: "", advanced: "", size: "", count: "1", quality: "", dimensions: "", voice: "alloy", format: "mp3", speed: "1", language: "", agent: "", server: "", tool: "", arguments: "{}", stream: true, agentStream: false };
 const safeID = /^[a-zA-Z0-9._:-]{1,128}$/;
 const maximumFileBytes = 8 * 1024 * 1024;
 
@@ -69,7 +69,7 @@ export function buildEndpointRequest(endpoint: SpecializedEndpoint, model: strin
   } else if (endpoint === "a2a") {
     if (!safeID.test(settings.agent)) throw new Error("Enter a valid agent ID.");
     if (Object.keys(extras).length) throw new Error("A2A parameters are configured by the agent and task controls.");
-    return agentRequest(settings.agent, input, agentTask, attachments);
+    return agentRequest(settings.agent, input, agentTask, attachments, settings.agentStream);
   } else {
     if (!safeID.test(settings.server) || !safeID.test(settings.tool)) throw new Error("Enter a valid MCP server ID and tool name.");
     path += `/${encodeURIComponent(settings.server)}/tools/${encodeURIComponent(settings.tool)}`;

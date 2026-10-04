@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { Checkbox } from "@gravity-ui/uikit";
+import { GravityThemeScope } from "../../components/GravityThemeScope";
 import { GatewayButton } from "../../components/GatewayButton";
 import { AreaControl } from "./Controls";
 import { CodeDialog } from "./CodeDialog";
@@ -14,6 +16,7 @@ export function AgentExecution({ connection, profile, disabled, active, tab }: {
   const [prompt, setPrompt] = useState(""), [history, setHistory] = useState<Turn[]>([]), [dropped, setDropped] = useState(0);
   const [result, setResult] = useState<AgentRun>(), [error, setError] = useState(""), [running, setRunning] = useState(false);
   const [batchPrompts, setBatchPrompts] = useState(""), [batchResults, setBatchResults] = useState<AgentBatchResult[]>([]), [batchCount, setBatchCount] = useState(0);
+  const [streaming, setStreaming] = useState(false);
   const [code, setCode] = useState<ReturnType<typeof agentRequest>>();
   const abort = useRef<AbortController | undefined>(undefined), epoch = useRef(0);
   function stop() { abort.current?.abort(); }
@@ -27,17 +30,23 @@ export function AgentExecution({ connection, profile, disabled, active, tab }: {
   async function execute(event?: FormEvent, method?: "GetTask" | "CancelTask", choices?: { call_id: string; approved: boolean }[]) {
     event?.preventDefault(); if (blocked) return;
     let request: ReturnType<typeof agentRequest> | ReturnType<typeof agentTaskRequest> | ReturnType<typeof agentApprovalRequest>;
-    try { request = choices && result?.task ? agentApprovalRequest(profile.id, result.task, choices) : method && result?.task ? agentTaskRequest(profile.id, result.task, method) : agentRequest(profile.id, prompt, result?.task); }
+    try { request = choices && result?.task ? agentApprovalRequest(profile.id, result.task, choices, streaming) : method && result?.task ? agentTaskRequest(profile.id, result.task, method) : agentRequest(profile.id, prompt, result?.task, [], streaming); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "Invalid agent request."); return; }
     const controller = new AbortController(); abort.current = controller; const current = ++epoch.current; setRunning(true); setError("");
     try {
-      const response = await runAgentRequest(connection, request, controller.signal);
+      const publish = (response: AgentRun) => {
+        if (current !== epoch.current || controller.signal.aborted) return;
+        setResult(response);
+        const text = response.text || response.task?.state || "No text output";
+        if (!method && !choices) {
+          const retained = retainConversation<Turn>([...history, { role: "user", content: prompt }, { role: "assistant", content: text }]);
+          setHistory(retained.turns); setDropped(dropped + retained.dropped);
+        } else setHistory(history.map((turn, index) => index === history.length - 1 && turn.role === "assistant" ? { ...turn, content: text } : turn));
+      };
+      const response = await runAgentRequest(connection, request, controller.signal, publish);
       if (current !== epoch.current || controller.signal.aborted) return;
-      setResult(response);
-      if (!method && !choices) {
-        const retained = retainConversation<Turn>([...history, { role: "user", content: prompt }, { role: "assistant", content: response.text || (response.task ? response.task.state : "No text output") }]);
-        setHistory(retained.turns); setDropped((value) => value + retained.dropped); setPrompt("");
-      } else if (response.text) setHistory((turns) => turns.map((turn, index) => index === turns.length - 1 && turn.role === "assistant" ? { ...turn, content: response.text } : turn));
+      publish(response);
+      if (!method && !choices) setPrompt("");
     } catch (cause) { if (current === epoch.current) setError(controller.signal.aborted ? "Request cancelled. Server execution may already have completed; check the task before repeating it." : cause instanceof Error ? cause.message : "Agent execution failed."); }
     finally { if (current === epoch.current) { setRunning(false); abort.current = undefined; } }
   }
@@ -46,7 +55,7 @@ export function AgentExecution({ connection, profile, disabled, active, tab }: {
     let prompts: string[];
     try { prompts = agentBatchPrompts(batchPrompts); } catch (cause) { setError(cause instanceof Error ? cause.message : "Invalid prompts."); return; }
     const controller = new AbortController(); abort.current = controller; const current = ++epoch.current; setRunning(true); setError(""); setBatchCount(prompts.length); setBatchResults([]);
-    try { await runAgentBatch(connection, profile.id, prompts, controller.signal, (item) => { if (current === epoch.current) setBatchResults((items) => [...items, item]); }); }
+    try { await runAgentBatch(connection, profile.id, prompts, controller.signal, (item) => { if (current === epoch.current) setBatchResults((items) => [...items.filter((value) => value.index !== item.index), item]); }, streaming); }
     catch (cause) { if (current === epoch.current) setError(cause instanceof Error ? cause.message : "Agent tests failed."); }
     finally { if (current === epoch.current) { setRunning(false); abort.current = undefined; } }
   }
@@ -54,16 +63,18 @@ export function AgentExecution({ connection, profile, disabled, active, tab }: {
     if (blocked || !item.task) return;
     const controller = new AbortController(); abort.current = controller; const current = ++epoch.current; setRunning(true); setError("");
     try {
-      const request = choices ? agentApprovalRequest(profile.id, item.task, choices) : agentTaskRequest(profile.id, item.task, method!);
-      const response = await runAgentRequest(connection, request, controller.signal);
-      if (current !== epoch.current || controller.signal.aborted) return;
-      const status = agentBatchStatus(response.task);
-      setBatchResults((items) => items.map((value) => value.index === item.index ? { ...value, text: response.text, task: response.task, latencyMS: response.latencyMS, status, error: status === "failed" ? `Task ended in ${response.task?.state}.` : undefined } : value));
+      const request = choices ? agentApprovalRequest(profile.id, item.task, choices, streaming) : agentTaskRequest(profile.id, item.task, method!);
+      const publish = (response: AgentRun) => {
+        if (current !== epoch.current || controller.signal.aborted) return;
+        const status = agentBatchStatus(response.task);
+        setBatchResults((items) => items.map((value) => value.index === item.index ? { ...value, text: response.text, task: response.task, latencyMS: response.latencyMS, status, error: status === "failed" ? `Task ended in ${response.task?.state}.` : undefined } : value));
+      };
+      publish(await runAgentRequest(connection, request, controller.signal, publish));
     } catch (cause) { if (current === epoch.current) setError(cause instanceof Error ? cause.message : "Could not resolve agent test."); }
     finally { if (current === epoch.current) { setRunning(false); abort.current = undefined; } }
   }
   function getCode() {
-    try { setCode(agentRequest(profile.id, tab === "connect" ? "Your message" : prompt || "Your message", tab === "connect" ? undefined : result?.task)); setError(""); }
+    try { setCode(agentRequest(profile.id, tab === "connect" ? "Your message" : prompt || "Your message", tab === "connect" ? undefined : result?.task, [], streaming)); setError(""); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "Could not generate code."); }
   }
   function exportResults() {
@@ -72,6 +83,8 @@ export function AgentExecution({ connection, profile, disabled, active, tab }: {
   }
   return <section className="playground-conversation-card playground-agent-execution" aria-label="Saved agent execution">
     <div className="playground-output-heading"><div><h2>{tab === "chat" ? "Agent conversation" : tab === "batch" ? "Agent batch test" : "Connect to agent"}</h2><p className="muted">Saved agent: {profile.name} · {profile.model}</p></div>{tab === "chat" && <GatewayButton view="outlined" onClick={clear}>New agent conversation</GatewayButton>}</div>
+    <GravityThemeScope><Checkbox controlProps={{ "aria-label": "Stream agent task" }} checked={streaming} disabled={blocked} onUpdate={setStreaming}>Stream task updates</Checkbox></GravityThemeScope>
+    {streaming && <p className="muted">Task streaming reports status and text artifacts. Token usage and first-token timing are unavailable.</p>}
     {disabled && <p className="muted">Save agent and apply connection changes before execution.</p>}
     {(!profile.execution_supported || !profile.enabled) && <p role="alert">This saved agent is disabled or has an instruction template that cannot execute through A2A.</p>}
     {tab === "chat" && <><section className="playground-transcript" aria-label="Agent conversation history">{history.map((turn, index) => <article key={index} className={`playground-turn ${turn.role}`}><strong>{turn.role === "user" ? "User" : "Agent"}</strong><pre>{turn.content}</pre>{turn.role === "assistant" && <CopyOutput label={`Copy agent answer ${index + 1}`} text={turn.content} />}</article>)}</section>

@@ -194,7 +194,7 @@ compatibility must be distinguished from merely having an endpoint selector.
   before effects, flushed SSE, settled artifacts/status, approval and replay
   continuity, disconnect cleanup and failure-safe settlement. Real HTTP and
   race tests verify flushing/cancellation; PostgreSQL replica coverage runs both
-  JSON and SSE. Playground stream controls still require integration below.
+  JSON and SSE. Playground stream controls are implemented below.
 - [ ] Finish media/tool output, policy selection and full conversation verification.
 - [ ] Complete endpoint-specific execution and media/tool handling.
 - [ ] Complete comparison, compliance and agent views.
@@ -460,8 +460,8 @@ never automatically retries an interrupted tool.
 Task streaming is supported for these MCP agents when the durable task store,
 MCP runtime, call store and audit service are available. The Agent Card advertises
 that capability only with these prerequisites. Push and `returnImmediately`
-remain unsupported; durable background worker execution and Playground streaming
-controls remain part of the unfinished endpoint/runtime work. Tool-free agents
+remain unsupported; durable background worker execution remains part of the
+unfinished endpoint/runtime work. Tool-free agents
 retain their existing behavior. This is an intentional response behavior change
 for MCP-bound profiles; clients must handle A2A task results and approval states.
 
@@ -500,6 +500,39 @@ PostgreSQL integration test verifies JSON and SSE approval claims across two
 store connections, including duplicate decisions, stale CAS and one durable MCP
 execution. No new public request fields, configuration format or dependency is
 introduced; previously rejected MCP-agent streaming requests now execute.
+
+### Playground agent streaming controls
+
+Agent Chat, Batch Test and the dedicated A2A form expose an explicit task-stream
+control; their default remains JSON. Compare applies its existing stream control
+to models and agents independently. Connect/code exports use the selected A2A
+method and omit the active credential. No new public request fields are added.
+
+The browser checks the RPC, task and context IDs on every update and bounds
+transport bytes, event count and artifact count. Text artifact replacements and
+append chunks update the same retained assistant turn, without duplicating its
+prompt or incrementing discarded-history counts for every event. Invalid events,
+foreign identities and data after terminal status fail visibly. A JSON response
+to the same streaming request is validated without another inference request.
+
+A premature stream end requires manual Refresh of the known task. A valid WORKING
+status remains pending rather than claiming completion. Errors and local Stop
+retain the last checked task and partial answer in Chat, Compare, A2A and Batch;
+batch updates replace their existing row. Late cancelled events and old credential
+results cannot publish. Refresh/Cancel use the ordinary task RPC and never start a
+replacement execution automatically. Approval/decline choices stay local until
+explicit Continue, which can use SSE with the original task/context/challenge.
+Task streaming does not invent token usage, cost or first-token timing.
+
+UI regression tests cover progressive Chat, interrupted recovery without duplicate
+history, explicit reviews, batch row retention, mixed model/agent partial success,
+endpoint Stop, credential changes and safe code export. Browser verification under
+the real embedded console CSP observed a WORKING task before delivery completed,
+a retained partial answer after missing final status, manual Refresh, approval
+pause/decline/Continue and an independently successful model in Compare. The A2A
+form also retained and refreshed an interrupted task. These checks used synthetic
+loopback resources; no real provider, external tools, microphone, billing or local
+deployment was invoked.
 
 Saved-agent verification covers typed model → MCP result → model continuation,
 credential and policy denial, cumulative call/iteration limits, durable approvals,

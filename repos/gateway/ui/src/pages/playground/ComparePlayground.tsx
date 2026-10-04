@@ -109,11 +109,13 @@ export function ComparePlayground({ connection, models, connectionControls, conn
       const controller = new AbortController(); controllers.current.set(panel.id, controller);
       try {
         if (request) {
-          const result = await runAgentRequest(connection, request, controller.signal);
-          if (generation.current !== activeGeneration || controller.signal.aborted) return;
-          const retained = retainConversation([...panel.history, ...turns, { role: "assistant", content: result.text || result.task?.state || "No text output" }]);
-          const state = result.task?.state, failed = !!state && ["TASK_STATE_FAILED", "TASK_STATE_CANCELED", "TASK_STATE_REJECTED"].includes(state);
-          setPanels((current) => current.map((item) => item.id === panel.id ? { ...item, historyDropped: item.historyDropped + retained.dropped, agentRun: result, pending: "", history: retained.turns, lastPrompt: lastPrompt ?? item.lastPrompt, status: failed ? "failed" : !state || state === "TASK_STATE_COMPLETED" ? "complete" : "awaiting_task", error: failed ? `Agent task ended in ${state}.` : "" } : item));
+          const publish = (result: AgentRun, final = false) => {
+            if (generation.current !== activeGeneration || controller.signal.aborted) return;
+            const retained = retainConversation([...panel.history, ...turns, { role: "assistant", content: result.text || result.task?.state || "No text output" }]);
+            const state = result.task?.state, failed = !!state && ["TASK_STATE_FAILED", "TASK_STATE_CANCELED", "TASK_STATE_REJECTED"].includes(state);
+            setPanels((current) => current.map((item) => item.id === panel.id ? { ...item, historyDropped: panel.historyDropped + retained.dropped, agentRun: result, pending: "", history: retained.turns, lastPrompt: lastPrompt ?? item.lastPrompt, status: !final ? "running" : failed ? "failed" : !state || state === "TASK_STATE_COMPLETED" ? "complete" : "awaiting_task", error: final && failed ? `Agent task ended in ${state}.` : "" } : item));
+          };
+          publish(await runAgentRequest(connection, request, controller.signal, (result) => publish(result)), true);
         } else {
           await checkPolicies(connection, panel.resources.policies, policyPrompt, panel.model, controller.signal);
           const result = await runText(connection, "chat", body!, { signal: controller.signal, sessionID: panel.sessionID,
@@ -146,7 +148,7 @@ export function ComparePlayground({ connection, models, connectionControls, conn
     try {
       if (new TextEncoder().encode(input).length > 1024 * 1024) throw new Error("Prompt exceeds the 1 MiB Playground limit.");
       requests = panels.map((panel) => {
-        if (panel.kind === "agent") return { panel, agentRequest: agentRequest(panel.agent, input, panel.agentRun?.task, attachments), turns: [{ role: "user", content: wireInput }], policyPrompt: input, lastPrompt: displayInput };
+        if (panel.kind === "agent") return { panel, agentRequest: agentRequest(panel.agent, input, panel.agentRun?.task, attachments, stream), turns: [{ role: "user", content: wireInput }], policyPrompt: input, lastPrompt: displayInput };
         policyChecks(panel.resources.policies, input, panel.model);
         return { panel, body: withResources(buildTextRequest({ endpoint: "chat", model: panel.model, input: wireInput, instructions: panel.instructions, history: panel.history, streaming: stream, settings: panel.settings }), "chat", panel.resources), turns: [{ role: "user", content: wireInput }], policyPrompt: input, lastPrompt: displayInput };
       });
@@ -184,10 +186,12 @@ export function ComparePlayground({ connection, models, connectionControls, conn
     if (running || connectionChanged) return;
     const controller = new AbortController(), activeGeneration = ++generation.current; controllers.current.set(panel.id, controller); setRunning(true);
     try {
-      const result = await runAgentRequest(connection, choices ? agentApprovalRequest(panel.agent, task, choices) : agentTaskRequest(panel.agent, task, method!), controller.signal);
-      if (generation.current !== activeGeneration || controller.signal.aborted) return;
-      const state = result.task?.state, failed = !!state && ["TASK_STATE_FAILED", "TASK_STATE_CANCELED", "TASK_STATE_REJECTED"].includes(state);
-      setPanels((items) => items.map((item) => item.id === panel.id ? { ...item, agentRun: result, error: failed ? `Agent task ended in ${state}.` : "", status: failed ? "failed" : state === "TASK_STATE_COMPLETED" ? "complete" : "awaiting_task", history: result.text ? item.history.map((turn, index) => index === item.history.length - 1 && turn.role === "assistant" ? { ...turn, content: result.text } : turn) : item.history } : item));
+      const publish = (result: AgentRun) => {
+        if (generation.current !== activeGeneration || controller.signal.aborted) return;
+        const state = result.task?.state, failed = !!state && ["TASK_STATE_FAILED", "TASK_STATE_CANCELED", "TASK_STATE_REJECTED"].includes(state);
+        setPanels((items) => items.map((item) => item.id === panel.id ? { ...item, agentRun: result, error: failed ? `Agent task ended in ${state}.` : "", status: failed ? "failed" : state === "TASK_STATE_COMPLETED" ? "complete" : "awaiting_task", history: item.history.map((turn, index) => index === item.history.length - 1 && turn.role === "assistant" ? { ...turn, content: result.text || state || "No text output" } : turn) } : item));
+      };
+      publish(await runAgentRequest(connection, choices ? agentApprovalRequest(panel.agent, task, choices, stream) : agentTaskRequest(panel.agent, task, method!), controller.signal, publish));
     } catch (cause) { if (generation.current === activeGeneration) setPanels((items) => items.map((item) => item.id === panel.id ? { ...item, error: cause instanceof Error ? cause.message : "Agent task operation failed." } : item)); }
     finally { if (controllers.current.get(panel.id) === controller) controllers.current.delete(panel.id); if (generation.current === activeGeneration) setRunning(false); }
   }

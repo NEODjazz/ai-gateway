@@ -117,7 +117,7 @@ describe("Compare Playground", () => {
     const mock = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, options) => {
       if (String(url).includes("catalog")) return new Response(JSON.stringify(catalog));
       const body = JSON.parse(String(options?.body));
-      if (String(url).startsWith("/a2a/")) return new Response(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { task: { id: "task-writer", contextId: "ctx-writer", status: { state: "TASK_STATE_COMPLETED" }, artifacts: [{ parts: [{ text: "Agent answer" }] }] } } }));
+      if (String(url).startsWith("/a2a/")) return new Response(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { task: { id: "task-writer", contextId: "ctx-writer", status: { state: "TASK_STATE_COMPLETED" }, artifacts: [{ parts: [{ text: "Agent answer" }] }] } } }), { headers: { "Content-Type": "application/json" } });
       return answer("Model answer");
     });
     setup(); await userEvent.click(screen.getByRole("button", { name: "Load authorized agents" }));
@@ -142,7 +142,7 @@ describe("Compare Playground", () => {
       const body = JSON.parse(String(options?.body));
       if (!String(url).startsWith("/a2a/")) return answer("Model succeeded");
       const task = { id: "task-one", contextId: "ctx-one", status: { state: taskState }, artifacts: taskState === "TASK_STATE_COMPLETED" ? [{ parts: [{ text: "Task complete" }] }] : [] };
-      return new Response(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: body.method === "GetTask" ? task : { task } }));
+      return new Response(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: body.method === "GetTask" ? task : { task } }), { headers: { "Content-Type": "application/json" } });
     });
     setup(); const second = within(screen.getByRole("region", { name: "Comparison 2" }));
     await userEvent.click(second.getByLabelText("Comparison type 2")); await userEvent.click(screen.getByRole("option", { name: "Saved agent" }));

@@ -33,12 +33,12 @@ export type AgentApproval = { id: string; calls: { id: string; server: string; t
 export type AgentTask = { id: string; contextID: string; state: string; approval?: AgentApproval };
 export type AgentRun = { text: string; task?: AgentTask; latencyMS: number; response: Record<string, unknown> };
 function object(value: unknown): Record<string, unknown> | undefined { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined; }
-export function agentRequest(agent: string, prompt: string, task?: AgentTask, attachments: Attachment[] = []) {
+export function agentRequest(agent: string, prompt: string, task?: AgentTask, attachments: Attachment[] = [], streaming = false) {
   if (!safeID.test(agent)) throw new Error("Select a valid agent ID.");
   if ((!prompt.trim() && !attachments.length) || new TextEncoder().encode(prompt).length > 1024 * 1024) throw new Error("Enter an agent prompt up to 1 MiB.");
   if (task && (!safeID.test(task.id) || !safeID.test(task.contextID) || task.state !== "TASK_STATE_COMPLETED")) throw new Error("Start a new conversation or resolve the current agent task before continuing.");
   validateConversationFiles(attachments);
-  const body = { jsonrpc: "2.0", id: crypto.randomUUID(), method: "SendMessage", params: { tenant: agent, message: { messageId: crypto.randomUUID(), role: "ROLE_USER", ...(task ? { taskId: task.id, contextId: task.contextID } : {}), parts: [...(prompt ? [{ text: prompt }] : []), ...attachments.map((item) => ({ raw: item.data_base64, mediaType: item.media_type, filename: item.filename }))] }, configuration: { acceptedOutputModes: ["text/plain"] } } };
+  const body = { jsonrpc: "2.0", id: crypto.randomUUID(), method: streaming ? "SendStreamingMessage" : "SendMessage", params: { tenant: agent, message: { messageId: crypto.randomUUID(), role: "ROLE_USER", ...(task ? { taskId: task.id, contextId: task.contextID } : {}), parts: [...(prompt ? [{ text: prompt }] : []), ...attachments.map((item) => ({ raw: item.data_base64, mediaType: item.media_type, filename: item.filename }))] }, configuration: { acceptedOutputModes: ["text/plain"] } } };
   if (new TextEncoder().encode(JSON.stringify(body)).length > 24 * 1024 * 1024) throw new Error("Request exceeds the 24 MiB Playground limit.");
   return { path: `/a2a/${encodeURIComponent(agent)}`, body, headers: { "A2A-Version": "1.0" } };
 }
@@ -46,9 +46,9 @@ export function agentTaskRequest(agent: string, task: AgentTask, method: "GetTas
   if (!safeID.test(agent) || !safeID.test(task.id) || !safeID.test(task.contextID)) throw new Error("Invalid agent task ID.");
   return { path: `/a2a/${encodeURIComponent(agent)}`, body: { jsonrpc: "2.0", id: crypto.randomUUID(), method, params: { tenant: agent, id: task.id } }, headers: { "A2A-Version": "1.0" }, expectedTask: { id: task.id, contextID: task.contextID } };
 }
-export function agentApprovalRequest(agent: string, task: AgentTask, choices: { call_id: string; approved: boolean }[]) {
+export function agentApprovalRequest(agent: string, task: AgentTask, choices: { call_id: string; approved: boolean }[], streaming = false) {
   if (!safeID.test(agent) || !safeID.test(task.id) || !safeID.test(task.contextID) || task.state !== "TASK_STATE_INPUT_REQUIRED" || !task.approval || !safeID.test(task.approval.id) || choices.length !== task.approval.calls.length || new Set(choices.map((choice) => choice.call_id)).size !== choices.length || choices.some((choice) => typeof choice.approved !== "boolean" || !task.approval!.calls.some((call) => call.id === choice.call_id))) throw new Error("Choose approve or decline for every pending agent tool call.");
-  return { path: `/a2a/${encodeURIComponent(agent)}`, body: { jsonrpc: "2.0", id: crypto.randomUUID(), method: "SendMessage", params: { tenant: agent, message: { messageId: crypto.randomUUID(), taskId: task.id, contextId: task.contextID, role: "ROLE_USER", parts: [{ text: "Review decisions for pending agent tools" }], metadata: { ai_gateway_tool_approval: { approval_id: task.approval.id, choices: choices.map((choice) => ({ ...choice })) } } } } }, headers: { "A2A-Version": "1.0" }, expectedTask: { id: task.id, contextID: task.contextID } };
+  return { path: `/a2a/${encodeURIComponent(agent)}`, body: { jsonrpc: "2.0", id: crypto.randomUUID(), method: streaming ? "SendStreamingMessage" : "SendMessage", params: { tenant: agent, message: { messageId: crypto.randomUUID(), taskId: task.id, contextId: task.contextID, role: "ROLE_USER", parts: [{ text: "Review decisions for pending agent tools" }], metadata: { ai_gateway_tool_approval: { approval_id: task.approval.id, choices: choices.map((choice) => ({ ...choice })) } } } } }, headers: { "A2A-Version": "1.0" }, expectedTask: { id: task.id, contextID: task.contextID } };
 }
 function agentApproval(task: Record<string, unknown>, state: string): AgentApproval | undefined {
   const message = object(object(task.status)?.message), raw = object(message?.metadata)?.ai_gateway_tool_approval;
@@ -59,16 +59,12 @@ function agentApproval(task: Record<string, unknown>, state: string): AgentAppro
   if (new Set(parsed.map((call) => call.id)).size !== parsed.length) throw new Error("Gateway returned repeated agent approval calls.");
   return { id: metadata.approval_id, calls: parsed };
 }
-export async function runAgentRequest(connection: PlaygroundConnection, request: { path: string; body: Record<string, unknown>; headers?: Record<string, string>; expectedTask?: Pick<AgentTask, "id" | "contextID"> }, signal: AbortSignal): Promise<AgentRun> {
-  if (signal.aborted) throw new DOMException("Request cancelled", "AbortError");
-  const params = object(request.body.params);
-  if (request.body.jsonrpc !== "2.0" || typeof request.body.id !== "string" || !params || !["SendMessage", "GetTask", "CancelTask"].includes(String(request.body.method))) throw new Error("Invalid agent RPC request.");
-  const start = performance.now();
-  const payload = await connection.client.request<Record<string, unknown>>(connection.path(request.path), { method: "POST", body: request.body, headers: request.headers, signal, maximumResponseBytes: 4 * 1024 * 1024 });
-  if (signal.aborted) throw new DOMException("Request cancelled", "AbortError");
+type AgentRequest = { path: string; body: Record<string, unknown>; headers?: Record<string, string>; expectedTask?: Pick<AgentTask, "id" | "contextID"> };
+function agentResponse(request: AgentRequest, payload: Record<string, unknown>, start: number): AgentRun {
+  const params = object(request.body.params)!;
   if (!object(payload) || payload.jsonrpc !== "2.0" || payload.id !== request.body.id) throw new Error("Gateway returned an invalid agent response.");
   const error = object(payload.error); if (error) throw new Error(typeof error.message === "string" ? error.message : "Agent request failed.");
-  const result = object(payload.result), task = object(result?.task) || (request.body.method !== "SendMessage" && object(result?.status) ? result : undefined), message = object(result?.message);
+  const result = object(payload.result), task = object(result?.task) || (["GetTask", "CancelTask"].includes(String(request.body.method)) && object(result?.status) ? result : undefined), message = object(result?.message);
   if (task) {
     const state = object(task.status)?.state;
     if (typeof task.id !== "string" || !safeID.test(task.id) || typeof task.contextId !== "string" || !safeID.test(task.contextId) || typeof state !== "string" || !["TASK_STATE_COMPLETED", "TASK_STATE_FAILED", "TASK_STATE_CANCELED", "TASK_STATE_REJECTED", "TASK_STATE_SUBMITTED", "TASK_STATE_WORKING", "TASK_STATE_INPUT_REQUIRED", "TASK_STATE_AUTH_REQUIRED"].includes(state)) throw new Error("Gateway returned an invalid agent task.");
@@ -81,6 +77,72 @@ export async function runAgentRequest(connection: PlaygroundConnection, request:
   if (!message || !Array.isArray(message.parts)) throw new Error("Gateway returned no agent message or task.");
   return { text: contentText(message.parts), latencyMS: performance.now() - start, response: payload };
 }
+export async function runAgentRequest(connection: PlaygroundConnection, request: AgentRequest, signal: AbortSignal, onUpdate?: (result: AgentRun) => void): Promise<AgentRun> {
+  const active = () => { if (signal.aborted) throw new DOMException("Request cancelled", "AbortError"); };
+  active();
+  const params = object(request.body.params);
+  if (request.body.jsonrpc !== "2.0" || typeof request.body.id !== "string" || !params || !["SendMessage", "SendStreamingMessage", "GetTask", "CancelTask"].includes(String(request.body.method))) throw new Error("Invalid agent RPC request.");
+  const start = performance.now();
+  const options = { method: "POST", body: request.body, headers: request.headers, signal, maximumResponseBytes: 4 * 1024 * 1024 };
+  const path = connection.path(request.path);
+  if (request.body.method !== "SendStreamingMessage") {
+    const payload = await connection.client.request<Record<string, unknown>>(path, options);
+    active(); return agentResponse(request, payload, start);
+  }
+  let task: Record<string, unknown> | undefined, statusSeen = false, terminal = false, eventCount = 0;
+  const payload = () => ({ jsonrpc: "2.0", id: request.body.id, result: { task } });
+  const parts = (value: unknown) => {
+    if (!Array.isArray(value) || value.length > 1024 || value.some((part) => typeof object(part)?.text !== "string")) throw new Error("Gateway returned an invalid text artifact.");
+    return value;
+  };
+  const result = await connection.client.stream<Record<string, unknown>>(path, options, (event) => {
+    active();
+    if (++eventCount > 16384 || terminal) throw new Error("Gateway returned excessive events or data after the final agent status.");
+    let envelope: Record<string, unknown> | undefined;
+    try { envelope = object(JSON.parse(event.data)); } catch { throw new Error("Malformed agent stream event."); }
+    if (!envelope || envelope.jsonrpc !== "2.0" || envelope.id !== request.body.id) throw new Error("Gateway returned an invalid agent response.");
+    const error = object(envelope.error);
+    if (error) throw new Error(typeof error.message === "string" ? error.message : "Agent stream failed.");
+    const result = object(envelope.result), initial = object(result?.task), artifact = object(result?.artifactUpdate), status = object(result?.statusUpdate);
+    if ([initial, artifact, status].filter(Boolean).length !== 1) throw new Error("Gateway returned an invalid agent stream event.");
+    if (initial) {
+      if (task) throw new Error("Gateway returned a repeated agent task.");
+      const artifacts = initial.artifacts;
+      if (artifacts !== undefined && (!Array.isArray(artifacts) || artifacts.length > 128)) throw new Error("Gateway returned invalid agent artifacts.");
+      const ids = new Set<string>();
+      for (const item of Array.isArray(artifacts) ? artifacts : []) {
+        const artifact = object(item);
+        if (typeof artifact?.artifactId !== "string" || !safeID.test(artifact.artifactId) || ids.has(artifact.artifactId)) throw new Error("Gateway returned invalid agent artifacts.");
+        ids.add(artifact.artifactId); parts(artifact.parts);
+      }
+      task = { ...initial };
+    } else {
+      const update = artifact || status!;
+      if (!task || update.taskId !== task.id || update.contextId !== task.contextId) throw new Error("Gateway returned a different agent task.");
+      if (artifact) {
+        const item = object(artifact.artifact);
+        if (typeof item?.artifactId !== "string" || !safeID.test(item.artifactId) || typeof artifact.append !== "boolean" || typeof artifact.lastChunk !== "boolean") throw new Error("Gateway returned an invalid agent artifact update.");
+        const incoming = parts(item.parts), artifacts = Array.isArray(task.artifacts) ? [...task.artifacts] : [];
+        const index = artifacts.findIndex((value) => object(value)?.artifactId === item.artifactId);
+        if (artifact.append && index < 0) throw new Error("Agent artifact append references an unknown artifact.");
+        const next = artifact.append ? { ...item, parts: [{ text: contentText(object(artifacts[index])?.parts) + contentText(incoming) }] } : { ...item, parts: incoming };
+        if (index < 0) artifacts.push(next); else artifacts[index] = next;
+        if (artifacts.length > 128) throw new Error("Gateway returned too many agent artifacts.");
+        task = { ...task, artifacts }; statusSeen = false;
+      } else {
+        if (!object(status!.status)) throw new Error("Gateway returned an invalid agent status update.");
+        task = { ...task, status: status!.status }; statusSeen = true;
+      }
+    }
+    const current = agentResponse(request, payload(), start);
+    if (status) terminal = !["TASK_STATE_WORKING", "TASK_STATE_SUBMITTED"].includes(current.task!.state);
+    onUpdate?.(current);
+  }, true);
+  active();
+  if (!result.streamed) return agentResponse(request, result.data, start);
+  if (!task || !statusSeen) throw new Error("Agent stream ended before its final status. Refresh the known task before repeating execution.");
+  return agentResponse(request, payload(), start);
+}
 export type AgentBatchResult = { index: number; prompt: string; status: "completed" | "failed" | "cancelled" | "pending"; text?: string; error?: string; task?: AgentTask; latencyMS: number };
 export function agentBatchStatus(task?: AgentTask): AgentBatchResult["status"] {
   if (!task || task.state === "TASK_STATE_COMPLETED") return "completed";
@@ -92,7 +154,7 @@ export function agentBatchPrompts(value: string) {
   if (!prompts.length || prompts.length > 20 || prompts.some((item) => new TextEncoder().encode(item).length > 65536)) throw new Error("Enter 1–20 prompts, one per line, up to 64 KiB each.");
   return prompts;
 }
-export async function runAgentBatch(connection: PlaygroundConnection, agent: string, prompts: string[], signal: AbortSignal, onResult: (result: AgentBatchResult) => void) {
+export async function runAgentBatch(connection: PlaygroundConnection, agent: string, prompts: string[], signal: AbortSignal, onResult: (result: AgentBatchResult) => void, streaming = false) {
   if (!prompts.length || prompts.length > 20 || prompts.some((prompt) => !prompt.trim() || new TextEncoder().encode(prompt).length > 65536)) throw new Error("Choose 1–20 prompts up to 64 KiB each.");
   if (!safeID.test(agent)) throw new Error("Select a valid agent ID.");
   let cursor = 0;
@@ -100,11 +162,17 @@ export async function runAgentBatch(connection: PlaygroundConnection, agent: str
     while (cursor < prompts.length) {
       const index = cursor++, prompt = prompts[index], start = performance.now();
       if (signal.aborted) { onResult({ index, prompt, status: "cancelled", latencyMS: 0 }); continue; }
-      try {
-        const result = await runAgentRequest(connection, agentRequest(agent, prompt), signal);
+      let observed: AgentRun | undefined;
+      const publish = (result: AgentRun) => {
+        observed = result;
         const status = agentBatchStatus(result.task);
         onResult({ index, prompt, status, text: result.text, task: result.task, error: status === "failed" ? `Task ended in ${result.task?.state}.` : undefined, latencyMS: result.latencyMS });
-      } catch (cause) { onResult({ index, prompt, status: signal.aborted ? "cancelled" : "failed", error: signal.aborted ? undefined : cause instanceof Error ? cause.message : "Agent test failed.", latencyMS: performance.now() - start }); }
+      };
+      try {
+        const result = await runAgentRequest(connection, agentRequest(agent, prompt, undefined, [], streaming), signal, publish);
+        const status = agentBatchStatus(result.task);
+        onResult({ index, prompt, status, text: result.text, task: result.task, error: status === "failed" ? `Task ended in ${result.task?.state}.` : undefined, latencyMS: result.latencyMS });
+      } catch (cause) { onResult({ index, prompt, text: observed?.text, task: observed?.task, status: signal.aborted ? "cancelled" : "failed", error: signal.aborted ? undefined : cause instanceof Error ? cause.message : "Agent test failed.", latencyMS: performance.now() - start }); }
     }
   }
   await Promise.all(Array.from({ length: Math.min(2, prompts.length) }, () => worker()));

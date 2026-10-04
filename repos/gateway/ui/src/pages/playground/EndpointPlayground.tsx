@@ -70,7 +70,7 @@ export function EndpointPlayground({ endpoint, connection, connectionChanged, co
     event?.preventDefault(); if (running || reading || abort.current) return;
     if (connectionChanged) { setError("Apply connection changes before running."); return; }
     let request: ReturnType<typeof body>;
-    try { request = agentChoices && output?.agent?.task ? agentApprovalRequest(settings.agent, output.agent.task, agentChoices) : agentMethod && output?.agent?.task ? agentTaskRequest(settings.agent, output.agent.task, agentMethod) : body(continuing); } catch (cause) { setError(cause instanceof Error ? cause.message : "Invalid request"); return; }
+    try { request = agentChoices && output?.agent?.task ? agentApprovalRequest(settings.agent, output.agent.task, agentChoices, settings.agentStream) : agentMethod && output?.agent?.task ? agentTaskRequest(settings.agent, output.agent.task, agentMethod) : body(continuing); } catch (cause) { setError(cause instanceof Error ? cause.message : "Invalid request"); return; }
     const controller = new AbortController(); abort.current = controller; const current = ++generation.current, start = performance.now(); setRunning(true); setError(""); setPending(""); if (endpoint !== "a2a") setOutput(undefined);
     try {
       let result: Output;
@@ -83,14 +83,19 @@ export function EndpointPlayground({ endpoint, connection, connectionChanged, co
         if (endpoint === "interactions" && responsePending(native.response)) { setInteractionJob({ id: String(native.response.id), turn, store: request.body.store !== false, started: start, tools: request.body.tools, input, attachments, calls, toolResults }); setCalls([]); setToolResults([]); }
         else finishNative(native, turn, request.body.store !== false, request.body.tools);
       } else if (endpoint === "a2a") {
-        const agent = await runAgentRequest(connection, request, controller.signal);
+        const publish = (agent: AgentRun) => {
+          if (current !== generation.current || controller.signal.aborted) return;
+          setOutput({ agent, payload: agent.response, latencyMS: agent.latencyMS });
+          const text = agent.text || agent.task?.state || "No text output";
+          if (agentMethod || agentChoices) setHistory(history.map((turn, index) => index === history.length - 1 && turn.role === "assistant" ? { ...turn, text } : turn));
+          else {
+            const retained = retainConversation<NativeTurn>([...history, { role: "user", content: input, text: input || attachments.map((file) => file.filename).join("\n") }, { role: "assistant", content: [], text }]);
+            setHistory(retained.turns); setHistoryDropped(historyDropped + retained.dropped);
+          }
+        };
+        const agent = await runAgentRequest(connection, request, controller.signal, publish);
         if (current !== generation.current || controller.signal.aborted) return;
-        result = { agent, payload: agent.response, latencyMS: agent.latencyMS };
-        if (agentMethod || agentChoices) setHistory((turns) => turns.map((turn, index) => index === turns.length - 1 && turn.role === "assistant" ? { ...turn, text: agent.text || agent.task?.state || "No text output" } : turn));
-        else {
-          const retained = retainConversation<NativeTurn>([...history, { role: "user", content: input, text: input || attachments.map((file) => file.filename).join("\n") }, { role: "assistant", content: [], text: agent.text || agent.task?.state || "No text output" }]);
-          setHistory(retained.turns); setHistoryDropped((value) => value + retained.dropped);
-        }
+        publish(agent); result = { agent, payload: agent.response, latencyMS: agent.latencyMS };
       } else if (endpoint === "speech") {
         const audio = await connection.client.requestBinary(connection.path(request.path), { maximumResponseBytes: 32 * 1024 * 1024, method: "POST", body: request.body, signal: controller.signal });
         if (current !== generation.current || controller.signal.aborted) return;
@@ -165,6 +170,7 @@ export function EndpointPlayground({ endpoint, connection, connectionChanged, co
       {endpoint === "speech" && <><TextControl label="Speech voice" value={settings.voice} disabled={running} onUpdate={(voice) => patch({ voice })} /><SelectControl label="Speech format" value={settings.format} disabled={running} options={["mp3", "wav", "opus", "aac", "flac", "pcm"].map((value) => ({ value, content: value }))} onUpdate={(format) => patch({ format })} /><TextControl label="Speech speed" type="number" value={settings.speed} disabled={running} onUpdate={(speed) => patch({ speed })} /></>}
       {endpoint === "transcription" && <TextControl label="Transcription language" value={settings.language} disabled={running} onUpdate={(language) => patch({ language })} placeholder="Optional language code" />}
       {endpoint === "a2a" && <TextControl label="Agent ID" value={settings.agent} disabled={running} onUpdate={(agent) => { patch({ agent }); clear(); setInput(""); setAttachments([]); if (attachmentInput.current) attachmentInput.current.value = ""; }} />}
+      {endpoint === "a2a" && <><GravityThemeScope><Checkbox controlProps={{ "aria-label": "Stream endpoint agent task" }} checked={settings.agentStream} disabled={running} onUpdate={(agentStream) => patch({ agentStream })}>Stream task updates</Checkbox></GravityThemeScope>{settings.agentStream && <p className="muted">Task streaming reports status and text artifacts. Token usage and first-token timing are unavailable.</p>}</>}
       {endpoint === "mcp" && <><TextControl label="MCP server ID" value={settings.server} disabled={running} onUpdate={(server) => patch({ server })} /><TextControl label="MCP tool name" value={settings.tool} disabled={running} onUpdate={(tool) => patch({ tool })} /><AreaControl label="MCP arguments JSON" rows={6} value={settings.arguments} disabled={running} onUpdate={(args) => patch({ arguments: args })} /></>}
       {textEndpoint && <PricingControls disabled={running} value={pricing} onUpdate={setPricing} />}
       {endpoint !== "a2a" && <details><summary>Advanced endpoint parameters</summary><AreaControl label="Endpoint parameters JSON" rows={5} value={settings.advanced} disabled={running} onUpdate={(advanced) => patch({ advanced })} /><p className="muted">Uses this endpoint's native parameter dialect. Unsupported parameters produce an error.{endpoint === "interactions" && <> Background interactions require {`{ "background": true }`} and streaming disabled.</>}</p></details>}
