@@ -153,6 +153,38 @@ func TestResponseOwnershipIsolation(t *testing.T) {
 	}
 }
 
+func TestResponseOwnershipOrganizationScopeDoesNotReuseLegacyRecords(t *testing.T) {
+	backend := &ownershipTestStore{data: map[string][]byte{}}
+	store := newResponseOwnershipStore(time.Hour, backend)
+	owner := modules.RequestContext{CredentialID: "key", UserID: "user"}
+	binding := responseOwnership{Endpoint: "deployment", Model: "model", Deployment: responseDeploymentIdentity(Endpoint{Name: "deployment"})}
+	payload, err := json.Marshal(binding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backend.data["response-owner:v1:"+affinityKey(owner, "resp_legacy")] = payload
+	if _, found, err := store.get(t.Context(), owner, "resp_legacy"); err != nil || found {
+		t.Fatal("legacy record authorized unbound identity", err)
+	}
+	if err := store.put(t.Context(), owner, "resp_demo", binding); err != nil {
+		t.Fatal(err)
+	}
+	owner.OrganizationID = "org-a"
+	if _, found, err := store.get(t.Context(), owner, "resp_demo"); err != nil || found {
+		t.Fatal("unscoped legacy record authorized organization", err)
+	}
+	if err := store.put(t.Context(), owner, "resp_demo", binding); err != nil {
+		t.Fatal(err)
+	}
+	if _, found, err := store.get(t.Context(), owner, "resp_demo"); err != nil || !found {
+		t.Fatal("organization record unavailable", err)
+	}
+	owner.OrganizationID = "org-b"
+	if _, found, err := store.get(t.Context(), owner, "resp_demo"); err != nil || found {
+		t.Fatal("cross-organization response authorized", err)
+	}
+}
+
 func TestResponseDeploymentIdentityDetectsReplacement(t *testing.T) {
 	original := Endpoint{Name: "e", ProviderID: "p", Type: "openai-compatible", BaseURL: "https://example.com", CredentialID: "c"}
 	want := responseDeploymentIdentity(original)

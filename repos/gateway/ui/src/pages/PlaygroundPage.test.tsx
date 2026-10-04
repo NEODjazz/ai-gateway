@@ -21,6 +21,37 @@ function streamResponse(chunks: string[]) {
 afterEach(() => document.querySelectorAll('meta[name="ai-gateway-playground-origins"]').forEach((node) => node.remove()));
 
 describe("PlaygroundPage", () => {
+  it("stores API-managed Responses explicitly, preserves browser store:false and downloads cited files only on demand", async () => {
+    const json = (value: unknown) => new Response(JSON.stringify(value), { headers: { "Content-Type": "application/json" } });
+    const response = { id: "resp_file", store: true, status: "completed", output: [{ type: "message", role: "assistant", content: [{ type: "output_text", text: "File ready", annotations: [{ type: "container_file_citation", container_id: "cntr_demo", file_id: "cfile_demo", filename: "report.csv" }] }] }] };
+    const mock = vi.spyOn(globalThis, "fetch").mockImplementation(async (path) => {
+      if (path === "/v1/models") return json({ data: [{ id: "model" }] });
+      if (path === "/v1/responses") return json(response);
+      if (path === "/v1/responses/resp_file/containers/cntr_demo/files/cfile_demo/content") return new Response("csv", { headers: { "Content-Type": "text/csv" } });
+      throw new Error("Unexpected request");
+    });
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: vi.fn(() => "blob:file") });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    try {
+      authenticated(); await screen.findByText("1 authorized model"); await userEvent.click(screen.getByRole("tab", { name: "Responses API" }));
+      await userEvent.click(screen.getByLabelText("Stream response"));
+      await userEvent.click(screen.getByText("Advanced parameters")); fireEvent.change(screen.getByLabelText("Advanced parameters JSON"), { target: { value: '{"store":false}' } });
+      await userEvent.type(screen.getByLabelText("Message"), "Make a file"); await userEvent.click(screen.getByRole("button", { name: "Run request" }));
+      expect(await screen.findByRole("alert")).toHaveTextContent("API session management requires store: true");
+      expect(mock.mock.calls.filter(([path]) => path === "/v1/responses")).toHaveLength(0);
+      fireEvent.change(screen.getByLabelText("Advanced parameters JSON"), { target: { value: "" } });
+      await userEvent.click(screen.getByRole("button", { name: "Run request" })); await screen.findByText("File ready");
+      const requests = () => mock.mock.calls.filter(([path]) => path === "/v1/responses").map(([, options]) => JSON.parse(String(options?.body)));
+      expect(requests()[0].store).toBe(true); expect(mock.mock.calls).toHaveLength(2);
+      await userEvent.click(screen.getByRole("button", { name: "Download report.csv" })); expect(await screen.findByRole("status")).toHaveTextContent("Download started");
+      expect(mock.mock.calls[2][0]).toBe("/v1/responses/resp_file/containers/cntr_demo/files/cfile_demo/content");
+      await userEvent.click(screen.getByRole("button", { name: "Clear" })); expect(screen.queryByRole("region", { name: "Response files" })).not.toBeInTheDocument();
+      await userEvent.click(screen.getByLabelText("Use API session management")); fireEvent.change(screen.getByLabelText("Advanced parameters JSON"), { target: { value: '{"store":false}' } });
+      await userEvent.type(screen.getByLabelText("Message"), "Browser mode"); await userEvent.click(screen.getByRole("button", { name: "Run request" })); await screen.findByText("File ready");
+      expect(requests()[1].store).toBe(false); expect(requests()[1]).not.toHaveProperty("previous_response_id");
+    } finally { Reflect.deleteProperty(URL, "createObjectURL"); Reflect.deleteProperty(URL, "revokeObjectURL"); }
+  });
   it("preserves actual output and usage but blocks continuation when native MCP provenance is invalid", async () => {
     const mock = vi.spyOn(globalThis, "fetch").mockImplementation(async (path) => path === "/v1/models" ? new Response('{"data":[{"id":"model"}]}') : new Response(JSON.stringify({ id: "resp_invalid", status: "completed", output_text: "Provider output retained", output: [{ type: "mcp_approval_request", id: "approval_foreign", name: "search", server_label: "foreign", arguments: "{}" }], usage: { input_tokens: 7, output_tokens: 2 } }), { headers: { "Content-Type": "application/json" } }));
     authenticated(); await screen.findByText("1 authorized model"); await userEvent.click(screen.getByRole("tab", { name: "Responses API" }));

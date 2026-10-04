@@ -103,7 +103,10 @@ func responseOwnershipKey(req modules.RequestContext, id string) string {
 	if key == "" {
 		return ""
 	}
-	return "response-owner:v1:" + key
+	// Old records did not bind an organization. Never reuse those records
+	// across browser organization selection or credential reassignment.
+	sum := sha256.Sum256([]byte(req.OrganizationID + "\x00" + key))
+	return "response-owner:v2:" + hex.EncodeToString(sum[:])
 }
 
 func (s responseOwnershipStore) put(ctx context.Context, req modules.RequestContext, id string, binding responseOwnership) error {

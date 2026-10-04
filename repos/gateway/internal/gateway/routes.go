@@ -119,6 +119,7 @@ var gatewayRoutes = []routeDefinition{
 	{RouteContract{http.MethodDelete, "/v1/responses/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.DeleteResponse) }},
 	{RouteContract{http.MethodPost, "/v1/responses/{id}/cancel"}, func(h Handler) http.Handler { return http.HandlerFunc(h.CancelResponse) }},
 	{RouteContract{http.MethodGet, "/v1/responses/{id}/input_items"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListResponseInputItems) }},
+	{RouteContract{http.MethodGet, "/v1/responses/{id}/containers/{container_id}/files/{file_id}/content"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GetResponseContainerFileContent) }},
 	{RouteContract{http.MethodPost, "/v1/embeddings"}, func(h Handler) http.Handler { return http.HandlerFunc(h.Embeddings) }},
 	{RouteContract{http.MethodPost, "/v1/rerank"}, func(h Handler) http.Handler { return http.HandlerFunc(h.Rerank) }},
 	{RouteContract{http.MethodPost, "/v1/moderations"}, func(h Handler) http.Handler { return http.HandlerFunc(h.Moderations) }},

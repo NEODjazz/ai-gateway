@@ -140,6 +140,9 @@ func assertAdminUISecurityHeaders(t *testing.T, headers http.Header, cacheContro
 	if !strings.Contains(headers.Get("Content-Security-Policy"), "media-src blob:") || !strings.Contains(headers.Get("Content-Security-Policy"), "connect-src 'self'") {
 		t.Error("local audio playback and same-origin connections must be scoped explicitly")
 	}
+	if !strings.Contains(headers.Get("Content-Security-Policy"), "img-src 'self' data: blob:;") || strings.Contains(headers.Get("Content-Security-Policy"), "img-src *") {
+		t.Fatal("local authenticated image previews require blob images without arbitrary image origins")
+	}
 	if got := headers.Get("X-Frame-Options"); got != "DENY" {
 		t.Errorf("unexpected frame policy: %q", got)
 	}

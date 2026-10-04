@@ -14,7 +14,7 @@ import (
 
 var versionedAsset = regexp.MustCompile(`-[A-Za-z0-9_-]{8,}\.[a-z0-9]+$`)
 
-const adminUICSP = "default-src 'none'; base-uri 'none'; connect-src 'self'; font-src 'self'; form-action 'self'; frame-ancestors 'none'; img-src 'self' data:; media-src blob:; script-src 'self'; style-src 'self'; worker-src 'self'"
+const adminUICSP = "default-src 'none'; base-uri 'none'; connect-src 'self'; font-src 'self'; form-action 'self'; frame-ancestors 'none'; img-src 'self' data: blob:; media-src blob:; script-src 'self'; style-src 'self'; worker-src 'self'"
 
 //go:embed adminui/*
 var adminUIAssets embed.FS

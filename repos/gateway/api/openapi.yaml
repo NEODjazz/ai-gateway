@@ -3603,6 +3603,45 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /v1/responses/{id}/containers/{container_id}/files/{file_id}/content:
+    get:
+      operationId: downloadResponseContainerFile
+      tags: [Inference]
+      summary: Download a generated file cited by an owned stored response
+      description: Rechecks authenticated response ownership, current model and code-interpreter grants, and the original deployment. Only an assistant output-text container-file citation in that retrieved response authorizes the exact container/file pair. No container list or inferred ownership is exposed. Reads are bounded to 32 MiB and do not create inference usage or billing. Unstored, deleted, expired or inaccessible responses and files cannot be downloaded through this route.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, minLength: 1, maxLength: 256, pattern: '^[A-Za-z0-9_.-]+$'}}
+        - {name: container_id, in: path, required: true, schema: {type: string, minLength: 1, maxLength: 256, pattern: '^[A-Za-z0-9_.-]+$'}}
+        - {name: file_id, in: path, required: true, schema: {type: string, minLength: 1, maxLength: 256, pattern: '^[A-Za-z0-9_.-]+$'}}
+      responses:
+        '200':
+          description: Complete bounded file bytes with no-store and attachment headers
+          headers:
+            X-Execution-ID: {$ref: '#/components/headers/XExecutionID'}
+          content:
+            application/octet-stream: {schema: {type: string, format: binary}}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404':
+          description: No owned response or matching cited file is available.
+          content:
+            application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}
+        '409':
+          description: The original deployment binding changed or no longer supports file reads.
+          content:
+            application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}
+        '413': {$ref: '#/components/responses/RequestTooLarge'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '501':
+          description: Response file reads are not implemented by the configured provider.
+          content:
+            application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}
+        '502': {$ref: '#/components/responses/ProviderFailed'}
+        '503':
+          description: Response ownership storage is unavailable.
+          content:
+            application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}
   /v1/responses/{id}/input_items:
     get:
       operationId: listResponseInputItems

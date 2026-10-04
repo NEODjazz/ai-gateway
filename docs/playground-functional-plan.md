@@ -157,6 +157,12 @@ compatibility must be distinguished from merely having an endpoint selector.
 - [x] Added Responses custom tool input review, explicit manual output/decline,
   typed continuation with original call IDs, exact text preservation, bounded
   UTF-8 results and submitted-definition binding in both continuity modes.
+- [x] Added canonical file citations, explicit credential-scoped downloads and
+  verified raster previews. Generated container files are authorized through an
+  owned stored response and its original deployment, without claiming container
+  ownership. Current model/tool grants, byte limits, cancellation and stale-read
+  rejection have regression coverage. Organization-bound ownership is described
+  below.
 - [ ] Finish media/tool output, policy selection and full conversation verification.
 - [ ] Complete endpoint-specific execution and media/tool handling.
 - [ ] Complete comparison, compliance and agent views.
@@ -488,3 +494,40 @@ output. A local HTTP adapter test verifies exact custom result strings and usage
 An isolated browser preview under the current CSP verified one manual result and
 one decline, zero extra requests before Continue, exactly one continuation and zero
 direct MCP calls. No real provider, remote tool service or billing was invoked.
+
+
+## Response file results
+
+The conversation shows at most 32 canonical file citations per output. Source
+file downloads use the existing owner-scoped `/v1/files/{id}/content` route;
+provider-only source IDs may be unavailable in that store. Generated container
+files use the additive
+`GET /v1/responses/{id}/containers/{container_id}/files/{file_id}/content` route.
+The Gateway checks the authenticated response owner, current model and
+code-interpreter grants, immutable deployment binding and the exact citation in
+the original provider's retrieved assistant output. It grants no container
+ownership or listing access. Reads do not open an inference billing lifecycle.
+
+Generated downloads require a stored response. Selecting API session management
+explicitly sends `store: true`; an advanced `store: false` conflicts visibly
+before transport. Browser history can still use `store: false` without silently
+enabling storage. File errors leave the conversation and actual usage intact;
+expired or deleted upstream resources can no longer be read.
+
+Response/Interaction ownership now includes Organization in its versioned
+storage key, as well as credential and user. Legacy unscoped ownership records
+are deliberately not accepted, including records for identities without an
+organization. Existing provider-side Responses/Interactions sessions created
+before this change must be restarted; no upstream content is deleted.
+
+File reads are limited to 32 MiB in the Gateway and browser. Unknown-length
+upstream bodies are validated before returning a successful file response.
+Files download as attachments with no-store/nosniff headers and sanitized local
+names; HTML and SVG are never rendered inline. Manual raster previews require
+matching PNG/JPEG/GIF/WebP MIME and magic bytes and are limited to 8 MiB, with
+one preview per retained response. Download object URLs are released immediately;
+preview URLs are released on Close, identity changes, view changes or unmount.
+The console CSP permits `blob:` only for local image/audio rendering; scripts,
+frames and unapproved connection origins remain restricted.
+Pending reads can be cancelled and cannot publish after a scope change even
+when a transport ignores cancellation.

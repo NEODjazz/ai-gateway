@@ -161,6 +161,12 @@ type ResponseResourceProvider interface {
 	RetrieveResponse(ctx context.Context, req modules.RequestContext, id string) (openai.ResponseResponse, error)
 }
 
+// ResponseContainerFileProvider reads only files cited by an owned stored response.
+type ResponseContainerFileProvider interface {
+	ResponseResourceResolver
+	DownloadResponseContainerFile(context.Context, modules.RequestContext, string, string, string) (ContainerFileContent, error)
+}
+
 type ResponseCancellationProvider interface {
 	ResponseResourceResolver
 	CancelResponse(ctx context.Context, req modules.RequestContext, id string) (openai.ResponseResponse, error)
