@@ -29,7 +29,7 @@ describe("DeploymentsPage", () => {
   });
 
   it("shows health details, runs checks and pauses a deployment", async () => {
-    const deployment = { id: "azure-gpt", provider_id: "azure", credential_id: "azure-key", provider_type: "openai-compatible", upstream_model: "gpt-versioned", models: ["gpt"], capabilities: ["chat"], priority: 0, weight: 1, rate_limit_rpm: 120, rate_limit_tpm: 64000, enabled: true, runtime_state: "available", latency_ewma_ms: 100, failure_ewma: 0.01 };
+    const deployment = { id: "azure-gpt", provider_id: "azure", credential_id: "azure-key", provider_type: "openai-compatible", upstream_model: "gpt-versioned", models: ["gpt"], capabilities: ["chat"], priority: 0, weight: 1, document_processing: "docling", rate_limit_rpm: 120, rate_limit_tpm: 64000, enabled: true, runtime_state: "available", latency_ewma_ms: 100, failure_ewma: 0.01 };
     const check = { deployment_id: "azure-gpt", provider_id: "azure", model: "gpt-versioned", status: "available", latency_ms: 42, checked_at: "2026-08-27T18:00:00Z" };
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, options) => {
       const path = String(input);
@@ -64,6 +64,7 @@ describe("DeploymentsPage", () => {
     await userEvent.click(screen.getByRole("button", { name: "Actions for azure-gpt" }));
     await userEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
     const edit = await screen.findByRole("dialog", { name: "Edit azure-gpt" });
+    expect(within(edit).getByLabelText("Document processing (PDF)")).toHaveValue("docling");
     expect(within(edit).getByLabelText("Requests per minute")).toHaveValue(120);
     expect(within(edit).getByLabelText("Tokens per minute")).toHaveValue(64000);
     await userEvent.click(within(edit).getByLabelText("Capabilities"));
@@ -73,7 +74,7 @@ describe("DeploymentsPage", () => {
     await waitFor(() => expect(fetchMock.mock.calls.some(([path, options]) => {
       if (String(path) !== "/admin/v1/model-deployments/azure-gpt" || options?.method !== "PUT") return false;
       const body = JSON.parse(String(options.body));
-      return body.capabilities?.includes("tools") && body.rate_limit_rpm === 120 && body.rate_limit_tpm === 64000;
+      return body.document_processing === "docling" && body.capabilities?.includes("tools") && body.rate_limit_rpm === 120 && body.rate_limit_tpm === 64000;
     })).toBe(true));
     await userEvent.click(screen.getByRole("button", { name: "Actions for azure-gpt" }));
     await userEvent.click(screen.getByRole("menuitem", { name: "Details" }));
@@ -90,6 +91,7 @@ describe("DeploymentsPage", () => {
     await waitFor(() => expect(fetchMock.mock.calls.some(([path, options]) => String(path) === "/admin/v1/model-deployments/azure-gpt" && options?.method === "PUT")).toBe(true));
     const pauseCall = fetchMock.mock.calls.find(([path, options]) => String(path) === "/admin/v1/model-deployments/azure-gpt" && options?.method === "PUT" && JSON.parse(String(options.body)).enabled === false)!;
     expect(JSON.parse(String(pauseCall[1]?.body)).enabled).toBe(false);
+    expect(JSON.parse(String(pauseCall[1]?.body)).document_processing).toBe("docling");
   });
 
   it("deletes a deployment through its actions menu", async () => {
