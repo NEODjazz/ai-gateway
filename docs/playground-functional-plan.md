@@ -200,11 +200,11 @@ compatibility must be distinguished from merely having an endpoint selector.
   explicit refresh/cancel/review controls and fail-closed interrupted execution.
   Replica, transaction rollback and interrupted-write regressions run in required
   PostgreSQL CI; background UI selection is shared across all agent workspaces.
-- [ ] Finish media/tool output, policy selection and full conversation verification.
-- [ ] Complete endpoint-specific execution and media/tool handling.
-- [ ] Complete comparison, compliance and agent views.
-- [ ] Run full UI/Go checks, regression tests, browser checks and screenshots.
-- [ ] Commit and push tested increments; verify final CI and local deployment.
+- [x] Finish media/tool output, policy selection and full conversation verification.
+- [x] Complete endpoint-specific execution and media/tool handling.
+- [x] Complete comparison, compliance and agent views.
+- [x] Run full UI/Go checks, regression tests, browser checks and screenshots.
+- [x] Commit and push tested increments; verify final CI and local deployment.
 
 Completion requires working flows and evidence for every requirement above.
 
@@ -985,3 +985,71 @@ Implementation and verification:
   No real provider execution, secrets, microphone access or deployment changes
   were used for this verification. The full Goal awaits its final requirements
   audit and local deployment rather than treating this increment as completion.
+
+
+## Final requirements audit and local release — 2026-10-04
+
+The original conversation, endpoint, Compare, Compliance and Agent Builder
+requirements above are implemented and verified. Completion is based on exercised
+request/result behavior, failure paths and credential isolation, not selector
+presence alone. The following matrix identifies the primary regression evidence;
+preceding sections record the implementation and browser checks for each increment.
+
+| Requirement | Regression evidence | Browser evidence |
+| --- | --- | --- |
+| Configuration, explicit model/key, advanced JSON, structured output, code export | `PlaygroundPage.test.tsx`, `requests.test.ts`, `origins.test.ts`, Gateway `playground_origins_test.go` | Screenshots 01–02, 29, 44–45 |
+| Conversation history, streaming, reasoning, honest usage, cancellation and late responses | `PlaygroundPage.test.tsx`, `runText.test.ts`, `runNativeText.test.ts`, `nativeConversation.test.ts` | Screenshots 02, 38–43 |
+| Attachments, citations, safe media, generated file previews and cleanup | `attachments.test.ts`, `OutputDetails.test.tsx`, `FileResults.test.tsx`, `EndpointPlayground.test.tsx` | Screenshots 06–08, 34–35, 47–51 |
+| Resources, mandatory policies, reviewed MCP/function/custom/native tools and exact JSON | `ResourceControls.test.tsx`, `resources.test.ts`, `ToolApprovals.test.tsx`, `exactJSON.test.ts`, Gateway `playground_catalog_test.go` | Screenshots 09–10, 30–39, 72–73 |
+| Chat Completions and Responses including stored/browser/background continuity | `PlaygroundPage.test.tsx`, `requests.test.ts`, `runText.test.ts` | Screenshots 02, 08, 21–22, 40, 42 |
+| Messages and Interactions native request/stream/tool dialects | `EndpointPlayground.test.tsx`, `endpointRequests.test.ts`, `runNativeText.test.ts`, `nativeConversation.test.ts` | Screenshots 16, 23–24, 38–39, 41, 43, 46 |
+| Image generation/edit, embeddings, speech and transcription | `EndpointPlayground.test.tsx`, `endpointRequests.test.ts` | Screenshots 47–51 |
+| A2A and explicit MCP execution, task identity and durable continuation | `EndpointPlayground.test.tsx`, `AgentToolApprovals.test.tsx`, Gateway `agent_mcp_transport_test.go`, `agent_mcp_tasks_postgres_test.go` | Screenshots 17–18, 26–28, 52–53, 69 |
+| Realtime text, explicit voice controls, bounded audio and scoped single-use tickets | `RealtimePlayground.test.tsx`, `realtimeRecorder.test.ts`, `realtimeWorklet.test.ts`, Gateway `realtime_browser_test.go` | Screenshots 19–20, 54 |
+| Independent/synchronized model and agent comparisons, partial failures and CSV | `ComparePlayground.test.tsx`, `AgentStreamingViews.test.tsx`, `AgentBackgroundViews.test.tsx` | Screenshots 14–15, 37, 56, 62, 70–71, 77–78 |
+| Compliance catalog/multiple policies, quick/batch tests, failures, bounded concurrency and CSV | `CompliancePlayground.test.tsx`, `compliance.test.ts` | Screenshots 04, 55, 79 |
+| Agent configuration governance/encryption, saved Chat/Batch/Connect, reviewed tools | `AgentBuilder.test.tsx`, `AgentMCPControls.test.tsx`, `AgentToolApprovals.test.tsx`, Gateway `agent_configuration_postgres_test.go` | Screenshots 11–13, 25–28, 57–60 |
+| Agent JSON/SSE/background execution, replica safety, cancellation and interrupted-effect recovery | `AgentStreamingViews.test.tsx`, `AgentBackgroundViews.test.tsx`, `agentArgumentsPrecision.test.tsx`, Gateway `agent_mcp_stream_test.go`, `agent_mcp_background_postgres_test.go` | Screenshots 65–78 |
+| Responsive layout and existing grouped navigation | UI component/layout regressions and actual browser layout checks | Screenshots 61–64 |
+
+UI test paths are under `repos/gateway/ui/src/pages/playground`, except
+`PlaygroundPage.test.tsx` under `repos/gateway/ui/src/pages`. Gateway test paths
+are under `repos/gateway/internal/gateway`. Screenshots are local verification
+artifacts under `output/playwright/playground`; they and synthetic preview files
+are intentionally excluded from Git.
+
+Release evidence:
+
+- Source commit `08030aa3bf01befa8a742a669250a376f707f612` is pushed to `test`.
+  Both CI runs, `37196256372` and `37196253160`, completed successfully with
+  26 passing jobs each, including required real PostgreSQL integration, gateway
+  race tests, UI checks and image builds. Local full UI coverage passes 790 tests
+  in 85 files; Go format/vet/test/race/build and production UI build pass.
+- Rancher Desktop is running with Moby and Kubernetes enabled. The unchanged
+  Dockerfile built `ai-gateway-gateway:local-08030aa3`, revision-labeled with the
+  source commit, non-root user `app`, image digest
+  `sha256:20e60ba05634d637e4554ffc8f98a8a42b55b1dbac8ee20d82f50dd3b33b30b1`.
+- Helm release `ai-gateway` is deployed at revision 751. The first server-side
+  upgrade/rollback encountered managed-field conflicts; the existing pod stayed
+  ready. Supported client-side three-way merge completed the upgrade without
+  forcing ownership or replacing resources. Encryption Secret name/key remain
+  unchanged; the chart's existing `optional: true` attribute was reconciled.
+  Secret values and Rancher/Kubernetes settings were not modified.
+- The new Gateway pod is Running, ready 1/1, zero restarts and has the exact
+  built image digest. Ingress `/healthz` and `/readyz` return HTTP 204; the new
+  hashed Playground asset returns HTTP 200. Served JavaScript includes multiple-policy checks,
+  honest agent request latency and background controls. Playground origins are
+  empty, retaining same-origin-only browser calls.
+- The deployed console opens its sign-in form with no browser console warnings
+  or errors (screenshot 80). No new browser credential was saved. Functional UI
+  flows were verified using the isolated actual-UI/CSP preview and synthetic
+  upstream; real provider execution and physical microphone behavior were not
+  exercised. CSV Blob generation and download-control cleanup are regression
+  tested; browser download-event delivery was unavailable in the browser adapter.
+- Provider-specific capabilities remain subject to normal gateway validation;
+  unsupported parameters/endpoints do not become supported through a selector.
+  Agent execution time/usage stay unavailable when the protocol does not report
+  them. Agent tasks use streaming or explicit refresh; unsupported A2A push
+  subscriptions are not represented as working Playground controls.
+
+The Goal's requested Playground flows and final local release are complete.
