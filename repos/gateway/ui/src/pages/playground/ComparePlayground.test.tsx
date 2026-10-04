@@ -128,7 +128,7 @@ describe("Compare Playground", () => {
     fireEvent.change(screen.getByLabelText("Comparison attachments"), { target: { files: [new File(["pdf"], "brief.pdf", { type: "application/pdf" })] } });
     await screen.findByText("brief.pdf"); await send("Shared prompt");
     expect(await screen.findByText("Agent answer")).toBeInTheDocument(); await screen.findByText("Model answer");
-    expect(second.getAllByText("Not reported")).toHaveLength(2);
+    for (const field of ["Tokens", "First token", "Agent execution time"]) expect(second.getByText(field).nextElementSibling).toHaveTextContent("Not reported");
     const first = mock.mock.calls.find(([url]) => url === "/a2a/writer");
     expect(new Headers(first?.[1]?.headers).get("A2A-Version")).toBe("1.0");
     expect(JSON.parse(String(first?.[1]?.body)).params.message.parts).toEqual([{ text: "Shared prompt" }, { raw: "cGRm", filename: "brief.pdf", mediaType: "application/pdf" }]);
@@ -136,7 +136,7 @@ describe("Compare Playground", () => {
     const continued = mock.mock.calls.filter(([url]) => url === "/a2a/writer")[1];
     expect(JSON.parse(String(continued[1]?.body)).params.message).toMatchObject({ taskId: "task-writer", contextId: "ctx-writer", parts: [{ text: "Follow up" }] });
   });
-  it("blocks shared prompts for pending agent tasks and resumes after verified task refresh", async () => {
+  it("blocks shared prompts for pending tasks and distinguishes refreshed agent latency in the UI and export", async () => {
     let taskState = "TASK_STATE_WORKING";
     vi.spyOn(globalThis, "fetch").mockImplementation(async (url, options) => {
       const body = JSON.parse(String(options?.body));
@@ -150,6 +150,24 @@ describe("Compare Playground", () => {
     await screen.findByText("Model succeeded"); expect(screen.getByLabelText("Comparison prompt")).toBeDisabled(); expect(second.getByRole("button", { name: "Cancel comparison 2 task" })).toBeEnabled();
     taskState = "TASK_STATE_COMPLETED"; await userEvent.click(second.getByRole("button", { name: "Refresh comparison 2 task" }));
     await screen.findByText("Task complete"); expect(screen.getByLabelText("Comparison prompt")).toBeEnabled();
+    expect(second.getByText("Last request latency").nextElementSibling).toHaveTextContent(/^\d+ ms$/);
+    expect(second.getByText("Agent execution time").nextElementSibling).toHaveTextContent("Not reported");
+    expect(within(screen.getByRole("region", { name: "Comparison 1" })).getByText("Latency")).toBeInTheDocument();
+    const create = vi.fn((_blob: Blob) => "blob:timing"), revoke = vi.fn();
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: create });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: revoke });
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    try {
+      await userEvent.click(screen.getByRole("button", { name: "Export results" }));
+      const csv = await new Promise<string>((resolve) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.readAsText(create.mock.calls[0][0]); });
+      // These controlled fields contain no CSV escape sequences; parse the exact header/row association.
+      const rows = csv.trim().split("\r\n").map((row) => JSON.parse(`[${row}]`) as string[]);
+      const records = rows.slice(1).map((row) => Object.fromEntries(rows[0].map((field, index) => [field, row[index]])));
+      expect(records[0]).toMatchObject({ target_type: "model", latency_kind: "model_request", input_tokens: "0", output_tokens: "2" });
+      expect(records[1]).toMatchObject({ target_type: "agent", latency_kind: "agent_request", task_id: "task-one", task_state: "TASK_STATE_COMPLETED", input_tokens: "", output_tokens: "", first_token_ms: "" });
+      expect(Number.isFinite(Number(records[1].latency_ms))).toBe(true);
+      expect(revoke).toHaveBeenCalledWith("blob:timing");
+    } finally { Reflect.deleteProperty(URL, "createObjectURL"); Reflect.deleteProperty(URL, "revokeObjectURL"); }
   });
   it("runs panels concurrently with isolated sessions and preserves typed histories", async () => {
     const deferred: ((response: Response) => void)[] = [];

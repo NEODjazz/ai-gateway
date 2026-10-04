@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { APIClient } from "../../api/client";
 import { AgentExecution } from "./AgentExecution";
@@ -40,7 +40,18 @@ describe("background agent Playground controls", () => {
       await userEvent.type(screen.getByLabelText("Endpoint input"), "Background prompt"); await userEvent.click(screen.getByRole("button", { name: "Run endpoint request" }));
       label = "Endpoint agent tool approvals"; refresh = "Refresh endpoint task";
     }
+    const assertTiming = () => {
+      if (view === "compare" || view === "a2a") {
+        expect(scope.getByText("Last request latency").nextElementSibling).toHaveTextContent(/^\d+ ms$/);
+        expect(scope.getByText("Agent execution time").nextElementSibling).toHaveTextContent("Not reported");
+        expect(scope.queryByText("Latency", { exact: true })).not.toBeInTheDocument();
+      } else {
+        expect(scope.getByText(/Total agent execution time is not reported/)).toBeInTheDocument();
+        expect(scope.getAllByText(/last request:/).length).toBeGreaterThan(0);
+      }
+    };
     const refreshButton = await screen.findByRole("button", { name: refresh });
+    assertTiming();
     expect(scope.getAllByText(/TASK_STATE_SUBMITTED/).length).toBeGreaterThan(0); expect(screen.queryByRole("region", { name: label })).not.toBeInTheDocument();
     expect(mock.mock.calls.filter(([path]) => String(path).startsWith("/a2a/"))).toHaveLength(1);
     await userEvent.click(refreshButton);
@@ -50,6 +61,7 @@ describe("background agent Playground controls", () => {
     await userEvent.click(review.getByRole("button", { name: `Continue ${label.toLowerCase()}` }));
     await scope.findAllByText(/TASK_STATE_SUBMITTED/); expect(screen.queryByText("Background final answer")).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: refresh })); await screen.findByText("Background final answer");
+    assertTiming();
     const bodies = mock.mock.calls.filter(([path]) => String(path).startsWith("/a2a/")).map(([, options]) => JSON.parse(String(options?.body)));
     expect(bodies.map((body) => body.method)).toEqual(["SendMessage", "GetTask", "SendMessage", "GetTask"]);
     expect(bodies[0].params.configuration.returnImmediately).toBe(true); expect(bodies[2].params.configuration.returnImmediately).toBe(true);
@@ -65,6 +77,19 @@ describe("background agent Playground controls", () => {
     await userEvent.click(screen.getByLabelText("Run agent in background")); await userEvent.type(screen.getByLabelText("Agent prompt"), "Queue prompt"); await userEvent.click(screen.getByRole("button", { name: "Send to agent" }));
     await userEvent.click(await screen.findByRole("button", { name: "Cancel agent task" }));
     expect(await screen.findByRole("status")).toHaveTextContent("TASK_STATE_CANCELED"); expect(mock).toHaveBeenCalledTimes(2); expect(JSON.parse(String(mock.mock.calls[1][1]?.body)).method).toBe("CancelTask");
+  });
+  it("shows unavailable latency for a batch prompt cancelled before dispatch", async () => {
+    const deferred: { id: string; resolve: (response: Response) => void }[] = [];
+    const mock = vi.spyOn(globalThis, "fetch").mockImplementation((_path, options) => new Promise<Response>((resolve) => deferred.push({ id: JSON.parse(String(options?.body)).id, resolve })));
+    render(<AgentExecution connection={connection()} profile={profile} disabled={false} active tab="batch" />);
+    await userEvent.type(screen.getByLabelText("Agent batch prompts"), "First\nSecond\nUndispatched");
+    await userEvent.click(screen.getByRole("button", { name: "Run agent tests" }));
+    expect(mock).toHaveBeenCalledTimes(2);
+    await userEvent.click(screen.getByRole("button", { name: "Stop agent request" }));
+    await act(async () => { for (const pending of deferred) pending.resolve(json({ jsonrpc: "2.0", id: pending.id, result: { task: task("TASK_STATE_COMPLETED") } })); });
+    expect(await screen.findByText("Test 3 · cancelled · last request: Unavailable")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("3 cancelled"); expect(screen.queryByText("Background final answer")).not.toBeInTheDocument();
+    expect(mock).toHaveBeenCalledTimes(2);
   });
   it("exports background mode without credentials and rejects simultaneous background streaming", async () => {
     render(<AgentExecution connection={connection()} profile={profile} disabled={false} active tab="connect" />);

@@ -896,3 +896,39 @@ worker runtime; native HTTP and PostgreSQL tests cover that execution boundary.
 Proof screenshots remain local under output/playwright/playground (74–76). The
 preview was stopped afterwards. Real providers, microphones and deployment were
 not exercised or changed. The whole Playground Goal remains open.
+
+## Agent request timing and export semantics
+
+Agent Chat, Batch Test, Compare and the A2A endpoint identify client-observed
+latency as the last agent request or task operation. A fast GetTask or CancelTask
+response is never presented as the duration of the agent's model/tool workflow.
+Agent execution time remains explicitly not reported, even for completed tasks;
+no duration is derived from sparse task timestamps or accumulated polling time.
+Model comparison panels retain their existing model-request latency.
+
+Comparison and agent batch CSV exports retain their existing columns and append
+latency_kind. Measured agent requests use agent_request; model responses use
+model_request. A cancelled batch prompt that never dispatched a request has no
+latency or latency kind, both in the UI and in CSV. A genuinely measured zero
+remains zero. This is an additive export column; consumers requiring an exact
+column count must accept the additional column. No public Gateway API, agent
+state, execution policy or credential format changes.
+
+Regression coverage verifies unknown execution time before and after background
+review/continuation in all four agent views, interrupted streaming, mixed model
+and agent exports after refresh, and undispatched batch cancellation. The full
+UI coverage run passed 777 tests in 85 files, type checking and the embedded
+production build passed. Gateway gofmt -w ., go vet ./..., go test ./... and
+go build ./... passed. Race detection was not rerun locally for this UI-only
+increment; required PostgreSQL CI runs Go race tests. There is no dedicated local
+PostgreSQL DSN, so database integration checks run on the CI test service.
+
+Browser verification used the rebuilt embedded UI and actual Gateway CSP with
+isolated synthetic A2A/model endpoints. Mixed comparison retained the successful
+model's metrics while the background agent transitioned through submitted,
+review and completed states. Last request latency changed after Refresh; agent
+execution time, tokens and first-token timing remained not reported. No browser
+console errors or warnings were observed. Local proof screenshots 77–78 are
+under output/playwright/playground; fixtures and screenshots are not committed.
+The preview services were stopped. Deployment and real provider/microphone
+operations were not performed, and the full Playground Goal remains open.

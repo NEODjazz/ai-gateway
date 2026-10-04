@@ -80,7 +80,7 @@ describe("streaming agent workspaces", () => {
     const panel = within(screen.getByRole("region", { name: "Comparison 2" })); await userEvent.click(panel.getByLabelText("Comparison type 2")); await userEvent.click(screen.getByRole("option", { name: "Saved agent" })); await userEvent.type(panel.getByLabelText("Agent 2"), "writer");
     await userEvent.type(screen.getByLabelText("Comparison prompt"), "Shared prompt"); await userEvent.click(screen.getByRole("button", { name: "Compare models" })); await held.send({ task }); await held.send(artifact("Partial comparison answer"));
     expect(panel.getByText("Partial comparison answer")).toBeInTheDocument(); await held.close(); await screen.findByText("Model succeeded"); expect(await screen.findByRole("alert")).toHaveTextContent("Refresh the known task"); expect(mock).toHaveBeenCalledTimes(2);
-    expect(screen.getByLabelText("Comparison prompt")).toBeDisabled(); expect(panel.getAllByText("Not reported")).toHaveLength(2);
+    expect(screen.getByLabelText("Comparison prompt")).toBeDisabled(); for (const field of ["Tokens", "First token", "Agent execution time"]) expect(panel.getByText(field).nextElementSibling).toHaveTextContent("Not reported");
     await userEvent.click(panel.getByRole("button", { name: "Refresh comparison 2 task" })); await screen.findByText("Recovered answer"); expect(screen.getByText("Model succeeded")).toBeInTheDocument(); expect(screen.getByLabelText("Comparison prompt")).toBeEnabled();
     expect(JSON.parse(String(mock.mock.calls.find(([path]) => path === "/a2a/writer")?.[1]?.body)).method).toBe("SendStreamingMessage");
   });

@@ -146,7 +146,7 @@ export async function runAgentRequest(connection: PlaygroundConnection, request:
   if (!task || !statusSeen) throw new Error("Agent stream ended before its final status. Refresh the known task before repeating execution.");
   return agentResponse(request, payload(), start);
 }
-export type AgentBatchResult = { index: number; prompt: string; status: "completed" | "failed" | "cancelled" | "pending"; text?: string; error?: string; task?: AgentTask; latencyMS: number };
+export type AgentBatchResult = { index: number; prompt: string; status: "completed" | "failed" | "cancelled" | "pending"; text?: string; error?: string; task?: AgentTask; latencyMS?: number };
 export function agentBatchStatus(task?: AgentTask): AgentBatchResult["status"] {
   if (!task || task.state === "TASK_STATE_COMPLETED") return "completed";
   if (task.state === "TASK_STATE_CANCELED") return "cancelled";
@@ -164,7 +164,7 @@ export async function runAgentBatch(connection: PlaygroundConnection, agent: str
   async function worker() {
     while (cursor < prompts.length) {
       const index = cursor++, prompt = prompts[index], start = performance.now();
-      if (signal.aborted) { onResult({ index, prompt, status: "cancelled", latencyMS: 0 }); continue; }
+      if (signal.aborted) { onResult({ index, prompt, status: "cancelled" }); continue; }
       let observed: AgentRun | undefined;
       const publish = (result: AgentRun) => {
         observed = result;
@@ -181,5 +181,5 @@ export async function runAgentBatch(connection: PlaygroundConnection, agent: str
   await Promise.all(Array.from({ length: Math.min(2, prompts.length) }, () => worker()));
 }
 export function agentBatchCSV(results: AgentBatchResult[]) {
-  return [["index", "prompt", "status", "output", "error", "task_id", "task_state", "latency_ms"], ...[...results].sort((a, b) => a.index - b.index).map((item) => [item.index + 1, item.prompt, item.status, item.text, item.error, item.task?.id, item.task?.state, item.latencyMS])].map((row) => row.map(csvCell).join(",")).join("\r\n") + "\r\n";
+  return [["index", "prompt", "status", "output", "error", "task_id", "task_state", "latency_ms", "latency_kind"], ...[...results].sort((a, b) => a.index - b.index).map((item) => [item.index + 1, item.prompt, item.status, item.text, item.error, item.task?.id, item.task?.state, item.latencyMS, item.latencyMS === undefined ? undefined : "agent_request"])].map((row) => row.map(csvCell).join(",")).join("\r\n") + "\r\n";
 }

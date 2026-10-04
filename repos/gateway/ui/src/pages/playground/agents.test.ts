@@ -88,10 +88,22 @@ describe("saved agent requests", () => {
     const run = runAgentBatch(connection(), "writer", ["First", "Second", "Third"], controller.signal, (item) => results.push(item));
     expect(mock).toHaveBeenCalledTimes(2); controller.abort();
     deferred.forEach((item) => item.resolve(response(item.id, "Late output")));
-    await run; expect(mock).toHaveBeenCalledTimes(2); expect(results).toHaveLength(3); expect(results.every((item) => item.status === "cancelled")).toBe(true); expect(results.some((item) => item.text)).toBe(false);
+    await run; expect(mock).toHaveBeenCalledTimes(2); expect(results).toHaveLength(3); expect(results.every((item) => item.status === "cancelled")).toBe(true); expect(results.some((item) => item.text)).toBe(false); expect(results.find((item) => item.index === 2)?.latencyMS).toBeUndefined();
     mock.mockImplementation(async (_url, options) => { const body = JSON.parse(String(options?.body)); return body.params.message.parts[0].text === "Bad" ? json({ jsonrpc: "2.0", id: body.id, error: { message: "Provider failed" } }) : response(body.id, "Success"); });
     const partial: AgentBatchResult[] = []; await runAgentBatch(connection(), "writer", ["Good", "Bad"], new AbortController().signal, (item) => partial.push(item));
     expect(partial.map((item) => item.status).sort()).toEqual(["completed", "failed"]);
+  });
+  it("keeps undispatched batch latency unavailable and identifies measured agent requests in CSV", async () => {
+    const fetch = vi.spyOn(globalThis, "fetch");
+    const controller = new AbortController(); controller.abort();
+    const results: AgentBatchResult[] = [];
+    await runAgentBatch(connection(), "writer", ["Queued"], controller.signal, (item) => results.push(item));
+    expect(fetch).not.toHaveBeenCalled();
+    expect(results).toEqual([{ index: 0, prompt: "Queued", status: "cancelled" }]);
+    const csv = agentBatchCSV([...results, { index: 1, prompt: "Measured", status: "completed", latencyMS: 0 }]);
+    expect(csv.split("\r\n")[0]).toContain('"latency_ms","latency_kind"');
+    expect(csv.split("\r\n")[1]).toBe('"1","Queued","cancelled","","","","","",""');
+    expect(csv.split("\r\n")[2]).toBe('"2","Measured","completed","","","","","0","agent_request"');
   });
   it("bounds prompt suites and exports safe multiline CSV with unavailable fields left empty", () => {
     expect(agentBatchPrompts(" First\r\n\nSecond ")).toEqual(["First", "Second"]);
