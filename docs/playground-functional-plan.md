@@ -195,6 +195,11 @@ compatibility must be distinguished from merely having an endpoint selector.
   continuity, disconnect cleanup and failure-safe settlement. Real HTTP and
   race tests verify flushing/cancellation; PostgreSQL replica coverage runs both
   JSON and SSE. Playground stream controls are implemented below.
+- [x] Added durable saved-agent background queueing, versioned encrypted execution
+  credentials, atomic task/outbox transitions, fresh credential/owner checks,
+  explicit refresh/cancel/review controls and fail-closed interrupted execution.
+  Replica, transaction rollback and interrupted-write regressions run in required
+  PostgreSQL CI; background UI selection is shared across all agent workspaces.
 - [ ] Finish media/tool output, policy selection and full conversation verification.
 - [ ] Complete endpoint-specific execution and media/tool handling.
 - [ ] Complete comparison, compliance and agent views.
@@ -459,9 +464,8 @@ never automatically retries an interrupted tool.
 
 Task streaming is supported for these MCP agents when the durable task store,
 MCP runtime, call store and audit service are available. The Agent Card advertises
-that capability only with these prerequisites. Push and `returnImmediately`
-remain unsupported; durable background worker execution remains part of the
-unfinished endpoint/runtime work. Tool-free agents
+that capability only with these prerequisites. Push remains unsupported for MCP-bound agents. Durable `returnImmediately`
+execution and Playground background controls are described below. Tool-free agents
 retain their existing behavior. This is an intentional response behavior change
 for MCP-bound profiles; clients must handle A2A task results and approval states.
 
@@ -821,3 +825,74 @@ are in the local verification output; no real provider, credentials or billing
 were used. UI coverage (769 tests), UI build/typecheck, gofmt, go vet, full Go tests,
 fresh race tests and Go build passed locally. This increment does not complete
 the remaining background runtime or final Goal audit/deployment requirements.
+
+
+## Saved-agent background execution
+
+Agent Chat, Batch Test, Compare and the A2A endpoint offer explicit background
+execution. Connect exports the selected mode without credentials. Background
+requests use SendMessage with returnImmediately; streaming and background are
+mutually exclusive for a single agent request. Compare model panels retain
+independent streaming. Submission is a known SUBMITTED task, not completed output.
+Refresh reads the task; approval choices enqueue an independent continuation only
+after Continue. Cancel terminates queued work without model/tool effects or records
+intent during execution. Closing the local request does not cancel server work.
+No automatic polling, approval or inference retry is added.
+
+The Gateway atomically persists the task transition and a distinct per-operation
+outbox job in PostgreSQL before model or MCP work. Each replica claims at most one
+job, with a three-minute lease. Queued work has the existing two-minute admission
+deadline; a claimed execution receives a two-minute execution deadline. The worker
+is tied to the application context and joined during shutdown. Approval pauses end
+a job; its explicit continuation creates a new execution ID. Normal model/tool
+policy, rate, audit, idempotency and billing paths remain in use.
+
+The current bearer credential is encrypted only in the bounded job payload using
+CREDENTIAL_ENCRYPTION_KEY with separate agent-job key derivation and AEAD binding
+to kind, owner, agent, resource and execution ID. It is never written to public or
+private task payloads, logs or exports. Each worker model/MCP request authenticates
+again and must preserve the queued credential/user, organization and team binding.
+Revocation fails closed; authorization outages before the durable execution claim
+leave work queued for bounded retries. Expired credentials are not refreshed or
+replaced automatically. Ordinary request authentication is unchanged.
+
+A task CAS records WorkerStarted before effects. Lease reclamation does not replay
+started work: active claims wait, expired interrupted claims become failed (or
+canceled if intent was recorded). Actual completed MCP results remain durably
+recorded even if subsequent task persistence fails. Task status is saved after
+provider/tool settlement and before deleting the job. Invalid encrypted jobs are
+reported through the worker's fixed error log and cannot execute; task reads retain
+the existing deadline reconciliation. Pending tasks block new conversations and
+retain unavailable usage/cost/first-token metrics visibly.
+
+Background private task state is version 2. Existing version 1 synchronous and
+streaming tasks stay readable; older binaries reject version 2 rather than taking
+over queued execution. WithAgentMCPBackground is an additive internal constructor.
+The existing async job table and atomic A2A outbox interfaces are reused; no schema
+migration, new credential setting or dependency is introduced. Push notification
+support for these MCP-bound agents remains unfinished.
+
+Regression coverage checks queue/replay, exact arguments, explicit approvals,
+pre-start cancellation, credentials/organization/user changes, auth outages,
+started-claim recovery, AEAD scope/key tampering and worker shutdown. The native
+Responses HTTP adapter is exercised in background mode as well as JSON and SSE.
+Required real PostgreSQL integration cases check atomic rollback, replica claims,
+exactly-once MCP effects, running cancellation settlement and a failed checkpoint
+after an actual model call, followed by recovery through a second replica.
+
+Validation for this increment: the full UI coverage run passed 775 tests in 85
+files, type checking and the embedded production UI build passed. Gateway
+gofmt -w ., go vet ./..., go test ./..., go test -race ./... and go build ./...
+completed successfully using Go 1.25.13. No dedicated local PostgreSQL DSN was
+configured; required database scenarios are validated by CI on real PostgreSQL.
+
+Browser verification used the rebuilt embedded UI and actual Gateway CSP with an
+isolated synthetic A2A endpoint. It verified queued status, explicit Refresh into
+review, changing Decline without executing a continuation, Continue queueing a
+new step, Refresh into completed output and cancellation of a separate queued
+task. Streaming was disabled while background was selected; console warnings and
+errors were absent. The synthetic browser service does not prove the production
+worker runtime; native HTTP and PostgreSQL tests cover that execution boundary.
+Proof screenshots remain local under output/playwright/playground (74–76). The
+preview was stopped afterwards. Real providers, microphones and deployment were
+not exercised or changed. The whole Playground Goal remains open.

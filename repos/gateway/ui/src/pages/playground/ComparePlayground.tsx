@@ -42,7 +42,7 @@ export function ComparePlayground({ connection, models, connectionControls, conn
   const attachmentInput = useRef<HTMLInputElement>(null), attachmentGeneration = useRef(0);
   function clearAttachments() { attachmentGeneration.current++; setAttachments([]); setReading(false); if (attachmentInput.current) attachmentInput.current.value = ""; }
   const [sync, setSync] = useState(true);
-  const [stream, setStream] = useState(true);
+  const [stream, setStream] = useState(true), [agentBackground, setAgentBackground] = useState(false);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
   const [agents, setAgents] = useState<ResourceCatalog["agents"]>([]), [agentsError, setAgentsError] = useState(""), [loadingAgents, setLoadingAgents] = useState(false);
@@ -148,7 +148,7 @@ export function ComparePlayground({ connection, models, connectionControls, conn
     try {
       if (new TextEncoder().encode(input).length > 1024 * 1024) throw new Error("Prompt exceeds the 1 MiB Playground limit.");
       requests = panels.map((panel) => {
-        if (panel.kind === "agent") return { panel, agentRequest: agentRequest(panel.agent, input, panel.agentRun?.task, attachments, stream), turns: [{ role: "user", content: wireInput }], policyPrompt: input, lastPrompt: displayInput };
+        if (panel.kind === "agent") return { panel, agentRequest: agentRequest(panel.agent, input, panel.agentRun?.task, attachments, stream && !agentBackground, agentBackground), turns: [{ role: "user", content: wireInput }], policyPrompt: input, lastPrompt: displayInput };
         policyChecks(panel.resources.policies, input, panel.model);
         return { panel, body: withResources(buildTextRequest({ endpoint: "chat", model: panel.model, input: wireInput, instructions: panel.instructions, history: panel.history, streaming: stream, settings: panel.settings }), "chat", panel.resources), turns: [{ role: "user", content: wireInput }], policyPrompt: input, lastPrompt: displayInput };
       });
@@ -191,7 +191,7 @@ export function ComparePlayground({ connection, models, connectionControls, conn
         const state = result.task?.state, failed = !!state && ["TASK_STATE_FAILED", "TASK_STATE_CANCELED", "TASK_STATE_REJECTED"].includes(state);
         setPanels((items) => items.map((item) => item.id === panel.id ? { ...item, agentRun: result, error: failed ? `Agent task ended in ${state}.` : "", status: failed ? "failed" : state === "TASK_STATE_COMPLETED" ? "complete" : "awaiting_task", history: item.history.map((turn, index) => index === item.history.length - 1 && turn.role === "assistant" ? { ...turn, content: result.text || state || "No text output" } : turn) } : item));
       };
-      publish(await runAgentRequest(connection, choices ? agentApprovalRequest(panel.agent, task, choices, stream) : agentTaskRequest(panel.agent, task, method!), controller.signal, publish));
+      publish(await runAgentRequest(connection, choices ? agentApprovalRequest(panel.agent, task, choices, stream && !agentBackground, agentBackground) : agentTaskRequest(panel.agent, task, method!), controller.signal, publish));
     } catch (cause) { if (generation.current === activeGeneration) setPanels((items) => items.map((item) => item.id === panel.id ? { ...item, error: cause instanceof Error ? cause.message : "Agent task operation failed." } : item)); }
     finally { if (controllers.current.get(panel.id) === controller) controllers.current.delete(panel.id); if (generation.current === activeGeneration) setRunning(false); }
   }
@@ -211,6 +211,8 @@ export function ComparePlayground({ connection, models, connectionControls, conn
       <GravityThemeScope><Checkbox controlProps={{ "aria-label": "Sync settings across models" }} checked={sync} disabled={running} onUpdate={(value) => {
         setSync(value); if (value) setPanels((current) => current.map((panel) => ({ ...panel, settings: { ...current[0].settings }, instructions: current[0].instructions })));
       }}>Sync settings across models</Checkbox></GravityThemeScope>
+      <GravityThemeScope><Checkbox controlProps={{ "aria-label": "Run comparison agents in background" }} checked={agentBackground} disabled={running} onUpdate={setAgentBackground}>Run agents in background</Checkbox></GravityThemeScope>
+      {agentBackground && <p className="muted">Agent panels queue server tasks and require Refresh to observe completion or tool review. Model panels keep their selected streaming mode. Closing a local request does not cancel a queued task.</p>}
       <GravityThemeScope><Checkbox controlProps={{ "aria-label": "Stream comparison" }} checked={stream} disabled={running} onUpdate={setStream}>Stream responses</Checkbox></GravityThemeScope>
       <div className="playground-actions"><GatewayButton view="outlined" disabled={running || loadingAgents || connectionChanged} onClick={() => void loadAgents()}>Load authorized agents</GatewayButton><GatewayButton view="outlined" disabled={running || !panels.some((panel) => panel.lastPrompt)} onClick={exportResults}>Export results</GatewayButton><GatewayButton view="outlined" disabled={running} onClick={() => { setPanels((current) => current.map((panel) => ({ ...newPanel(panel.id, panel.model), kind: panel.kind, agent: panel.agent, settings: panel.settings, instructions: panel.instructions, pricing: panel.pricing, resources: panel.resources }))); setError(""); clearAttachments(); }}>Clear all chats</GatewayButton><GatewayButton view="outlined" disabled={running || panels.length >= 3} onClick={() => {
         const id = nextID.current++; setPanels((current) => [...current, { ...newPanel(id, models[current.length] || models[0] || ""), ...(sync ? { settings: { ...current[0].settings }, instructions: current[0].instructions } : {}) }]);

@@ -15,8 +15,9 @@ import (
 )
 
 func TestAgentMCPDurableLoopThroughNativeResponsesHTTPAdapter(t *testing.T) {
-	for _, streaming := range []bool{false, true} {
-		t.Run(map[bool]string{false: "JSON", true: "SSE"}[streaming], func(t *testing.T) {
+	for _, mode := range []string{"JSON", "SSE", "background"} {
+		t.Run(mode, func(t *testing.T) {
+			streaming, background := mode == "SSE", mode == "background"
 			method := "SendMessage"
 			resultTask := agentMCPResultTask
 			if streaming {
@@ -57,15 +58,35 @@ func TestAgentMCPDurableLoopThroughNativeResponsesHTTPAdapter(t *testing.T) {
 				t.Fatal(err)
 			}
 			h.provider, h.pipeline = llm, pipeline
-			first := agentMCPSend(h, method, "")
+			extra := ""
+			if background {
+				store := &a2aPushTestStore{a2aMemoryTaskStore: h.a2aTasks.(*a2aMemoryTaskStore)}
+				h = h.WithA2ATaskStore(store, h.a2aTaskConfig)
+				h, err = h.WithAgentMCPBackground(store, []byte("synthetic-background-key-material"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				extra = `,"configuration":{"returnImmediately":true}`
+			}
+			first := agentMCPSend(h, method, extra)
 			task := resultTask(t, first)
+			if background {
+				if task.Status.State != "TASK_STATE_SUBMITTED" || calls.Load() != 0 {
+					t.Fatal("background native adapter ran synchronously")
+				}
+				if _, err := h.ProcessAgentMCPBackground(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+				first = agentMCPTaskRPC(h, "GetTask", a2aMessage{}, task.ID)
+				task = readBackgroundAgentTask(t, h, task.ID)
+			}
 			if task.Status.State != "TASK_STATE_INPUT_REQUIRED" || client.callCalls != 0 {
 				t.Fatal("native tool request was not paused")
 			}
 			for name, response := range map[string]*httptest.ResponseRecorder{
 				"initial": first,
 				"refresh": agentMCPTaskRPC(h, "GetTask", a2aMessage{}, task.ID),
-				"replay":  agentMCPSend(h, method, ""),
+				"replay":  agentMCPSend(h, method, extra),
 			} {
 				if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"count":9007199254740993`) {
 					t.Fatalf("%s rounded approval arguments", name)
@@ -74,7 +95,19 @@ func TestAgentMCPDurableLoopThroughNativeResponsesHTTPAdapter(t *testing.T) {
 			if calls.Load() != 1 || client.callCalls != 0 {
 				t.Fatal("approval reads or replay executed new effects")
 			}
-			completed := resultTask(t, agentMCPTaskRPC(h, method, agentMCPDecision(t, task, true, "decision"), ""))
+			var completed a2aTask
+			if background {
+				queued := agentMCPResultTask(t, backgroundAgentDecision(h, agentMCPDecision(t, task, true, "decision")))
+				if queued.Status.State != "TASK_STATE_SUBMITTED" || client.callCalls != 0 {
+					t.Fatal("background native approval executed synchronously")
+				}
+				if _, err := h.ProcessAgentMCPBackground(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+				completed = readBackgroundAgentTask(t, h, task.ID)
+			} else {
+				completed = resultTask(t, agentMCPTaskRPC(h, method, agentMCPDecision(t, task, true, "decision"), ""))
+			}
 			if completed.Status.State != "TASK_STATE_COMPLETED" || calls.Load() != 2 || client.callCalls != 1 || *completed.Artifacts[0].Parts[0].Text != "Native final answer" {
 				t.Fatal("native Responses adapter did not finish the MCP loop")
 			}

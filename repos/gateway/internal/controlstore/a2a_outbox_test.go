@@ -85,3 +85,31 @@ func TestA2AAtomicOutboxRejectsCrossScopeJob(t *testing.T) {
 		t.Fatalf("nil store error=%v", err)
 	}
 }
+
+func TestAgentA2AOutboxJobBindsExecutionAndScope(t *testing.T) {
+	task := a2astate.Task{ID: "task", OwnerKey: "owner", AgentID: "agent"}
+	job := asyncstate.Job{Kind: a2astate.AgentJobKind, ResourceID: "task:exec", OwnerKey: "owner", EndpointID: "agent", ExecutionID: "exec", Payload: []byte(`{}`)}
+	if !validA2AOutboxJob(task, job) {
+		t.Fatal("valid agent execution outbox rejected")
+	}
+	for _, change := range []string{"owner", "endpoint", "execution", "resource", "kind"} {
+		t.Run(change, func(t *testing.T) {
+			copy := job
+			switch change {
+			case "owner":
+				copy.OwnerKey = "other"
+			case "endpoint":
+				copy.EndpointID = "other"
+			case "execution":
+				copy.ExecutionID = "other"
+			case "resource":
+				copy.ResourceID = "other:exec"
+			case "kind":
+				copy.Kind = "a2a-push"
+			}
+			if validA2AOutboxJob(task, copy) {
+				t.Fatal("unbound background execution job accepted")
+			}
+		})
+	}
+}

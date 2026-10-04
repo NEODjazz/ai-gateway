@@ -191,6 +191,10 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
+		handler, err = handler.WithAgentMCPBackground(providerControlStore, []byte(cfg.Provider.CredentialKey))
+		if err != nil {
+			log.Fatal(err)
+		}
 	}
 	if cfg.APIDocs.Enabled {
 		handler = handler.WithAPIDocs(cfg.APIDocs.TryItOutEnabled)
@@ -225,10 +229,17 @@ func main() {
 		handler = handler.WithBudgetManagement(billingManagement).WithUsageReporting(billingManagement).WithRequestLogs(billingManagement).WithAudit(billingManagement)
 	}
 	var a2aPushWorkerDone <-chan struct{}
+	var agentMCPWorkerDone <-chan struct{}
 	var batchWorkerDone <-chan struct{}
 	var fineTuningWorkerDone <-chan struct{}
 	var videoWorkerDone <-chan struct{}
 	if providerControlStore != nil {
+		agentDone := make(chan struct{})
+		agentMCPWorkerDone = agentDone
+		go func() {
+			defer close(agentDone)
+			gateway.RunAgentMCPBackgroundWorker(appCtx, handler)
+		}()
 		done := make(chan struct{})
 		a2aPushWorkerDone = done
 		go func() {
@@ -284,6 +295,13 @@ func main() {
 		case <-backgroundWorkerDone:
 		case <-shutdownCtx.Done():
 			log.Printf("background response worker shutdown timed out")
+		}
+	}
+	if agentMCPWorkerDone != nil {
+		select {
+		case <-agentMCPWorkerDone:
+		case <-shutdownCtx.Done():
+			log.Print("agent background worker shutdown timed out")
 		}
 	}
 	if a2aPushWorkerDone != nil {

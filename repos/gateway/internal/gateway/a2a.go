@@ -287,7 +287,7 @@ func (h Handler) sendA2AMessage(w http.ResponseWriter, r *http.Request, request 
 		h.writeA2AError(w, request.ID, http.StatusBadRequest, -32602, "returnImmediately is not valid for streaming")
 		return
 	}
-	if len(profile.MCPTools) > 0 && returnImmediately {
+	if len(profile.MCPTools) > 0 && returnImmediately && (h.agentMCPJobs == nil || h.agentMCPOutbox == nil || h.agentMCPJobAEAD == nil) {
 		h.writeA2AError(w, request.ID, http.StatusNotImplemented, -32004, "Agents with MCP tools do not support background execution")
 		return
 	}
@@ -295,7 +295,7 @@ func (h Handler) sendA2AMessage(w http.ResponseWriter, r *http.Request, request 
 		h.writeA2AError(w, request.ID, http.StatusNotImplemented, -32004, "Streaming is not supported")
 		return
 	}
-	if returnImmediately {
+	if returnImmediately && len(profile.MCPTools) == 0 {
 		if h.a2aTasks == nil || h.a2aTaskConfig.OwnerQuota < 1 || h.a2aTaskConfig.TTL <= 0 {
 			h.writeA2AError(w, request.ID, http.StatusNotImplemented, -32004, "Asynchronous task execution is not supported")
 			return

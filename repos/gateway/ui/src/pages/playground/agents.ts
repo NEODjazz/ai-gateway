@@ -34,12 +34,13 @@ export type AgentApproval = { id: string; calls: { id: string; server: string; t
 export type AgentTask = { id: string; contextID: string; state: string; approval?: AgentApproval };
 export type AgentRun = { text: string; task?: AgentTask; latencyMS: number; response: Record<string, unknown> };
 function object(value: unknown): Record<string, unknown> | undefined { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined; }
-export function agentRequest(agent: string, prompt: string, task?: AgentTask, attachments: Attachment[] = [], streaming = false) {
+export function agentRequest(agent: string, prompt: string, task?: AgentTask, attachments: Attachment[] = [], streaming = false, background = false) {
+  if (streaming && background) throw new Error("Background agent execution cannot stream the same request.");
   if (!safeID.test(agent)) throw new Error("Select a valid agent ID.");
   if ((!prompt.trim() && !attachments.length) || new TextEncoder().encode(prompt).length > 1024 * 1024) throw new Error("Enter an agent prompt up to 1 MiB.");
   if (task && (!safeID.test(task.id) || !safeID.test(task.contextID) || task.state !== "TASK_STATE_COMPLETED")) throw new Error("Start a new conversation or resolve the current agent task before continuing.");
   validateConversationFiles(attachments);
-  const body = { jsonrpc: "2.0", id: crypto.randomUUID(), method: streaming ? "SendStreamingMessage" : "SendMessage", params: { tenant: agent, message: { messageId: crypto.randomUUID(), role: "ROLE_USER", ...(task ? { taskId: task.id, contextId: task.contextID } : {}), parts: [...(prompt ? [{ text: prompt }] : []), ...attachments.map((item) => ({ raw: item.data_base64, mediaType: item.media_type, filename: item.filename }))] }, configuration: { acceptedOutputModes: ["text/plain"] } } };
+  const body = { jsonrpc: "2.0", id: crypto.randomUUID(), method: streaming ? "SendStreamingMessage" : "SendMessage", params: { tenant: agent, message: { messageId: crypto.randomUUID(), role: "ROLE_USER", ...(task ? { taskId: task.id, contextId: task.contextID } : {}), parts: [...(prompt ? [{ text: prompt }] : []), ...attachments.map((item) => ({ raw: item.data_base64, mediaType: item.media_type, filename: item.filename }))] }, configuration: { acceptedOutputModes: ["text/plain"], ...(background ? { returnImmediately: true } : {}) } } };
   if (new TextEncoder().encode(JSON.stringify(body)).length > 24 * 1024 * 1024) throw new Error("Request exceeds the 24 MiB Playground limit.");
   return { path: `/a2a/${encodeURIComponent(agent)}`, body, headers: { "A2A-Version": "1.0" } };
 }
@@ -47,9 +48,10 @@ export function agentTaskRequest(agent: string, task: AgentTask, method: "GetTas
   if (!safeID.test(agent) || !safeID.test(task.id) || !safeID.test(task.contextID)) throw new Error("Invalid agent task ID.");
   return { path: `/a2a/${encodeURIComponent(agent)}`, body: { jsonrpc: "2.0", id: crypto.randomUUID(), method, params: { tenant: agent, id: task.id } }, headers: { "A2A-Version": "1.0" }, expectedTask: { id: task.id, contextID: task.contextID } };
 }
-export function agentApprovalRequest(agent: string, task: AgentTask, choices: { call_id: string; approved: boolean }[], streaming = false) {
+export function agentApprovalRequest(agent: string, task: AgentTask, choices: { call_id: string; approved: boolean }[], streaming = false, background = false) {
+  if (streaming && background) throw new Error("Background agent execution cannot stream the same request.");
   if (!safeID.test(agent) || !safeID.test(task.id) || !safeID.test(task.contextID) || task.state !== "TASK_STATE_INPUT_REQUIRED" || !task.approval || !safeID.test(task.approval.id) || choices.length !== task.approval.calls.length || new Set(choices.map((choice) => choice.call_id)).size !== choices.length || choices.some((choice) => typeof choice.approved !== "boolean" || !task.approval!.calls.some((call) => call.id === choice.call_id))) throw new Error("Choose approve or decline for every pending agent tool call.");
-  return { path: `/a2a/${encodeURIComponent(agent)}`, body: { jsonrpc: "2.0", id: crypto.randomUUID(), method: streaming ? "SendStreamingMessage" : "SendMessage", params: { tenant: agent, message: { messageId: crypto.randomUUID(), taskId: task.id, contextId: task.contextID, role: "ROLE_USER", parts: [{ text: "Review decisions for pending agent tools" }], metadata: { ai_gateway_tool_approval: { approval_id: task.approval.id, choices: choices.map((choice) => ({ ...choice })) } } } } }, headers: { "A2A-Version": "1.0" }, expectedTask: { id: task.id, contextID: task.contextID } };
+  return { path: `/a2a/${encodeURIComponent(agent)}`, body: { jsonrpc: "2.0", id: crypto.randomUUID(), method: streaming ? "SendStreamingMessage" : "SendMessage", params: { tenant: agent, ...(background ? { configuration: { returnImmediately: true } } : {}), message: { messageId: crypto.randomUUID(), taskId: task.id, contextId: task.contextID, role: "ROLE_USER", parts: [{ text: "Review decisions for pending agent tools" }], metadata: { ai_gateway_tool_approval: { approval_id: task.approval.id, choices: choices.map((choice) => ({ ...choice })) } } } } }, headers: { "A2A-Version": "1.0" }, expectedTask: { id: task.id, contextID: task.contextID } };
 }
 function agentApproval(task: Record<string, unknown>, state: string): AgentApproval | undefined {
   const message = object(object(task.status)?.message), raw = object(message?.metadata)?.ai_gateway_tool_approval;
@@ -155,7 +157,7 @@ export function agentBatchPrompts(value: string) {
   if (!prompts.length || prompts.length > 20 || prompts.some((item) => new TextEncoder().encode(item).length > 65536)) throw new Error("Enter 1–20 prompts, one per line, up to 64 KiB each.");
   return prompts;
 }
-export async function runAgentBatch(connection: PlaygroundConnection, agent: string, prompts: string[], signal: AbortSignal, onResult: (result: AgentBatchResult) => void, streaming = false) {
+export async function runAgentBatch(connection: PlaygroundConnection, agent: string, prompts: string[], signal: AbortSignal, onResult: (result: AgentBatchResult) => void, streaming = false, background = false) {
   if (!prompts.length || prompts.length > 20 || prompts.some((prompt) => !prompt.trim() || new TextEncoder().encode(prompt).length > 65536)) throw new Error("Choose 1–20 prompts up to 64 KiB each.");
   if (!safeID.test(agent)) throw new Error("Select a valid agent ID.");
   let cursor = 0;
@@ -170,7 +172,7 @@ export async function runAgentBatch(connection: PlaygroundConnection, agent: str
         onResult({ index, prompt, status, text: result.text, task: result.task, error: status === "failed" ? `Task ended in ${result.task?.state}.` : undefined, latencyMS: result.latencyMS });
       };
       try {
-        const result = await runAgentRequest(connection, agentRequest(agent, prompt, undefined, [], streaming), signal, publish);
+        const result = await runAgentRequest(connection, agentRequest(agent, prompt, undefined, [], streaming, background), signal, publish);
         const status = agentBatchStatus(result.task);
         onResult({ index, prompt, status, text: result.text, task: result.task, error: status === "failed" ? `Task ended in ${result.task?.state}.` : undefined, latencyMS: result.latencyMS });
       } catch (cause) { onResult({ index, prompt, text: observed?.text, task: observed?.task, status: signal.aborted ? "cancelled" : "failed", error: signal.aborted ? undefined : cause instanceof Error ? cause.message : "Agent test failed.", latencyMS: performance.now() - start }); }

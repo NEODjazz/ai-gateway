@@ -38,7 +38,7 @@ func (h Handler) ListMCPServerTools(w http.ResponseWriter, r *http.Request) {
 		Request:   openai.ChatCompletionRequest{Provider: "mcp", Model: serverID},
 		Metadata:  map[string]string{"gateway.api_type": "mcp_tools_list", "provider.endpoint.name": serverID, "provider.endpoint.type": "mcp"},
 	}
-	if err := h.pipeline.RunAuthentication(r.Context(), &req); err != nil {
+	if err := h.authenticateAgentMCPRequest(r.Context(), &req); err != nil {
 		if errors.Is(err, modules.ErrUnauthorized) {
 			writeError(w, http.StatusUnauthorized, "unauthorized", "invalid api key")
 			return
@@ -143,7 +143,7 @@ func (h Handler) CallMCPServerTool(w http.ResponseWriter, r *http.Request) {
 		ToolRequests: 1,
 		Metadata:     map[string]string{"gateway.api_type": "mcp_tools_call", "provider.endpoint.name": serverID, "provider.endpoint.type": "mcp"},
 	}
-	if err := h.pipeline.RunAuthentication(r.Context(), &req); err != nil {
+	if err := h.authenticateAgentMCPRequest(r.Context(), &req); err != nil {
 		if errors.Is(err, modules.ErrUnauthorized) {
 			writeError(w, http.StatusUnauthorized, "unauthorized", "invalid api key")
 			return

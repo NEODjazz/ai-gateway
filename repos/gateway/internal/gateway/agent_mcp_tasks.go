@@ -20,23 +20,25 @@ const agentApprovalMetadata = "ai_gateway_tool_approval"
 // This state is private: public task reads expose Task, never this wrapper.
 // Instructions and connector/provider credentials are deliberately not stored.
 type agentMCPTaskState struct {
-	Version         int                   `json:"version"`
-	Profile         AgentProfile          `json:"profile"`
-	Configuration   string                `json:"configuration"`
-	InitialHash     string                `json:"initialHash"`
-	MessageID       string                `json:"messageId"`
-	MessageHash     string                `json:"messageHash"`
-	RunID           string                `json:"runId"`
-	Deadline        time.Time             `json:"deadline"`
-	CancelRequested bool                  `json:"cancelRequested,omitempty"`
-	Input           []any                 `json:"input"`
-	Iterations      int                   `json:"iterations"`
-	Calls           int                   `json:"calls"`
-	Seen            map[string]bool       `json:"seen"`
-	Servers         map[string]string     `json:"servers"`
-	ToolDigest      string                `json:"toolDigest,omitempty"`
-	Pending         []agentMCPPendingCall `json:"pending,omitempty"`
-	Challenge       string                `json:"challenge,omitempty"`
+	Version               int                   `json:"version"`
+	Profile               AgentProfile          `json:"profile"`
+	Configuration         string                `json:"configuration"`
+	InitialHash           string                `json:"initialHash"`
+	MessageID             string                `json:"messageId"`
+	MessageHash           string                `json:"messageHash"`
+	RunID                 string                `json:"runId"`
+	Deadline              time.Time             `json:"deadline"`
+	CancelRequested       bool                  `json:"cancelRequested,omitempty"`
+	BackgroundExecutionID string                `json:"backgroundExecutionId,omitempty"`
+	WorkerStarted         bool                  `json:"workerStarted,omitempty"`
+	Input                 []any                 `json:"input"`
+	Iterations            int                   `json:"iterations"`
+	Calls                 int                   `json:"calls"`
+	Seen                  map[string]bool       `json:"seen"`
+	Servers               map[string]string     `json:"servers"`
+	ToolDigest            string                `json:"toolDigest,omitempty"`
+	Pending               []agentMCPPendingCall `json:"pending,omitempty"`
+	Challenge             string                `json:"challenge,omitempty"`
 }
 
 type agentMCPPendingCall struct {
@@ -85,7 +87,10 @@ func agentMCPCallApproved(r *http.Request, call openai.ResponseOutputItem) bool 
 }
 
 func validAgentMCPTaskState(task a2aTask, state *agentMCPTaskState) bool {
-	if state.Version != 1 || state.Profile.ID == "" || !validAgentMCPTools(state.Profile.MCPTools) || len(state.Profile.MCPTools) == 0 || len(state.Configuration) != 64 || len(state.InitialHash) != 64 || len(state.MessageHash) != 64 || state.MessageID == "" || !validFileToken(state.RunID, 128) || state.Deadline.IsZero() || state.Input == nil || state.Iterations < 0 || state.Iterations > 50 || state.Calls < 0 || state.Calls > 1000 || len(state.Seen) > 2500 || len(state.Pending) > agentMCPMaxTools || len(state.Servers) > agentMCPMaxTools {
+	if (state.Version != 1 && state.Version != 2) || state.Profile.ID == "" || !validAgentMCPTools(state.Profile.MCPTools) || len(state.Profile.MCPTools) == 0 || len(state.Configuration) != 64 || len(state.InitialHash) != 64 || len(state.MessageHash) != 64 || state.MessageID == "" || !validFileToken(state.RunID, 128) || state.Deadline.IsZero() || state.Input == nil || state.Iterations < 0 || state.Iterations > 50 || state.Calls < 0 || state.Calls > 1000 || len(state.Seen) > 2500 || len(state.Pending) > agentMCPMaxTools || len(state.Servers) > agentMCPMaxTools {
+		return false
+	}
+	if state.Version == 1 && (state.BackgroundExecutionID != "" || state.WorkerStarted) || state.Version == 2 && !validFileToken(state.BackgroundExecutionID, 128) || task.Status.State == "TASK_STATE_SUBMITTED" && (state.Version != 2 || state.WorkerStarted) {
 		return false
 	}
 	if task.Status.State == "TASK_STATE_INPUT_REQUIRED" {
@@ -140,6 +145,7 @@ func (h Handler) sendAgentMCPTask(w http.ResponseWriter, r *http.Request, reques
 	if !ok || !h.authorizeA2ATaskModel(w, request.ID, identity, profile.Model) {
 		return
 	}
+	background := request.Params.Configuration.ReturnImmediately != nil && *request.Params.Configuration.ReturnImmediately
 	owner := fileOwnerKey(identity)
 	taskID := request.Params.Message.TaskID
 	initial := taskID == ""
@@ -205,8 +211,15 @@ func (h Handler) sendAgentMCPTask(w http.ResponseWriter, r *http.Request, reques
 		state.MessageID, state.MessageHash, state.Challenge = request.Params.Message.MessageID, messageHash, ""
 		state.Deadline, state.CancelRequested = time.Now().UTC().Add(2*time.Minute), false
 		run.task.Status = a2aTaskStatus{State: "TASK_STATE_WORKING", Timestamp: time.Now().UTC().Format(time.RFC3339Nano)}
-		if err := h.saveAgentMCPTask(r.Context(), &run); err != nil {
-			h.writeAgentMCPStoreError(w, request.ID, err)
+		var saveErr error
+		if background {
+			saveErr = h.queueAgentMCPTask(r, &run, false, identity)
+		} else {
+			run.state.Version, run.state.BackgroundExecutionID, run.state.WorkerStarted = 1, "", false
+			saveErr = h.saveAgentMCPTask(r.Context(), &run)
+		}
+		if saveErr != nil {
+			h.writeAgentMCPStoreError(w, request.ID, saveErr)
 			return
 		}
 	} else if initial && errors.Is(err, a2astate.ErrNotFound) {
@@ -230,7 +243,11 @@ func (h Handler) sendAgentMCPTask(w http.ResponseWriter, r *http.Request, reques
 			return
 		}
 		run.stored.State, run.stored.Payload = run.task.Status.State, payload
-		run.stored, err = h.a2aTasks.CreateA2ATask(r.Context(), run.stored, h.a2aTaskConfig.OwnerQuota, h.a2aTaskConfig.TTL)
+		if background {
+			err = h.queueAgentMCPTask(r, &run, true, identity)
+		} else {
+			run.stored, err = h.a2aTasks.CreateA2ATask(r.Context(), run.stored, h.a2aTaskConfig.OwnerQuota, h.a2aTaskConfig.TTL)
+		}
 		if err != nil {
 			// A racing initial send owns execution. Never run effects after losing create.
 			if errors.Is(err, a2astate.ErrConflict) || errors.Is(err, a2astate.ErrQuotaExceeded) {
@@ -248,6 +265,10 @@ func (h Handler) sendAgentMCPTask(w http.ResponseWriter, r *http.Request, reques
 		}
 	} else {
 		h.writeA2ATaskStoreError(w, request.ID, err)
+		return
+	}
+	if background {
+		writeAgentMCPTask(w, request.ID, run.task)
 		return
 	}
 	// Reload encrypted instructions only after checking the immutable configuration digest.
@@ -470,7 +491,7 @@ func (h Handler) cancelAgentMCPTask(w http.ResponseWriter, r *http.Request, requ
 		return
 	}
 	state.CancelRequested = true
-	if task.Status.State == "TASK_STATE_INPUT_REQUIRED" {
+	if task.Status.State == "TASK_STATE_INPUT_REQUIRED" || task.Status.State == "TASK_STATE_SUBMITTED" {
 		task.Status = agentMCPTaskStatus(task, "TASK_STATE_CANCELED", "Pending tools were canceled without execution.", nil)
 		state.Pending, state.Challenge = nil, ""
 	} else {

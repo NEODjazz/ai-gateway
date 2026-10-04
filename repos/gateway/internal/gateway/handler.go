@@ -64,6 +64,9 @@ type Handler struct {
 	a2aPushJobs        asyncstate.Store
 	a2aPushConfigs     a2astate.AtomicOutboxStore
 	a2aPushVault       *a2aPushVault
+	agentMCPJobs       asyncstate.Store
+	agentMCPOutbox     a2astate.AtomicOutboxStore
+	agentMCPJobAEAD    cipher.AEAD
 	mcp                *MCPRegistry
 	mcpRuntime         MCPRuntimeFactory
 	mcpRuntimeCache    *mcpRuntimeCache
@@ -755,8 +758,9 @@ func (h Handler) serveResponsesAs(w http.ResponseWriter, r *http.Request, reques
 
 	var pipelineErr error
 	computerOutputs, _ := openai.InspectResponseComputerCallOutputs(request.Input)
-	if responseComputerOutputsHaveFiles(computerOutputs) {
-		pipelineErr = h.pipeline.RunAuthentication(r.Context(), &reqCtx)
+	_, backgroundAgent := r.Context().Value(agentMCPWorkerContextKey{}).(agentMCPWorkerIdentity)
+	if responseComputerOutputsHaveFiles(computerOutputs) || backgroundAgent {
+		pipelineErr = h.authenticateAgentMCPRequest(r.Context(), &reqCtx)
 		if pipelineErr == nil {
 			reqCtx.APIKey = ""
 			if err := h.resolveResponseComputerScreenshots(r.Context(), reqCtx, reqCtx.ResponseRequest); err != nil {
