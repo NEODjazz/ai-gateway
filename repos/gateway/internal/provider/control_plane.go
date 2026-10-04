@@ -248,7 +248,8 @@ func (r *Router) applyControlPlaneSnapshot(snapshot ControlPlaneSnapshot) error 
 }
 
 func sameDeploymentRuntime(first, second ModelDeployment) bool {
-	return first.ID == second.ID &&
+	return first.DocumentProcessing == second.DocumentProcessing &&
+		first.ID == second.ID &&
 		first.ProviderID == second.ProviderID &&
 		first.CredentialID == second.CredentialID &&
 		first.ProviderType == second.ProviderType &&

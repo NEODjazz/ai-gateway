@@ -175,6 +175,7 @@ type GuardrailPolicyConfig struct {
 }
 
 type ProviderEndpointConfig struct {
+	DocumentProcessing    string            `json:"document_processing,omitempty"`
 	Name                  string            `json:"name"`
 	Type                  string            `json:"type"`
 	BaseURL               string            `json:"base_url"`

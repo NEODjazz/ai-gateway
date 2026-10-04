@@ -23,6 +23,7 @@ type ModelDeployment struct {
 	Capabilities          []string `json:"capabilities,omitempty"`
 	Priority              int      `json:"priority"`
 	Weight                int      `json:"weight"`
+	DocumentProcessing    string   `json:"document_processing,omitempty"`
 	GuardrailPolicy       string   `json:"guardrail_policy,omitempty"`
 	RequestTimeoutMS      int      `json:"request_timeout_ms,omitempty"`
 	MaxRetries            int      `json:"max_retries,omitempty"`
@@ -126,6 +127,9 @@ func (r *Router) UpdateModelDeployment(id string, deployment ModelDeployment) (M
 	}
 	if !deployment.CredentialSet {
 		deployment.CredentialID = existing.CredentialID
+	}
+	if deployment.DocumentProcessing == "" {
+		deployment.DocumentProcessing = existing.DocumentProcessing
 	}
 	if deployment.Capabilities == nil {
 		deployment.Capabilities = append([]string(nil), existing.Capabilities...)
@@ -329,6 +333,9 @@ func containsDeployment(values []string, expected string) bool {
 }
 
 func (r *Router) validateDeployment(deployment ModelDeployment) error {
+	if !config.ValidDocumentProcessing(deployment.DocumentProcessing) || deployment.DocumentProcessing == "docling" && !hasCapability(deployment.Capabilities, "chat") && !hasCapability(deployment.Capabilities, "responses") {
+		return ErrInvalidDeployment
+	}
 	if strings.TrimSpace(deployment.ID) == "" || len(deployment.ID) > 128 || strings.TrimSpace(deployment.ProviderID) == "" || len(deployment.ProviderID) > 128 || len(deployment.CredentialID) > 128 || len(deployment.UpstreamModel) > 256 || deployment.Priority < 0 || deployment.Weight < 0 || len(deployment.Models) == 0 || len(deployment.Models) > 128 || !validDeploymentStrings(deployment.Models) || !validDeploymentCapabilities(deployment.Capabilities) || len(deployment.GuardrailPolicy) > 128 || !validDeploymentOperations(deployment) {
 		return ErrInvalidDeployment
 	}
@@ -487,6 +494,9 @@ func (r *Router) endpointForManagedDeployment(deployment ModelDeployment, manage
 }
 
 func (r *Router) endpointForManagedDeploymentWithSecret(deployment ModelDeployment, managed ManagedProvider, secret string) (Endpoint, error) {
+	if !config.ValidDocumentProcessing(deployment.DocumentProcessing) {
+		return Endpoint{}, ErrInvalidDeployment
+	}
 	if managed.Type == "vertex-gemini" && deployment.CredentialID != "" {
 		return Endpoint{}, ErrInvalidDeployment
 	}
@@ -517,7 +527,7 @@ func (r *Router) endpointForManagedDeploymentWithSecret(deployment ModelDeployme
 			aliases[model] = upstreamModel
 		}
 	}
-	endpoint := Endpoint{Name: deployment.ID, ProviderID: deployment.ProviderID, Type: managed.Type, Models: append([]string(nil), deployment.Models...), Capabilities: append([]string(nil), deployment.Capabilities...), Priority: deployment.Priority, Weight: deployment.Weight, GuardrailPolicy: deployment.GuardrailPolicy, GuardrailPolicyValid: true, ModelAliases: aliases, Provider: client, Admission: newAdmissionController(deployment.MaxParallelRequests, deployment.QueueCapacity, time.Duration(deployment.QueueTimeoutMS)*time.Millisecond), BaseURL: managed.BaseURL, CredentialID: deployment.CredentialID, RequestTimeout: time.Duration(deployment.RequestTimeoutMS) * time.Millisecond, MaxRetries: deployment.MaxRetries, CooldownAfterFailures: deployment.CooldownAfterFailures, Cooldown: time.Duration(deployment.CooldownSeconds) * time.Second, RateLimitRPM: deployment.RateLimitRPM, RateLimitTPM: deployment.RateLimitTPM, ProviderRateLimitRPM: managed.RateLimitRPM, ProviderRateLimitTPM: managed.RateLimitTPM}
+	endpoint := Endpoint{DocumentProcessing: deployment.DocumentProcessing, Name: deployment.ID, ProviderID: deployment.ProviderID, Type: managed.Type, Models: append([]string(nil), deployment.Models...), Capabilities: append([]string(nil), deployment.Capabilities...), Priority: deployment.Priority, Weight: deployment.Weight, GuardrailPolicy: deployment.GuardrailPolicy, GuardrailPolicyValid: true, ModelAliases: aliases, Provider: client, Admission: newAdmissionController(deployment.MaxParallelRequests, deployment.QueueCapacity, time.Duration(deployment.QueueTimeoutMS)*time.Millisecond), BaseURL: managed.BaseURL, CredentialID: deployment.CredentialID, RequestTimeout: time.Duration(deployment.RequestTimeoutMS) * time.Millisecond, MaxRetries: deployment.MaxRetries, CooldownAfterFailures: deployment.CooldownAfterFailures, Cooldown: time.Duration(deployment.CooldownSeconds) * time.Second, RateLimitRPM: deployment.RateLimitRPM, RateLimitTPM: deployment.RateLimitTPM, ProviderRateLimitRPM: managed.RateLimitRPM, ProviderRateLimitTPM: managed.RateLimitTPM}
 	if managed.Type == "ollama" && hasCapability(deployment.Capabilities, "structured_output") {
 		models := deployment.Models
 		if deployment.UpstreamModel != "" {

@@ -428,6 +428,7 @@ type ProviderObserver interface {
 }
 
 type Endpoint struct {
+	DocumentProcessing    string
 	Name                  string
 	ProviderID            string
 	Type                  string
@@ -511,6 +512,9 @@ func NewWithError(cfg Config) (Provider, error) {
 	initialDeployments := make(map[string]ModelDeployment)
 	initialProviders := make(map[string]ManagedProvider)
 	for _, endpoint := range cfg.Endpoints {
+		if !config.ValidDocumentProcessing(endpoint.DocumentProcessing) {
+			return nil, fmt.Errorf("provider %q has invalid document processing mode", endpoint.Name)
+		}
 		providerBaseURL := endpoint.BaseURL
 		upstreamModel := ""
 		if len(endpoint.Models) == 1 {
@@ -584,6 +588,7 @@ func NewWithError(cfg Config) (Provider, error) {
 			mirrorTimeout = 5 * time.Second
 		}
 		endpoints = append(endpoints, Endpoint{
+			DocumentProcessing:    endpoint.DocumentProcessing,
 			Name:                  endpoint.Name,
 			ProviderID:            endpoint.Name,
 			Type:                  endpoint.Type,
@@ -632,7 +637,7 @@ func NewWithError(cfg Config) (Provider, error) {
 			}
 		}
 		initialProviders[endpoint.Name] = ManagedProvider{ID: endpoint.Name, Type: endpoint.Type, BaseURL: strings.TrimRight(providerBaseURL, "/"), APIVersion: strings.TrimSpace(endpoint.APIVersion), AuthType: authType, AzureCloud: endpoint.AzureCloud, AzureAudience: endpoint.AzureAudience, Region: region, Enabled: enabled}
-		initialDeployments[endpoint.Name] = ModelDeployment{ID: endpoint.Name, ProviderID: endpoint.Name, ProviderType: endpoint.Type, UpstreamModel: upstreamModel, Models: append([]string(nil), endpoint.Models...), Capabilities: append([]string(nil), endpoint.Capabilities...), Priority: endpoint.Priority, Weight: deploymentWeight, GuardrailPolicy: endpoint.GuardrailPolicy, MaxRetries: endpoint.MaxRetries, CooldownAfterFailures: endpoint.CooldownAfterFailures, CooldownSeconds: endpoint.CooldownSeconds, MaxParallelRequests: endpoint.MaxParallelRequests, QueueCapacity: endpoint.QueueCapacity, QueueTimeoutMS: endpoint.QueueTimeoutMS, RateLimitRPM: endpoint.RateLimitRPM, RateLimitTPM: endpoint.RateLimitTPM, Enabled: enabled}
+		initialDeployments[endpoint.Name] = ModelDeployment{DocumentProcessing: endpoint.DocumentProcessing, ID: endpoint.Name, ProviderID: endpoint.Name, ProviderType: endpoint.Type, UpstreamModel: upstreamModel, Models: append([]string(nil), endpoint.Models...), Capabilities: append([]string(nil), endpoint.Capabilities...), Priority: endpoint.Priority, Weight: deploymentWeight, GuardrailPolicy: endpoint.GuardrailPolicy, MaxRetries: endpoint.MaxRetries, CooldownAfterFailures: endpoint.CooldownAfterFailures, CooldownSeconds: endpoint.CooldownSeconds, MaxParallelRequests: endpoint.MaxParallelRequests, QueueCapacity: endpoint.QueueCapacity, QueueTimeoutMS: endpoint.QueueTimeoutMS, RateLimitRPM: endpoint.RateLimitRPM, RateLimitTPM: endpoint.RateLimitTPM, Enabled: enabled}
 	}
 
 	hasPrimary := false
