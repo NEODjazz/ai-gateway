@@ -23,6 +23,13 @@ The interface must not weaken mandatory policies or bypass organization scope.
   continuation and expose approval before executing tools.
 - Images/PDF attachments, safe media preview/download, copy output, reasoning,
   citations, bounded raw events and request inspection.
+- Assistant output renders CommonMark and GFM (headings, lists, tables, links,
+  inline code and fenced/indented code blocks), including partial streaming
+  output. Code blocks show their language and copy the original code. Full
+  response copy and conversation replay preserve the original Markdown.
+  Model-supplied HTML stays inert; Markdown images do not load external URLs.
+  Links allow explicit HTTP/HTTPS, email and generated footnote anchors.
+  User messages, tool results, reasoning and diagnostic JSON remain plain text.
 - Tags, authorized MCP servers/toolsets, vector stores, guardrails and policy
   selection. Request-level selection must not relax mandatory policy.
 - Responses code interpreter and explicit container/file selection.

@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AuthProvider } from "../auth/AuthContext";
 import { PlaygroundPage } from "./PlaygroundPage";
@@ -21,6 +21,60 @@ function streamResponse(chunks: string[]) {
 afterEach(() => document.querySelectorAll('meta[name="ai-gateway-playground-origins"]').forEach((node) => node.remove()));
 
 describe("PlaygroundPage", () => {
+  it.each(["chat", "responses"])("renders Markdown %s answers while preserving copy and replay", async (endpoint) => {
+    const user = userEvent.setup();
+    const copy = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
+    const answer = '## Analysis\n\n**Important**\n\n```go\nfmt.Println("hello")\n```\n\n| Risk | Action |\n| --- | --- |\n| High | Review |';
+    const bodies: Array<Record<string, any>> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (path, options) => {
+      if (path === "/v1/models") return new Response('{"data":[{"id":"model"}]}');
+      bodies.push(JSON.parse(String(options?.body)));
+      return new Response(JSON.stringify(endpoint === "chat" ? { choices: [{ message: { content: answer } }] } : { id: "resp_markdown", status: "completed", output_text: answer }), { headers: { "Content-Type": "application/json" } });
+    });
+    authenticated(); await screen.findByText("1 authorized model");
+    if (endpoint === "responses") await user.click(screen.getByRole("tab", { name: "Responses API" }));
+    await user.click(screen.getByLabelText("Stream response"));
+    await user.type(screen.getByLabelText("Message"), "**literal user input**");
+    await user.click(screen.getByRole("button", { name: "Run request" }));
+    const conversation = within(screen.getByRole("region", { name: "Playground conversation" }));
+    await conversation.findByRole("heading", { name: "Analysis" });
+    expect(conversation.getByText("**literal user input**").tagName).toBe("PRE");
+    expect(conversation.getByRole("table")).toBeVisible();
+    await user.click(conversation.getByRole("button", { name: "Copy code" }));
+    expect(copy).toHaveBeenLastCalledWith('fmt.Println("hello")\n');
+    expect(bodies).toHaveLength(1);
+    await user.click(conversation.getByRole("button", { name: /^Copy response / }));
+    expect(copy).toHaveBeenLastCalledWith(answer);
+    await user.type(screen.getByLabelText("Message"), "Continue");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(bodies).toHaveLength(2));
+    expect(JSON.stringify(bodies[1])).toContain(JSON.stringify(answer).slice(1, -1));
+  });
+
+  it("renders an unfinished Markdown code block during Responses streaming", async () => {
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    const partial = '## Live answer\n\n```python\nprint(';
+    const answer = partial + '"done")\n```';
+    const encoder = new TextEncoder();
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (path) => path === "/v1/models" ? new Response('{"data":[{"id":"model"}]}') : new Response(new ReadableStream<Uint8Array>({ start(value) { controller = value; } }), { headers: { "Content-Type": "text/event-stream" } }));
+    authenticated(); await screen.findByText("1 authorized model");
+    await userEvent.click(screen.getByRole("tab", { name: "Responses API" }));
+    await userEvent.type(screen.getByLabelText("Message"), "Show code");
+    await userEvent.click(screen.getByRole("button", { name: "Run request" }));
+    await act(async () => controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "response.output_text.delta", delta: partial })}\n\n`)));
+    const conversation = within(screen.getByRole("region", { name: "Playground conversation" }));
+    await conversation.findByRole("heading", { name: "Live answer" });
+    expect(conversation.getByLabelText("python code").textContent).toBe("print(\n");
+    expect(screen.getByRole("button", { name: "Stop" })).toBeVisible();
+    await act(async () => {
+      controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "response.output_text.delta", delta: answer.slice(partial.length) })}\n\n`));
+      controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "response.completed", response: { id: "resp_live", status: "completed", output_text: answer } })}\n\n`));
+      controller.close();
+    });
+    await screen.findByRole("button", { name: "Send message" });
+    expect(conversation.getByLabelText("python code").textContent).toBe('print("done")\n');
+  });
+
   it.each(["json", "stream"])("defaults Ollama PDF Responses to browser history over %s", async (transport) => {
     const bodies: Array<Record<string, any>> = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(async (path, options) => {
@@ -672,9 +726,9 @@ describe("PlaygroundPage", () => {
     await userEvent.click(screen.getByRole("button", { name: "Run request" }));
     expect(await screen.findByText("Public answer")).toBeInTheDocument();
     const conversation = screen.getByRole("region", { name: "Playground conversation" });
-    expect(conversation.querySelector(".assistant > pre")).toHaveTextContent("Public answer");
-    expect(conversation.querySelector(".assistant > pre")).not.toHaveTextContent("tool-arguments");
-    expect(conversation.querySelector(".assistant > pre")).not.toHaveTextContent("private-reasoning");
+    expect(conversation.querySelector(".assistant > .playground-markdown")).toHaveTextContent("Public answer");
+    expect(conversation.querySelector(".assistant > .playground-markdown")).not.toHaveTextContent("tool-arguments");
+    expect(conversation.querySelector(".assistant > .playground-markdown")).not.toHaveTextContent("private-reasoning");
     expect(screen.getByText("Reasoning").closest("details")).toHaveTextContent("private-reasoning");
     expect(screen.getByText("Input tokens").nextElementSibling).toHaveTextContent("0");
   });
