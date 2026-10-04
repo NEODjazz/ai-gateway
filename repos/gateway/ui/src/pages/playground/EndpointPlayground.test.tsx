@@ -9,6 +9,19 @@ function setup(endpoint: SpecializedEndpoint) { return render(<EndpointPlaygroun
 const nativeJSON = (value: unknown) => new Response(typeof value === "string" ? value : JSON.stringify(value), { headers: { "Content-Type": "application/json" } });
 const run = () => userEvent.click(screen.getByRole("button", { name: "Run endpoint request" }));
 describe("Endpoint Playground", () => {
+  it.each(["messages", "interactions", "embeddings", "images"] as const)("uses an explicit %s model and keeps it when catalog options change", async (endpoint) => {
+    const payload = endpoint === "messages" ? { content: [{ type: "text", text: "Manual native reply" }] } : endpoint === "interactions" ? { id: "manual_reply", status: "completed", steps: [{ type: "model_output", content: [{ type: "text", text: "Manual native reply" }] }] } : endpoint === "embeddings" ? { data: [{ index: 0, embedding: [1, 2] }] } : { data: [] };
+    const mock = vi.spyOn(globalThis, "fetch").mockResolvedValue(nativeJSON(payload));
+    const value = playgroundConnection(new APIClient(() => "test-key"), "session", "", "");
+    const view = render(<EndpointPlayground endpoint={endpoint} connection={value} models={["listed-model"]} connectionControls={null} connectionChanged={false} />);
+    await userEvent.click(screen.getByRole("button", { name: "Endpoint model: enter ID manually" })); fireEvent.change(screen.getByLabelText("Endpoint model"), { target: { value: "manual-model" } });
+    view.rerender(<EndpointPlayground endpoint={endpoint} connection={value} models={["new-listed-model"]} connectionControls={null} connectionChanged={false} />);
+    expect(screen.getByLabelText("Endpoint model")).toHaveValue("manual-model"); await userEvent.type(screen.getByLabelText(endpoint === "embeddings" ? "Embedding input" : "Endpoint input"), "Manual prompt"); await run();
+    await waitFor(() => expect(mock).toHaveBeenCalledOnce()); expect(JSON.parse(String(mock.mock.calls[0][1]?.body)).model).toBe("manual-model");
+    if (endpoint === "messages" || endpoint === "interactions") await screen.findByText("Manual native reply");
+    await userEvent.click(screen.getByRole("button", { name: "Endpoint model: choose from catalog" })); expect(screen.getByLabelText("Endpoint model")).toHaveTextContent("new-listed-model"); expect(screen.queryByText("Manual native reply")).not.toBeInTheDocument();
+  });
+
   it.each(["json", "fallback", "stream"])("shows failed Interactions output and actual usage over %s without retrying", async (transport) => {
     const response = { id: "interaction_failed", status: "failed", steps: [{ type: "model_output", content: [{ type: "text", text: "Retained failed native answer" }] }], usage: { total_input_tokens: 0, total_output_tokens: 3 }, error: { message: "Provider execution failed" } };
     const mock = vi.spyOn(globalThis, "fetch").mockResolvedValue(transport === "stream"

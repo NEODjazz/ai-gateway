@@ -8,6 +8,7 @@ import { GatewayButton } from "../components/GatewayButton";
 import { PageTabs } from "../components/PageTabs";
 import { ToolbarIconButton } from "../components/ToolbarIconButton";
 import { GravityThemeScope } from "../components/GravityThemeScope";
+import { ModelControl } from "./playground/ModelControl";
 import { AreaControl, SelectControl, TextControl } from "./playground/Controls";
 import { conversationAttachments, conversationInput, retainConversation } from "./playground/attachments";
 import type { Attachment } from "./playground/endpointRequests";
@@ -52,7 +53,8 @@ export function PlaygroundPage() {
   const [visitedCompare, setVisitedCompare] = useState(false);
   const [visitedCompliance, setVisitedCompliance] = useState(false);
   const [visitedAgents, setVisitedAgents] = useState(false);
-  const [models, setModels] = useState<string[]>([]);
+  const [modelCatalog, setModelCatalog] = useState({ connection, models: [] as string[] });
+  const models = useMemo(() => modelCatalog.connection === connection ? modelCatalog.models : [], [modelCatalog, connection]);
   const [modelsError, setModelsError] = useState("");
   const [loadingModels, setLoadingModels] = useState(true);
   const [model, setModel] = useState("");
@@ -102,13 +104,13 @@ export function PlaygroundPage() {
       const payload = await client.request<ModelList>(connection.path("/v1/models"), { signal: controller.signal, maximumResponseBytes: 8 * 1024 * 1024 });
       if (generation !== modelGeneration.current) return;
       const available = [...new Set((payload.data || []).map((item) => item.id.trim()).filter(Boolean))].sort();
-      setModels(available);
-      setModel((current) => available.includes(current) ? current : available[0] || "");
-    } catch (cause) { if (generation === modelGeneration.current && !controller.signal.aborted) { setModels([]); setModel(""); setModelsError(cause instanceof Error ? cause.message : "Could not load models"); } }
+      setModelCatalog({ connection, models: available });
+      setModel((current) => current || available[0] || "");
+    } catch (cause) { if (generation === modelGeneration.current && !controller.signal.aborted) { setModelCatalog({ connection, models: [] }); setModelsError(cause instanceof Error ? cause.message : "Could not load models"); } }
     finally { if (generation === modelGeneration.current) setLoadingModels(false); }
   }
 
-  useEffect(() => { void loadModels(); return () => { modelGeneration.current++; modelAbortRef.current?.abort(); }; }, [connection]);
+  useEffect(() => { setModel(""); setModelCatalog({ connection, models: [] }); void loadModels(); return () => { modelGeneration.current++; modelAbortRef.current?.abort(); }; }, [connection]);
   useEffect(() => () => { attachmentGeneration.current++; abortRef.current?.abort(); abortRef.current = undefined; }, []);
 
   function newSession() {
@@ -136,7 +138,7 @@ export function PlaygroundPage() {
   function applyConnection() {
     try {
       playgroundConnection(sessionClient, keySource, testKey, baseURL);
-      newSession(); setPricing(defaultPricing); setModels([]); setModel("");
+      newSession(); setPricing(defaultPricing); setModelCatalog({ connection, models: [] }); setModel("");
       setAppliedConnection({ source: keySource, key: keySource === "custom" ? testKey : "", url: baseURL });
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not configure connection"); }
   }
@@ -300,12 +302,7 @@ export function PlaygroundPage() {
           <h2>Configurations</h2>
           {connectionControls}
           <PageTabs className="playground-api-tabs" label="Playground API" value={mode} items={[{ value: "chat", label: "Chat Completions" }, { value: "responses", label: "Responses API" }]} onUpdate={changeMode} />
-          <label>Model<div className="playground-model-control">
-            <GravityThemeScope className="gravity-playground-control">{!loadingModels && !models.length
-              ? <TextInput aria-label="Model" size="l" disabled={running} value={model} onUpdate={(value) => { setModel(value); setPricing(defaultPricing); newSession(); }} placeholder="Enter a model ID" />
-              : <Select aria-label="Model" size="l" width="max" filterable loading={loadingModels} disabled={running || loadingModels} value={model ? [model] : []} options={models.map((item) => ({ value: item, content: item }))} placeholder="Select an authorized model" onUpdate={([value]) => { setModel(value || ""); setPricing(defaultPricing); newSession(); }} />}
-            </GravityThemeScope><ToolbarIconButton icon="refresh" label="Refresh models" disabled={running || loadingModels} onClick={() => void loadModels()} />
-          </div><span className="playground-model-help">{models.length ? `${models.length.toLocaleString()} authorized model${models.length === 1 ? "" : "s"}` : "Model access is checked by the gateway"}</span></label>
+          <div><ModelControl label="Model" value={model} models={models} scope={connection} loading={loadingModels} disabled={running} onUpdate={(value) => { setModel(value); setPricing(defaultPricing); newSession(); }} refresh={<ToolbarIconButton icon="refresh" label="Refresh models" disabled={running || loadingModels} onClick={() => void loadModels()} />} /><span className="playground-model-help">{models.length ? `${models.length.toLocaleString()} authorized model${models.length === 1 ? "" : "s"}` : "Model access is checked by the gateway"}</span></div>
           {modelsError && <p className="form-error" role="status">Model discovery: {modelsError}</p>}
           <TextControl label="Temperature" disabled={running} type="number" controlProps={{ min: 0, max: 2, step: 0.1 }} value={temperature} onUpdate={setTemperature} placeholder="Provider default" />
           <TextControl label="Maximum output tokens" disabled={running} type="number" controlProps={{ min: 1, step: 1 }} value={maxTokens} onUpdate={setMaxTokens} placeholder="Provider default" />

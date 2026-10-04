@@ -12,6 +12,19 @@ function answer(text: string) { return new Response(JSON.stringify({ choices: [{
 async function send(text: string) { await userEvent.type(screen.getByLabelText("Comparison prompt"), text); await userEvent.click(screen.getByRole("button", { name: "Compare models" })); }
 
 describe("Compare Playground", () => {
+  it("keeps independently selected manual models and histories when catalog options change", async () => {
+    const mock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_path, options) => answer(`Reply for ${JSON.parse(String(options?.body)).model}`));
+    const value = connection(); const view = render(<ComparePlayground connection={value} models={["alpha", "beta"]} connectionChanged={false} connectionControls={null} />);
+    await userEvent.click(screen.getByRole("button", { name: "Model 1: enter ID manually" })); fireEvent.change(screen.getByLabelText("Model 1"), { target: { value: "manual-model" } });
+    await send("First prompt"); await screen.findByText("Reply for manual-model"); await screen.findByText("Reply for beta");
+    view.rerender(<ComparePlayground connection={value} models={["gamma"]} connectionChanged={false} connectionControls={null} />);
+    expect(screen.getByLabelText("Model 1")).toHaveValue("manual-model"); expect(screen.getByLabelText("Model 2")).toHaveValue("beta");
+    await send("Second prompt"); await waitFor(() => expect(mock).toHaveBeenCalledTimes(4));
+    const bodies = mock.mock.calls.map(([, options]) => JSON.parse(String(options?.body)));
+    expect(bodies.map((body) => body.model)).toEqual(["manual-model", "beta", "manual-model", "beta"]);
+    expect(bodies[2].messages).toEqual([{ role: "user", content: "First prompt" }, { role: "assistant", content: "Reply for manual-model", reasoning_content: "retained reasoning" }, { role: "user", content: "Second prompt" }]);
+  });
+
   it("retains actual output and usage when a tool batch is invalid and requires clearing that panel", async () => {
     const call = { id: "duplicate", type: "function", function: { name: "lookup", arguments: "{}" } };
     const mock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_path, options) => JSON.parse(String(options?.body)).model === "alpha"

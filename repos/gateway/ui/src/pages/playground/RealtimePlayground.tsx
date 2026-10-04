@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "rea
 import { GatewayButton } from "../../components/GatewayButton";
 import { ModalFrame } from "../../components/ModalFrame";
 import { PageTabs } from "../../components/PageTabs";
+import { ModelControl } from "./ModelControl";
 import { AreaControl, SelectControl, TextControl } from "./Controls";
 import { CopyOutput } from "./OutputDetails";
 import type { PlaygroundConnection } from "./requests";
@@ -57,7 +58,7 @@ export function RealtimePlayground({ connection, connectionChanged, connectionCo
   }
   useEffect(() => { disconnect(true); setModel(models[0] || ""); return () => { releaseConnection(); history.current.forEach((turn) => { if (turn.audio) URL.revokeObjectURL(turn.audio.url); }); history.current = []; }; }, [connection]);
   useEffect(() => { if (connectionChanged) disconnect(); }, [connectionChanged]);
-  useEffect(() => { if (status === "disconnected" && models.length && !models.includes(model)) setModel(models[0]); }, [models]);
+  useEffect(() => { if (status === "disconnected" && models.length && !model) setModel(models[0]); }, [models]);
   function append(turn: Omit<Turn, "id">) {
     const next = [...history.current, { ...turn, id: ++turnID.current }]; let removed = 0;
     const tooLarge = () => next.length > 40 || next.reduce((sum, item) => sum + new TextEncoder().encode(item.text).length, 0) > maximumRealtimeTextBytes || next.reduce((sum, item) => sum + (item.audio?.bytes || 0), 0) > 16 * 1024 * 1024;
@@ -194,7 +195,7 @@ export function RealtimePlayground({ connection, connectionChanged, connectionCo
   const patch = (value: Partial<RealtimeSettings>) => setSettings((previous) => ({ ...previous, ...value }));
   return <div className="playground-workspace playground-config-layout">
     <aside className="playground-side-panel"><section className="playground-parameters-card"><h2>Configurations</h2>{connectionControls}
-      {models.length ? <SelectControl label="Realtime model" value={model} options={models.map((id) => ({ value: id, content: id }))} disabled={locked} onUpdate={(value) => { setModel(value); clearHistory(); }} /> : <TextControl label="Realtime model" value={model} disabled={locked} onUpdate={setModel} />}
+      <ModelControl label="Realtime model" value={model} models={models} scope={connection} disabled={locked} onUpdate={(value) => { setModel(value); clearHistory(); }} />
       <SelectControl label="Realtime mode" value={settings.mode} disabled={locked} options={[{ value: "text", content: "Text" }, { value: "voice", content: "Voice and text" }]} onUpdate={(mode) => patch({ mode })} />
       <SelectControl label="Realtime API dialect" value={settings.dialect} disabled={locked} options={[{ value: "current", content: "Current Realtime" }, { value: "legacy", content: "Legacy Realtime" }]} onUpdate={(dialect) => patch({ dialect })} />
       {settings.mode === "voice" && <TextControl label="Realtime voice" value={settings.voice} disabled={locked} onUpdate={(voice) => patch({ voice })} />}

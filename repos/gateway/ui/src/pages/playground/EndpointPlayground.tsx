@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "rea
 import { Checkbox } from "@gravity-ui/uikit";
 import { GatewayButton } from "../../components/GatewayButton";
 import { GravityThemeScope } from "../../components/GravityThemeScope";
+import { ModelControl } from "./ModelControl";
 import { AreaControl, SelectControl, TextControl } from "./Controls";
 import { CodeDialog } from "./CodeDialog";
 import { buildEndpointRequest, defaultEndpointSettings, readAttachment, safeMediaURL, type Attachment, type EndpointSettings, type SpecializedEndpoint } from "./endpointRequests";
@@ -39,7 +40,7 @@ export function EndpointPlayground({ endpoint, connection, connectionChanged, co
   const imageEndpoint = endpoint === "images" || endpoint === "image-edits";
   useEffect(() => () => { generation.current++; abort.current?.abort(); if (audioURL.current) URL.revokeObjectURL(audioURL.current); }, []);
   useEffect(() => { clear(); setInput(""); setAttachments([]); setMask(undefined); if (attachmentInput.current) attachmentInput.current.value = ""; if (maskInput.current) maskInput.current.value = ""; setModel(models[0] || ""); setPricing(defaultPricing); }, [connection]);
-  useEffect(() => { if (endpoint !== "a2a" && endpoint !== "mcp" && models.length && !models.includes(model)) { setModel(models[0]); clear(); } }, [models]);
+  useEffect(() => { if (endpoint !== "a2a" && endpoint !== "mcp" && models.length && !model) { setModel(models[0]); clear(); } }, [models]);
   const patch = (value: Partial<EndpointSettings>) => setSettings((current) => ({ ...current, ...value }));
   function clear() { generation.current++; abort.current?.abort(); abort.current = undefined; setRunning(false); setOutput(undefined); setCode(undefined); setPending(""); setHistory([]); setHistoryDropped(0); setPreviousID(""); setInteractionJob(undefined); setCalls([]); setToolResults([]); setUnreviewableTools(false); setReading(false); setError(""); if (audioURL.current) URL.revokeObjectURL(audioURL.current); audioURL.current = undefined; }
   async function attach(files: FileList | null, isMask = false) {
@@ -157,7 +158,7 @@ export function EndpointPlayground({ endpoint, connection, connectionChanged, co
 
   return <div className="playground-workspace playground-config-layout">
     <aside className="playground-side-panel"><section className="playground-parameters-card"><h2>Configurations</h2>{connectionControls}
-      {!["a2a", "mcp"].includes(endpoint) && (models.length ? <SelectControl label="Endpoint model" value={model} disabled={running} options={models.map((id) => ({ value: id, content: id }))} onUpdate={(value) => { setModel(value); setPricing(defaultPricing); clear(); }} /> : <TextControl label="Endpoint model" value={model} disabled={running} onUpdate={(value) => { setModel(value); setPricing(defaultPricing); clear(); }} />)}
+      {!["a2a", "mcp"].includes(endpoint) && <ModelControl label="Endpoint model" value={model} models={models} scope={connection} disabled={running} onUpdate={(value) => { setModel(value); setPricing(defaultPricing); clear(); }} />}
       {textEndpoint && <><AreaControl label="Native system instructions" rows={3} value={settings.instructions} disabled={running} onUpdate={(instructions) => patch({ instructions })} /><TextControl label="Native maximum output tokens" value={settings.limit} type="number" disabled={running} onUpdate={(limit) => patch({ limit })} /><TextControl label="Native temperature" value={settings.temperature} type="number" disabled={running} onUpdate={(temperature) => patch({ temperature })} /><TextControl label="Native Top P" value={settings.topP} type="number" disabled={running} onUpdate={(topP) => patch({ topP })} /><GravityThemeScope><Checkbox controlProps={{ "aria-label": "Stream native response" }} checked={settings.stream} disabled={running} onUpdate={(stream) => patch({ stream })}>Stream response</Checkbox></GravityThemeScope></>}
       {imageEndpoint && <><TextControl label="Image size" value={settings.size} disabled={running} onUpdate={(size) => patch({ size })} placeholder="Provider default" /><TextControl label="Image count" type="number" value={settings.count} disabled={running} onUpdate={(count) => patch({ count })} /><TextControl label="Image quality" value={settings.quality} disabled={running} onUpdate={(quality) => patch({ quality })} placeholder="Provider default" /></>}
       {endpoint === "embeddings" && <TextControl label="Embedding dimensions" value={settings.dimensions} disabled={running} type="number" onUpdate={(dimensions) => patch({ dimensions })} placeholder="Model default" />}

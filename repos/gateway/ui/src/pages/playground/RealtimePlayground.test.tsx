@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { APIClient } from "../../api/client";
 import { playgroundConnection } from "./requests";
@@ -32,6 +32,15 @@ beforeEach(() => {
 });
 afterEach(() => { vi.unstubAllGlobals(); vi.mocked(startRealtimeRecorder).mockReset(); });
 describe("Realtime Playground", () => {
+  it("requests a ticket for an explicit manual model and keeps selection on catalog refresh", async () => {
+    const value = connection(); const view = render(<RealtimePlayground connection={value} models={["listed-model"]} connectionControls={null} connectionChanged={false} />);
+    await userEvent.click(screen.getByRole("button", { name: "Realtime model: enter ID manually" })); fireEvent.change(screen.getByLabelText("Realtime model"), { target: { value: "manual-realtime" } });
+    view.rerender(<RealtimePlayground connection={value} models={["new-listed-model"]} connectionControls={null} connectionChanged={false} />);
+    expect(screen.getByLabelText("Realtime model")).toHaveValue("manual-realtime"); await ready();
+    const mock = vi.mocked(globalThis.fetch); expect(JSON.parse(String(mock.mock.calls[0][1]?.body)).model).toBe("manual-realtime"); expect(Socket.instances[0].url).toContain("model=manual-realtime");
+    expect(screen.getByLabelText("Realtime model")).toBeDisabled(); expect(screen.getByRole("button", { name: "Realtime model: choose from catalog" })).toBeDisabled();
+  });
+
   it("waits for configuration, sends typed text once and displays finalized usage including zero", async () => {
     setup(); expect(screen.getByLabelText("Realtime message")).toBeDisabled(); const socket = await ready();
     expect(socket.sent[0]).toMatchObject({ type: "session.update", session: { output_modalities: ["text"] } });

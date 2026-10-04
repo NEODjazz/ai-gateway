@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties, type FormEvent, type R
 import { Checkbox } from "@gravity-ui/uikit";
 import { GatewayButton } from "../../components/GatewayButton";
 import { GravityThemeScope } from "../../components/GravityThemeScope";
+import { ModelControl } from "./ModelControl";
 import { AreaControl, SelectControl, TextControl } from "./Controls";
 import { buildTextRequest, defaultGenerationSettings, type GenerationSettings, type Message, type PlaygroundConnection } from "./requests";
 import { runText, type TextRun } from "./runText";
@@ -58,13 +59,13 @@ export function ComparePlayground({ connection, models, connectionControls, conn
     agentEpoch.current++; agentAbort.current?.abort(); setAgents([]); setAgentsError(""); setLoadingAgents(false);
     for (const controller of controllers.current.values()) controller.abort(); controllers.current.clear();
     setRunning(false); setError("");
-    setPanels((current) => current.map((panel) => ({ ...newPanel(panel.id, ""), settings: panel.settings, instructions: panel.instructions })));
+    setPanels((current) => current.map((panel, index) => ({ ...newPanel(panel.id, models[index] || models[0] || ""), settings: panel.settings, instructions: panel.instructions })));
   }, [connection]);
   useEffect(() => {
     if (!models.length) return;
-    if (panels.some((panel) => panel.kind === "model" && !models.includes(panel.model))) {
+    if (panels.some((panel) => panel.kind === "model" && !panel.model)) {
       cancel();
-      setPanels((current) => current.map((panel, index) => panel.kind === "agent" || panel.model && models.includes(panel.model) ? panel : { ...newPanel(panel.id, models[index] || models[0]), settings: panel.settings, instructions: panel.instructions }));
+      setPanels((current) => current.map((panel, index) => panel.kind === "agent" || panel.model ? panel : { ...newPanel(panel.id, models[index] || models[0]), settings: panel.settings, instructions: panel.instructions }));
     }
   }, [models]);
 
@@ -218,8 +219,7 @@ export function ComparePlayground({ connection, models, connectionControls, conn
         <div className="playground-output-heading"><h2>{panel.kind === "model" ? "Model" : "Agent"} {index + 1}</h2><GatewayButton view="flat" aria-label={`Remove comparison ${index + 1}`} disabled={running || panels.length <= 1} onClick={() => setPanels((current) => current.filter((item) => item.id !== panel.id))}>Remove</GatewayButton></div>
         <GatewayButton view="outlined" disabled={running} onClick={() => setPanels((items) => items.map((item) => item.id === panel.id ? { ...newPanel(item.id, item.model), kind: item.kind, agent: item.agent, settings: item.settings, instructions: item.instructions, pricing: item.pricing, resources: item.resources } : item))}>Clear comparison {index + 1} chat</GatewayButton>
         <SelectControl label={`Comparison type ${index + 1}`} value={panel.kind} disabled={running} options={[{ value: "model", content: "Model" }, { value: "agent", content: "Saved agent" }]} onUpdate={(kind) => setPanels((items) => items.map((item) => item.id === panel.id ? { ...newPanel(item.id, kind === "model" ? models[index] || models[0] || "" : ""), kind } : item))} />
-        {panel.kind === "model" ? models.length ? <SelectControl label={`Model ${index + 1}`} value={panel.model} disabled={running} options={models.map((model) => ({ value: model, content: model }))} onUpdate={(model) => setPanels((current) => current.map((item) => item.id === panel.id ? { ...newPanel(item.id, model), settings: item.settings, instructions: item.instructions } : item))} />
-          : <TextControl label={`Model ${index + 1}`} value={panel.model} disabled={running} onUpdate={(model) => setPanels((current) => current.map((item) => item.id === panel.id ? { ...newPanel(item.id, model), settings: item.settings, instructions: item.instructions } : item))} placeholder="Enter a model ID" /> : agents.length ? <SelectControl label={`Agent ${index + 1}`} value={panel.agent} disabled={running} options={[{ value: "", content: "Select an authorized agent" }, ...agents.map((item) => ({ value: item.id, content: `${item.name} · ${item.model}` }))]} onUpdate={(agent) => setPanels((items) => items.map((item) => item.id === panel.id ? { ...newPanel(item.id, agents.find((value) => value.id === agent)?.model || ""), kind: "agent", agent } : item))} /> : <TextControl label={`Agent ${index + 1}`} value={panel.agent} disabled={running} onUpdate={(agent) => setPanels((items) => items.map((item) => item.id === panel.id ? { ...newPanel(item.id, ""), kind: "agent", agent } : item))} placeholder="Load agents or enter an authorized agent ID" />}
+        {panel.kind === "model" ? <ModelControl label={`Model ${index + 1}`} value={panel.model} models={models} scope={connection} disabled={running} onUpdate={(model) => setPanels((current) => current.map((item) => item.id === panel.id ? { ...newPanel(item.id, model), settings: item.settings, instructions: item.instructions } : item))} /> : agents.length ? <SelectControl label={`Agent ${index + 1}`} value={panel.agent} disabled={running} options={[{ value: "", content: "Select an authorized agent" }, ...agents.map((item) => ({ value: item.id, content: `${item.name} · ${item.model}` }))]} onUpdate={(agent) => setPanels((items) => items.map((item) => item.id === panel.id ? { ...newPanel(item.id, agents.find((value) => value.id === agent)?.model || ""), kind: "agent", agent } : item))} /> : <TextControl label={`Agent ${index + 1}`} value={panel.agent} disabled={running} onUpdate={(agent) => setPanels((items) => items.map((item) => item.id === panel.id ? { ...newPanel(item.id, ""), kind: "agent", agent } : item))} placeholder="Load agents or enter an authorized agent ID" />}
         {panel.kind === "model" && <>
         <details className="playground-advanced"><summary>Model settings</summary>
           <AreaControl label={`Instructions ${index + 1}`} rows={2} value={panel.instructions} disabled={running} onUpdate={(value) => updateInstructions(panel.id, value)} />

@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { APIClient } from "../../api/client";
 import { AgentBuilder } from "./AgentBuilder";
@@ -27,6 +27,14 @@ async function selectAgent() {
 }
 
 describe("Agent Builder", () => {
+  it("saves the explicitly entered model instead of substituting a discovered model", async () => {
+    const mock = fixtures(); setup(); await waitFor(() => expect(screen.getByRole("button", { name: "New agent" })).toBeEnabled()); await userEvent.click(screen.getByRole("button", { name: "New agent" }));
+    await userEvent.type(screen.getByLabelText("Agent ID"), "manual-writer"); await userEvent.type(screen.getByLabelText("Agent name"), "Manual writer");
+    await userEvent.click(screen.getByRole("button", { name: "Agent model: enter ID manually" })); fireEvent.change(screen.getByLabelText("Agent model"), { target: { value: "manual-model" } });
+    await userEvent.click(screen.getByRole("button", { name: "Save agent" })); await screen.findByText("Agent saved. Chat and tests use this saved configuration.");
+    const put = mock.mock.calls.find(([, options]) => options?.method === "PUT"); expect(JSON.parse(String(put?.[1]?.body)).model).toBe("manual-model"); expect(screen.getByLabelText("Agent model")).toHaveValue("manual-model");
+  });
+
   it("reads full configuration, preserves settings on edit and executes only saved A2A configuration", async () => {
     const mock = fixtures(); setup(); await selectAgent();
     expect(screen.getByLabelText("Agent temperature")).toHaveValue(0); expect(screen.getByLabelText("Agent maximum output tokens")).toHaveValue(400);

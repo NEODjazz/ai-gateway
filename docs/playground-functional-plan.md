@@ -186,6 +186,10 @@ compatibility must be distinguished from merely having an endpoint selector.
   review controls; a failed terminal read restores them for explicit retry using
   the last successful continuity ID. Results, original definitions and numeric
   literals survive both API-managed and browser-managed history.
+- [x] Added manual model entry with a populated catalog in Chat, Responses,
+  native/media endpoints, Realtime, Compare and Agent Builder. Refresh preserves
+  explicit selections; changing the connection discards the previous catalog.
+  Manual entry does not grant access or replace a rejected model automatically.
 - [ ] Finish media/tool output, policy selection and full conversation verification.
 - [ ] Complete endpoint-specific execution and media/tool handling.
 - [ ] Complete comparison, compliance and agent views.
@@ -193,6 +197,31 @@ compatibility must be distinguished from merely having an endpoint selector.
 - [ ] Commit and push tested increments; verify final CI and local deployment.
 
 Completion requires working flows and evidence for every requirement above.
+
+## Explicit model selection
+
+Every model picker permits manual entry even when model discovery succeeds.
+Refreshing the catalog changes its suggestions without replacing an explicit ID,
+discarding conversation history or dropping selected prompt policies. A failed
+catalog read retains the selected ID and shows the discovery error. Switching
+back to the catalog preserves a listed ID, or explicitly selects its first option
+when the current ID is absent. An actual model change resets its conversation and
+reviewed results through the existing lifecycle.
+
+Catalog state is bound to the applied connection. Changing credentials or the
+gateway URL hides the previous catalog immediately, clears selections and pending
+results, and rejects late discovery responses. Manual entry changes no model
+grant: normal Gateway authorization, compatibility checks, policy and billing
+apply, and a rejected model produces a visible error without substitution.
+
+Regression coverage includes populated/empty/unavailable catalogs, retained
+history and policies, credential changes with pending discovery, denied models,
+keyboard entry and locked execution controls. Each view's actual request or saved
+agent configuration carries the chosen ID. Browser verification under the actual
+console CSP used Chat and Responses HTTP handlers and a synthetic HTTP adapter,
+then compared a manual ID against an independent catalog selection. Four explicit
+requests returned the expected models; code export retained the manual ID and
+the browser recorded no errors. No real provider or billing was invoked.
 Having a selector, a disabled control or a raw JSON viewer alone is insufficient.
 
 ## Failed text execution and reported usage

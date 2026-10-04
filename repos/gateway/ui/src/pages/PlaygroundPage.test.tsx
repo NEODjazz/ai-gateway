@@ -21,6 +21,54 @@ function streamResponse(chunks: string[]) {
 afterEach(() => document.querySelectorAll('meta[name="ai-gateway-playground-origins"]').forEach((node) => node.remove()));
 
 describe("PlaygroundPage", () => {
+  it("retains a manual selection after catalog failure and shows a denied model without substituting another", async () => {
+    let catalogs = 0;
+    const mock = vi.spyOn(globalThis, "fetch").mockImplementation(async (path) => path === "/v1/models"
+      ? ++catalogs === 1 ? new Response('{"data":[{"id":"listed-model"}]}') : new Response('{"error":{"message":"Catalog unavailable"}}', { status: 503 })
+      : new Response('{"error":{"message":"Model access denied"}}', { status: 403 }));
+    authenticated(); await screen.findByText("1 authorized model"); await userEvent.click(screen.getByRole("button", { name: "Model: enter ID manually" }));
+    fireEvent.change(screen.getByLabelText("Model"), { target: { value: "denied-model" } });
+    await userEvent.click(screen.getByRole("button", { name: "Refresh models" })); await screen.findByText(/Model discovery: Catalog unavailable/);
+    expect(screen.getByLabelText("Model")).toHaveValue("denied-model");
+    await userEvent.type(screen.getByLabelText("Message"), "Keep my prompt"); await userEvent.click(screen.getByRole("button", { name: "Run request" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Model access denied"); expect(screen.getByLabelText("Message")).toHaveValue("Keep my prompt"); expect(screen.getByLabelText("Model")).toHaveValue("denied-model");
+    const calls = mock.mock.calls.filter(([path]) => path === "/v1/chat/completions"); expect(calls).toHaveLength(1); expect(JSON.parse(String(calls[0][1]?.body)).model).toBe("denied-model");
+  });
+  it("discards the old manual model and catalog while a new credential's discovery is pending", async () => {
+    let resolve: (response: Response) => void = () => {};
+    const mock = vi.spyOn(globalThis, "fetch").mockImplementation(async (path, options) => path === "/v1/models"
+      ? new Headers(options?.headers).get("Authorization") === "Bearer new-test-key" ? new Promise<Response>((done) => resolve = done) : new Response('{"data":[{"id":"old-listed-model"}]}')
+      : new Response('{"choices":[{"message":{"content":"Private old answer"}}]}', { headers: { "Content-Type": "application/json" } }));
+    authenticated(); await screen.findByText("1 authorized model"); await userEvent.click(screen.getByRole("button", { name: "Model: enter ID manually" }));
+    fireEvent.change(screen.getByLabelText("Model"), { target: { value: "old-manual-model" } });
+    await userEvent.type(screen.getByLabelText("Message"), "Private old prompt"); await userEvent.click(screen.getByRole("button", { name: "Run request" })); await screen.findByText("Private old answer");
+    await userEvent.click(screen.getByLabelText("Virtual key source")); await userEvent.click(screen.getByRole("option", { name: "Test API key" }));
+    await userEvent.type(screen.getByLabelText("Test API key"), "new-test-key"); await userEvent.click(screen.getByRole("button", { name: "Apply connection" }));
+    await waitFor(() => expect(mock.mock.calls.filter(([path]) => path === "/v1/models")).toHaveLength(2));
+    expect(screen.getByLabelText("Model")).toHaveValue(""); expect(screen.queryByText("old-listed-model")).not.toBeInTheDocument(); expect(screen.queryByText("Private old answer")).not.toBeInTheDocument();
+    await act(async () => resolve(new Response('{"data":[{"id":"new-listed-model"}]}')));
+    expect(screen.getByLabelText("Model")).toHaveTextContent("new-listed-model"); expect(screen.queryByRole("textbox", { name: "Model" })).not.toBeInTheDocument();
+  });
+
+  it.each(["chat", "responses"])("uses a manual model with a populated catalog in %s and preserves it on refresh", async (endpoint) => {
+    let catalogs = 0;
+    const mock = vi.spyOn(globalThis, "fetch").mockImplementation(async (path) => path === "/v1/models"
+      ? new Response(JSON.stringify({ data: [{ id: ++catalogs === 1 ? "catalog-model" : "refreshed-model" }] }))
+      : new Response(JSON.stringify(endpoint === "chat" ? { choices: [{ message: { content: "Manual model answer" } }] } : { id: "resp_manual_model", status: "completed", output_text: "Manual model answer" }), { headers: { "Content-Type": "application/json" } }));
+    authenticated(); await screen.findByText("1 authorized model");
+    if (endpoint === "responses") await userEvent.click(screen.getByRole("tab", { name: "Responses API" }));
+    await userEvent.click(screen.getByRole("button", { name: "Model: enter ID manually" }));
+    fireEvent.change(screen.getByLabelText("Model"), { target: { value: "manual-model" } });
+    await userEvent.click(screen.getByRole("button", { name: "Refresh models" })); await waitFor(() => expect(catalogs).toBe(2));
+    expect(screen.getByLabelText("Model")).toHaveValue("manual-model");
+    await userEvent.type(screen.getByLabelText("Message"), "Use my explicit model"); await userEvent.click(screen.getByRole("button", { name: "Run request" }));
+    await screen.findByText("Manual model answer");
+    const calls = mock.mock.calls.filter(([path]) => path === `/v1/${endpoint === "chat" ? "chat/completions" : "responses"}`);
+    expect(calls).toHaveLength(1); expect(JSON.parse(String(calls[0][1]?.body)).model).toBe("manual-model");
+    await userEvent.click(screen.getByRole("button", { name: "Model: choose from catalog" }));
+    expect(screen.getByLabelText("Model")).toHaveTextContent("refreshed-model"); expect(screen.queryByText("Manual model answer")).not.toBeInTheDocument();
+  });
+
   it.each(["json", "fallback", "stream"])("shows failed Responses output and real usage over %s without retrying", async (transport) => {
     const response = { id: "resp_failed", status: "failed", output: [{ type: "message", role: "assistant", content: [{ type: "output_text", text: "Retained failed answer" }] }], usage: { input_tokens: 0, output_tokens: 3 }, error: { message: "Provider execution failed" } };
     const mock = vi.spyOn(globalThis, "fetch").mockImplementation(async (path) => path === "/v1/models" ? new Response('{"data":[{"id":"model"}]}')
@@ -398,7 +446,7 @@ describe("PlaygroundPage", () => {
     expect(mock.mock.calls.some(([path]) => String(path).includes("/mcp/"))).toBe(false);
     expect(JSON.parse(String(mock.mock.calls[2][1]?.body)).messages.at(-1).content).toContain("User declined");
   });
-  it("preserves selected policies across workspace tabs, and resets them when refreshed models change scope", async () => {
+  it("preserves selected policies and model across catalog refresh, and resets policies on explicit model change", async () => {
     let model = "first";
     const mock = vi.spyOn(globalThis, "fetch").mockImplementation(async (path) => {
       if (path === "/v1/models") return new Response(JSON.stringify({ data: [{ id: model }] }));
@@ -409,7 +457,9 @@ describe("PlaygroundPage", () => {
     await userEvent.click(screen.getByRole("tab", { name: "Compliance" })); await userEvent.click(screen.getByRole("tab", { name: "Chat" }));
     await userEvent.type(screen.getByLabelText("Message"), "Check preserved"); await userEvent.click(screen.getByRole("button", { name: "Run request" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("blocked by policy strict");
-    model = "second"; await userEvent.click(screen.getByRole("button", { name: "Refresh models" })); await waitFor(() => expect(screen.getByLabelText("Model")).toHaveTextContent("second"));
+    model = "second"; await userEvent.click(screen.getByRole("button", { name: "Refresh models" })); await waitFor(() => expect(screen.getByLabelText("Model")).toHaveValue("first"));
+    expect(screen.getByText(/Active selections/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Model: choose from catalog" })); expect(screen.getByLabelText("Model")).toHaveTextContent("second");
     await userEvent.click(screen.getByText("Tools, resources and policies")); expect(screen.queryByText(/Active selections/)).not.toBeInTheDocument();
     expect(mock.mock.calls.filter(([path]) => path === "/guardrails/apply_guardrail")).toHaveLength(1);
   });
