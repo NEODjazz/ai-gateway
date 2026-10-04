@@ -962,16 +962,21 @@ func decodeA2ATask(payload []byte) (a2aTask, error) {
 }
 
 func decodeA2AStoredTask(payload []byte) (a2aTask, string, error) {
-	if len(payload) == 0 || len(payload) > a2astate.MaxPayloadBytes {
+	if len(payload) == 0 || len(payload) > a2astate.MaxPayloadBytes || !json.Valid(payload) {
 		return a2aTask{}, "", a2astate.ErrInvalid
+	}
+	decode := func(target any) error {
+		decoder := json.NewDecoder(bytes.NewReader(payload))
+		decoder.UseNumber()
+		return decoder.Decode(target)
 	}
 	var task a2aTask
 	backgroundResponseID := ""
 	var stored a2aStoredTask
-	if json.Unmarshal(payload, &stored) == nil && stored.Task.ID != "" {
+	if decode(&stored) == nil && stored.Task.ID != "" {
 		task = stored.Task
 		backgroundResponseID = stored.BackgroundResponseID
-	} else if json.Unmarshal(payload, &task) != nil {
+	} else if decode(&task) != nil {
 		return a2aTask{}, "", a2astate.ErrInvalid
 	}
 	if !validFileToken(task.ID, 128) || !validFileToken(task.ContextID, 128) || !validA2ATaskState(task.Status.State) || !validStoredA2ATask(task) {

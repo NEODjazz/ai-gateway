@@ -24,6 +24,7 @@ type agentMCPTestProvider struct {
 	alwaysTool       bool
 	unknownTool      bool
 	invalidArguments bool
+	toolArguments    string
 	duplicateCalls   bool
 	afterResponse    func()
 	observeContext   func(context.Context)
@@ -43,6 +44,9 @@ func (p *agentMCPTestProvider) Responses(ctx context.Context, request modules.Re
 				name = "unbound"
 			}
 			arguments := `{"city":"Paris","count":2}`
+			if p.toolArguments != "" {
+				arguments = p.toolArguments
+			}
 			if p.invalidArguments {
 				arguments = `[]`
 			}

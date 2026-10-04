@@ -1,4 +1,4 @@
-// Keep reviewed native tool argument objects as their original JSON text.
+// Keep reviewed tool argument objects as their original JSON text.
 // The marker is private and cannot be supplied by a JSON response.
 const originalJSON = Symbol("native tool argument JSON");
 type ExactObject = Record<string, unknown> & { [originalJSON]?: string };
@@ -40,10 +40,18 @@ export function stringifyExactJSON(value: unknown): string {
   return result;
 }
 
-// JSON.parse validates syntax first. This bounded lexical walk finds original
-// input/arguments objects without interpreting their numeric literals again.
+// JSON.parse validates syntax first. The bounded lexical walk finds matching
+// argument objects without interpreting their numeric literals again.
 export function parseNativeJSON(source: string): unknown {
-  if (new TextEncoder().encode(source).length > 2 * 1024 * 1024) throw new Error("Native output exceeds the 2 MiB Playground limit.");
+  return parseToolJSON(source, 2, "Native", (parent, key) => parent.type === "tool_use" && key === "input" || parent.type === "function_call" && key === "arguments");
+}
+
+export function parseAgentJSON(source: string): unknown {
+  return parseToolJSON(source, 4, "Agent", (parent, key) => key === "arguments" && typeof parent.call_id === "string" && typeof parent.server_id === "string" && typeof parent.tool_name === "string");
+}
+
+function parseToolJSON(source: string, maximumMiB: number, label: string, preserve: (parent: Record<string, unknown>, key: string) => boolean): unknown {
+  if (new TextEncoder().encode(source).length > maximumMiB * 1024 * 1024) throw new Error(`${label} output exceeds the ${maximumMiB} MiB Playground limit.`);
   const parsed: unknown = JSON.parse(source);
   let offset = 0;
   const space = () => { while (/\s/.test(source[offset] || "")) offset++; };
@@ -53,7 +61,7 @@ export function parseNativeJSON(source: string): unknown {
     offset++;
   }
   function visit(value: unknown, depth: number) {
-    if (depth > 128) throw new Error("Native JSON exceeds the 128-level depth limit.");
+    if (depth > 128) throw new Error(`${label} JSON exceeds the 128-level depth limit.`);
     space();
     if (source[offset] === '"') { stringEnd(); return; }
     if (source[offset] === "[") {
@@ -71,7 +79,7 @@ export function parseNativeJSON(source: string): unknown {
         space(); offset++; space(); const valueStart = offset;
         const child = object(value) ? value[key] : undefined;
         visit(child, depth + 1);
-        if (object(value) && object(child) && (value.type === "tool_use" && key === "input" || value.type === "function_call" && key === "arguments")) {
+        if (object(value) && object(child) && preserve(value, key)) {
           Object.defineProperty(child, originalJSON, { value: source.slice(valueStart, offset), configurable: true });
         }
         space(); if (source[offset] === ",") { offset++; space(); }

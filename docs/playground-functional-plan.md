@@ -782,3 +782,42 @@ continuations retained exact numeric arguments and plain-text results; changing 
 definition made no transport call. Export and history rendering were inspected,
 and the console recorded no errors. No real provider, remote tool service,
 production credentials or billing were used by this verification.
+
+## Agent approval numeric precision
+
+Saved-agent tool reviews preserve the numeric JSON literals supplied by the
+Gateway in Chat, Batch Test, Compare and the A2A endpoint form. JSON responses,
+same-request streaming JSON fallback, SSE status updates and GetTask refresh use
+a bounded codec that privately retains approval argument objects. A2A Response
+details use the same exact serializer. Large integer IDs, precise decimals and
+nested exponent values remain readable without rounding. Argument text is
+rendered as plain React text; no tool runs when a review selection changes.
+Continue sends only the approval ID and call-ID/boolean decisions, never a
+browser-reencoded argument object.
+
+Stored public A2A task metadata now decodes numbers as json.Number internally.
+This preserves numeric literals across task refresh, durable replay and replica
+reads, as well as actual tool execution. Legacy and wrapped storage formats stay
+readable. Payload size, JSON syntax/trailing-data rejection, task/history identity,
+state and private execution validation remain enforced. HTTP fields and public
+configuration do not change, and no dependency is added. Existing native JSON
+limits stay at 2 MiB; agent response reads stay at 4 MiB, with a 128-level JSON
+depth limit. Other UI response readers retain their existing parser.
+
+Regressions cover exact approval text and explicit decisions across four
+transports; all four workspaces are checked with JSON and SSE followed by Refresh.
+Codec tests cover malformed/trailing JSON, depth and byte limits, duplicate-member
+semantics, mutation and response marker spoofing. The native Responses HTTP
+adapter test covers initial approval, GetTask, replay and exactly-once execution
+for JSON and SSE. Required PostgreSQL integration coverage checks precise
+arguments read and approved through a second replica before its existing CAS,
+isolation and billing assertions. The local PostgreSQL cases require test DSNs
+and are verified against real PostgreSQL in CI.
+
+Browser verification used the real embedded console CSP and an isolated synthetic
+A2A fixture. Streamed Chat review, Refresh, explicit Decline/Continue and JSON A2A
+Response details retained exact arguments with no console errors. Screenshots
+are in the local verification output; no real provider, credentials or billing
+were used. UI coverage (769 tests), UI build/typecheck, gofmt, go vet, full Go tests,
+fresh race tests and Go build passed locally. This increment does not complete
+the remaining background runtime or final Goal audit/deployment requirements.

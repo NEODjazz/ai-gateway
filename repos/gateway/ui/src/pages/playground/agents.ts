@@ -3,6 +3,7 @@ import type { Attachment } from "./endpointRequests";
 import { optionalNumber, type PlaygroundConnection } from "./requests";
 import { validateConversationFiles } from "./nativeConversation";
 import { contentText } from "./runText";
+import { exactObjectText, parseAgentJSON } from "./exactJSON";
 
 export type AgentMCPTool = { server_id: string; tool_name: string };
 export type AgentProfile = { id: string; name: string; description?: string; model: string; instructions_template_id?: string; instructions_configured: boolean; generation?: { temperature?: number; max_output_tokens?: number }; mcp_tools?: AgentMCPTool[]; tool_policy_id: string; allowed_tools: string[]; denied_tools?: string[]; approval_required?: string[]; max_tool_calls: number; max_iterations: number; tags?: string[]; enabled: boolean; execution_supported: boolean };
@@ -29,7 +30,7 @@ export function agentBody(draft: AgentDraft) {
 export function validateAgentMCPTools(tools: AgentMCPTool[]) {
   if (tools.length > 32 || tools.some((tool) => !safeID.test(tool.server_id) || !tool.tool_name || tool.tool_name.trim() !== tool.tool_name || new TextEncoder().encode(tool.tool_name).length > 256 || /[\x00-\x1f\x7f]/.test(tool.tool_name)) || new Set(tools.map((tool) => JSON.stringify([tool.server_id, tool.tool_name]))).size !== tools.length) throw new Error("Select up to 32 distinct MCP tools with valid server IDs and names.");
 }
-export type AgentApproval = { id: string; calls: { id: string; server: string; tool: string; arguments: Record<string, unknown> }[] };
+export type AgentApproval = { id: string; calls: { id: string; server: string; tool: string; arguments: Record<string, unknown>; rawArguments?: string }[] };
 export type AgentTask = { id: string; contextID: string; state: string; approval?: AgentApproval };
 export type AgentRun = { text: string; task?: AgentTask; latencyMS: number; response: Record<string, unknown> };
 function object(value: unknown): Record<string, unknown> | undefined { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined; }
@@ -55,7 +56,7 @@ function agentApproval(task: Record<string, unknown>, state: string): AgentAppro
   if (raw === undefined) return;
   const metadata = object(raw), calls = metadata?.calls;
   if (state !== "TASK_STATE_INPUT_REQUIRED" || message?.role !== "ROLE_AGENT" || message.taskId !== task.id || message.contextId !== task.contextId || typeof metadata?.approval_id !== "string" || !safeID.test(metadata.approval_id) || !Array.isArray(calls) || !calls.length || calls.length > 32) throw new Error("Gateway returned an invalid agent approval.");
-  const parsed = calls.map((value) => { const call = object(value), args = object(call?.arguments); if (typeof call?.call_id !== "string" || !call.call_id || new TextEncoder().encode(call.call_id).length > 128 || typeof call.server_id !== "string" || !safeID.test(call.server_id) || typeof call.tool_name !== "string" || !call.tool_name || new TextEncoder().encode(call.tool_name).length > 256 || !args) throw new Error("Gateway returned an invalid agent approval call."); return { id: call.call_id, server: call.server_id, tool: call.tool_name, arguments: args }; });
+  const parsed = calls.map((value) => { const call = object(value), args = object(call?.arguments); if (typeof call?.call_id !== "string" || !call.call_id || new TextEncoder().encode(call.call_id).length > 128 || typeof call.server_id !== "string" || !safeID.test(call.server_id) || typeof call.tool_name !== "string" || !call.tool_name || new TextEncoder().encode(call.tool_name).length > 256 || !args) throw new Error("Gateway returned an invalid agent approval call."); return { id: call.call_id, server: call.server_id, tool: call.tool_name, arguments: args, rawArguments: exactObjectText(args) }; });
   if (new Set(parsed.map((call) => call.id)).size !== parsed.length) throw new Error("Gateway returned repeated agent approval calls.");
   return { id: metadata.approval_id, calls: parsed };
 }
@@ -83,7 +84,7 @@ export async function runAgentRequest(connection: PlaygroundConnection, request:
   const params = object(request.body.params);
   if (request.body.jsonrpc !== "2.0" || typeof request.body.id !== "string" || !params || !["SendMessage", "SendStreamingMessage", "GetTask", "CancelTask"].includes(String(request.body.method))) throw new Error("Invalid agent RPC request.");
   const start = performance.now();
-  const options = { method: "POST", body: request.body, headers: request.headers, signal, maximumResponseBytes: 4 * 1024 * 1024 };
+  const options = { method: "POST", body: request.body, headers: request.headers, signal, maximumResponseBytes: 4 * 1024 * 1024, parseJSON: parseAgentJSON };
   const path = connection.path(request.path);
   if (request.body.method !== "SendStreamingMessage") {
     const payload = await connection.client.request<Record<string, unknown>>(path, options);
@@ -99,7 +100,7 @@ export async function runAgentRequest(connection: PlaygroundConnection, request:
     active();
     if (++eventCount > 16384 || terminal) throw new Error("Gateway returned excessive events or data after the final agent status.");
     let envelope: Record<string, unknown> | undefined;
-    try { envelope = object(JSON.parse(event.data)); } catch { throw new Error("Malformed agent stream event."); }
+    try { envelope = object(parseAgentJSON(event.data)); } catch { throw new Error("Malformed agent stream event."); }
     if (!envelope || envelope.jsonrpc !== "2.0" || envelope.id !== request.body.id) throw new Error("Gateway returned an invalid agent response.");
     const error = object(envelope.error);
     if (error) throw new Error(typeof error.message === "string" ? error.message : "Agent stream failed.");
