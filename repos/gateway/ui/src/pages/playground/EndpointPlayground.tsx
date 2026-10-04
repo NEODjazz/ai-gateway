@@ -11,8 +11,10 @@ import { contentText, responsePending } from "./runText";
 import { CopyOutput, OutputDetails } from "./OutputDetails";
 import { conversationAttachments, retainConversation } from "./attachments";
 import { nativeHistory, nativeToolCalls, nativeToolContent, nativeUserContent, type NativeToolCall, type NativeToolResult, type NativeTurn } from "./nativeConversation";
-import { agentTaskRequest, runAgentRequest, type AgentRun } from "./agents";
+import { agentApprovalRequest, agentTaskRequest, runAgentRequest, type AgentRun } from "./agents";
 import { PricingControls, defaultPricing, estimateCost } from "./PriceEstimate";
+
+import { AgentToolApprovals } from "./AgentToolApprovals";
 
 type Output = { payload?: Record<string, unknown>; native?: NativeTextRun; agent?: AgentRun; audio?: { url: string; type: string; filename: string }; latencyMS: number };
 function object(value: unknown): Record<string, unknown> | undefined { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined; }
@@ -58,11 +60,11 @@ export function EndpointPlayground({ endpoint, connection, connectionChanged, co
     try { const request = endpoint === "a2a" && agentPending && output?.agent?.task ? agentTaskRequest(settings.agent, output.agent.task, "GetTask") : body(calls.length > 0); setCode({ path: request.path, body: request.body, baseURL: connection.baseURL, headers: request.headers, binaryOutput: endpoint === "speech" }); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "Could not generate code"); }
   }
-  async function submit(event?: FormEvent, continuing = false, agentMethod?: "GetTask" | "CancelTask") {
+  async function submit(event?: FormEvent, continuing = false, agentMethod?: "GetTask" | "CancelTask", agentChoices?: { call_id: string; approved: boolean }[]) {
     event?.preventDefault(); if (running || reading || abort.current) return;
     if (connectionChanged) { setError("Apply connection changes before running."); return; }
     let request: ReturnType<typeof body>;
-    try { request = agentMethod && output?.agent?.task ? agentTaskRequest(settings.agent, output.agent.task, agentMethod) : body(continuing); } catch (cause) { setError(cause instanceof Error ? cause.message : "Invalid request"); return; }
+    try { request = agentChoices && output?.agent?.task ? agentApprovalRequest(settings.agent, output.agent.task, agentChoices) : agentMethod && output?.agent?.task ? agentTaskRequest(settings.agent, output.agent.task, agentMethod) : body(continuing); } catch (cause) { setError(cause instanceof Error ? cause.message : "Invalid request"); return; }
     const controller = new AbortController(); abort.current = controller; const current = ++generation.current, start = performance.now(); setRunning(true); setError(""); setPending(""); if (endpoint !== "a2a") setOutput(undefined);
     try {
       let result: Output;
@@ -78,7 +80,7 @@ export function EndpointPlayground({ endpoint, connection, connectionChanged, co
         const agent = await runAgentRequest(connection, request, controller.signal);
         if (current !== generation.current || controller.signal.aborted) return;
         result = { agent, payload: agent.response, latencyMS: agent.latencyMS };
-        if (agentMethod) setHistory((turns) => turns.map((turn, index) => index === turns.length - 1 && turn.role === "assistant" ? { ...turn, text: agent.text || agent.task?.state || "No text output" } : turn));
+        if (agentMethod || agentChoices) setHistory((turns) => turns.map((turn, index) => index === turns.length - 1 && turn.role === "assistant" ? { ...turn, text: agent.text || agent.task?.state || "No text output" } : turn));
         else {
           const retained = retainConversation<NativeTurn>([...history, { role: "user", content: input, text: input || attachments.map((file) => file.filename).join("\n") }, { role: "assistant", content: [], text: agent.text || agent.task?.state || "No text output" }]);
           setHistory(retained.turns); setHistoryDropped((value) => value + retained.dropped);
@@ -99,7 +101,7 @@ export function EndpointPlayground({ endpoint, connection, connectionChanged, co
         result = { payload, latencyMS: performance.now() - start };
       }
       if (current !== generation.current || controller.signal.aborted) return;
-      setOutput(result); setPending(""); if (conversationEndpoint && !continuing && !agentMethod) { setInput(""); setAttachments([]); if (attachmentInput.current) attachmentInput.current.value = ""; }
+      setOutput(result); setPending(""); if (conversationEndpoint && !continuing && !agentMethod && !agentChoices) { setInput(""); setAttachments([]); if (attachmentInput.current) attachmentInput.current.value = ""; }
     } catch (cause) {
       if (current === generation.current) {
         const cancelled = endpoint === "a2a" ? "Request cancelled. Server execution may already have completed; refresh a known task before repeating it." : "Request cancelled";
@@ -167,7 +169,7 @@ export function EndpointPlayground({ endpoint, connection, connectionChanged, co
       {output?.audio && <div>{/^audio\/(mpeg|wav|x-wav|ogg|flac|mp4|webm|aac)$/.test(output.audio.type) ? <audio controls src={output.audio.url} aria-label="Generated speech" /> : <p>Audio format has no browser preview. Download to play it.</p>}<a href={output.audio.url} download={output.audio.filename}>Download speech</a></div>}
       {!!embeddings.length && <section aria-label="Embedding vectors"><h3>Embedding vectors</h3>{embeddings.map((item, index) => <details key={index}><summary>Vector {String(item?.index ?? index)} · {Array.isArray(item?.embedding) ? item.embedding.length : "—"} dimensions</summary><pre>{JSON.stringify(item?.embedding ?? null).slice(0, 65536)}</pre></details>)}</section>}
       {endpoint === "transcription" && typeof payload?.text === "string" && <section><h3>Transcript</h3><pre>{payload.text}</pre><CopyOutput text={payload.text} /></section>}
-      {output?.agent && <section aria-label="Agent task state"><h3>Agent response</h3><p role="status">{output.agent.task ? `Task ${output.agent.task.id} · ${output.agent.task.state}` : "Stateless agent response: each request is independent."}</p>{output.agent.task && <div className="playground-actions"><GatewayButton view="outlined" disabled={running || connectionChanged} onClick={() => void submit(undefined, false, "GetTask")}>Refresh endpoint task</GatewayButton>{["TASK_STATE_SUBMITTED", "TASK_STATE_WORKING"].includes(output.agent.task.state) && <GatewayButton view="outlined" disabled={running || connectionChanged} onClick={() => void submit(undefined, false, "CancelTask")}>Cancel endpoint task</GatewayButton>}</div>}{agentPending && <p className="muted">Resolve the current task or clear endpoint output before starting another conversation.</p>}</section>}
+      {output?.agent && <section aria-label="Agent task state"><h3>Agent response</h3><p role="status">{output.agent.task ? `Task ${output.agent.task.id} · ${output.agent.task.state}` : "Stateless agent response: each request is independent."}</p>{output.agent.task && <div className="playground-actions"><GatewayButton view="outlined" disabled={running || connectionChanged} onClick={() => void submit(undefined, false, "GetTask")}>Refresh endpoint task</GatewayButton>{["TASK_STATE_SUBMITTED", "TASK_STATE_WORKING", "TASK_STATE_INPUT_REQUIRED"].includes(output.agent.task.state) && <GatewayButton view="outlined" disabled={running || connectionChanged} onClick={() => void submit(undefined, false, "CancelTask")}>Cancel endpoint task</GatewayButton>}</div>}{output.agent.task && <AgentToolApprovals label="Endpoint agent tool approvals" task={output.agent.task} disabled={running || connectionChanged} onContinue={(choices) => void submit(undefined, false, undefined, choices)} />}{agentPending && <p className="muted">Resolve the current task or clear endpoint output before starting another conversation.</p>}</section>}
       {endpoint === "mcp" && payload && <section><h3>Tool output</h3><pre>{contentText(payload.content) || JSON.stringify(payload, null, 2).slice(0, 65536)}</pre></section>}
       {payload && !textEndpoint && <OutputDetails payload={payload} />}
       {payload && <details><summary>Response details</summary><pre>{JSON.stringify(payload, null, 2).slice(0, 65536)}</pre></details>}

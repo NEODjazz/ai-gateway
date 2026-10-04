@@ -77,8 +77,9 @@ type A2ATaskRuntimeConfig struct {
 }
 
 type a2aTaskStatus struct {
-	State     string `json:"state"`
-	Timestamp string `json:"timestamp,omitempty"`
+	State     string      `json:"state"`
+	Timestamp string      `json:"timestamp,omitempty"`
+	Message   *a2aMessage `json:"message,omitempty"`
 }
 
 type a2aArtifact struct {
@@ -95,9 +96,10 @@ type a2aTask struct {
 }
 
 type a2aStoredTask struct {
-	Task                 a2aTask `json:"task"`
-	BackgroundResponseID string  `json:"backgroundResponseId,omitempty"`
-	Streaming            bool    `json:"streaming,omitempty"`
+	Task                 a2aTask            `json:"task"`
+	BackgroundResponseID string             `json:"backgroundResponseId,omitempty"`
+	Streaming            bool               `json:"streaming,omitempty"`
+	AgentMCP             *agentMCPTaskState `json:"agentMcp,omitempty"`
 }
 
 func (h Handler) WithA2ATaskStore(store a2astate.Store, config A2ATaskRuntimeConfig) Handler {
@@ -272,8 +274,8 @@ func (h Handler) sendA2AMessage(w http.ResponseWriter, r *http.Request, request 
 		h.writeA2AError(w, request.ID, http.StatusBadRequest, -32602, "Invalid parameters")
 		return
 	}
-	if len(profile.MCPTools) > 0 && (continuation || request.Params.Configuration.PushNotificationConfig != nil) {
-		h.writeA2AError(w, request.ID, http.StatusNotImplemented, -32004, "Agents with MCP tools currently require independent messages without task continuation or push notifications")
+	if len(profile.MCPTools) > 0 && request.Params.Configuration.PushNotificationConfig != nil {
+		h.writeA2AError(w, request.ID, http.StatusNotImplemented, -32004, "Agents with MCP tools do not support push notifications")
 		return
 	}
 	returnImmediately := request.Params.Configuration.ReturnImmediately != nil && *request.Params.Configuration.ReturnImmediately
@@ -338,6 +340,10 @@ func (h Handler) sendA2AMessage(w http.ResponseWriter, r *http.Request, request 
 			h.writeA2AError(w, request.ID, http.StatusBadRequest, -32005, "Content type is not supported")
 			return
 		}
+	}
+	if len(profile.MCPTools) > 0 {
+		h.sendAgentMCPTask(w, r, request, profile)
+		return
 	}
 	var stored a2astate.Task
 	var existing a2aTask
@@ -704,6 +710,11 @@ func (h Handler) getA2ATask(w http.ResponseWriter, r *http.Request, request a2aR
 		h.writeA2ATaskStoreError(w, request.ID, err)
 		return
 	}
+	if state, stateErr := decodeAgentMCPState(task.Payload); stateErr == nil && state != nil {
+		if h.reconcileAgentMCPTask(w, r, request, task, decoded, state) {
+			return
+		}
+	}
 	if backgroundResponseID != "" && a2aTaskPending(decoded.Status.State) {
 		_, decoded, err = h.reconcileA2ABackgroundTask(r.Context(), reqCtx, task, decoded, backgroundResponseID)
 		if err != nil {
@@ -846,6 +857,10 @@ func (h Handler) cancelA2ATask(w http.ResponseWriter, r *http.Request, request a
 		h.writeA2ATaskStoreError(w, request.ID, err)
 		return
 	}
+	if state, stateErr := decodeAgentMCPState(task.Payload); stateErr == nil && state != nil {
+		h.cancelAgentMCPTask(w, r, request, task, decoded, state)
+		return
+	}
 	if backgroundResponseID != "" && a2aTaskPending(decoded.Status.State) {
 		canceler, ok := h.provider.(provider.ResponseCancellationProvider)
 		if !ok {
@@ -960,9 +975,9 @@ func decodeA2AStoredTask(payload []byte) (a2aTask, string, error) {
 	}
 	pending := a2aTaskPending(task.Status.State)
 	invalidBackground := backgroundResponseID != "" && (!pending || stored.Streaming || !validLifecycleToken(backgroundResponseID))
-	missingExecution := backgroundResponseID == "" && pending && !stored.Streaming
+	missingExecution := backgroundResponseID == "" && pending && !stored.Streaming && stored.AgentMCP == nil
 	invalidStreaming := stored.Streaming && !pending
-	if invalidBackground || missingExecution || invalidStreaming {
+	if invalidBackground || missingExecution || invalidStreaming || stored.AgentMCP != nil && (stored.Streaming || backgroundResponseID != "" || !validAgentMCPTaskState(task, stored.AgentMCP)) {
 		return a2aTask{}, "", a2astate.ErrInvalid
 	}
 	return task, backgroundResponseID, nil
@@ -991,6 +1006,14 @@ func encodeA2AStoredTask(task a2aTask, backgroundResponseID string) ([]byte, err
 }
 
 func validStoredA2ATask(task a2aTask) bool {
+	if message := task.Status.Message; message != nil {
+		if message.MessageID == "" || len(message.MessageID) > 128 || message.ContextID != task.ContextID || message.TaskID != task.ID || message.Role != "ROLE_AGENT" || len(message.Parts) != 1 || message.Parts[0].Text == nil {
+			return false
+		}
+		if _, valid := a2aInputPart(message.Parts[0]); !valid {
+			return false
+		}
+	}
 	if task.Status.Timestamp != "" {
 		if _, err := time.Parse(time.RFC3339Nano, task.Status.Timestamp); err != nil {
 			return false

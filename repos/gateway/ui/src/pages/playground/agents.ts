@@ -29,7 +29,8 @@ export function agentBody(draft: AgentDraft) {
 export function validateAgentMCPTools(tools: AgentMCPTool[]) {
   if (tools.length > 32 || tools.some((tool) => !safeID.test(tool.server_id) || !tool.tool_name || tool.tool_name.trim() !== tool.tool_name || new TextEncoder().encode(tool.tool_name).length > 256 || /[\x00-\x1f\x7f]/.test(tool.tool_name)) || new Set(tools.map((tool) => JSON.stringify([tool.server_id, tool.tool_name]))).size !== tools.length) throw new Error("Select up to 32 distinct MCP tools with valid server IDs and names.");
 }
-export type AgentTask = { id: string; contextID: string; state: string };
+export type AgentApproval = { id: string; calls: { id: string; server: string; tool: string; arguments: Record<string, unknown> }[] };
+export type AgentTask = { id: string; contextID: string; state: string; approval?: AgentApproval };
 export type AgentRun = { text: string; task?: AgentTask; latencyMS: number; response: Record<string, unknown> };
 function object(value: unknown): Record<string, unknown> | undefined { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined; }
 export function agentRequest(agent: string, prompt: string, task?: AgentTask, attachments: Attachment[] = []) {
@@ -44,6 +45,19 @@ export function agentRequest(agent: string, prompt: string, task?: AgentTask, at
 export function agentTaskRequest(agent: string, task: AgentTask, method: "GetTask" | "CancelTask") {
   if (!safeID.test(agent) || !safeID.test(task.id) || !safeID.test(task.contextID)) throw new Error("Invalid agent task ID.");
   return { path: `/a2a/${encodeURIComponent(agent)}`, body: { jsonrpc: "2.0", id: crypto.randomUUID(), method, params: { tenant: agent, id: task.id } }, headers: { "A2A-Version": "1.0" }, expectedTask: { id: task.id, contextID: task.contextID } };
+}
+export function agentApprovalRequest(agent: string, task: AgentTask, choices: { call_id: string; approved: boolean }[]) {
+  if (!safeID.test(agent) || !safeID.test(task.id) || !safeID.test(task.contextID) || task.state !== "TASK_STATE_INPUT_REQUIRED" || !task.approval || !safeID.test(task.approval.id) || choices.length !== task.approval.calls.length || new Set(choices.map((choice) => choice.call_id)).size !== choices.length || choices.some((choice) => typeof choice.approved !== "boolean" || !task.approval!.calls.some((call) => call.id === choice.call_id))) throw new Error("Choose approve or decline for every pending agent tool call.");
+  return { path: `/a2a/${encodeURIComponent(agent)}`, body: { jsonrpc: "2.0", id: crypto.randomUUID(), method: "SendMessage", params: { tenant: agent, message: { messageId: crypto.randomUUID(), taskId: task.id, contextId: task.contextID, role: "ROLE_USER", parts: [{ text: "Review decisions for pending agent tools" }], metadata: { ai_gateway_tool_approval: { approval_id: task.approval.id, choices: choices.map((choice) => ({ ...choice })) } } } } }, headers: { "A2A-Version": "1.0" }, expectedTask: { id: task.id, contextID: task.contextID } };
+}
+function agentApproval(task: Record<string, unknown>, state: string): AgentApproval | undefined {
+  const message = object(object(task.status)?.message), raw = object(message?.metadata)?.ai_gateway_tool_approval;
+  if (raw === undefined) return;
+  const metadata = object(raw), calls = metadata?.calls;
+  if (state !== "TASK_STATE_INPUT_REQUIRED" || message?.role !== "ROLE_AGENT" || message.taskId !== task.id || message.contextId !== task.contextId || typeof metadata?.approval_id !== "string" || !safeID.test(metadata.approval_id) || !Array.isArray(calls) || !calls.length || calls.length > 32) throw new Error("Gateway returned an invalid agent approval.");
+  const parsed = calls.map((value) => { const call = object(value), args = object(call?.arguments); if (typeof call?.call_id !== "string" || !call.call_id || new TextEncoder().encode(call.call_id).length > 128 || typeof call.server_id !== "string" || !safeID.test(call.server_id) || typeof call.tool_name !== "string" || !call.tool_name || new TextEncoder().encode(call.tool_name).length > 256 || !args) throw new Error("Gateway returned an invalid agent approval call."); return { id: call.call_id, server: call.server_id, tool: call.tool_name, arguments: args }; });
+  if (new Set(parsed.map((call) => call.id)).size !== parsed.length) throw new Error("Gateway returned repeated agent approval calls.");
+  return { id: metadata.approval_id, calls: parsed };
 }
 export async function runAgentRequest(connection: PlaygroundConnection, request: { path: string; body: Record<string, unknown>; headers?: Record<string, string>; expectedTask?: Pick<AgentTask, "id" | "contextID"> }, signal: AbortSignal): Promise<AgentRun> {
   if (signal.aborted) throw new DOMException("Request cancelled", "AbortError");
@@ -62,12 +76,17 @@ export async function runAgentRequest(connection: PlaygroundConnection, request:
     if (("id" in params && params.id !== task.id) || (continuation?.taskId !== undefined && (continuation.taskId !== task.id || continuation.contextId !== task.contextId)) || (request.expectedTask && (request.expectedTask.id !== task.id || request.expectedTask.contextID !== task.contextId))) throw new Error("Gateway returned a different agent task.");
     const artifacts = Array.isArray(task.artifacts) ? task.artifacts : [];
     const latest = object(artifacts.at(-1));
-    return { text: contentText(latest?.parts) || contentText(object(object(task.status)?.message)?.parts), task: { id: task.id, contextID: task.contextId, state }, latencyMS: performance.now() - start, response: payload };
+    return { text: contentText(latest?.parts) || contentText(object(object(task.status)?.message)?.parts), task: { id: task.id, contextID: task.contextId, state, approval: agentApproval(task, state) }, latencyMS: performance.now() - start, response: payload };
   }
   if (!message || !Array.isArray(message.parts)) throw new Error("Gateway returned no agent message or task.");
   return { text: contentText(message.parts), latencyMS: performance.now() - start, response: payload };
 }
-export type AgentBatchResult = { index: number; prompt: string; status: "completed" | "failed" | "cancelled"; text?: string; error?: string; task?: AgentTask; latencyMS: number };
+export type AgentBatchResult = { index: number; prompt: string; status: "completed" | "failed" | "cancelled" | "pending"; text?: string; error?: string; task?: AgentTask; latencyMS: number };
+export function agentBatchStatus(task?: AgentTask): AgentBatchResult["status"] {
+  if (!task || task.state === "TASK_STATE_COMPLETED") return "completed";
+  if (task.state === "TASK_STATE_CANCELED") return "cancelled";
+  return ["TASK_STATE_INPUT_REQUIRED", "TASK_STATE_SUBMITTED", "TASK_STATE_WORKING", "TASK_STATE_AUTH_REQUIRED"].includes(task.state) ? "pending" : "failed";
+}
 export function agentBatchPrompts(value: string) {
   const prompts = value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
   if (!prompts.length || prompts.length > 20 || prompts.some((item) => new TextEncoder().encode(item).length > 65536)) throw new Error("Enter 1–20 prompts, one per line, up to 64 KiB each.");
@@ -83,8 +102,8 @@ export async function runAgentBatch(connection: PlaygroundConnection, agent: str
       if (signal.aborted) { onResult({ index, prompt, status: "cancelled", latencyMS: 0 }); continue; }
       try {
         const result = await runAgentRequest(connection, agentRequest(agent, prompt), signal);
-        const completed = !result.task || result.task.state === "TASK_STATE_COMPLETED";
-        onResult({ index, prompt, status: completed ? "completed" : "failed", text: result.text, task: result.task, error: completed ? undefined : `Task ended in ${result.task?.state}.`, latencyMS: result.latencyMS });
+        const status = agentBatchStatus(result.task);
+        onResult({ index, prompt, status, text: result.text, task: result.task, error: status === "failed" ? `Task ended in ${result.task?.state}.` : undefined, latencyMS: result.latencyMS });
       } catch (cause) { onResult({ index, prompt, status: signal.aborted ? "cancelled" : "failed", error: signal.aborted ? undefined : cause instanceof Error ? cause.message : "Agent test failed.", latencyMS: performance.now() - start }); }
     }
   }

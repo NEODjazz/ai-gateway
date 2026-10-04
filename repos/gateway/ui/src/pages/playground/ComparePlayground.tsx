@@ -14,8 +14,10 @@ import { ResourceControls } from "./ResourceControls";
 import { checkPolicies, emptyResources, parseResourceCatalog, policyChecks, withResources, type ResourceCatalog, type ResourceSelection } from "./resources";
 import { ToolApprovals } from "./ToolApprovals";
 import { executeTool, toolInvocations, toolOutputs, type ToolInvocation } from "./toolCalls";
-import { agentRequest, agentTaskRequest, runAgentRequest, type AgentRun, type AgentTask } from "./agents";
+import { agentApprovalRequest, agentRequest, agentTaskRequest, runAgentRequest, type AgentRun, type AgentTask } from "./agents";
 import { csvCell } from "../../csv";
+
+import { AgentToolApprovals } from "./AgentToolApprovals";
 
 type Panel = {
   id: number; model: string; settings: GenerationSettings; instructions: string; sessionID: string;
@@ -165,11 +167,11 @@ export function ComparePlayground({ connection, models, connectionControls, conn
     } catch (cause) { if (generation.current === activeGeneration) setPanels((items) => items.map((item) => item.id === panel.id ? { ...item, calls: item.calls.map((call, position) => position === index ? { ...call, status: "failed", error: controller.signal.aborted ? "Tool execution cancelled." : cause instanceof Error ? cause.message : "Tool execution failed." } : call) } : item)); }
     finally { if (controllers.current.get(panel.id) === controller) controllers.current.delete(panel.id); if (generation.current === activeGeneration) setRunning(false); }
   }
-  async function taskOperation(panel: Panel, task: AgentTask, method: "GetTask" | "CancelTask") {
+  async function taskOperation(panel: Panel, task: AgentTask, method?: "GetTask" | "CancelTask", choices?: { call_id: string; approved: boolean }[]) {
     if (running || connectionChanged) return;
     const controller = new AbortController(), activeGeneration = ++generation.current; controllers.current.set(panel.id, controller); setRunning(true);
     try {
-      const result = await runAgentRequest(connection, agentTaskRequest(panel.agent, task, method), controller.signal);
+      const result = await runAgentRequest(connection, choices ? agentApprovalRequest(panel.agent, task, choices) : agentTaskRequest(panel.agent, task, method!), controller.signal);
       if (generation.current !== activeGeneration || controller.signal.aborted) return;
       const state = result.task?.state, failed = !!state && ["TASK_STATE_FAILED", "TASK_STATE_CANCELED", "TASK_STATE_REJECTED"].includes(state);
       setPanels((items) => items.map((item) => item.id === panel.id ? { ...item, agentRun: result, error: failed ? `Agent task ended in ${state}.` : "", status: failed ? "failed" : state === "TASK_STATE_COMPLETED" ? "complete" : "awaiting_task", history: result.text ? item.history.map((turn, index) => index === item.history.length - 1 && turn.role === "assistant" ? { ...turn, content: result.text } : turn) : item.history } : item));
@@ -229,7 +231,8 @@ export function ComparePlayground({ connection, models, connectionControls, conn
         </div>
         <ToolApprovals label={`Comparison ${index + 1} tool approvals`} continueLabel={`Continue comparison ${index + 1} with tool results`} calls={panel.calls} disabled={running || connectionChanged} onExecute={(position) => void approveTool(panel, position)} onDecline={(position) => setPanels((items) => items.map((item) => item.id === panel.id ? { ...item, calls: item.calls.map((call, i) => i === position ? { ...call, status: "declined", output: JSON.stringify({ isError: true, error: "User declined tool invocation" }), error: undefined } : call) } : item))} onContinue={() => void continuePanel(panel)} />
         {panel.agentRun && <dl className="playground-metadata"><div><dt>Latency</dt><dd>{Math.round(panel.agentRun.latencyMS)} ms</dd></div><div><dt>Task status</dt><dd>{panel.agentRun.task?.state || "Stateless response"}</dd></div><div><dt>Tokens</dt><dd>Not reported</dd></div><div><dt>First token</dt><dd>Not reported</dd></div><div><dt>Finalized cost</dt><dd>See Usage &amp; spend</dd></div></dl>}
-        {panel.agentRun?.task && <div className="playground-actions"><GatewayButton view="outlined" disabled={running || connectionChanged} onClick={() => void taskOperation(panel, panel.agentRun!.task!, "GetTask")}>Refresh comparison {index + 1} task</GatewayButton>{["TASK_STATE_SUBMITTED", "TASK_STATE_WORKING"].includes(panel.agentRun.task.state) && <GatewayButton view="outlined" disabled={running || connectionChanged} onClick={() => void taskOperation(panel, panel.agentRun!.task!, "CancelTask")}>Cancel comparison {index + 1} task</GatewayButton>}</div>}
+        {panel.agentRun?.task && <div className="playground-actions"><GatewayButton view="outlined" disabled={running || connectionChanged} onClick={() => void taskOperation(panel, panel.agentRun!.task!, "GetTask")}>Refresh comparison {index + 1} task</GatewayButton>{["TASK_STATE_SUBMITTED", "TASK_STATE_WORKING", "TASK_STATE_INPUT_REQUIRED"].includes(panel.agentRun.task.state) && <GatewayButton view="outlined" disabled={running || connectionChanged} onClick={() => void taskOperation(panel, panel.agentRun!.task!, "CancelTask")}>Cancel comparison {index + 1} task</GatewayButton>}</div>}
+        {panel.agentRun?.task && <AgentToolApprovals label={`Comparison ${index + 1} agent tool approvals`} task={panel.agentRun.task} disabled={running || connectionChanged} onContinue={(choices) => void taskOperation(panel, panel.agentRun!.task!, undefined, choices)} />}
         {panel.result && <dl className="playground-metadata">
           <div><dt>Input tokens</dt><dd>{panel.result.usage?.prompt_tokens ?? panel.result.usage?.input_tokens ?? "—"}</dd></div>
           <div><dt>Output tokens</dt><dd>{panel.result.usage?.completion_tokens ?? panel.result.usage?.output_tokens ?? "—"}</dd></div>

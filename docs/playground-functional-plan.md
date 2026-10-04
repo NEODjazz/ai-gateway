@@ -103,7 +103,7 @@ compatibility must be distinguished from merely having an endpoint selector.
 - [x] Added Agent Builder configuration CRUD, saved A2A chat with task continuity
   and task refresh/cancel, explicit bounded batch inference and connection code.
   Unsaved drafts cannot execute; credential changes discard late reads/results.
-  Saved MCP execution is described below; approval continuation is still pending.
+  Saved MCP execution and durable approval continuation are described below.
 - [x] Added model/agent comparison with shared attachments and independent A2A
   tasks; model tool calls require per-panel approval/decline and explicit typed
   continuation. Pending calls/tasks block new shared prompts; individual panels
@@ -138,8 +138,12 @@ compatibility must be distinguished from merely having an endpoint selector.
 - [x] Added explicit saved-agent MCP bindings and synchronous model/tool iterations.
   Every model generation and MCP operation uses existing authentication, policy,
   quota, billing, audit and idempotency paths. Whole-step validation prevents
-  invalid/approval-required batches from partially executing; loop limits and
-  current policy revocation are enforced. Approval continuation remains pending.
+  invalid batches from partially executing; loop limits and
+  current policy revocation are enforced. Required approvals pause before tools.
+- [x] Added durable saved-agent task claims before model/tool effects, explicit
+  approve/decline in Agent Chat, Compare, A2A and Batch Test, replica-safe CAS,
+  stable tool action keys, native history continuation, bounded failure state,
+  cancellation intent and fail-closed recovery of interrupted execution.
 - [ ] Finish media/tool output, policy selection and full conversation verification.
 - [ ] Complete endpoint-specific execution and media/tool handling.
 - [ ] Complete comparison, compliance and agent views.
@@ -283,20 +287,54 @@ model/tool work remains billable when a later iteration fails.
 The saved policy is an upper bound. A current policy can revoke a tool, require
 approval or lower maximum calls; expanding a policy does not silently expand a
 saved profile. Limits include all calls in a run and all model generations, with
-a two-minute deadline, 2 MiB response capture and 24 MiB execution history. A tool
+a two-minute deadline per active turn, 2 MiB response capture and a 2 MiB
+bound on the complete durable task payload, including native execution history. A tool
 step is validated as a whole before executing any call; a step cannot execute if
 there is no remaining model iteration for its result. Changed bindings/model/
 instructions, disabled agents/policies, malformed arguments, unknown functions,
 repeated call IDs and connector failures stop the run.
 
-Approval-required steps currently return an explicit error before executing any
-of their tools. Durable approval/resume controls remain required for completion.
-Agents with MCP bindings return independent messages and reject task continuation,
-push notifications, streaming and `returnImmediately` until durable loop state
-supports those modes. Their agent cards do not advertise streaming or push.
-This prevents simultaneous task continuations from executing tool side effects
-before the existing final-result compare-and-swap detects a conflict.
-Tool-free agents retain their existing behavior.
+Agents with MCP bindings require the configured task store, MCP idempotency store
+and audit service before discovery or inference. Production uses PostgreSQL. They
+return durable tasks rather than independent messages. An initial `messageId`
+derives an owner/agent-scoped task ID. Replaying the same ID and content returns
+its known task without generation; conflicting content returns 409. This guarantee
+lasts for the configured task retention period. New independent messages must use
+new IDs. Continuations atomically claim the stored version before effects.
+
+An approval-required step pauses the whole batch in `TASK_STATE_INPUT_REQUIRED`.
+`status.message.metadata.ai_gateway_tool_approval` contains `approval_id` and
+`calls` with `call_id`, `server_id`, `tool_name` and actual `arguments`. It contains
+no connector URLs, credentials, instructions or private execution keys. Continue
+with `SendMessage`, matching task/context IDs, a new user message ID and metadata
+`ai_gateway_tool_approval: {approval_id, choices: [{call_id, approved}]}`. Supply
+one explicit boolean decision for every required call, with no duplicates or
+unknown IDs. The challenge is consumed by the atomic transition to WORKING.
+Decline supplies a typed error result to the model without invoking the tool.
+Newly generated calls need new approval. The original native call/result history
+is preserved for subsequent messages in a completed task.
+
+Resume rediscovers tools and rechecks current profile configuration, schema,
+connector, credential, access-group, toolset and policy permissions. Captured
+allowed grants remain an upper bound. Instructions are reloaded from encrypted
+configuration and checked against a digest; they are not copied into task state.
+Private state records counters and stable per-run/call action identities. It is
+never exposed by public task reads or exports.
+
+Canceling INPUT_REQUIRED stops pending calls without execution. Canceling WORKING
+records intent and keeps WORKING until current execution stops and settles; a
+successful cancellation request does not claim zero billing. Expired working
+claims are marked failed on task read, without restarting unknown effects.
+Failures persist terminal status using bounded cancellation-independent cleanup.
+Oversized results preserve a bounded terminal task and the last durable intent;
+actual MCP execution results remain in the existing call store. A process crash
+never automatically retries an interrupted tool.
+
+Streaming, push and `returnImmediately` remain unsupported for these MCP agents;
+the agent card does not advertise them. Durable worker/stream execution for those
+modes remains part of the unfinished endpoint/runtime work. Tool-free agents
+retain their existing behavior. This is an intentional response behavior change
+for MCP-bound profiles; clients must handle A2A task results and approval states.
 
 Snapshots containing bindings use admin state schema version 3. Older binaries
 fail closed rather than silently dropping these settings; clearing bindings allows
@@ -305,8 +343,15 @@ additive public API field and a configuration compatibility boundary. PostgreSQL
 replica-restoration coverage includes encrypted instructions and MCP references.
 
 Saved-agent verification covers typed model → MCP result → model continuation,
-credential and policy denial, cumulative call/iteration limits, approval stops,
+credential and policy denial, cumulative call/iteration limits, durable approvals,
 revoked toolsets, connector changes after discovery, cancellation and private
-binding isolation. The saved MCP selection was added, removed and saved in an
-isolated browser preview with synthetic resources. No real provider or billing
-call was made by this browser verification.
+binding isolation, parallel initial/approval claims, conflicting replays, schema
+revocation, cancellation and bounded failure persistence. A native Responses
+HTTP adapter fixture verifies actual typed tool-result continuation and large
+integer argument preservation. Required PostgreSQL integration coverage checks
+replica continuation, owner isolation, CAS and durable call deduplication.
+The saved MCP selection was added, removed and saved in an
+isolated browser preview with synthetic resources. The durable approval view
+was also verified with two pending calls: one explicit approval, one decline,
+and a completed task after continuation. No real provider or billing call was
+made by this browser verification.

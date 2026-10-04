@@ -18,6 +18,55 @@ import (
 )
 
 func TestPostgresAgentConfigurationEncryptedRestoreIntegration(t *testing.T) {
+	store, pool, _ := agentPostgresTestStore(t)
+	ctx := t.Context()
+	key := []byte("agent-configuration-integration-key")
+	freshRuntime := func() (*AdminStateRuntime, *AgentRegistry) {
+		t.Helper()
+		llm, err := provider.NewWithError(provider.Config{ControlPlaneStore: store, CredentialEncryptionKey: key})
+		if err != nil {
+			t.Fatal(err)
+		}
+		controller, ok := llm.(AdminStateController)
+		if !ok {
+			t.Fatal("provider lacks admin state controller")
+		}
+		agents := NewAgentRegistry()
+		runtime, err := NewAdminStateRuntime(ctx, controller, key, NewAccessRegistry(), NewMCPRegistry(), agents, newLoggingRegistryWithoutWorker(nil))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return runtime, agents
+	}
+	runtime, agents := freshRuntime()
+	if _, err := agents.PutToolPolicy("safe", ToolPolicy{Name: "Safe", AllowedTools: []string{"lookup"}, MaxToolCalls: 2, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	router := Routes(NewHandler(modulesPipeline("admin"), nil).WithAgentRegistry(agents).WithAdminState(runtime))
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodPut, "/admin/v1/agent-profiles/research", strings.NewReader(`{"name":"Research","model":"test-model","tool_policy_id":"safe","max_iterations":3,"enabled":true,"instructions":"`+agentFixtureInstructions+`","generation":{"temperature":0,"max_output_tokens":127},"mcp_tools":[{"server_id":"weather","tool_name":"lookup"}]}`)))
+	if response.Code != http.StatusOK {
+		t.Fatalf("durable profile update failed: status=%d", response.Code)
+	}
+	var persisted string
+	if err := pool.QueryRow(ctx, `SELECT payload::text FROM gateway_control_plane_state WHERE singleton=TRUE`).Scan(&persisted); err != nil {
+		t.Fatal("could not read persisted state")
+	}
+	if strings.Contains(persisted, agentFixtureInstructions) || !strings.Contains(persisted, "agent_instructions") {
+		t.Fatal("PostgreSQL did not persist encrypted configuration")
+	}
+	_, restored := freshRuntime()
+	saved, ok := restored.AgentProfile("research")
+	if len(saved.MCPTools) != 1 || saved.MCPTools[0].ServerID != "weather" || saved.MCPTools[0].ToolName != "lookup" {
+		t.Fatal("fresh replica lost MCP bindings")
+	}
+	if !ok || saved.Instructions != agentFixtureInstructions || saved.Generation == nil || *saved.Generation.Temperature != 0 || *saved.Generation.MaxOutputTokens != 127 {
+		t.Fatal("fresh replica lost executable configuration")
+	}
+}
+
+func agentPostgresTestStore(t *testing.T) (*controlstore.PostgresStore, *pgxpool.Pool, string) {
+	t.Helper()
 	dsn := os.Getenv("CONTROL_PLANE_POSTGRES_TEST_DSN")
 	if dsn == "" {
 		if os.Getenv("POSTGRES_INTEGRATION_REQUIRED") == "true" {
@@ -76,47 +125,5 @@ func TestPostgresAgentConfigurationEncryptedRestoreIntegration(t *testing.T) {
 		t.Fatal("could not open test control store")
 	}
 	t.Cleanup(store.Close)
-	key := []byte("agent-configuration-integration-key")
-	freshRuntime := func() (*AdminStateRuntime, *AgentRegistry) {
-		t.Helper()
-		llm, err := provider.NewWithError(provider.Config{ControlPlaneStore: store, CredentialEncryptionKey: key})
-		if err != nil {
-			t.Fatal(err)
-		}
-		controller, ok := llm.(AdminStateController)
-		if !ok {
-			t.Fatal("provider lacks admin state controller")
-		}
-		agents := NewAgentRegistry()
-		runtime, err := NewAdminStateRuntime(ctx, controller, key, NewAccessRegistry(), NewMCPRegistry(), agents, newLoggingRegistryWithoutWorker(nil))
-		if err != nil {
-			t.Fatal(err)
-		}
-		return runtime, agents
-	}
-	runtime, agents := freshRuntime()
-	if _, err := agents.PutToolPolicy("safe", ToolPolicy{Name: "Safe", AllowedTools: []string{"lookup"}, MaxToolCalls: 2, Enabled: true}); err != nil {
-		t.Fatal(err)
-	}
-	router := Routes(NewHandler(modulesPipeline("admin"), nil).WithAgentRegistry(agents).WithAdminState(runtime))
-	response := httptest.NewRecorder()
-	router.ServeHTTP(response, httptest.NewRequest(http.MethodPut, "/admin/v1/agent-profiles/research", strings.NewReader(`{"name":"Research","model":"test-model","tool_policy_id":"safe","max_iterations":3,"enabled":true,"instructions":"`+agentFixtureInstructions+`","generation":{"temperature":0,"max_output_tokens":127},"mcp_tools":[{"server_id":"weather","tool_name":"lookup"}]}`)))
-	if response.Code != http.StatusOK {
-		t.Fatalf("durable profile update failed: status=%d", response.Code)
-	}
-	var persisted string
-	if err := pool.QueryRow(ctx, `SELECT payload::text FROM gateway_control_plane_state WHERE singleton=TRUE`).Scan(&persisted); err != nil {
-		t.Fatal("could not read persisted state")
-	}
-	if strings.Contains(persisted, agentFixtureInstructions) || !strings.Contains(persisted, "agent_instructions") {
-		t.Fatal("PostgreSQL did not persist encrypted configuration")
-	}
-	_, restored := freshRuntime()
-	saved, ok := restored.AgentProfile("research")
-	if len(saved.MCPTools) != 1 || saved.MCPTools[0].ServerID != "weather" || saved.MCPTools[0].ToolName != "lookup" {
-		t.Fatal("fresh replica lost MCP bindings")
-	}
-	if !ok || saved.Instructions != agentFixtureInstructions || saved.Generation == nil || *saved.Generation.Temperature != 0 || *saved.Generation.MaxOutputTokens != 127 {
-		t.Fatal("fresh replica lost executable configuration")
-	}
+	return store, pool, dsn
 }

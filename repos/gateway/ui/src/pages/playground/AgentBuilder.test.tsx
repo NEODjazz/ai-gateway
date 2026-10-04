@@ -115,7 +115,7 @@ describe("Agent Builder", () => {
     expect(mock.mock.calls.filter(([url]) => String(url).startsWith("/a2a/"))).toHaveLength(0);
     await userEvent.click(screen.getByRole("button", { name: "Run agent tests" }));
     expect(await screen.findByText("Successful test")).toBeInTheDocument(); expect(await screen.findByRole("alert")).toHaveTextContent("Provider failed");
-    expect(screen.getByRole("button", { name: "Export agent results" })).toBeEnabled(); expect(screen.getByRole("status")).toHaveTextContent("1 completed · 1 failed");
+    expect(screen.getByRole("button", { name: "Export agent results" })).toBeEnabled(); expect(screen.getByRole("status")).toHaveTextContent("1 completed · 0 pending · 1 failed");
   });
   it("continues with task identity and handles direct GetTask results", async () => {
     const mock = fixtures(); setup(); await selectAgent(); await userEvent.click(screen.getByRole("tab", { name: "Chat" }));

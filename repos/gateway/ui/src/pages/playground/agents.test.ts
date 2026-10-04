@@ -1,5 +1,5 @@
 import { APIClient } from "../../api/client";
-import { agentBatchCSV, agentBatchPrompts, agentBody, agentDraft, agentRequest, agentTaskRequest, emptyAgentDraft, runAgentBatch, runAgentRequest, type AgentBatchResult, type AgentProfile } from "./agents";
+import { agentApprovalRequest, agentBatchCSV, agentBatchPrompts, agentBody, agentDraft, agentRequest, agentTaskRequest, emptyAgentDraft, runAgentBatch, runAgentRequest, type AgentBatchResult, type AgentProfile } from "./agents";
 import { playgroundConnection } from "./requests";
 
 const connection = () => playgroundConnection(new APIClient(() => "test-agent-key"), "session", "", "");
@@ -8,6 +8,30 @@ const profile: AgentProfile = { id: "writer", name: "Writer", model: "model", in
 function response(id: string, text: string) { return json({ jsonrpc: "2.0", id, result: { message: { role: "ROLE_AGENT", parts: [{ text }] } } }); }
 
 describe("saved agent requests", () => {
+  it("validates task-bound approvals and preserves pending batch status", async () => {
+    const pending = { id: "task-one", contextId: "ctx-one", status: { state: "TASK_STATE_INPUT_REQUIRED", message: { role: "ROLE_AGENT", taskId: "task-one", contextId: "ctx-one", parts: [{ text: "Review tool" }], metadata: { ai_gateway_tool_approval: { approval_id: "approval-one", calls: [{ call_id: "call-one", server_id: "weather", tool_name: "lookup", arguments: { city: "Paris" } }] } } } } };
+    const mock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_path, options) => { const request = JSON.parse(String(options?.body)); return json({ jsonrpc: "2.0", id: request.id, result: { task: pending } }); });
+    const request = agentRequest("writer", "Prompt"), signal = new AbortController().signal;
+    const result = await runAgentRequest(connection(), request, signal);
+    expect(result.task?.approval).toMatchObject({ id: "approval-one", calls: [{ id: "call-one", arguments: { city: "Paris" } }] });
+    expect(() => agentApprovalRequest("writer", result.task!, [])).toThrow("every pending");
+    expect(() => agentApprovalRequest("writer", result.task!, [{ call_id: "other", approved: true }])).toThrow();
+    expect(agentApprovalRequest("writer", result.task!, [{ call_id: "call-one", approved: false }]).body.params.message.metadata).toMatchObject({ ai_gateway_tool_approval: { choices: [{ call_id: "call-one", approved: false }] } });
+    const results: AgentBatchResult[] = [];
+    await runAgentBatch(connection(), "writer", ["Prompt"], signal, (value) => results.push(value));
+    expect(results[0]).toMatchObject({ status: "pending", task: { state: "TASK_STATE_INPUT_REQUIRED" } }); expect(results[0].error).toBeUndefined();
+    for (const changed of [
+      { ...pending, status: { ...pending.status, state: "TASK_STATE_COMPLETED" } },
+      { ...pending, status: { ...pending.status, message: { ...pending.status.message, taskId: "foreign" } } },
+      { ...pending, status: { ...pending.status, message: { ...pending.status.message, metadata: { ai_gateway_tool_approval: { approval_id: "approval-one", calls: [] } } } } },
+    ]) { mock.mockResolvedValueOnce(json({ jsonrpc: "2.0", id: request.body.id, result: { task: changed } })); await expect(runAgentRequest(connection(), request, signal)).rejects.toThrow("invalid agent approval"); }
+  });
+  it("distinguishes canceled server tasks from failed and pending batch tasks", async () => {
+    const states = ["TASK_STATE_CANCELED", "TASK_STATE_FAILED", "TASK_STATE_AUTH_REQUIRED"];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_path, options) => { const request = JSON.parse(String(options?.body)); const state = states.shift(); return json({ jsonrpc: "2.0", id: request.id, result: { task: { id: "task-one", contextId: "ctx-one", status: { state } } } }); });
+    const results: AgentBatchResult[] = []; await runAgentBatch(connection(), "writer", ["Cancel", "Fail", "Authenticate"], new AbortController().signal, (result) => results.push(result));
+    expect(results.map((result) => result.status).sort()).toEqual(["cancelled", "failed", "pending"]); expect(results.find((result) => result.status === "cancelled")?.error).toBeUndefined();
+  });
   it("round-trips explicit instructions and generation, and explicitly clears settings", () => {
     const draft = agentDraft(profile, "Saved instructions");
     expect(agentBody(draft)).toMatchObject({ instructions: "Saved instructions", generation: { temperature: 0, max_output_tokens: 400 }, max_iterations: 2, tags: ["team"] });

@@ -70,10 +70,15 @@ func agentMCPTestHandler(t *testing.T, llm *agentMCPTestProvider, policy ToolPol
 	client := &fakeMCPRuntimeClient{page: mcpclient.ToolPage{Tools: []mcpclient.Tool{{Name: "forecast", InputSchema: json.RawMessage(`{"type":"object","properties":{"city":{"type":"string"},"count":{"type":"integer","minimum":1}},"required":["city"]}`)}}}, callResult: mcpclient.CallResult{Content: []json.RawMessage{json.RawMessage(`{"type":"text","text":"sunny"}`)}}}
 	billing := &mcpBillingRecorder{}
 	h := NewHandler(modules.NewPipeline([]modules.Module{mcpRuntimeAuth{tools: tools}, billing}), llm).WithAgentRegistry(agents).WithMCPRegistry(runtimeRegistry(t, "streamable-http")).WithMCPCallStore(mcpstate.NewMemoryStore(100, time.Hour)).WithAudit(&recordingAuditClient{}).WithMCPRuntimeFactory(func(string, string, string) (MCPRuntimeClient, error) { return client, nil })
+	h = h.WithA2ATaskStore(&a2aMemoryTaskStore{tasks: map[string]a2astate.Task{}}, A2ATaskRuntimeConfig{OwnerQuota: 10, TTL: time.Hour})
 	return h, client, billing
 }
 func agentMCPSend(h Handler, method, extra string) *httptest.ResponseRecorder {
-	request := httptest.NewRequest(http.MethodPost, "/a2a/research", strings.NewReader(`{"jsonrpc":"2.0","id":"rpc","method":"`+method+`","params":{"tenant":"research","message":{"messageId":"user-message","role":"ROLE_USER","parts":[{"text":"Check Paris weather"}]} `+extra+`}}`))
+	return agentMCPSendID(h, method, extra, "user-message")
+}
+
+func agentMCPSendID(h Handler, method, extra, messageID string) *httptest.ResponseRecorder {
+	request := httptest.NewRequest(http.MethodPost, "/a2a/research", strings.NewReader(`{"jsonrpc":"2.0","id":"rpc","method":"`+method+`","params":{"tenant":"research","message":{"messageId":"`+messageID+`","role":"ROLE_USER","parts":[{"text":"Check Paris weather"}]} `+extra+`}}`))
 	request.Header.Set("A2A-Version", "1.0")
 	request.Header.Set("Authorization", "Bearer test-key")
 	response := httptest.NewRecorder()
@@ -128,7 +133,7 @@ func TestAgentMCPLoopStopsBeforeUnapprovedOrInvalidTools(t *testing.T) {
 		{name: "unknown function", llm: agentMCPTestProvider{callCount: 1, unknownTool: true}, calls: 3, iterations: 3, status: http.StatusBadGateway, modelCalls: 1},
 		{name: "invalid arguments", llm: agentMCPTestProvider{callCount: 1, invalidArguments: true}, calls: 3, iterations: 3, status: http.StatusBadGateway, modelCalls: 1},
 		{name: "duplicate call", llm: agentMCPTestProvider{callCount: 2, duplicateCalls: true}, calls: 3, iterations: 3, status: http.StatusBadGateway, modelCalls: 1},
-		{name: "approval required", llm: agentMCPTestProvider{callCount: 1}, policy: ToolPolicy{ID: "safe", Name: "Safe", AllowedTools: []string{"forecast"}, ApprovalRequired: []string{"forecast"}, MaxToolCalls: 3, Enabled: true}, calls: 3, iterations: 3, status: http.StatusConflict, modelCalls: 1},
+		{name: "approval required", llm: agentMCPTestProvider{callCount: 1}, policy: ToolPolicy{ID: "safe", Name: "Safe", AllowedTools: []string{"forecast"}, ApprovalRequired: []string{"forecast"}, MaxToolCalls: 3, Enabled: true}, calls: 3, iterations: 3, status: http.StatusOK, modelCalls: 1},
 		{name: "credential denied", llm: agentMCPTestProvider{callCount: 1}, grants: []string{"unrelated"}, calls: 3, iterations: 3, status: http.StatusForbidden},
 		{name: "profile denied", llm: agentMCPTestProvider{callCount: 1}, policy: ToolPolicy{ID: "safe", Name: "Safe", AllowedTools: []string{"forecast"}, DeniedTools: []string{"forecast"}, MaxToolCalls: 3, Enabled: true}, calls: 3, iterations: 3, status: http.StatusForbidden},
 	}
@@ -291,15 +296,12 @@ func TestAgentMCPLoopStopsOnToolFailureAndCancellation(t *testing.T) {
 	if response.Code != http.StatusBadGateway || len(llm.requests) != 1 || client.callCalls != 1 || strings.Contains(response.Body.String(), "private MCP transport detail") {
 		t.Fatalf("status=%d models=%d tools=%d body=%s", response.Code, len(llm.requests), client.callCalls, response.Body.String())
 	}
-	profile, _ := h.agents.AgentProfile("research")
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	request := httptest.NewRequest(http.MethodPost, "/a2a/research", nil).WithContext(ctx)
 	capture := httptest.NewRecorder()
-	h.serveAgentResponsesAs(capture, request, openai.ResponseRequest{Model: "test-model", Input: []any{}}, profile, func(openai.ResponseResponse, modules.RequestContext) any {
-		t.Fatal("cancelled execution completed")
-		return nil
-	})
+	profile, _ := h.agents.AgentProfile("research")
+	h.sendAgentMCPTask(capture, request, a2aRequest{}, profile)
 	if capture.Code != http.StatusRequestTimeout || len(llm.requests) != 1 || client.calls != 1 {
 		t.Fatal("cancelled run executed discovery or inference")
 	}
@@ -316,21 +318,13 @@ func TestAgentMCPCaptureBoundsResponseMemory(t *testing.T) {
 	}
 }
 
-func TestAgentMCPIndependentMessageDoesNotClaimTaskContinuity(t *testing.T) {
+func TestAgentMCPRequiresDurableStoreBeforeDiscovery(t *testing.T) {
 	llm := &agentMCPTestProvider{callCount: 1}
-	h, _, _ := agentMCPTestHandler(t, llm, ToolPolicy{}, nil, 2, 3)
-	tasks := &a2aMemoryTaskStore{tasks: map[string]a2astate.Task{}}
-	h = h.WithA2ATaskStore(tasks, A2ATaskRuntimeConfig{OwnerQuota: 10, TTL: time.Hour})
+	h, client, _ := agentMCPTestHandler(t, llm, ToolPolicy{}, nil, 2, 3)
+	h.a2aTasks = nil
 	response := agentMCPSend(h, "SendMessage", "")
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"message"`) || strings.Contains(response.Body.String(), `"task"`) || len(tasks.tasks) != 0 {
-		t.Fatal("MCP execution advertised unclaimed task continuity")
-	}
-	request := httptest.NewRequest(http.MethodPost, "/a2a/research", strings.NewReader(`{"jsonrpc":"2.0","id":"rpc","method":"SendMessage","params":{"tenant":"research","message":{"messageId":"followup","role":"ROLE_USER","taskId":"task","parts":[{"text":"next"}]}}}`))
-	request.Header.Set("A2A-Version", "1.0")
-	capture := httptest.NewRecorder()
-	Routes(h).ServeHTTP(capture, request)
-	if capture.Code != http.StatusNotImplemented || len(llm.requests) != 2 {
-		t.Fatal("unsupported task continuation reached tool execution")
+	if response.Code != http.StatusServiceUnavailable || len(llm.requests) != 0 || client.calls != 0 {
+		t.Fatal("unavailable durable storage reached MCP or inference")
 	}
 }
 
@@ -364,7 +358,7 @@ func TestAgentMCPPolicyToolsetIsRevalidated(t *testing.T) {
 	if _, err := h.mcp.PutToolset("read", MCPToolset{Name: "Read", Tools: []string{"mcp:weather@https://mcp.example.test/v1#tool:other"}, Enabled: true}); err != nil {
 		t.Fatal(err)
 	}
-	response = agentMCPSend(h, "SendMessage", "")
+	response = agentMCPSendID(h, "SendMessage", "", "another-initial-message")
 	if response.Code != http.StatusForbidden || client.callCalls != 1 {
 		t.Fatal("revoked policy toolset still executed MCP")
 	}

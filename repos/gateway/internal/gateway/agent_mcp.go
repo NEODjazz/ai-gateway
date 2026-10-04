@@ -2,16 +2,13 @@ package gateway
 
 import (
 	"bytes"
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"strings"
-	"time"
 	"unicode/utf8"
 
 	"ai-gateway-gateway/internal/mcpclient"
@@ -27,6 +24,7 @@ type agentMCPAuthorization struct {
 	profile  AgentProfile
 	bindings map[string]AgentMCPTool
 	servers  map[string]string
+	approved map[string]bool
 }
 
 func validAgentMCPTools(tools []AgentMCPTool) bool {
@@ -59,7 +57,7 @@ func (h Handler) effectiveAgentMCPProfile(saved AgentProfile) (AgentProfile, err
 		return AgentProfile{}, errInvalidAgentEntry
 	}
 	current, ok := h.agents.AgentProfile(saved.ID)
-	if !ok || !current.Enabled || !current.ExecutionSupported || current.Model != saved.Model || current.Instructions != saved.Instructions || current.ToolPolicyID != saved.ToolPolicyID || !sameAgentMCPTools(current.MCPTools, saved.MCPTools) {
+	if !ok || !current.Enabled || !current.ExecutionSupported || current.Model != saved.Model || current.Instructions != saved.Instructions || current.ToolPolicyID != saved.ToolPolicyID || !sameAgentMCPTools(current.MCPTools, saved.MCPTools) || agentMCPConfiguration(current) != agentMCPConfiguration(saved) {
 		return AgentProfile{}, errInvalidAgentEntry
 	}
 	h.agents.mu.RLock()
@@ -216,7 +214,9 @@ func (h Handler) discoverAgentMCPTools(r *http.Request, profile AgentProfile) ([
 		}
 		definition, found := definitions[binding.ToolName]
 		var schema map[string]any
-		if !found || json.Unmarshal(definition.InputSchema, &schema) != nil || schema == nil {
+		decoder := json.NewDecoder(bytes.NewReader(definition.InputSchema))
+		decoder.UseNumber()
+		if !found || decoder.Decode(&schema) != nil || schema == nil || decoder.Decode(&struct{}{}) != io.EOF {
 			capture := newA2AResponseCapture()
 			writeError(capture, http.StatusForbidden, "agent_tool_unavailable", "Selected agent MCP tool is unavailable to this credential")
 			return nil, nil, capture
@@ -229,118 +229,7 @@ func (h Handler) discoverAgentMCPTools(r *http.Request, profile AgentProfile) ([
 }
 
 func (h Handler) serveAgentResponsesAs(w http.ResponseWriter, r *http.Request, request openai.ResponseRequest, profile AgentProfile, transform func(openai.ResponseResponse, modules.RequestContext) any) {
-	if len(profile.MCPTools) == 0 {
-		h.serveResponsesAs(w, r, request, "a2a", transform, nil, nil, false)
-		return
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
-	defer cancel()
-	r = r.WithContext(ctx)
-	if h.mcp == nil {
-		writeError(w, http.StatusServiceUnavailable, "mcp_unavailable", "MCP runtime is unavailable")
-		return
-	}
-	effective, err := h.effectiveAgentMCPProfile(profile)
-	if err != nil {
-		writeError(w, http.StatusForbidden, "agent_tool_policy_changed", "Agent MCP configuration or tool policy no longer permits execution")
-		return
-	}
-	if r.Context().Err() != nil {
-		writeError(w, http.StatusRequestTimeout, "agent_execution_cancelled", "Agent execution was cancelled")
-		return
-	}
-	servers := make(map[string]string)
-	for _, binding := range profile.MCPTools {
-		server, found := h.mcp.Server(binding.ServerID)
-		if !found {
-			writeError(w, http.StatusForbidden, "agent_tool_unavailable", "Agent MCP server is unavailable")
-			return
-		}
-		servers[server.ID] = server.ServerURL + "\x00" + server.Transport
-	}
-	tools, bindings, failure := h.discoverAgentMCPTools(r, profile)
-	if failure != nil {
-		copyAgentMCPResponse(w, failure)
-		return
-	}
-	request.Tools = tools
-	r = r.WithContext(context.WithValue(r.Context(), agentMCPContextKey{}, agentMCPAuthorization{profile: profile, bindings: bindings, servers: servers}))
-	input, ok := request.Input.([]any)
-	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid_request", "Agent input must be a conversation")
-		return
-	}
-	callsMade := 0
-	seenCalls := map[string]bool{}
-	for iteration := 0; iteration < effective.MaxIterations; iteration++ {
-		if err := r.Context().Err(); err != nil {
-			writeError(w, http.StatusRequestTimeout, "agent_execution_cancelled", "Agent execution was cancelled or exceeded its deadline")
-			return
-		}
-		request.Input = input
-		capture := newA2AResponseCapture()
-		var response openai.ResponseResponse
-		var identity modules.RequestContext
-		h.serveResponsesAs(agentMCPCapture{capture}, r, request, "a2a", func(result openai.ResponseResponse, req modules.RequestContext) any {
-			response = result
-			identity = req
-			return result
-		}, nil, nil, false)
-		if capture.status != http.StatusOK || capture.body.Len() == 0 {
-			copyAgentMCPResponse(w, capture)
-			return
-		}
-		effective, err = h.effectiveAgentMCPProfile(profile)
-		if err != nil || !h.agentMCPServersUnchanged(r) {
-			writeError(w, http.StatusForbidden, "agent_tool_policy_changed", "Agent MCP configuration or tool policy changed during execution")
-			return
-		}
-		var calls []openai.ResponseOutputItem
-		for _, output := range response.Output {
-			switch output.Type {
-			case "function_call":
-				calls = append(calls, output)
-			case "message", "reasoning":
-			default:
-				writeError(w, http.StatusBadGateway, "agent_tool_call_invalid", "Model returned an unsupported agent output")
-				return
-			}
-		}
-		if response.Status != "completed" {
-			writeError(w, http.StatusBadGateway, "agent_response_incomplete", "Agent model did not complete the synchronous response")
-			return
-		}
-		if len(calls) == 0 {
-			copyA2AHeaders(w, capture.header)
-			writeJSON(w, http.StatusOK, transform(response, identity))
-			return
-		}
-		if iteration+1 >= effective.MaxIterations || len(calls) > effective.MaxToolCalls-callsMade {
-			writeError(w, http.StatusConflict, "agent_execution_limit", "Agent reached its tool-call or iteration limit; no further tools were executed")
-			return
-		}
-		arguments, valid := h.validateAgentMCPCalls(w, effective, bindings, calls, seenCalls)
-		if !valid {
-			return
-		}
-		for _, output := range response.Output {
-			input = append(input, output)
-		}
-		for i, call := range calls {
-			output, executed := h.executeAgentMCPCall(w, r, profile, bindings[call.Name], call, arguments[i], identity.RequestID, callsMade, iteration)
-			if !executed {
-				return
-			}
-			input = append(input, map[string]any{"type": "function_call_output", "call_id": call.CallID, "output": output})
-			callsMade++
-			encoded, err := json.Marshal(input)
-			if err != nil || len(encoded) > 24<<20 {
-				writeError(w, http.StatusBadGateway, "agent_history_limit", "Agent conversation exceeds its execution limit")
-				return
-			}
-		}
-	}
-	writeError(w, http.StatusConflict, "agent_execution_limit", fmt.Sprintf("Agent reached its maximum of %d model iterations", effective.MaxIterations))
+	h.serveResponsesAs(w, r, request, "a2a", transform, nil, nil, false)
 }
 
 func copyAgentMCPResponse(w http.ResponseWriter, capture *a2aResponseCapture) {
@@ -384,7 +273,7 @@ func (h Handler) executeAgentMCPCall(w http.ResponseWriter, r *http.Request, pro
 	}
 	current, err := h.effectiveAgentMCPProfile(profile)
 	server, found := h.mcp.Server(binding.ServerID)
-	if err != nil || !found || !h.agentMCPServersUnchanged(r) || callsMade >= current.MaxToolCalls || iteration+1 >= current.MaxIterations || h.agentToolMatches(current.ApprovalRequired, binding, "mcp:"+server.ID+"@"+server.ServerURL) {
+	if err != nil || !found || !h.agentMCPServersUnchanged(r) || callsMade >= current.MaxToolCalls || iteration+1 >= current.MaxIterations || h.agentToolMatches(current.ApprovalRequired, binding, "mcp:"+server.ID+"@"+server.ServerURL) && !agentMCPCallApproved(r, call) {
 		writeError(w, http.StatusForbidden, "agent_tool_policy_changed", "Agent tool policy no longer permits execution")
 		return "", false
 	}
