@@ -12,6 +12,53 @@ function answer(text: string) { return new Response(JSON.stringify({ choices: [{
 async function send(text: string) { await userEvent.type(screen.getByLabelText("Comparison prompt"), text); await userEvent.click(screen.getByRole("button", { name: "Compare models" })); }
 
 describe("Compare Playground", () => {
+  it("retains actual output and usage when a tool batch is invalid and requires clearing that panel", async () => {
+    const call = { id: "duplicate", type: "function", function: { name: "lookup", arguments: "{}" } };
+    const mock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_path, options) => JSON.parse(String(options?.body)).model === "alpha"
+      ? new Response(JSON.stringify({ choices: [{ message: { role: "assistant", content: "Actual alpha output", tool_calls: [call, call] } }], usage: { prompt_tokens: 9, completion_tokens: 3 } }), { headers: { "Content-Type": "application/json" } }) : answer("Other panel succeeded"));
+    setup(); await send("Review invalid calls"); await screen.findByText("Other panel succeeded");
+    expect(await screen.findByText("Actual alpha output")).toBeInTheDocument();
+    const first = within(screen.getByRole("region", { name: "Comparison 1" }));
+    expect(first.getByRole("alert")).toHaveTextContent("Tool review failed");
+    expect(first.getByText("Input tokens").nextElementSibling).toHaveTextContent("9");
+    expect(first.getByText("Output tokens").nextElementSibling).toHaveTextContent("3");
+    expect(screen.getByLabelText("Comparison prompt")).toBeDisabled(); expect(mock).toHaveBeenCalledTimes(2);
+    await userEvent.click(first.getByRole("button", { name: "Clear comparison 1 chat" }));
+    expect(screen.getByLabelText("Comparison prompt")).toBeEnabled(); expect(screen.getByText("Other panel succeeded")).toBeInTheDocument();
+  });
+  it("reviews declared function results per panel without MCP execution and binds the original definition", async () => {
+    const tools = [{ type: "function", function: { name: "query", parameters: { type: "object", properties: { id: { type: "integer" } }, required: ["id"] } } }];
+    const rawArguments = '{"id":9007199254740993}';
+    const output = 'rows: 9007199254740993\n<not-json>';
+    const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json" } });
+    let runs = 0;
+    const mock = vi.spyOn(globalThis, "fetch").mockImplementation(async (path, options) => {
+      if (path !== "/v1/chat/completions") throw new Error("Unexpected tool execution");
+      if (JSON.parse(String(options?.body)).model === "beta") return answer("Independent beta output");
+      return ++runs === 1 ? json({ choices: [{ message: { content: null, tool_calls: [{ id: "call_manual", type: "function", function: { name: "query", arguments: rawArguments } }] } }], usage: { prompt_tokens: 8, completion_tokens: 3 } })
+        : runs === 2 ? json({ error: { message: "Manual continuation unavailable" } }, 503) : answer("Function result received");
+    });
+    setup(); const first = within(screen.getByRole("region", { name: "Comparison 1" }));
+    await userEvent.click(first.getByText("Model settings"));
+    fireEvent.change(first.getByLabelText("Advanced parameters 1"), { target: { value: JSON.stringify({ tools }) } });
+    await send("Review functions"); await screen.findByText("Independent beta output");
+    const approvals = within(await screen.findByRole("region", { name: "Comparison 1 tool approvals" }));
+    expect(approvals.getByText(rawArguments)).toBeInTheDocument(); expect(approvals.queryByRole("button", { name: "Execute query" })).not.toBeInTheDocument();
+    const next = approvals.getByRole("button", { name: "Continue comparison 1 with tool results" });
+    expect(next).toBeDisabled();
+    fireEvent.change(approvals.getByLabelText("Function tool result call_manual"), { target: { value: output } }); expect(next).toBeDisabled();
+    await userEvent.click(approvals.getByRole("button", { name: "Use result for query" })); expect(next).toBeEnabled(); expect(runs).toBe(1);
+    fireEvent.change(first.getByLabelText("Advanced parameters 1"), { target: { value: JSON.stringify({ tools: [] }) } });
+    await userEvent.click(next); expect(await first.findByRole("alert")).toHaveTextContent("function tool definition changed"); expect(runs).toBe(1);
+    fireEvent.change(first.getByLabelText("Advanced parameters 1"), { target: { value: JSON.stringify({ tools }) } });
+    await userEvent.click(next); expect(await first.findByRole("alert")).toHaveTextContent("Manual continuation unavailable");
+    expect(approvals.getByLabelText("Function tool result call_manual")).toHaveValue(output); expect(screen.getByLabelText("Comparison prompt")).toBeDisabled();
+    await userEvent.click(next); await screen.findByText("Function result received"); expect(screen.getByLabelText("Comparison prompt")).toBeEnabled();
+    const bodies = mock.mock.calls.filter(([, options]) => JSON.parse(String(options?.body)).model === "alpha").map(([, options]) => JSON.parse(String(options?.body)));
+    expect(bodies).toHaveLength(3); expect(bodies[1]).toEqual(bodies[2]); expect(bodies[2].tools).toEqual(tools);
+    expect(bodies[2].messages).toEqual([{ role: "user", content: "Review functions" }, { role: "assistant", content: "", tool_calls: [{ id: "call_manual", type: "function", function: { name: "query", arguments: rawArguments } }] }, { role: "tool", tool_call_id: "call_manual", content: output }]);
+    expect(mock.mock.calls.filter(([, options]) => JSON.parse(String(options?.body)).model === "beta")).toHaveLength(1);
+  });
   it("requires per-panel tool approval, reuses retry identity and continues without a phantom user", async () => {
     let alphaRuns = 0, executions = 0;
     const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json" } });

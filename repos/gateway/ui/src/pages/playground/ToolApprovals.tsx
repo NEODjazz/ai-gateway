@@ -13,17 +13,18 @@ export function ToolApprovals({ calls, disabled, onExecute, onDecline, onContinu
   if (!calls.length) return null;
   return <section className="playground-tool-approvals" aria-label={label}>
     <h3>Review tool calls</h3><p className="muted">Resolve every call, then explicitly continue the conversation.</p>
-    {calls.some((call) => !call.nativeApproval && !call.customTool) && <p className="muted">Execution sends the reviewed arguments to the selected MCP server.</p>}
+    {calls.some((call) => !call.nativeApproval && !call.customTool && !call.manualFunction) && <p className="muted">Execution sends the reviewed arguments to the selected MCP server.</p>}
     {calls.some((call) => call.nativeApproval) && <p className="muted">Native MCP approvals are sent to the provider only when you continue. An approval allows the provider to send the reviewed arguments to its configured MCP connection.</p>}
     {calls.some((call) => call.customTool) && <p className="muted">Custom tools require a result you supply or an explicit decline. This browser does not execute their input. Results are sent as text without JSON conversion.</p>}
+    {calls.some((call) => call.manualFunction) && <p className="muted">Client functions require a result you supply or an explicit decline. This browser does not execute them. Results are sent as text without JSON conversion.</p>}
     {calls.map((call, index) => <article className="playground-turn tool" key={call.id}>
       <strong>{call.nativeApproval ? `${call.nativeApproval.serverLabel}/` : call.serverID ? `${call.serverID}/` : ""}{call.name} · {call.status}</strong><code>{call.id}</code>
       <details open={call.output === undefined}><summary>{call.customTool ? "Tool input" : "Arguments"}</summary><pre>{call.rawArguments.slice(0, 65536)}</pre></details>
       {call.nativeApproval && <p>MCP connection: <code>{call.nativeApproval.serverURL}</code></p>}
       {call.issue && <p role="status" className="form-error">{call.issue}</p>}
-      {call.error && <p role="alert" className="form-error">{call.error}{!call.customTool && !call.nativeApproval && " Execution may already have completed; retry uses the same idempotency key."}</p>}
-      {call.customTool ? <>
-        <AreaControl label={`Custom tool result ${call.id}`} rows={4} value={call.manualOutput ?? ""} disabled={disabled || !!call.issue || !onResultEdit} onUpdate={(value) => onResultEdit?.(index, value)} />
+      {call.error && <p role="alert" className="form-error">{call.error}{!call.customTool && !call.nativeApproval && !call.manualFunction && " Execution may already have completed; retry uses the same idempotency key."}</p>}
+      {call.customTool || call.manualFunction ? <>
+        <AreaControl label={`${call.customTool ? "Custom" : "Function"} tool result ${call.id}`} rows={4} value={call.manualOutput ?? ""} disabled={disabled || !!call.issue || !onResultEdit} onUpdate={(value) => onResultEdit?.(index, value)} />
         <div className="playground-actions">
           <GatewayButton disabled={disabled || !!call.issue || !!call.error || !onUseResult} onClick={() => onUseResult?.(index)}>{call.manualOutput ? "Use result for" : "Use empty result for"} {call.name}</GatewayButton>
           <GatewayButton view="outlined" disabled={disabled} onClick={() => onDecline(index)}>Decline {call.name}</GatewayButton>

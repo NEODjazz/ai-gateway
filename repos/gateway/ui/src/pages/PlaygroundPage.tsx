@@ -21,7 +21,7 @@ import { ComparePlayground } from "./playground/ComparePlayground";
 import { ResourceControls } from "./playground/ResourceControls";
 import { checkPolicies, emptyResources, policyChecks, withResources } from "./playground/resources";
 import type { CodeCheck } from "./playground/requests";
-import { decideTool, editCustomToolResult, executeTool, provideCustomToolResult, toolInvocations, toolOutputs, validateToolContinuation, type ToolInvocation } from "./playground/toolCalls";
+import { decideTool, editManualToolResult, executeTool, provideManualToolResult, toolInvocations, toolOutputs, validateToolContinuation, type ToolInvocation } from "./playground/toolCalls";
 import { CopyOutput, OutputDetails } from "./playground/OutputDetails";
 import { ToolApprovals } from "./playground/ToolApprovals";
 import { CodeDialog } from "./playground/CodeDialog";
@@ -246,7 +246,7 @@ export function PlaygroundPage() {
       setCalls((previous) => previous.map((call, position) => position === index ? decideTool(call, true) : call));
       return;
     }
-    if (calls[index].customTool || calls[index].output !== undefined) return;
+    if (calls[index].customTool || calls[index].manualFunction || calls[index].output !== undefined) return;
     const controller = new AbortController(); abortRef.current = controller; setRunning(true); setError("");
     const call = calls[index];
     try {
@@ -257,11 +257,11 @@ export function PlaygroundPage() {
     } finally { if (abortRef.current === controller) { abortRef.current = undefined; setRunning(false); } }
   }
 
-  function customToolResult(index: number, output?: string) {
+  function manualToolResult(index: number, output?: string) {
     if (running || connectionChanged) return;
     setCalls((previous) => previous.map((call, position) => {
-      if (position !== index || !call.customTool) return call;
-      try { return output === undefined ? provideCustomToolResult(call, call.manualOutput ?? "") : editCustomToolResult(call, output); }
+      if (position !== index || !(call.customTool || call.manualFunction)) return call;
+      try { return output === undefined ? provideManualToolResult(call, call.manualOutput ?? "") : editManualToolResult(call, output); }
       catch (cause) { return { ...call, output: undefined, status: "pending", error: cause instanceof Error ? cause.message : "Invalid tool result." }; }
     }));
   }
@@ -320,7 +320,7 @@ export function PlaygroundPage() {
             <div className="playground-transcript">{transcript.map((turn) => <article className={`playground-turn ${turn.role}`} key={turn.id}><strong>{turn.role === "user" ? "User" : turn.role === "tool" ? "Tool result" : "Assistant"}</strong><pre>{turn.content || "No text output"}</pre>{turn.reasoning && <details><summary>Reasoning</summary><pre>{turn.reasoning}</pre></details>}{turn.role === "assistant" && <><CopyOutput label={`Copy response ${turn.id}`} text={turn.content} /><OutputDetails payload={turn.response || turn.wire} connection={connection} disabled={connectionChanged} /></>}{turn.response && <details><summary>Response details</summary><pre>{JSON.stringify(turn.response, null, 2).slice(0, 65536)}</pre></details>}</article>)}{pendingResponse?.turns.map((turn) => <article className={`playground-turn ${turn.role}`} key={turn.id}><strong>{turn.role === "user" ? "User" : "Tool result"}</strong><pre>{turn.content}</pre></article>)}{pendingOutput && <article className={`playground-turn assistant${running ? " streaming" : ""}`}><strong>Assistant <span>{running ? "streaming" : "partial response"}</span></strong><pre>{pendingOutput}</pre></article>}</div>
           </section>
           {pendingResponse && <section aria-label="Background response"><p role="status">Response {pendingResponse.result.id} · {String(pendingResponse.result.response.status)}</p><p className="muted">The server is still executing. Refresh or cancel it before starting another turn. Clear removes only browser state and does not cancel server execution.</p><div className="playground-actions"><GatewayButton disabled={running || connectionChanged} onClick={() => void manageResponse("refresh")}>Refresh background response</GatewayButton><GatewayButton view="outlined" disabled={running || connectionChanged} onClick={() => void manageResponse("cancel")}>Cancel background response</GatewayButton></div></section>}
-          <ToolApprovals onResultEdit={customToolResult} onUseResult={(index) => customToolResult(index)} calls={calls} disabled={running || connectionChanged} onExecute={(index) => void approveTool(index)} onDecline={(index) => setCalls((previous) => previous.map((item, position) => position === index ? decideTool(item, false) : item))} onContinue={() => void runConversation()} />
+          <ToolApprovals onResultEdit={manualToolResult} onUseResult={(index) => manualToolResult(index)} calls={calls} disabled={running || connectionChanged} onExecute={(index) => void approveTool(index)} onDecline={(index) => setCalls((previous) => previous.map((item, position) => position === index ? decideTool(item, false) : item))} onContinue={() => void runConversation()} />
           {historyDropped > 0 && <p className="muted">{historyDropped} earlier turns were removed from browser history to keep it bounded. {mode === "responses" && apiContinuity ? "API continuation uses the saved response ID." : "New requests include only the retained browser history."}</p>}
           <label>Images or PDF<input ref={attachmentInput} aria-label="Conversation attachments" type="file" multiple accept="image/png,image/jpeg,image/gif,image/webp,application/pdf" disabled={running || readingAttachments || calls.length > 0 || unreviewableTools || !!pendingResponse} onChange={async (event) => {
             const files = [...(event.currentTarget.files || [])]; const current = ++attachmentGeneration.current; setAttachments([]); setReadingAttachments(true);

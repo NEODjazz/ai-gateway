@@ -1,10 +1,81 @@
 import { APIClient } from "../../api/client";
 import { buildTextRequest, defaultGenerationSettings, playgroundConnection } from "./requests";
-import { decideTool, editCustomToolResult, executeTool, provideCustomToolResult, toolInvocations, toolOutputs, validateToolContinuation } from "./toolCalls";
+import { decideTool, editManualToolResult, executeTool, provideManualToolResult, toolInvocations, toolOutputs, validateToolContinuation } from "./toolCalls";
 const selected = [{ serverID: "weather", name: "forecast", inputSchema: {} }];
 const response = (id = "call_1", args = '{}', name = "forecast") => ({ choices: [{ message: { tool_calls: [{ id, type: "function", function: { name, arguments: args } }] } }] });
 const connection = playgroundConnection(new APIClient(() => "console-key"), "custom", "test-key", `${window.location.origin}/v1`);
 describe("Playground tool approvals", () => {
+  it.each(["chat", "responses"] as const)("reviews declared %s functions for manual output when no MCP binding exists", (endpoint) => {
+    const fn = { name: "forecast", parameters: { type: "object", properties: { id: { type: "integer" } } } };
+    const tools = [endpoint === "chat" ? { type: "function", function: fn } : { type: "function", ...fn }];
+    const payload = endpoint === "chat" ? response("call_manual", '{"id":9007199254740993}') : { output: [{ type: "function_call", call_id: "call_manual", name: "forecast", arguments: '{"id":9007199254740993}' }] };
+    const [call] = toolInvocations(endpoint, payload, [], tools);
+    expect(call.issue).toBeUndefined(); expect(call).toHaveProperty("manualFunction"); expect(call.serverID).toBeUndefined();
+  });
+  const manualFunction = { name: "forecast", description: "Return a reviewed forecast", parameters: { type: "object", properties: { id: { type: "integer" } }, required: ["id"] } };
+  const manualTools = (endpoint: "chat" | "responses") => [endpoint === "chat" ? { type: "function", function: manualFunction } : { type: "function", ...manualFunction }];
+  const manualPayload = (endpoint: "chat" | "responses", raw = '{"id":9007199254740993}') => endpoint === "chat" ? response("manual_1", raw) : { output: [{ type: "function_call", id: "output_item", call_id: "manual_1", name: "forecast", arguments: raw }] };
+  it.each(["chat", "responses"] as const)("preserves exact manual %s results, including empty text, and never executes even a forged server binding", async (endpoint) => {
+    const [call] = toolInvocations(endpoint, manualPayload(endpoint), [], manualTools(endpoint));
+    const fetch = vi.spyOn(globalThis, "fetch");
+    expect(call.id).toBe("manual_1"); expect(call.rawArguments).toBe('{"id":9007199254740993}'); expect(call.idempotencyKey).toBe("");
+    await expect(executeTool(connection, { ...call, serverID: "forged", arguments: {} }, new AbortController().signal)).rejects.toThrow("cannot be executed");
+    expect(() => decideTool(call, true)).toThrow("manual result");
+    for (const output of ["", 'result:9007199254740993\n<not-json>\n0.1234567890123456789012345']) {
+      const resolved = provideManualToolResult(call, output);
+      const outputs = toolOutputs([resolved]); expect(outputs).toEqual([{ role: "tool", tool_call_id: "manual_1", content: output }]);
+      if (endpoint === "responses") for (const previousResponseID of ["resp_1", ""]) {
+        const history = [{ role: "assistant", content: "", responseItems: (manualPayload(endpoint) as { output: unknown[] }).output }];
+        const body = buildTextRequest({ endpoint, model: "model", instructions: "", history, toolOutputs: outputs, previousResponseID, streaming: false, settings: defaultGenerationSettings });
+        const item = { type: "function_call_output", call_id: "manual_1", output };
+        expect(body.input).toEqual(previousResponseID ? [item] : [...history[0].responseItems, item]);
+      }
+      else {
+        const body = buildTextRequest({ endpoint, model: "model", instructions: "", history: [{ role: "assistant", content: null, tool_calls: response("manual_1").choices[0].message.tool_calls }], toolOutputs: outputs, streaming: false, settings: defaultGenerationSettings });
+        expect(body.messages).toEqual([expect.objectContaining({ role: "assistant" }), ...outputs]);
+      }
+      const edited = editManualToolResult(resolved, "Changed"); expect(edited.output).toBeUndefined(); expect(() => toolOutputs([edited])).toThrow("Resolve every");
+      expect(toolOutputs([decideTool(resolved, false)])[0].content).toBe('{"isError":true,"error":"User declined tool invocation"}');
+      expect(provideManualToolResult(decideTool(resolved, false), output).status).toBe("completed");
+    }
+    expect(fetch).not.toHaveBeenCalled();
+  });
+  it.each(["chat", "responses"] as const)("binds manual %s continuation to one exact submitted definition", (endpoint) => {
+    const tools = manualTools(endpoint), calls = toolInvocations(endpoint, manualPayload(endpoint), [], tools);
+    expect(() => validateToolContinuation(calls, tools)).not.toThrow();
+    for (const changed of [undefined, [], [...tools, ...tools], [{ type: "custom", name: "forecast" }], endpoint === "chat" ? [{ type: "function", function: { ...manualFunction, description: "Changed" } }] : [{ type: "function", ...manualFunction, description: "Changed" }]]) expect(() => validateToolContinuation(calls, changed)).toThrow("function tool definition changed");
+    for (const definitions of [undefined, [], [...tools, ...tools], [{ type: "custom", name: "forecast" }]]) {
+      const [unknown] = toolInvocations(endpoint, manualPayload(endpoint), [], definitions);
+      expect(unknown.manualFunction).toBeUndefined(); expect(unknown.issue).toContain("only be declined");
+      expect(() => provideManualToolResult(unknown, "Unbound")).toThrow("cannot accept");
+    }
+    const [bound] = toolInvocations(endpoint, manualPayload(endpoint), selected, tools);
+    expect(bound.manualFunction).toBeUndefined(); expect(bound.serverID).toBe("weather");
+    const [ambiguous] = toolInvocations(endpoint, manualPayload(endpoint), [...selected, ...selected], tools);
+    expect(ambiguous.manualFunction).toBeUndefined(); expect(ambiguous.issue).toContain("only be declined");
+  });
+  it.each(["chat", "responses"] as const)("allows only decline for malformed %s function arguments and bounds manual result bytes", (endpoint) => {
+    for (const raw of ["null", "[]", "broken", '{"text":"' + "🙂".repeat(16384) + '"}']) {
+      const [call] = toolInvocations(endpoint, manualPayload(endpoint, raw), [], manualTools(endpoint));
+      expect(call.issue).toBeTruthy(); expect(() => provideManualToolResult(call, "result")).toThrow("cannot accept");
+      expect(() => toolOutputs([{ ...call, status: "completed", output: "forged" }])).toThrow("only be declined");
+      expect(toolOutputs([decideTool(call, false)])[0].tool_call_id).toBe("manual_1");
+    }
+    const [call] = toolInvocations(endpoint, manualPayload(endpoint), [], manualTools(endpoint));
+    const maximum = "🙂".repeat(32768); expect(provideManualToolResult(call, maximum).output).toBe(maximum);
+    for (const output of [maximum + "x", "x".repeat(131073)]) {
+      expect(() => editManualToolResult(call, output)).toThrow("128 KiB"); expect(() => provideManualToolResult(call, output)).toThrow("128 KiB");
+      expect(() => toolOutputs([{ ...call, status: "completed", output }])).toThrow("128 KiB");
+    }
+    expect(() => toolOutputs([{ ...call, output: "unconfirmed" }])).toThrow("Resolve every function");
+    expect(() => provideManualToolResult(call, undefined as unknown as string)).toThrow("must be text");
+  });
+  it("keeps incomplete Responses functions decline-only even with a declared definition", () => {
+    const payload = { output: [{ type: "function_call", call_id: "manual_1", name: "forecast", arguments: "{}", status: "in_progress" }] };
+    const [call] = toolInvocations("responses", payload, [], manualTools("responses"));
+    expect(call.issue).toContain("incomplete"); expect(() => provideManualToolResult(call, "result")).toThrow("cannot accept");
+    expect(toolOutputs([decideTool(call, false)])[0].tool_call_id).toBe("manual_1");
+  });
   it("keeps custom tool calls pending for explicit manual results instead of dropping them", () => {
     const output = [{ type: "custom_tool_call", call_id: "custom_1", name: "query", input: 'status:open\nowner:"demo"' }];
     const calls = toolInvocations("responses", { output }, [], [{ type: "custom", name: "query", format: { type: "text" } }]);
@@ -20,17 +91,17 @@ describe("Playground tool approvals", () => {
     const fetch = vi.spyOn(globalThis, "fetch");
     await expect(executeTool(connection, { ...call, serverID: "forged", arguments: {} }, new AbortController().signal)).rejects.toThrow("cannot be executed");
     expect(() => decideTool(call, true)).toThrow("manual result");
-    const completed = provideCustomToolResult(call, text), item = { type: "custom_tool_call_output", call_id: customCall.call_id, output: text };
+    const completed = provideManualToolResult(call, text), item = { type: "custom_tool_call_output", call_id: customCall.call_id, output: text };
     expect(completed).toMatchObject({ status: "completed", output: text, manualOutput: text });
     for (const previousResponseID of ["resp_1", ""]) {
       const body = buildTextRequest({ endpoint: "responses", model: "model", history: [{ role: "assistant", content: "", responseItems: [customCall] }], toolOutputs: toolOutputs([completed]), previousResponseID, instructions: "", streaming: false, settings: defaultGenerationSettings });
       expect(body.input).toEqual(previousResponseID ? [item] : [customCall, item]);
     }
     expect(fetch).not.toHaveBeenCalled();
-    const edited = editCustomToolResult(completed, "Updated"); expect(edited.status).toBe("pending"); expect(() => toolOutputs([edited])).toThrow("Resolve every");
+    const edited = editManualToolResult(completed, "Updated"); expect(edited.status).toBe("pending"); expect(() => toolOutputs([edited])).toThrow("Resolve every");
     const declined = decideTool(completed, false);
     expect(toolOutputs([declined])[0].responseItems).toEqual([{ ...item, output: '{"isError":true,"error":"User declined tool invocation"}' }]);
-    expect(provideCustomToolResult(declined, text).status).toBe("completed");
+    expect(provideManualToolResult(declined, text).status).toBe("completed");
   });
   it.each([{ ...customCall, name: "foreign" }, { ...customCall, input: {} }, { ...customCall, call_id: "../bad" }, { ...customCall, name: "a.b" }])("rejects malformed or foreign custom calls", (item) => {
     expect(() => toolInvocations("responses", { output: [item] }, [], [customDefinition])).toThrow();
@@ -47,22 +118,22 @@ describe("Playground tool approvals", () => {
   });
   it.each(["x".repeat(65537), "🙂".repeat(16385)])("allows only decline for custom input beyond the UTF-8 byte limit", (input) => {
     const [call] = toolInvocations("responses", { output: [{ ...customCall, input }] }, [], [customDefinition]);
-    expect(call.issue).toContain("64 KiB"); expect(() => provideCustomToolResult(call, "result")).toThrow("cannot accept");
+    expect(call.issue).toContain("64 KiB"); expect(() => provideManualToolResult(call, "result")).toThrow("cannot accept");
     expect(toolOutputs([decideTool(call, false)])[0].responseItems).toEqual([expect.objectContaining({ call_id: "custom_1" })]);
     expect(() => toolOutputs([{ ...call, status: "completed", output: "forged" }])).toThrow("only be declined");
   });
   it("bounds UTF-8 manual results at editing, confirmation and serialization without truncation", () => {
     const [call] = toolInvocations("responses", { output: [customCall] }, [], [customDefinition]);
     const maximum = "🙂".repeat(32768);
-    expect(provideCustomToolResult(call, maximum).output).toBe(maximum);
+    expect(provideManualToolResult(call, maximum).output).toBe(maximum);
     for (const output of ["x".repeat(128 * 1024 + 1), maximum + "x"]) {
-      expect(() => editCustomToolResult(call, output)).toThrow("128 KiB");
-      expect(() => provideCustomToolResult(call, output)).toThrow("128 KiB");
+      expect(() => editManualToolResult(call, output)).toThrow("128 KiB");
+      expect(() => provideManualToolResult(call, output)).toThrow("128 KiB");
       expect(() => toolOutputs([{ ...call, status: "completed", output }])).toThrow("128 KiB");
     }
     expect(() => toolOutputs([{ ...call, output: "unconfirmed" }])).toThrow("Resolve every custom");
     const ordinary = toolInvocations("chat", response(), selected)[0];
-    expect(() => provideCustomToolResult(ordinary, "result")).toThrow("cannot accept");
+    expect(() => provideManualToolResult(ordinary, "result")).toThrow("cannot accept");
     const incomplete = toolInvocations("responses", { output: [{ ...customCall, status: "in_progress" }] }, [], [customDefinition])[0];
     expect(incomplete.issue).toContain("incomplete");
   });
@@ -100,8 +171,8 @@ describe("Playground tool approvals", () => {
     const fn = { type: "function_call", call_id: "function_1", name: "forecast", arguments: "{}" };
     const tools = [...nativeTools, customDefinition];
     const calls = toolInvocations("responses", { output: [customCall, approval, fn] }, selected, tools);
-    expect(() => toolOutputs([provideCustomToolResult(calls[0], "result"), decideTool(calls[1], false), calls[2]])).toThrow("Resolve every");
-    const outputs = toolOutputs([provideCustomToolResult(calls[0], "result"), decideTool(calls[1], false), decideTool(calls[2], false)]);
+    expect(() => toolOutputs([provideManualToolResult(calls[0], "result"), decideTool(calls[1], false), calls[2]])).toThrow("Resolve every");
+    const outputs = toolOutputs([provideManualToolResult(calls[0], "result"), decideTool(calls[1], false), decideTool(calls[2], false)]);
     expect(outputs.map((item) => item.responseItems?.[0] ?? { type: "function_result", id: item.tool_call_id })).toEqual([
       { type: "custom_tool_call_output", call_id: "custom_1", output: "result" },
       { type: "mcp_approval_response", approval_request_id: "approval_1", approve: false },

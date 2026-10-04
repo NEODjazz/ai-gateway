@@ -157,6 +157,11 @@ compatibility must be distinguished from merely having an endpoint selector.
 - [x] Added Responses custom tool input review, explicit manual output/decline,
   typed continuation with original call IDs, exact text preservation, bounded
   UTF-8 results and submitted-definition binding in both continuity modes.
+- [x] Added explicit manual results for declared Chat/Responses functions without
+  MCP bindings, with exact argument/result text, definition binding and typed
+  continuation in API/browser/background sessions and each Compare panel.
+  Invalid Compare tool batches preserve actual output/usage and require clearing
+  the affected panel before a new shared prompt.
 - [x] Added canonical file citations, explicit credential-scoped downloads and
   verified raster previews. Generated container files are authorized through an
   owned stored response and its original deployment, without claiming container
@@ -495,6 +500,39 @@ An isolated browser preview under the current CSP verified one manual result and
 one decline, zero extra requests before Continue, exactly one continuation and zero
 direct MCP calls. No real provider, remote tool service or billing was invoked.
 
+
+## Manual function results
+
+Chat Completions and Responses functions declared in the submitted `tools` array
+can be reviewed without an MCP execution binding. The browser never executes
+these functions or evaluates their arguments. A user supplies plain text,
+explicitly confirms an empty or nonempty result, or declines the call; editing a
+confirmed result makes confirmation necessary again. Every call must be resolved
+before the user explicitly continues the conversation.
+
+Manual results are limited to 128 KiB of UTF-8 text. Original argument strings
+and supplied result text remain unchanged, including JSON numeric literals and
+non-JSON output. Chat uses the original `tool_call_id`; Responses uses typed
+`function_call_output` with its original `call_id`, in both API-managed and
+browser-managed history. Background responses retain the original submitted
+tool definitions. Continuation rejects changed, removed or duplicate definitions
+before transport; a failed continuation retains the reviewed results for retry.
+
+A selected MCP function retains its explicit execution path. Ambiguous MCP
+bindings do not become manual functions. Unknown or duplicate declared functions,
+malformed or oversized argument objects, and incomplete Responses function calls
+can only be declined. Manual results never trigger direct MCP transport. Compare
+uses separate results, definitions and history per panel; a malformed tool batch
+keeps the actual provider response and usage but blocks new shared prompts until
+the affected panel is cleared. Other successful panels remain intact.
+
+UI regressions cover definition changes, background provenance, empty results,
+UTF-8 limits, retry preservation, keyboard confirmation and panel isolation.
+HTTP adapter tests verify all three continuation dialects with empty, plain-text
+and declined output. Browser checks under the actual console CSP exercised
+Chat, Responses and Compare: no MCP calls, no extra inference before Continue,
+no transport for a changed definition, and no console or CSP errors. These checks
+used isolated synthetic responses without real provider execution or billing.
 
 ## Response file results
 

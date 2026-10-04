@@ -13,7 +13,7 @@ import { CopyOutput, OutputDetails } from "./OutputDetails";
 import { ResourceControls } from "./ResourceControls";
 import { checkPolicies, emptyResources, parseResourceCatalog, policyChecks, withResources, type ResourceCatalog, type ResourceSelection } from "./resources";
 import { ToolApprovals } from "./ToolApprovals";
-import { executeTool, toolInvocations, toolOutputs, type ToolInvocation } from "./toolCalls";
+import { decideTool, editManualToolResult, executeTool, provideManualToolResult, toolInvocations, toolOutputs, validateToolContinuation, type ToolInvocation } from "./toolCalls";
 import { agentApprovalRequest, agentRequest, agentTaskRequest, runAgentRequest, type AgentRun, type AgentTask } from "./agents";
 import { csvCell } from "../../csv";
 
@@ -23,12 +23,13 @@ type Panel = {
   id: number; model: string; settings: GenerationSettings; instructions: string; sessionID: string;
   kind: "model" | "agent"; agent: string; agentRun?: AgentRun; calls: ToolInvocation[]; policyPrompt: string;
   resources: ResourceSelection; historyDropped: number; pricing: PricingInputs; history: Message[]; pending: string; lastPrompt?: string; result?: TextRun; error: string; status: "idle" | "running" | "complete" | "awaiting_tools" | "awaiting_task" | "failed" | "cancelled";
+  unreviewableTools: boolean;
 };
 
 function newPanel(id: number, model: string): Panel {
   return { id, model, settings: { ...defaultGenerationSettings }, instructions: "", sessionID: `playground-compare-${crypto.randomUUID()}`,
     kind: "model", agent: "", calls: [], policyPrompt: "",
-    resources: { ...emptyResources }, historyDropped: 0, pricing: { ...defaultPricing }, history: [], pending: "", error: "", status: "idle" };
+    resources: { ...emptyResources }, historyDropped: 0, pricing: { ...defaultPricing }, history: [], pending: "", error: "", status: "idle", unreviewableTools: false };
 }
 
 export function ComparePlayground({ connection, models, connectionControls, connectionChanged, active = true }: {
@@ -96,7 +97,7 @@ export function ComparePlayground({ connection, models, connectionControls, conn
     setPanels((current) => current.map((panel) => panel.status === "running" ? { ...panel, status: "cancelled", error: "Request cancelled" } : activeIDs.has(panel.id) ? { ...panel, error: "Request cancelled. Server execution may have completed.", calls: panel.calls.map((call) => call.output === undefined ? { ...call, status: "failed", error: "Tool execution cancelled." } : call) } : panel));
     setRunning(false);
   }
-  const pendingApprovals = panels.some((panel) => panel.calls.length > 0 || panel.agentRun?.task && panel.agentRun.task.state !== "TASK_STATE_COMPLETED");
+  const pendingApprovals = panels.some((panel) => panel.unreviewableTools || panel.calls.length > 0 || panel.agentRun?.task && panel.agentRun.task.state !== "TASK_STATE_COMPLETED");
   type Prepared = { panel: Panel; body?: Record<string, unknown>; agentRequest?: ReturnType<typeof agentRequest>; turns: Message[]; policyPrompt: string; lastPrompt?: string };
   async function runPrepared(requests: Prepared[]) {
     const activeGeneration = ++generation.current;
@@ -119,9 +120,11 @@ export function ComparePlayground({ connection, models, connectionControls, conn
           if (generation.current !== activeGeneration || controller.signal.aborted) return;
           const choice = (result.response.choices as { message?: Message }[] | undefined)?.[0]?.message;
           const assistant: Message = { ...choice, role: "assistant", content: choice?.content ?? result.text };
-          const calls = toolInvocations("chat", result.response, panel.resources.tools);
+          let calls: ToolInvocation[] = [], reviewError = "";
+          try { calls = toolInvocations("chat", result.response, panel.resources.tools, body!.tools); }
+          catch (cause) { reviewError = `Tool review failed: ${cause instanceof Error ? cause.message : "Invalid tool calls."} Clear this comparison before continuing.`; }
           const retained = retainConversation([...panel.history, ...turns, assistant]);
-          setPanels((current) => current.map((item) => item.id === panel.id ? { ...item, calls, policyPrompt, historyDropped: item.historyDropped + retained.dropped, result, pending: "", status: calls.length ? "awaiting_tools" : "complete", history: retained.turns, lastPrompt: lastPrompt ?? item.lastPrompt } : item));
+          setPanels((current) => current.map((item) => item.id === panel.id ? { ...item, calls, unreviewableTools: !!reviewError, error: reviewError, policyPrompt, historyDropped: item.historyDropped + retained.dropped, result, pending: "", status: reviewError ? "failed" : calls.length ? "awaiting_tools" : "complete", history: retained.turns, lastPrompt: lastPrompt ?? item.lastPrompt } : item));
         }
       } catch (cause) {
         if (generation.current === activeGeneration) setPanels((current) => current.map((item) => item.id === panel.id ? { ...item, status: controller.signal.aborted ? "cancelled" : "failed", error: cause instanceof Error ? cause.message : "Request failed" } : item));
@@ -150,22 +153,31 @@ export function ComparePlayground({ connection, models, connectionControls, conn
     if (await runPrepared(requests)) { setPrompt(""); clearAttachments(); }
   }
   async function continuePanel(panel: Panel) {
-    if (running || connectionChanged) return;
+    if (running || connectionChanged || panel.unreviewableTools) return;
     try {
       const outputs = toolOutputs(panel.calls);
       const body = withResources(buildTextRequest({ endpoint: "chat", model: panel.model, instructions: panel.instructions, history: panel.history, toolOutputs: outputs, streaming: stream, settings: panel.settings }), "chat", panel.resources);
+      validateToolContinuation(panel.calls, body.tools);
       policyChecks(panel.resources.policies, panel.policyPrompt, panel.model);
       await runPrepared([{ panel, body, turns: outputs, policyPrompt: panel.policyPrompt }]);
     } catch (cause) { setPanels((items) => items.map((item) => item.id === panel.id ? { ...item, error: cause instanceof Error ? cause.message : "Could not continue comparison." } : item)); }
   }
   async function approveTool(panel: Panel, index: number) {
-    if (running || connectionChanged || panel.calls[index].output !== undefined) return;
+    if (running || connectionChanged || !panel.calls[index] || panel.calls[index].manualFunction || panel.calls[index].issue || panel.calls[index].output !== undefined) return;
     const controller = new AbortController(), activeGeneration = ++generation.current; controllers.current.set(panel.id, controller); setRunning(true);
     try {
       const output = await executeTool(connection, panel.calls[index], controller.signal);
       if (generation.current === activeGeneration && !controller.signal.aborted) setPanels((items) => items.map((item) => item.id === panel.id ? { ...item, calls: item.calls.map((call, position) => position === index ? { ...call, status: "completed", output, error: undefined } : call) } : item));
     } catch (cause) { if (generation.current === activeGeneration) setPanels((items) => items.map((item) => item.id === panel.id ? { ...item, calls: item.calls.map((call, position) => position === index ? { ...call, status: "failed", error: controller.signal.aborted ? "Tool execution cancelled." : cause instanceof Error ? cause.message : "Tool execution failed." } : call) } : item)); }
     finally { if (controllers.current.get(panel.id) === controller) controllers.current.delete(panel.id); if (generation.current === activeGeneration) setRunning(false); }
+  }
+  function manualToolResult(panel: Panel, index: number, output?: string) {
+    if (running || connectionChanged) return;
+    setPanels((items) => items.map((item) => item.id === panel.id ? { ...item, calls: item.calls.map((call, position) => {
+      if (position !== index || !call.manualFunction) return call;
+      try { return output === undefined ? provideManualToolResult(call, call.manualOutput ?? "") : editManualToolResult(call, output); }
+      catch (cause) { return { ...call, output: undefined, status: "pending", error: cause instanceof Error ? cause.message : "Invalid tool result." }; }
+    }) } : item));
   }
   async function taskOperation(panel: Panel, task: AgentTask, method?: "GetTask" | "CancelTask", choices?: { call_id: string; approved: boolean }[]) {
     if (running || connectionChanged) return;
@@ -229,7 +241,7 @@ export function ComparePlayground({ connection, models, connectionControls, conn
           {panel.pending && <article className="playground-turn assistant streaming"><strong>{panel.status === "running" ? "Streaming" : "Partial response"}</strong><pre>{panel.pending}</pre></article>}
           {panel.error && <p role="alert" className="form-error">{panel.error}</p>}
         </div>
-        <ToolApprovals label={`Comparison ${index + 1} tool approvals`} continueLabel={`Continue comparison ${index + 1} with tool results`} calls={panel.calls} disabled={running || connectionChanged} onExecute={(position) => void approveTool(panel, position)} onDecline={(position) => setPanels((items) => items.map((item) => item.id === panel.id ? { ...item, calls: item.calls.map((call, i) => i === position ? { ...call, status: "declined", output: JSON.stringify({ isError: true, error: "User declined tool invocation" }), error: undefined } : call) } : item))} onContinue={() => void continuePanel(panel)} />
+        <ToolApprovals label={`Comparison ${index + 1} tool approvals`} continueLabel={`Continue comparison ${index + 1} with tool results`} calls={panel.calls} disabled={running || connectionChanged} onResultEdit={(position, output) => manualToolResult(panel, position, output)} onUseResult={(position) => manualToolResult(panel, position)} onExecute={(position) => void approveTool(panel, position)} onDecline={(position) => setPanels((items) => items.map((item) => item.id === panel.id ? { ...item, calls: item.calls.map((call, i) => i === position ? decideTool(call, false) : call) } : item))} onContinue={() => void continuePanel(panel)} />
         {panel.agentRun && <dl className="playground-metadata"><div><dt>Latency</dt><dd>{Math.round(panel.agentRun.latencyMS)} ms</dd></div><div><dt>Task status</dt><dd>{panel.agentRun.task?.state || "Stateless response"}</dd></div><div><dt>Tokens</dt><dd>Not reported</dd></div><div><dt>First token</dt><dd>Not reported</dd></div><div><dt>Finalized cost</dt><dd>See Usage &amp; spend</dd></div></dl>}
         {panel.agentRun?.task && <div className="playground-actions"><GatewayButton view="outlined" disabled={running || connectionChanged} onClick={() => void taskOperation(panel, panel.agentRun!.task!, "GetTask")}>Refresh comparison {index + 1} task</GatewayButton>{["TASK_STATE_SUBMITTED", "TASK_STATE_WORKING", "TASK_STATE_INPUT_REQUIRED"].includes(panel.agentRun.task.state) && <GatewayButton view="outlined" disabled={running || connectionChanged} onClick={() => void taskOperation(panel, panel.agentRun!.task!, "CancelTask")}>Cancel comparison {index + 1} task</GatewayButton>}</div>}
         {panel.agentRun?.task && <AgentToolApprovals label={`Comparison ${index + 1} agent tool approvals`} task={panel.agentRun.task} disabled={running || connectionChanged} onContinue={(choices) => void taskOperation(panel, panel.agentRun!.task!, undefined, choices)} />}

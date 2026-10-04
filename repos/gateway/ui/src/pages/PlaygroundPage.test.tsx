@@ -114,6 +114,65 @@ describe("PlaygroundPage", () => {
     expect(bodies[2].input).toEqual(variant === "browser" ? [{ role: "user", content: "Review native actions" }, ...approvals, ...decisions] : decisions);
     expect(bodies[2].previous_response_id).toBe(variant === "browser" ? undefined : "resp_1");
   });
+  it.each(["chat", "api", "browser", "background"])("requires explicit function results in %s and preserves their original definition and arguments", async (variant) => {
+    const fn = { name: "query", parameters: { type: "object", properties: { id: { type: "integer" } }, required: ["id"] } };
+    const tools = [variant === "chat" ? { type: "function", function: fn } : { type: "function", ...fn }];
+    const rawArguments = '{"id":9007199254740993}';
+    const calls = variant === "chat" ? [{ id: "manual_1", type: "function", function: { name: "query", arguments: rawArguments } }, { id: "manual_2", type: "function", function: { name: "query", arguments: "{}" } }]
+      : [{ type: "function_call", call_id: "manual_1", name: "query", arguments: rawArguments }, { type: "function_call", call_id: "manual_2", name: "query", arguments: "{}" }];
+    const advanced = JSON.stringify({ tools, ...(variant === "background" ? { background: true } : {}) });
+    const result = 'rows: 9007199254740993\n<not-json>';
+    const endpoint = variant === "chat" ? "/v1/chat/completions" : "/v1/responses";
+    const first = variant === "chat" ? { choices: [{ message: { role: "assistant", content: null, tool_calls: calls } }] }
+      : { id: "resp_manual", status: "completed", output: calls };
+    const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json" } });
+    let runs = 0;
+    const mock = vi.spyOn(globalThis, "fetch").mockImplementation(async (path) => {
+      if (path === "/v1/models") return json({ data: [{ id: "model" }] });
+      if (path === "/v1/responses/resp_manual") return json(first);
+      if (path !== endpoint) throw new Error("Unexpected automatic function execution");
+      return ++runs === 1 ? json(variant === "background" ? { id: "resp_manual", status: "queued" } : first)
+        : runs === 2 ? json({ error: { message: "Function continuation unavailable" } }, 503)
+          : json(variant === "chat" ? { choices: [{ message: { content: "Function results received" } }] } : { id: "resp_done", status: "completed", output_text: "Function results received" });
+    });
+    authenticated(); await screen.findByText("1 authorized model");
+    if (variant !== "chat") await userEvent.click(screen.getByRole("tab", { name: "Responses API" }));
+    await userEvent.click(screen.getByLabelText("Stream response"));
+    if (variant === "browser") await userEvent.click(screen.getByLabelText("Use API session management"));
+    await userEvent.click(screen.getByText("Advanced parameters")); fireEvent.change(screen.getByLabelText("Advanced parameters JSON"), { target: { value: advanced } });
+    await userEvent.type(screen.getByLabelText("Message"), "Review function query"); await userEvent.click(screen.getByRole("button", { name: "Run request" }));
+    if (variant === "background") {
+      await screen.findByRole("region", { name: "Background response" });
+      fireEvent.change(screen.getByLabelText("Advanced parameters JSON"), { target: { value: '{"tools":[]}' } });
+      await userEvent.click(screen.getByRole("button", { name: "Refresh background response" }));
+    }
+    expect(await screen.findByRole("region", { name: "Tool approvals" })).toHaveTextContent("9007199254740993");
+    expect(screen.getByLabelText("Message")).toBeDisabled(); expect(screen.queryByRole("button", { name: "Execute query" })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Function tool result manual_1"), { target: { value: result } });
+    expect(screen.getByRole("button", { name: "Continue with tool results" })).toBeDisabled();
+    await userEvent.click(screen.getAllByRole("button", { name: "Use result for query" })[0]);
+    await userEvent.click(screen.getByRole("button", { name: "Use empty result for query" }));
+    expect(screen.getByText("Empty tool result")).toBeInTheDocument(); expect(runs).toBe(1);
+    if (variant !== "background") fireEvent.change(screen.getByLabelText("Advanced parameters JSON"), { target: { value: '{"tools":[]}' } });
+    await userEvent.click(screen.getByRole("button", { name: "Continue with tool results" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("function tool definition changed"); expect(runs).toBe(1);
+    fireEvent.change(screen.getByLabelText("Advanced parameters JSON"), { target: { value: advanced } });
+    await userEvent.click(screen.getByRole("button", { name: "Get code" }));
+    expect(await screen.findByLabelText("Request code")).toHaveTextContent(variant === "chat" ? "tool_call_id" : "function_call_output");
+    expect(screen.getByLabelText("Request code")).toHaveTextContent("9007199254740993"); expect(screen.getByLabelText("Request code")).not.toHaveTextContent("playground-token"); await userEvent.keyboard("{Escape}");
+    await userEvent.click(screen.getByRole("button", { name: "Continue with tool results" })); expect(await screen.findByRole("alert")).toHaveTextContent("Function continuation unavailable");
+    expect(screen.getByLabelText("Function tool result manual_1")).toHaveValue(result);
+    await userEvent.click(screen.getByRole("button", { name: "Continue with tool results" })); await screen.findByText("Function results received");
+    expect(screen.queryByRole("region", { name: "Tool approvals" })).not.toBeInTheDocument(); expect(screen.getAllByText("Review function query")).toHaveLength(1);
+    const bodies = mock.mock.calls.filter(([path]) => path === endpoint).map(([, options]) => JSON.parse(String(options?.body)));
+    expect(bodies).toHaveLength(3); expect(bodies[1]).toEqual(bodies[2]); expect(bodies[2].tools).toEqual(tools);
+    if (variant === "chat") expect(bodies[2].messages).toEqual([{ role: "user", content: "Review function query" }, { role: "assistant", content: "", tool_calls: calls }, { role: "tool", tool_call_id: "manual_1", content: result }, { role: "tool", tool_call_id: "manual_2", content: "" }]);
+    else {
+      const outputs = [{ type: "function_call_output", call_id: "manual_1", output: result }, { type: "function_call_output", call_id: "manual_2", output: "" }];
+      expect(bodies[2].input).toEqual(variant === "browser" ? [{ role: "user", content: "Review function query" }, ...calls, ...outputs] : outputs);
+      expect(bodies[2].previous_response_id).toBe(variant === "browser" ? undefined : "resp_manual");
+    }
+  });
   it.each(["api", "browser", "background"])("requires explicit custom results in %s Responses, preserving text on retry and binding definitions", async (variant) => {
     const tools = [{ type: "custom", name: "query", format: { type: "text" } }];
     const calls = [{ type: "custom_tool_call", id: "output_item", call_id: "custom_1", name: "query", input: 'status:open\nowner:"demo"' }, { type: "custom_tool_call", call_id: "custom_2", name: "query", input: "status:closed" }];
