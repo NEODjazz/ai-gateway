@@ -18,6 +18,7 @@ import (
 )
 
 type Config struct {
+	Docling       DoclingConfig
 	HTTP          HTTPConfig
 	Cache         CacheConfig
 	Redis         RedisConfig
@@ -316,6 +317,7 @@ func Load() Config {
 		a2aTaskErr = errors.Join(a2aTaskErr, errors.New("A2A subscription poll interval must be between 100 and 10000 milliseconds"))
 	}
 	return Config{
+		Docling: DoclingConfig{URL: strings.TrimSpace(os.Getenv("DOCLING_URL")), APIKey: os.Getenv("DOCLING_API_KEY"), Timeout: time.Duration(envInt("DOCLING_TIMEOUT_SECONDS", 240)) * time.Second, PollInterval: time.Duration(envInt("DOCLING_POLL_MILLISECONDS", 500)) * time.Millisecond, MaxTextBytes: envInt("DOCLING_MAX_TEXT_BYTES", 4<<20)},
 		HTTP: HTTPConfig{
 			Addr: env("HTTP_ADDR", ":8080"),
 		},

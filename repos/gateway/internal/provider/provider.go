@@ -18,6 +18,7 @@ import (
 	"ai-gateway-gateway/internal/asyncstate"
 	"ai-gateway-gateway/internal/config"
 	"ai-gateway-gateway/internal/conversationstate"
+	"ai-gateway-gateway/internal/documentprocessing"
 	"ai-gateway-gateway/internal/modelcatalog"
 	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/openai"
@@ -389,6 +390,7 @@ type StreamingResponseClient interface {
 var ErrStreamingUnsupported = errors.New("streaming unsupported")
 
 type Config struct {
+	DocumentConverter       documentprocessing.Converter
 	BackgroundAuthorization modules.Pipeline
 	Default                 string
 	Endpoints               []config.ProviderEndpointConfig
@@ -466,6 +468,7 @@ type Endpoint struct {
 }
 
 type Router struct {
+	documentConverter       documentprocessing.Converter
 	backgroundAuthorization modules.Pipeline
 	defaultProvider         string
 	endpoints               []Endpoint
@@ -664,6 +667,7 @@ func NewWithError(cfg Config) (Provider, error) {
 		deploymentQuotas = NewMemoryDeploymentQuotaStore()
 	}
 	router := &Router{
+		documentConverter:       cfg.DocumentConverter,
 		backgroundAuthorization: cfg.BackgroundAuthorization,
 		defaultProvider:         cfg.Default,
 		endpoints:               endpoints,
@@ -869,7 +873,7 @@ func (r Router) ChatCompletions(ctx context.Context, req modules.RequestContext)
 				}
 			}
 		}
-		if !mirrored && request.GeminiCachedContent == "" && replaySafe {
+		if !mirrored && req.Metadata[documentBindingMetadata] == "" && request.GeminiCachedContent == "" && replaySafe {
 			r.mirrorChat(ctx, req.RequestID, attemptCtx.Request, request.Model, requiredChatCapabilities(request, false)...)
 			mirrored = true
 		}
@@ -1019,7 +1023,7 @@ func (r Router) StreamChatCompletions(ctx context.Context, req modules.RequestCo
 			return openai.ChatCompletionResponse{}, false, err
 		}
 		lastAttempt = &attemptCtx
-		if !mirrored && request.GeminiCachedContent == "" && chatReplaySafe(attemptCtx.Request) {
+		if !mirrored && req.Metadata[documentBindingMetadata] == "" && request.GeminiCachedContent == "" && chatReplaySafe(attemptCtx.Request) {
 			r.mirrorChat(ctx, req.RequestID, attemptCtx.Request, request.Model, requiredChatCapabilities(request, true)...)
 			mirrored = true
 		}
@@ -1222,7 +1226,7 @@ func (r Router) Responses(ctx context.Context, req modules.RequestContext) (open
 			attemptCtx.Metadata["provider.cache.status"] = "error"
 			log.Print("provider cache get failed")
 		}
-		if !mirrored && attemptCtx.ConversationTurn == nil && !persistentResponseRequested(*attemptCtx.ResponseRequest) && responseReplaySafe(*attemptCtx.ResponseRequest) {
+		if !mirrored && req.Metadata[documentBindingMetadata] == "" && attemptCtx.ConversationTurn == nil && !persistentResponseRequested(*attemptCtx.ResponseRequest) && responseReplaySafe(*attemptCtx.ResponseRequest) {
 			r.mirrorResponses(ctx, req.RequestID, *attemptCtx.ResponseRequest, request.Model, requiredResponseCapabilities(request, false)...)
 			mirrored = true
 		}
@@ -2248,7 +2252,7 @@ func (r Router) StreamResponses(ctx context.Context, req modules.RequestContext,
 			return openai.ResponseResponse{}, true, err
 		}
 		lastAttempt = &attemptCtx
-		if !mirrored && attemptCtx.ConversationTurn == nil && !persistentResponseRequested(*attemptCtx.ResponseRequest) && responseReplaySafe(*attemptCtx.ResponseRequest) {
+		if !mirrored && req.Metadata[documentBindingMetadata] == "" && attemptCtx.ConversationTurn == nil && !persistentResponseRequested(*attemptCtx.ResponseRequest) && responseReplaySafe(*attemptCtx.ResponseRequest) {
 			r.mirrorResponses(ctx, req.RequestID, *attemptCtx.ResponseRequest, request.Model, requiredResponseCapabilities(request, true)...)
 			mirrored = true
 		}

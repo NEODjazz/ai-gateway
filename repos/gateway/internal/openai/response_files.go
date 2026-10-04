@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -44,8 +45,13 @@ func ResponseFileAttachments(input any) ([]ResponseFileAttachment, error) {
 				attachments = append(attachments, attachment)
 				return nil
 			}
-			for _, nested := range typed {
-				if err := walk(nested); err != nil {
+			keys := make([]string, 0, len(typed))
+			for key := range typed {
+				keys = append(keys, key)
+			}
+			sort.Strings(keys)
+			for _, key := range keys {
+				if err := walk(typed[key]); err != nil {
 					return err
 				}
 			}

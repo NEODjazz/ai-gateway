@@ -370,7 +370,7 @@ func (h Handler) serveChatWithAdapter(w http.ResponseWriter, r *http.Request, re
 	}
 
 	var pipelineErr error
-	if openai.HasChatResolvableReferences(request) {
+	if openai.HasChatResolvableReferences(request) || h.documentProcessingEnabled() && openai.HasChatFileInput(request) {
 		pipelineErr = h.pipeline.RunAuthentication(r.Context(), &reqCtx)
 		if pipelineErr == nil {
 			reqCtx.APIKey = ""
@@ -386,6 +386,9 @@ func (h Handler) serveChatWithAdapter(w http.ResponseWriter, r *http.Request, re
 			}
 			if err := h.resolveCachedContentReference(r.Context(), reqCtx, &reqCtx.Request); err != nil {
 				writeCachedContentReferenceError(w, err)
+				return
+			}
+			if !h.prepareDocuments(w, r, &reqCtx) {
 				return
 			}
 			pipelineErr = h.pipeline.RunAfterAuthentication(r.Context(), &reqCtx)
@@ -759,7 +762,7 @@ func (h Handler) serveResponsesAs(w http.ResponseWriter, r *http.Request, reques
 	var pipelineErr error
 	computerOutputs, _ := openai.InspectResponseComputerCallOutputs(request.Input)
 	_, backgroundAgent := r.Context().Value(agentMCPWorkerContextKey{}).(agentMCPWorkerIdentity)
-	if responseComputerOutputsHaveFiles(computerOutputs) || backgroundAgent {
+	if responseComputerOutputsHaveFiles(computerOutputs) || backgroundAgent || h.documentProcessingEnabled() && openai.HasResponseFiles(request) {
 		pipelineErr = h.authenticateAgentMCPRequest(r.Context(), &reqCtx)
 		if pipelineErr == nil {
 			reqCtx.APIKey = ""
@@ -772,6 +775,9 @@ func (h Handler) serveResponsesAs(w http.ResponseWriter, r *http.Request, reques
 				return
 			}
 			reqCtx.Request.Messages = responseMessages(*reqCtx.ResponseRequest)
+			if !h.prepareDocuments(w, r, &reqCtx) {
+				return
+			}
 			pipelineErr = h.pipeline.RunAfterAuthentication(r.Context(), &reqCtx)
 		}
 	} else {

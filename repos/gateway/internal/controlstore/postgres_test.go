@@ -124,7 +124,7 @@ func TestPostgresControlPlaneSnapshotLifecycleIntegration(t *testing.T) {
 			{ID: "foundry-gov", Type: "azure-openai", BaseURL: "https://proxy.example.test/api/projects/project-a", AuthType: "entra", AzureCloud: "usgov", AzureAudience: "foundry", Enabled: true},
 		},
 		Credentials: []provider.EncryptedCredentialSnapshot{{Credential: provider.Credential{ID: "ollama-key"}, Nonce: []byte("nonce"), Ciphertext: []byte("ciphertext")}},
-		Deployments: []provider.ModelDeployment{{ID: "local", ProviderID: "ollama", ProviderType: "ollama", Models: []string{"public"}, UpstreamModel: "qwen", Weight: 1, Enabled: true}},
+		Deployments: []provider.ModelDeployment{{ID: "local", ProviderID: "ollama", ProviderType: "ollama", Models: []string{"public"}, UpstreamModel: "qwen", DocumentProcessing: "docling", Weight: 1, Enabled: true}},
 		ModelGroups: []provider.ModelGroup{{ID: "public", DeploymentIDs: []string{"local"}, Strategy: "weighted", Enabled: true}},
 	}
 	revision, err := store.Save(ctx, 0, snapshot)
@@ -132,7 +132,7 @@ func TestPostgresControlPlaneSnapshotLifecycleIntegration(t *testing.T) {
 		t.Fatalf("save revision=%d err=%v", revision, err)
 	}
 	loaded, found, err := store.Load(ctx)
-	if err != nil || !found || loaded.Revision != 1 || len(loaded.Credentials) != 1 || string(loaded.Credentials[0].Ciphertext) != "ciphertext" || len(loaded.Providers) != 2 || loaded.Providers[1].AzureCloud != "usgov" || loaded.Providers[1].AzureAudience != "foundry" {
+	if err != nil || !found || loaded.Revision != 1 || len(loaded.Credentials) != 1 || string(loaded.Credentials[0].Ciphertext) != "ciphertext" || len(loaded.Providers) != 2 || loaded.Providers[1].AzureCloud != "usgov" || loaded.Providers[1].AzureAudience != "foundry" || len(loaded.Deployments) != 1 || loaded.Deployments[0].DocumentProcessing != "docling" {
 		t.Fatalf("unexpected loaded snapshot: found=%v err=%v snapshot=%+v", found, err, loaded)
 	}
 	if _, err := store.Save(ctx, 0, snapshot); !errors.Is(err, provider.ErrControlPlaneConflict) {
@@ -148,6 +148,7 @@ func TestPostgresControlPlaneSnapshotLifecycleIntegration(t *testing.T) {
 	changed := loaded
 	changed.Deployments = append([]provider.ModelDeployment(nil), loaded.Deployments...)
 	changed.Deployments[0].UpstreamModel = "qwen-updated"
+	changed.Deployments[0].DocumentProcessing = "native"
 	if revision, err := store.Save(ctx, 1, changed); err != nil || revision != 2 {
 		t.Fatalf("updated snapshot revision=%d err=%v", revision, err)
 	}
@@ -158,7 +159,7 @@ func TestPostgresControlPlaneSnapshotLifecycleIntegration(t *testing.T) {
 		t.Fatalf("restored snapshot revision=%d err=%v", revision, err)
 	}
 	restored, found, err := store.Load(ctx)
-	if err != nil || !found || restored.Revision != 3 || len(restored.Deployments) != 1 || restored.Deployments[0].UpstreamModel != "qwen" {
+	if err != nil || !found || restored.Revision != 3 || len(restored.Deployments) != 1 || restored.Deployments[0].UpstreamModel != "qwen" || restored.Deployments[0].DocumentProcessing != "docling" {
 		t.Fatalf("PostgreSQL rollback was not durable: found=%t err=%v revision=%d deployments=%+v", found, err, restored.Revision, restored.Deployments)
 	}
 }

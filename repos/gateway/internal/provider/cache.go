@@ -251,7 +251,7 @@ func cacheIsolationScope(req modules.RequestContext) string {
 	canonical := func(values []string) []string { v := append([]string{}, values...); sort.Strings(v); return v }
 	policy := map[string]string{}
 	for key, value := range req.Metadata {
-		if strings.HasPrefix(key, "policy.") || strings.HasPrefix(key, "provider.modules.") || strings.HasPrefix(key, "provider.guardrail.") {
+		if strings.HasPrefix(key, "policy.") || strings.HasPrefix(key, "provider.modules.") || strings.HasPrefix(key, "provider.guardrail.") || strings.HasPrefix(key, "gateway.document.") {
 			policy[key] = value
 		}
 	}

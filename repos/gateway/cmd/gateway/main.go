@@ -11,6 +11,7 @@ import (
 
 	"ai-gateway-gateway/internal/config"
 	"ai-gateway-gateway/internal/controlstore"
+	"ai-gateway-gateway/internal/documentprocessing"
 	"ai-gateway-gateway/internal/gateway"
 	"ai-gateway-gateway/internal/modelcatalog"
 	"ai-gateway-gateway/internal/modules"
@@ -109,6 +110,13 @@ func main() {
 	}
 	if providerControlStore != nil {
 		providerConfig.SessionStore = providerControlStore.ResponseSessions()
+	}
+	if cfg.Docling.URL != "" {
+		converter, err := documentprocessing.New(documentprocessing.Config{URL: cfg.Docling.URL, APIKey: cfg.Docling.APIKey, Timeout: cfg.Docling.Timeout, PollInterval: cfg.Docling.PollInterval, MaxTextBytes: cfg.Docling.MaxTextBytes})
+		if err != nil {
+			log.Fatal("invalid Docling configuration")
+		}
+		providerConfig.DocumentConverter = converter
 	}
 	llmProvider, err := provider.NewWithError(providerConfig)
 	if err != nil {

@@ -156,6 +156,9 @@ func (r *Router) planModelOnboardingLocked(input ModelOnboardingInput) (ModelOnb
 		if existingIDs[deployment.ID] && !input.UpdateExistingDeployments {
 			return ModelOnboardingPlan{}, ErrDeploymentExists
 		}
+		if existingIDs[deployment.ID] && deployment.DocumentProcessing == "" {
+			deployment.DocumentProcessing = nextDeployments[deployment.ID].DocumentProcessing
+		}
 		if err := r.validateDeployment(deployment); err != nil {
 			return ModelOnboardingPlan{}, ErrInvalidModelOnboarding
 		}

@@ -12989,6 +12989,7 @@ components:
         capabilities: {type: array, maxItems: 128, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 256}}
         priority: {type: integer, minimum: 0}
         weight: {type: integer, minimum: 1}
+        document_processing: {type: string, enum: [native, docling], description: Gateway document processing policy; omission preserves the existing policy on update. Native file_input capability remains separate.}
         guardrail_policy: {type: string, maxLength: 128}
         request_timeout_ms: {type: integer, minimum: 0, maximum: 600000}
         max_retries: {type: integer, minimum: 0, maximum: 10}

@@ -72,7 +72,7 @@ func backgroundJobMetadata(metadata map[string]string) map[string]string {
 		if key == "provider.error" {
 			continue
 		}
-		if key == "gateway.api_type" || strings.HasPrefix(key, "provider.") || strings.HasPrefix(key, "policy.") || strings.HasPrefix(key, "model_catalog.") || strings.HasPrefix(key, "billing.") {
+		if strings.HasPrefix(key, "gateway.document.") || key == "gateway.api_type" || strings.HasPrefix(key, "provider.") || strings.HasPrefix(key, "policy.") || strings.HasPrefix(key, "model_catalog.") || strings.HasPrefix(key, "billing.") {
 			result[key] = value
 		}
 	}
