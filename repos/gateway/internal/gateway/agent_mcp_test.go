@@ -92,6 +92,9 @@ func TestAgentMCPLoopUsesCredentialACLAndBillingForEveryStep(t *testing.T) {
 		t.Fatalf("tool arguments=%v", client.callArgs)
 	}
 	first := llm.requests[0].ResponseRequest
+	if !strings.Contains(first.Tools[0].Description, "forecast") || !strings.Contains(first.Tools[0].Description, "weather") {
+		t.Fatal("description-less MCP tool lost its semantic name behind the private alias")
+	}
 	if first.Tools[0].Name != agentMCPFunctionName(AgentMCPTool{ServerID: "weather", ToolName: "forecast"}) {
 		t.Fatal("unstable tool alias")
 	}

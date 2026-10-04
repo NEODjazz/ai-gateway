@@ -222,7 +222,7 @@ func (h Handler) discoverAgentMCPTools(r *http.Request, profile AgentProfile) ([
 			return nil, nil, capture
 		}
 		name := agentMCPFunctionName(binding)
-		tools = append(tools, openai.ResponseTool{Type: "function", Name: name, Description: definition.Description, Parameters: schema})
+		tools = append(tools, openai.ResponseTool{Type: "function", Name: name, Description: "MCP tool " + binding.ToolName + " on server " + binding.ServerID + ".\n" + definition.Description, Parameters: schema})
 		bindings[name] = binding
 	}
 	return tools, bindings, nil
