@@ -26,9 +26,13 @@ type agentMCPTestProvider struct {
 	invalidArguments bool
 	duplicateCalls   bool
 	afterResponse    func()
+	observeContext   func(context.Context)
 }
 
-func (p *agentMCPTestProvider) Responses(_ context.Context, request modules.RequestContext) (openai.ResponseResponse, error) {
+func (p *agentMCPTestProvider) Responses(ctx context.Context, request modules.RequestContext) (openai.ResponseResponse, error) {
+	if p.observeContext != nil {
+		p.observeContext(ctx)
+	}
 	p.requests = append(p.requests, request)
 	result := openai.ResponseResponse{ID: fmt.Sprintf("resp_%d", len(p.requests)), Status: "completed", Model: "test-model", OutputText: "The forecast is sunny"}
 	if len(p.requests) == 1 || p.alwaysTool {

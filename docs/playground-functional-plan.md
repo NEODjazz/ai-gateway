@@ -495,7 +495,10 @@ completion. Reads remain necessary when delivery or settlement is uncertain.
 
 Regression tests cover the first flush and durable claim order, real HTTP
 disconnect, approval/decline, replay, tool failure, runtime/ACL denial, failed
-persistence, expired claims and unchanged per-step billing. The required
+persistence, expired claims and unchanged per-step billing. HTTP disconnect
+verification waits for cancellation of the actual execution context before
+releasing its fake provider; bounded waits and deferred completion prevent a test
+panic from becoming a ten-minute CI hang. The required
 PostgreSQL integration test verifies JSON and SSE approval claims across two
 store connections, including duplicate decisions, stale CAS and one durable MCP
 execution. No new public request fields, configuration format or dependency is

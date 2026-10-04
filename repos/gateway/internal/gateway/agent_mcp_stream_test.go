@@ -26,14 +26,24 @@ func TestAgentMCPStreamingHTTPFlushAndDisconnect(t *testing.T) {
 	unblock := func() { releaseOnce.Do(func() { close(release) }) }
 	llm.afterResponse = func() { close(entered); <-release }
 	cancelled := make(chan (<-chan struct{}), 1)
+	llm.observeContext = func(ctx context.Context) { cancelled <- ctx.Done() }
+	deadline, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+	await := func(done <-chan struct{}, stage string) {
+		t.Helper()
+		select {
+		case <-done:
+		case <-deadline.Done():
+			t.Fatalf("streaming HTTP test stalled while waiting for %s", stage)
+		}
+	}
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal("no loopback test port available")
 	}
 	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		cancelled <- r.Context().Done()
+		defer close(finished)
 		Routes(h).ServeHTTP(w, r)
-		close(finished)
 	}))
 	server.Listener = listener
 	server.Start()
@@ -55,14 +65,16 @@ func TestAgentMCPStreamingHTTPFlushAndDisconnect(t *testing.T) {
 	if err != nil || !strings.Contains(line, "TASK_STATE_WORKING") || response.Header.Get("Content-Type") != "text/event-stream" {
 		t.Fatal("first task event was buffered until execution completed")
 	}
-	<-entered
+	await(entered, "model generation")
 	requestDone := <-cancelled
 	if err := response.Body.Close(); err != nil {
 		t.Fatal(err)
 	}
-	<-requestDone
+	// The execution context derives from the HTTP context. Waiting for the
+	// parent alone can release the provider before cancellation reaches the child.
+	await(requestDone, "execution cancellation")
 	unblock()
-	<-finished
+	await(finished, "handler completion")
 	if len(llm.requests) != 1 || client.callCalls != 0 {
 		t.Fatal("disconnected task continued tools or model iterations")
 	}
