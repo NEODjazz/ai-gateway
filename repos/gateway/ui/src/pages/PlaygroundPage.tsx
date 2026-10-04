@@ -74,7 +74,7 @@ export function PlaygroundPage() {
   const [calls, setCalls] = useState<ToolInvocation[]>([]);
   const [unreviewableTools, setUnreviewableTools] = useState(false);
   const [toolPrompt, setToolPrompt] = useState("");
-  const [apiContinuity, setAPIContinuity] = useState(true);
+  const [apiContinuity, setAPIContinuity] = useState(false);
   const [codeRequest, setCodeRequest] = useState<{ path: string; body: unknown; baseURL: string; checks?: CodeCheck[] }>();
   const [streaming, setStreaming] = useState(true);
   const [transcript, setTranscript] = useState<TranscriptTurn[]>([]);
@@ -153,6 +153,10 @@ export function PlaygroundPage() {
     if (mode === "responses" && apiContinuity) {
       if (body.store === false) throw new Error("API session management requires store: true. Disable API session management to use store: false.");
       body.store = true;
+    } else if (mode === "responses" && body.store === undefined) {
+      // Ordinary browser conversations are stateless. Explicit background jobs
+      // require storage even when their history is managed in the browser.
+      body.store = body.background === true;
     }
     if (input === undefined) validateToolContinuation(calls, body.tools);
     return body;
@@ -310,7 +314,7 @@ export function PlaygroundPage() {
           <SelectControl label="Response format" value={responseFormat} disabled={running} options={[{ value: "text", content: "Text" }, { value: "json_object", content: "JSON object" }, { value: "json_schema", content: "JSON schema" }]} onUpdate={setResponseFormat} />
           {responseFormat === "json_schema" && <AreaControl label="Output JSON schema" rows={5} disabled={running} value={schema} onUpdate={setSchema} placeholder='{ "type": "object", "properties": {} }' />}
           <GravityThemeScope className="gravity-playground-control"><Checkbox controlProps={{ "aria-label": "Stream response" }} size="l" disabled={running} checked={streaming} onUpdate={setStreaming}>Stream response</Checkbox></GravityThemeScope>
-          {mode === "responses" && <GravityThemeScope className="gravity-playground-control"><Checkbox controlProps={{ "aria-label": "Use API session management" }} disabled={running} checked={apiContinuity} onUpdate={(value) => { setAPIContinuity(value); setPreviousResponseID(""); }}>Use API session management</Checkbox></GravityThemeScope>}
+          {mode === "responses" && <><GravityThemeScope className="gravity-playground-control"><Checkbox controlProps={{ "aria-label": "Use API session management", "aria-describedby": "responses-session-help" }} disabled={running} checked={apiContinuity} onUpdate={(value) => { setAPIContinuity(value); setPreviousResponseID(""); }}>Use API session management</Checkbox></GravityThemeScope><p id="responses-session-help" className="muted">{apiContinuity ? "Sends store: true and continues by response ID. Requires a deployment supporting stateful Responses; Ollama does not support this mode." : "Browser history is replayed with store: false. Explicit background jobs require storage; advanced store settings are preserved."}</p></>}
           <details className="playground-advanced"><summary>Advanced parameters</summary><AreaControl label="Advanced parameters JSON" rows={6} disabled={running} value={advanced} onUpdate={setAdvanced} placeholder='{ "reasoning_effort": "low" }' /><p className="muted">Parameters are sent unchanged. Unsupported settings return a gateway or provider error. Responses background mode requires {`{ "background": true }`} and streaming disabled.</p></details>
           <ResourceControls connection={connection} model={model} endpoint={mode} value={resources} onUpdate={setResources} disabled={running || connectionChanged || calls.length > 0 || unreviewableTools || !!pendingResponse} />
           <PricingControls value={pricing} onUpdate={setPricing} disabled={running} />

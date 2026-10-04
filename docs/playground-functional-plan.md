@@ -723,8 +723,12 @@ ownership or listing access. Reads do not open an inference billing lifecycle.
 
 Generated downloads require a stored response. Selecting API session management
 explicitly sends `store: true`; an advanced `store: false` conflicts visibly
-before transport. Browser history can still use `store: false` without silently
-enabling storage. File errors leave the conversation and actual usage intact;
+before transport. Responses now default to browser history: `store: false`,
+complete history replay, and no `previous_response_id`. Stateful API sessions
+are opt-in and require a supporting deployment; Ollama Responses are stateless.
+Explicit background jobs still request the required `store: true`, and explicit
+advanced storage settings are preserved. File errors leave the conversation and
+actual usage intact;
 expired or deleted upstream resources can no longer be read.
 
 Response/Interaction ownership now includes Organization in its versioned

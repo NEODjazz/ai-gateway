@@ -77,6 +77,11 @@ In UI open **Deployments → Edit → Document processing (PDF)** and choose `do
 or Responses support but does not require native `file_input` on model/adapter.
 Pause/resume and onboarding updates preserve the processing policy.
 
+For Ollama PDF requests in Playground, leave **Use API session management** off.
+The default browser-history mode sends `store: false` and replays prior turns.
+Docling enables document-to-text conversion; it does not add native Responses
+storage or `previous_response_id` support to Ollama.
+
 Gateway environment:
 
 - `DOCLING_URL`: internal API base URL; unset disables the client.

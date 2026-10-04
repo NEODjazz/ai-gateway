@@ -21,6 +21,39 @@ function streamResponse(chunks: string[]) {
 afterEach(() => document.querySelectorAll('meta[name="ai-gateway-playground-origins"]').forEach((node) => node.remove()));
 
 describe("PlaygroundPage", () => {
+  it.each(["json", "stream"])("defaults Ollama PDF Responses to browser history over %s", async (transport) => {
+    const bodies: Array<Record<string, any>> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (path, options) => {
+      if (path === "/v1/models") return new Response('{"data":[{"id":"qwen3.8:27b"}]}');
+      if (path !== "/v1/responses") throw new Error("Unexpected request");
+      const body = JSON.parse(String(options?.body)); bodies.push(body);
+      if (body.store !== false || body.previous_response_id) return new Response('{"error":{"message":"provider rejected parameter store"}}', { status: 400 });
+      const response = { id: `resp_${bodies.length}`, store: false, status: "completed", output_text: bodies.length === 1 ? "PDF answer" : "Follow-up answer", usage: { input_tokens: 40, output_tokens: 4 } };
+      return transport === "stream" ? streamResponse([`data: ${JSON.stringify({ type: "response.completed", response })}\n\n`]) : new Response(JSON.stringify(response), { headers: { "Content-Type": "application/json" } });
+    });
+    authenticated(); await screen.findByText("1 authorized model");
+    await userEvent.click(screen.getByRole("tab", { name: "Responses API" }));
+    expect(screen.getByLabelText("Use API session management")).not.toBeChecked();
+    if (transport === "json") await userEvent.click(screen.getByLabelText("Stream response"));
+    await userEvent.upload(screen.getByLabelText("Conversation attachments"), new File(["%PDF-1.4 test"], "fixture.pdf", { type: "application/pdf" }));
+    await userEvent.type(screen.getByLabelText("Message"), "Summarize the PDF");
+    await userEvent.click(screen.getByRole("button", { name: "Run request" }));
+    await screen.findByText("PDF answer"); expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(bodies[0].input[0].content).toContainEqual(expect.objectContaining({ type: "input_file", filename: "fixture.pdf" }));
+    await userEvent.type(screen.getByLabelText("Message"), "Continue");
+    await userEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await screen.findByText("Follow-up answer");
+    expect(bodies).toHaveLength(2);
+    expect(bodies[1]).toMatchObject({ store: false, input: [expect.objectContaining({ role: "user" }), expect.objectContaining({ role: "assistant" }), { role: "user", content: "Continue" }] });
+    expect(bodies[1]).not.toHaveProperty("previous_response_id");
+    await userEvent.click(screen.getByText("Advanced parameters"));
+    fireEvent.change(screen.getByLabelText("Advanced parameters JSON"), { target: { value: '{"store":true}' } });
+    await userEvent.type(screen.getByLabelText("Message"), "Explicit storage");
+    await userEvent.click(screen.getByRole("button", { name: "Send message" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("provider rejected parameter store");
+    expect(bodies).toHaveLength(3); expect(bodies[2].store).toBe(true);
+    expect(screen.getByLabelText("Message")).toHaveValue("Explicit storage");
+  });
   it("retains a manual selection after catalog failure and shows a denied model without substituting another", async () => {
     let catalogs = 0;
     const mock = vi.spyOn(globalThis, "fetch").mockImplementation(async (path) => path === "/v1/models"
@@ -100,6 +133,7 @@ describe("PlaygroundPage", () => {
     expect(screen.getByLabelText("Message")).toHaveValue("Retained background prompt"); expect(screen.getByText("kept.png")).toBeInTheDocument(); expect(screen.getByText("Input tokens").nextElementSibling).toHaveTextContent("7"); expect(creates).toBe(1);
     await userEvent.click(screen.getByRole("button", { name: "Run request" })); await screen.findByText("Retry succeeded");
     const requests = mock.mock.calls.filter(([path]) => path === "/v1/responses"); expect(requests).toHaveLength(2); expect(requests[1][1]?.body).toBe(requests[0][1]?.body); expect(screen.queryByRole("region", { name: "Failed response output" })).not.toBeInTheDocument();
+    expect(JSON.parse(String(requests[0][1]?.body)).store).toBe(true);
   });
   it("stores API-managed Responses explicitly, preserves browser store:false and downloads cited files only on demand", async () => {
     const json = (value: unknown) => new Response(JSON.stringify(value), { headers: { "Content-Type": "application/json" } });
@@ -115,6 +149,7 @@ describe("PlaygroundPage", () => {
     vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
     try {
       authenticated(); await screen.findByText("1 authorized model"); await userEvent.click(screen.getByRole("tab", { name: "Responses API" }));
+      await userEvent.click(screen.getByLabelText("Use API session management"));
       await userEvent.click(screen.getByLabelText("Stream response"));
       await userEvent.click(screen.getByText("Advanced parameters")); fireEvent.change(screen.getByLabelText("Advanced parameters JSON"), { target: { value: '{"store":false}' } });
       await userEvent.type(screen.getByLabelText("Message"), "Make a file"); await userEvent.click(screen.getByRole("button", { name: "Run request" }));
@@ -162,7 +197,7 @@ describe("PlaygroundPage", () => {
     });
     authenticated(); await screen.findByText("1 authorized model"); await userEvent.click(screen.getByRole("tab", { name: "Responses API" }));
     await userEvent.click(screen.getByLabelText("Stream response"));
-    if (variant === "browser") await userEvent.click(screen.getByLabelText("Use API session management"));
+    if (variant !== "browser" && variant !== "chat") await userEvent.click(screen.getByLabelText("Use API session management"));
     await userEvent.click(screen.getByText("Advanced parameters"));
     fireEvent.change(screen.getByLabelText("Advanced parameters JSON"), { target: { value: advanced } });
     await userEvent.type(screen.getByLabelText("Message"), "Review native actions"); await userEvent.click(screen.getByRole("button", { name: "Run request" }));
@@ -223,7 +258,7 @@ describe("PlaygroundPage", () => {
     authenticated(); await screen.findByText("1 authorized model");
     if (variant !== "chat") await userEvent.click(screen.getByRole("tab", { name: "Responses API" }));
     await userEvent.click(screen.getByLabelText("Stream response"));
-    if (variant === "browser") await userEvent.click(screen.getByLabelText("Use API session management"));
+    if (variant !== "browser" && variant !== "chat") await userEvent.click(screen.getByLabelText("Use API session management"));
     await userEvent.click(screen.getByText("Advanced parameters")); fireEvent.change(screen.getByLabelText("Advanced parameters JSON"), { target: { value: advanced } });
     await userEvent.type(screen.getByLabelText("Message"), "Review function query"); await userEvent.click(screen.getByRole("button", { name: "Run request" }));
     if (variant === "background") {
@@ -279,7 +314,7 @@ describe("PlaygroundPage", () => {
     });
     authenticated(); await screen.findByText("1 authorized model"); await userEvent.click(screen.getByRole("tab", { name: "Responses API" }));
     await userEvent.click(screen.getByLabelText("Stream response"));
-    if (variant === "browser") await userEvent.click(screen.getByLabelText("Use API session management"));
+    if (variant !== "browser" && variant !== "chat") await userEvent.click(screen.getByLabelText("Use API session management"));
     await userEvent.click(screen.getByText("Advanced parameters")); fireEvent.change(screen.getByLabelText("Advanced parameters JSON"), { target: { value: advanced } });
     await userEvent.type(screen.getByLabelText("Message"), "Review custom query"); await userEvent.click(screen.getByRole("button", { name: "Run request" }));
     if (variant === "background") {
@@ -357,6 +392,7 @@ describe("PlaygroundPage", () => {
       inference++; return inference === 1 ? json({ id: "resp_job", status: "queued", usage: { input_tokens: 0, output_tokens: 0 } }) : json({ id: "resp_next", status: "completed", output_text: "Next answer" });
     });
     authenticated(); await screen.findByText("1 authorized model"); await userEvent.click(screen.getByRole("tab", { name: "Responses API" }));
+    await userEvent.click(screen.getByLabelText("Use API session management"));
     await userEvent.click(screen.getByLabelText("Stream response")); await userEvent.click(screen.getByText("Advanced parameters"));
     fireEvent.change(screen.getByLabelText("Advanced parameters JSON"), { target: { value: '{"background":true}' } });
     await userEvent.type(screen.getByLabelText("Message"), "Original job prompt"); await userEvent.click(screen.getByRole("button", { name: "Run request" }));
@@ -412,7 +448,7 @@ describe("PlaygroundPage", () => {
     });
     authenticated(); await screen.findByText("1 authorized model");
     if (endpoint === "responses") await userEvent.click(screen.getByRole("tab", { name: "Responses API" }));
-    if (variant === "responses-browser") await userEvent.click(screen.getByLabelText("Use API session management"));
+    if (variant === "responses-api") await userEvent.click(screen.getByLabelText("Use API session management"));
     await userEvent.click(screen.getByText("Tools, resources and policies"));
     await userEvent.type(screen.getByLabelText("Tool discovery server"), "weather");
     await userEvent.click(screen.getByRole("button", { name: "Load MCP tools" }));
@@ -643,7 +679,7 @@ describe("PlaygroundPage", () => {
     expect(screen.getByText("Input tokens").nextElementSibling).toHaveTextContent("0");
   });
 
-  it("uses browser history when Responses API session management is disabled", async () => {
+  it("uses browser history by default for Responses", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => String(input) === "/v1/models"
       ? new Response(JSON.stringify({ data: [{ id: "model-a" }] }))
       : new Response(JSON.stringify({ id: "resp-one", output_text: "Answer" }), { headers: { "Content-Type": "application/json" } }));
@@ -652,7 +688,6 @@ describe("PlaygroundPage", () => {
     await userEvent.type(screen.getByLabelText("Message"), "first");
     await userEvent.click(screen.getByRole("button", { name: "Run request" }));
     await screen.findByText("Answer");
-    await userEvent.click(screen.getByLabelText("Use API session management"));
     await userEvent.type(screen.getByLabelText("Message"), "second");
     await userEvent.click(screen.getByRole("button", { name: "Send message" }));
     await waitFor(() => expect(fetchMock.mock.calls.filter(([path]) => path === "/v1/responses")).toHaveLength(2));
@@ -726,6 +761,7 @@ describe("PlaygroundPage", () => {
     await screen.findByText("1 authorized model");
     expect(screen.getByLabelText("Model")).toHaveTextContent("response-model");
     await userEvent.click(screen.getByRole("tab", { name: "Responses API" }));
+    await userEvent.click(screen.getByLabelText("Use API session management"));
     await userEvent.type(screen.getByLabelText("Instructions"), "Use plain text");
     await userEvent.type(screen.getByLabelText("Message"), "first question");
     await userEvent.click(screen.getByRole("button", { name: "Run request" }));

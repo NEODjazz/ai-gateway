@@ -62,6 +62,9 @@ func TestDocumentProcessingBeforeSecurityAccountingAndOllama(t *testing.T) {
 					if !strings.Contains(string(payload), "extracted words") || strings.Contains(string(payload), "file_data") {
 						t.Fatal("Responses did not receive text")
 					}
+					if responseRequest.Store == nil || *responseRequest.Store {
+						t.Fatal("stateless Responses storage setting was not preserved")
+					}
 					_, _ = w.Write([]byte(`{"id":"resp_test","object":"response","status":"completed","model":"qwen","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":400,"output_tokens":1,"total_tokens":401}}`))
 					return
 				}
@@ -87,6 +90,7 @@ func TestDocumentProcessingBeforeSecurityAccountingAndOllama(t *testing.T) {
 			if responses {
 				path = "/v1/responses"
 				delete(body, "messages")
+				body["store"] = false
 				body["input"] = []any{map[string]any{"role": "user", "content": []any{file}}}
 			}
 			encoded, _ := json.Marshal(body)
