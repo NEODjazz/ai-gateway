@@ -11,6 +11,12 @@ describe("Playground output details", () => {
     expect(screen.getAllByRole("link")).toHaveLength(1);
     expect(screen.getByRole("link", { name: "Documentation" })).toHaveAttribute("rel", "noopener noreferrer");
   });
+  it("retains custom calls and results as tools without rendering their input as media or executing markup", () => {
+    const calls = [{ type: "custom_tool_call", name: "query", input: '<script>alert("test")</script>', arguments: { type: "image", url: "https://hidden.example.test" } }, { type: "custom_tool_call_output", call_id: "call_1", output: '<img src="https://hidden.example.test">' }];
+    const details = outputDetails({ output: calls }); expect(details.tools).toEqual(calls); expect(details.images).toEqual([]); expect(details.citations).toEqual([]);
+    const view = render(<OutputDetails payload={{ output: calls }} />);
+    expect(screen.getByText("Tool calls and results")).toBeInTheDocument(); expect(view.container.querySelector("script")).toBeNull(); expect(screen.queryByRole("img")).not.toBeInTheDocument();
+  });
   it("accepts safe image outputs and rejects unsafe schemes and credentials", () => {
     const details = outputDetails({ content: [{ type: "image", data: "AA==", mime_type: "image/png" }, { type: "image_url", image_url: { url: "https://user:secret@example.test/image" } }, { type: "output_image", url: "file:///private/image.png" }] });
     expect(details.images).toEqual(["data:image/png;base64,AA=="]);

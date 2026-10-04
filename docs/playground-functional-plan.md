@@ -154,6 +154,9 @@ compatibility must be distinguished from merely having an endpoint selector.
 - [x] Added native Responses MCP approval review, explicit typed approve/decline
   continuation, submitted-connection binding and background-response provenance.
   Invalid review batches retain actual output and usage while blocking continuation.
+- [x] Added Responses custom tool input review, explicit manual output/decline,
+  typed continuation with original call IDs, exact text preservation, bounded
+  UTF-8 results and submitted-definition binding in both continuity modes.
 - [ ] Finish media/tool output, policy selection and full conversation verification.
 - [ ] Complete endpoint-specific execution and media/tool handling.
 - [ ] Complete comparison, compliance and agent views.
@@ -453,3 +456,35 @@ The served embedded CSS has a regression test that rejects unresolved runtime
 stylesheet imports; local imports must be resolved by the existing UI build.
 Browser verification under the current CSP confirmed zero external font requests,
 zero external stylesheets and successful Playground rendering.
+
+
+## Responses custom tool results
+
+Responses tools configured in advanced JSON can return `custom_tool_call`.
+Playground displays their plain-text input alongside direct functions and native
+MCP approvals, sharing the 32-call review limit. A custom call must match exactly
+one submitted custom tool definition. Foreign or malformed calls retain actual
+provider output and usage but block further turns until Clear. Inputs over 64 KiB
+or explicitly incomplete inputs can only be declined.
+
+The browser does not execute custom tool input. Supply a result, then choose Use
+result, or explicitly choose Use empty result or Decline. Results are strings and
+are preserved without trimming, JSON parsing or numeric conversion. Editing a
+confirmed result invalidates the decision and disables Continue until confirmation.
+UTF-8 results exceeding 128 KiB are rejected visibly without truncation or sending
+the previous confirmed value. Decisions can be changed before continuation.
+
+Only Continue sends `custom_tool_call_output` with the original `call_id`, using
+API continuity or retained browser history without adding a user message. The
+submitted custom tool definition must remain unchanged. Background resource reads
+use the original submitted definitions; transport failures retain reviewed results
+for a manual retry. Credential/model/endpoint changes discard pending decisions
+and drafts. Normal Gateway authorization and policy enforcement remain in place.
+
+Regression coverage includes mixed tool batches, ID/definition validation, empty
+and arbitrary text results, UTF-8 limits, keyboard behavior, both history modes,
+background completion, failed continuation, credential reset and completed-stream
+output. A local HTTP adapter test verifies exact custom result strings and usage.
+An isolated browser preview under the current CSP verified one manual result and
+one decline, zero extra requests before Continue, exactly one continuation and zero
+direct MCP calls. No real provider, remote tool service or billing was invoked.

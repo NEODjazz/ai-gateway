@@ -12,7 +12,7 @@ export function outputDetails(payload: unknown): Details {
     if (Array.isArray(value)) { for (const item of value) visit(item, depth + 1); return; }
     const item = value as Record<string, unknown>;
     if (["reasoning", "thought", "thinking", "redacted_thinking"].includes(String(item.type))) return;
-    if (["function_call", "tool_use", "tool_result", "function_result", "mcp_call", "mcp_approval_request", "code_interpreter_call", "file_search_call"].includes(String(item.type))) details.tools.push(item);
+    if (["custom_tool_call", "custom_tool_call_output", "function_call", "tool_use", "tool_result", "function_result", "mcp_call", "mcp_approval_request", "code_interpreter_call", "file_search_call"].includes(String(item.type))) details.tools.push(item);
     if (Array.isArray(item.tool_calls)) details.tools.push(...item.tool_calls);
     if (item.type === "url_citation" || item.type === "web_search_result_location") {
       const source = item.url_citation && typeof item.url_citation === "object" ? item.url_citation as Record<string, unknown> : item;

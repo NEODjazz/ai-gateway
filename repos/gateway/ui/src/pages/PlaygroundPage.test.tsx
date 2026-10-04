@@ -83,6 +83,88 @@ describe("PlaygroundPage", () => {
     expect(bodies[2].input).toEqual(variant === "browser" ? [{ role: "user", content: "Review native actions" }, ...approvals, ...decisions] : decisions);
     expect(bodies[2].previous_response_id).toBe(variant === "browser" ? undefined : "resp_1");
   });
+  it.each(["api", "browser", "background"])("requires explicit custom results in %s Responses, preserving text on retry and binding definitions", async (variant) => {
+    const tools = [{ type: "custom", name: "query", format: { type: "text" } }];
+    const calls = [{ type: "custom_tool_call", id: "output_item", call_id: "custom_1", name: "query", input: 'status:open\nowner:"demo"' }, { type: "custom_tool_call", call_id: "custom_2", name: "query", input: "status:closed" }];
+    const advanced = JSON.stringify({ tools, ...(variant === "background" ? { background: true } : {}) });
+    const originalResult = 'rows: 9007199254740993\nquoted: "exact"\n<not-json>';
+    let inference = 0;
+    const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json" } });
+    const mock = vi.spyOn(globalThis, "fetch").mockImplementation(async (path) => {
+      if (path === "/v1/models") return json({ data: [{ id: "model" }] });
+      if (path === "/v1/responses/resp_custom") return json({ id: "resp_custom", status: "completed", output: calls, usage: { input_tokens: 8, output_tokens: 4 } });
+      if (path !== "/v1/responses") throw new Error("Unexpected direct custom tool execution");
+      inference++;
+      return inference === 1 ? json({ id: "resp_custom", status: variant === "background" ? "queued" : "completed", ...(variant === "background" ? {} : { output: calls }) }) : inference === 2 ? json({ error: { message: "Custom continuation unavailable" } }, 503) : json({ id: "resp_custom_done", status: "completed", output_text: "Custom results received" });
+    });
+    authenticated(); await screen.findByText("1 authorized model"); await userEvent.click(screen.getByRole("tab", { name: "Responses API" }));
+    await userEvent.click(screen.getByLabelText("Stream response"));
+    if (variant === "browser") await userEvent.click(screen.getByLabelText("Use API session management"));
+    await userEvent.click(screen.getByText("Advanced parameters")); fireEvent.change(screen.getByLabelText("Advanced parameters JSON"), { target: { value: advanced } });
+    await userEvent.type(screen.getByLabelText("Message"), "Review custom query"); await userEvent.click(screen.getByRole("button", { name: "Run request" }));
+    if (variant === "background") {
+      await screen.findByRole("region", { name: "Background response" });
+      fireEvent.change(screen.getByLabelText("Advanced parameters JSON"), { target: { value: JSON.stringify({ tools: [{ ...tools[0], format: { type: "grammar", syntax: "regex", definition: "changed" } }] }) } });
+      await userEvent.click(screen.getByRole("button", { name: "Refresh background response" }));
+    }
+    const review = await screen.findByRole("region", { name: "Tool approvals" }); expect(review).toHaveTextContent('owner:"demo"');
+    expect(screen.getByLabelText("Message")).toBeDisabled(); expect(screen.getByRole("button", { name: "Continue with tool results" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Execute query" })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Custom tool result custom_1"), { target: { value: originalResult } });
+    expect(screen.getByRole("button", { name: "Continue with tool results" })).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: "Use result for query" }));
+    await userEvent.click(screen.getAllByRole("button", { name: "Decline query" })[1]);
+    expect(screen.getByRole("button", { name: "Continue with tool results" })).toBeEnabled();
+    fireEvent.change(screen.getByLabelText("Custom tool result custom_1"), { target: { value: originalResult + " updated" } });
+    expect(screen.getByRole("button", { name: "Continue with tool results" })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Custom tool result custom_1"), { target: { value: originalResult } });
+    await userEvent.click(screen.getByRole("button", { name: "Use result for query" })); expect(inference).toBe(1);
+    if (variant !== "background") fireEvent.change(screen.getByLabelText("Advanced parameters JSON"), { target: { value: JSON.stringify({ tools: [{ ...tools[0], description: "Changed" }] }) } });
+    await userEvent.click(screen.getByRole("button", { name: "Continue with tool results" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("custom tool definition changed"); expect(inference).toBe(1);
+    fireEvent.change(screen.getByLabelText("Advanced parameters JSON"), { target: { value: advanced } });
+    await userEvent.click(screen.getByRole("button", { name: "Get code" }));
+    const code = await screen.findByLabelText("Request code"); expect(code).toHaveTextContent("custom_tool_call_output"); expect(code).toHaveTextContent("9007199254740993"); expect(code).not.toHaveTextContent("playground-token");
+    await userEvent.keyboard("{Escape}");
+    await userEvent.click(screen.getByRole("button", { name: "Continue with tool results" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Custom continuation unavailable"); expect(screen.getByRole("alert")).not.toHaveTextContent("idempotency");
+    expect(screen.getByLabelText("Custom tool result custom_1")).toHaveValue(originalResult);
+    await userEvent.click(screen.getByRole("button", { name: "Continue with tool results" })); await screen.findByText("Custom results received");
+    expect(screen.queryByRole("region", { name: "Tool approvals" })).not.toBeInTheDocument(); expect(screen.getAllByText("Review custom query")).toHaveLength(1);
+    const bodies = mock.mock.calls.filter(([path]) => path === "/v1/responses").map(([, options]) => JSON.parse(String(options?.body)));
+    const results = [{ type: "custom_tool_call_output", call_id: "custom_1", output: originalResult }, { type: "custom_tool_call_output", call_id: "custom_2", output: '{"isError":true,"error":"User declined tool invocation"}' }];
+    expect(bodies).toHaveLength(3); expect(bodies[1]).toEqual(bodies[2]); expect(bodies[2].tools).toEqual(tools);
+    expect(bodies[2].input).toEqual(variant === "browser" ? [{ role: "user", content: "Review custom query" }, ...calls, ...results] : results);
+    expect(bodies[2].previous_response_id).toBe(variant === "browser" ? undefined : "resp_custom");
+  });
+  it("fails closed for an undeclared custom call while keeping actual output, usage and Clear", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (path) => path === "/v1/models" ? new Response('{"data":[{"id":"model"}]}') : new Response(JSON.stringify({ id: "resp_custom_foreign", status: "completed", output_text: "Actual provider text", output: [{ type: "custom_tool_call", call_id: "foreign", name: "query", input: "untrusted code" }], usage: { input_tokens: 9, output_tokens: 2 } }), { headers: { "Content-Type": "application/json" } }));
+    authenticated(); await screen.findByText("1 authorized model"); await userEvent.click(screen.getByRole("tab", { name: "Responses API" }));
+    await userEvent.type(screen.getByLabelText("Message"), "Original prompt"); await userEvent.click(screen.getByRole("button", { name: "Run request" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("submitted request"); expect(screen.getByText("Actual provider text")).toBeInTheDocument();
+    expect(screen.getByText("Input tokens").nextElementSibling).toHaveTextContent("9"); expect(screen.getByLabelText("Message")).toBeDisabled(); expect(screen.getByRole("button", { name: "Get code" })).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: "Clear" })); expect(screen.getByLabelText("Message")).toBeEnabled();
+  });
+  it("confirms empty custom output explicitly, rejects oversized results and clears drafts when credentials change", async () => {
+    const calls = [{ type: "custom_tool_call", call_id: "custom_empty", name: "query", input: "" }];
+    const mock = vi.spyOn(globalThis, "fetch").mockImplementation(async (path) => String(path).endsWith("/models") ? new Response('{"data":[{"id":"model"}]}') : new Response(JSON.stringify({ id: "resp_custom", status: "completed", output: calls }), { headers: { "Content-Type": "application/json" } }));
+    authenticated(); await screen.findByText("1 authorized model"); await userEvent.click(screen.getByRole("tab", { name: "Responses API" }));
+    await userEvent.click(screen.getByText("Advanced parameters")); fireEvent.change(screen.getByLabelText("Advanced parameters JSON"), { target: { value: '{"tools":[{"type":"custom","name":"query"}]}' } });
+    await userEvent.type(screen.getByLabelText("Message"), "Custom query"); await userEvent.click(screen.getByRole("button", { name: "Run request" }));
+    await screen.findByRole("region", { name: "Tool approvals" });
+    await userEvent.click(screen.getByRole("button", { name: "Use empty result for query" })); expect(screen.getByText("Empty tool result")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Continue with tool results" })).toBeEnabled();
+    fireEvent.change(screen.getByLabelText("Custom tool result custom_empty"), { target: { value: "🙂".repeat(32769) } });
+    expect(screen.getByRole("alert")).toHaveTextContent("128 KiB"); expect(screen.getByRole("alert")).not.toHaveTextContent("Execution may already");
+    expect(screen.getByRole("button", { name: "Continue with tool results" })).toBeDisabled(); expect(screen.getByRole("button", { name: "Use empty result for query" })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Custom tool result custom_empty"), { target: { value: "Private draft" } });
+    await userEvent.click(screen.getByRole("button", { name: "Use result for query" }));
+    await userEvent.click(screen.getByRole("combobox", { name: "Virtual key source" })); await userEvent.click(screen.getByRole("option", { name: "Test API key" }));
+    await userEvent.type(screen.getByLabelText("Test API key"), "new-test-key"); await userEvent.click(screen.getByRole("button", { name: "Apply connection" }));
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Tool approvals" })).not.toBeInTheDocument());
+    expect(screen.queryByDisplayValue("Private draft")).not.toBeInTheDocument(); expect(screen.getByLabelText("Message")).toBeEnabled();
+    expect(mock.mock.calls.filter(([path]) => path === "/v1/responses")).toHaveLength(1);
+  });
   it("blocks new turns for queued Responses, preserves failed refreshes and commits final output once", async () => {
     let inference = 0, reads = 0;
     const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json" } });

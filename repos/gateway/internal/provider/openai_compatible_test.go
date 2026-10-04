@@ -95,6 +95,52 @@ func TestOpenAICompatibleForwardsCustomToolsAndPreservesCalls(t *testing.T) {
 	}
 }
 
+func TestOpenAICompatibleForwardsCustomToolContinuation(t *testing.T) {
+	for _, previousResponse := range []string{"", "resp_previous"} {
+		for _, output := range []string{"", "rows: 9007199254740993\nquoted: \"exact\"\n<not-json>", `{"isError":true,"error":"User declined tool invocation"}`} {
+			t.Run(fmt.Sprintf("previous=%s/output=%q", previousResponse, output), func(t *testing.T) {
+				var upstream openai.ResponseRequest
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.URL.Path != "/v1/responses" || r.Method != http.MethodPost {
+						t.Errorf("unexpected provider transport: %s %s", r.Method, r.URL.Path)
+					}
+					if err := json.NewDecoder(r.Body).Decode(&upstream); err != nil {
+						t.Errorf("decode provider request: %v", err)
+						http.Error(w, "invalid request", http.StatusBadRequest)
+						return
+					}
+					w.Header().Set("Content-Type", "application/json")
+					if _, err := fmt.Fprint(w, `{"id":"resp_custom_done","object":"response","status":"completed","model":"model","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Custom result received"}]}],"usage":{"input_tokens":5,"output_tokens":2,"total_tokens":7}}`); err != nil {
+						t.Errorf("write provider response: %v", err)
+					}
+				}))
+				t.Cleanup(server.Close)
+				input := []any{}
+				if previousResponse == "" {
+					input = append(input, map[string]any{"type": "custom_tool_call", "call_id": "custom_1", "name": "query", "input": "status:open"})
+				}
+				input = append(input, map[string]any{"type": "custom_tool_call_output", "call_id": "custom_1", "output": output})
+				request := openai.ResponseRequest{Model: "model", PreviousResponse: previousResponse, Input: input, Tools: []openai.ResponseTool{{Type: "custom", Name: "query", Format: &openai.ResponseCustomToolFormat{Type: "text"}}}}
+				response, err := NewOpenAICompatible(server.URL, "", false).Responses(t.Context(), request)
+				if err != nil {
+					t.Fatal(err)
+				}
+				items, ok := upstream.Input.([]any)
+				if !ok || len(items) != len(input) {
+					t.Fatalf("custom continuation history changed: %#v", upstream.Input)
+				}
+				result, ok := items[len(items)-1].(map[string]any)
+				if !ok || result["type"] != "custom_tool_call_output" || result["call_id"] != "custom_1" || result["output"] != output || upstream.PreviousResponse != previousResponse {
+					t.Fatalf("custom result was not preserved: %#v previous=%q", result, upstream.PreviousResponse)
+				}
+				if len(upstream.Tools) != 1 || upstream.Tools[0].Type != "custom" || upstream.Tools[0].Name != "query" || response.ID != "resp_custom_done" || response.Usage.TotalTokens != 7 {
+					t.Fatalf("custom continuation configuration or response changed: %#v %#v", upstream.Tools, response)
+				}
+			})
+		}
+	}
+}
+
 func TestOpenAICompatibleForwardsComputerLoopAndPreservesActions(t *testing.T) {
 	var upstream map[string]json.RawMessage
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

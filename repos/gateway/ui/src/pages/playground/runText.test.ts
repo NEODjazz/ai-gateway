@@ -63,6 +63,21 @@ describe("Playground text execution", () => {
     ]));
     expect(await runText(connection(), "responses", { model: "public", stream: true }, options())).toMatchObject({ text: "Answer", reasoning: "Reasoning summary", id: "resp-1", usage: { input_tokens: 4 } });
   });
+  it("retains custom tool input only in finalized Responses output, separate from public text", async () => {
+    const call = { type: "custom_tool_call", call_id: "custom_1", name: "query", input: 'status:open\nowner:"demo"' };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(sse([
+      { type: "response.custom_tool_call_input.delta", delta: "status:open" },
+      { type: "response.custom_tool_call_input.delta", delta: '\nowner:"demo"' },
+      { type: "response.completed", response: { id: "resp_custom", status: "completed", output: [call], usage: { input_tokens: 4, output_tokens: 2 } } }
+    ]));
+    const onText = vi.fn();
+    const result = await runText(connection(), "responses", { model: "model", stream: true }, { ...options(), onText });
+    expect(result.text).toBe(""); expect(result.firstTokenMS).toBeUndefined(); expect(onText.mock.calls.every(([text]) => text === "")).toBe(true); expect(result.response.output).toEqual([call]);
+  });
+  it("does not expose partial custom input from an interrupted Responses stream for execution", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response('data: {"type":"response.custom_tool_call_input.delta","delta":"partial code"}\n\n', { headers: { "Content-Type": "text/event-stream" } }));
+    await expect(runText(connection(), "responses", { model: "model", stream: true }, options())).rejects.toThrow("before the response completed");
+  });
   it("accepts a single JSON fallback without replaying and leaves TTFT unavailable", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ id: "resp-1", output: [{ type: "message", content: [{ type: "output_text", text: "JSON answer" }] }] }), { headers: { "Content-Type": "application/json" } }));
     const result = await runText(connection(), "responses", { model: "model", stream: true }, options());
