@@ -286,3 +286,33 @@ securityContext:
   capabilities:
     drop:
       - ALL
+
+# Opt-in document processing; existing deployments retain native behavior.
+docling:
+  enabled: false
+  # Existing Secret keys: api-key, redis-url, redis-password.
+  # redis-url points at <release-fullname>-docling-redis:6379 and uses this password.
+  existingSecret: ""
+  image:
+    repository: ghcr.io/neodjazz/ai-gateway-docling
+    tag: ""
+    pullPolicy: IfNotPresent
+  apiReplicas: 1
+  workerReplicas: 2
+  capacity: 16
+  queueWaitSeconds: 120
+  apiResources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {cpu: "1", memory: 1Gi}
+  workerResources:
+    requests: {cpu: 500m, memory: 2Gi}
+    limits: {cpu: "2", memory: 4Gi}
+  redis:
+    image: redis:7.4.6-alpine
+    persistence:
+      size: 2Gi
+      storageClass: ""
+    resources:
+      requests: {cpu: 100m, memory: 128Mi}
+      limits: {cpu: "1", memory: 768Mi}
+  networkPolicy: true

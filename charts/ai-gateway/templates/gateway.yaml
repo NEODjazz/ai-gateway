@@ -50,6 +50,19 @@ spec:
               value: {{ .Values.gateway.telemetry.otlpTracesEndpoint | quote }}
             - name: OTEL_TRACE_SAMPLE_RATIO
               value: {{ .Values.gateway.telemetry.sampleRatio | quote }}
+            {{- if .Values.docling.enabled }}
+            - name: DOCLING_URL
+              value: {{ printf "http://%s-docling-api:5001" (include "ai-gateway.fullname" .) | quote }}
+            - name: DOCLING_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "docling.existingSecret is required" .Values.docling.existingSecret | quote }}
+                  key: api-key
+            - name: DOCLING_TIMEOUT_SECONDS
+              value: "240"
+            - name: DOCLING_MAX_TEXT_BYTES
+              value: "4194304"
+            {{- end }}
             - name: HTTP_ADDR
               value: ":8080"
             - name: ADMIN_UI_ENABLED

@@ -1,0 +1,57 @@
+{{- if and .Values.docling.enabled .Values.docling.networkPolicy -}}
+{{- range $kind := list "api" "worker" "redis" }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "ai-gateway.fullname" $ }}-docling-{{ $kind }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "ai-gateway.selectorLabels" $ | nindent 6 }}
+      app.kubernetes.io/component: docling-{{ $kind }}
+  policyTypes: [Ingress, Egress]
+  {{- if eq $kind "api" }}
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "ai-gateway.selectorLabels" $ | nindent 14 }}
+              app.kubernetes.io/component: gateway
+      ports: [{protocol: TCP, port: 5001}]
+  {{- else if eq $kind "redis" }}
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "ai-gateway.selectorLabels" $ | nindent 14 }}
+              app.kubernetes.io/component: docling-api
+        - podSelector:
+            matchLabels:
+              {{- include "ai-gateway.selectorLabels" $ | nindent 14 }}
+              app.kubernetes.io/component: docling-worker
+      ports: [{protocol: TCP, port: 6379}]
+  {{- else }}
+  ingress: []
+  {{- end }}
+  {{- if eq $kind "redis" }}
+  egress: []
+  {{- else }}
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "ai-gateway.selectorLabels" $ | nindent 14 }}
+              app.kubernetes.io/component: docling-redis
+      ports: [{protocol: TCP, port: 6379}]
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+  {{- end }}
+{{- end }}
+{{- end }}

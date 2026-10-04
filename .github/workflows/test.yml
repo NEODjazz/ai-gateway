@@ -376,3 +376,27 @@ jobs:
           tags: ai-gateway-${{ matrix.service }}:test
           cache-from: type=gha,scope=${{ matrix.service }}
           cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+  docling:
+    name: Docling API / Redis queue / CPU workers
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: repos/gateway/go.mod
+          cache-dependency-path: repos/gateway/go.mod
+      - name: Exercise real OCR, stopped workers, bounded admission and owner isolation
+        run: python3 services/docling/check.py
+      - uses: azure/setup-helm@v5
+        with:
+          version: v4.2.1
+      - name: Verify opt-in Helm processing stack
+        run: |
+          helm lint charts/ai-gateway --set docling.enabled=true --set docling.existingSecret=document-test
+          helm template document-test charts/ai-gateway --set docling.enabled=true --set docling.existingSecret=document-test > /dev/null
+          if helm template document-test charts/ai-gateway --set docling.enabled=true > /dev/null 2>&1; then
+            echo "Docling must require an existing Secret"
+            exit 1
+          fi
