@@ -1,5 +1,5 @@
 import { APIClient } from "../../api/client";
-import { complianceCSV, parseComplianceCSV, runCompliance, starterCases } from "./compliance";
+import { complianceCSV, compliancePolicies, type ComplianceResult, parseComplianceCSV, runCompliance, starterCases } from "./compliance";
 import { playgroundConnection } from "./requests";
 
 describe("Policy test cases", () => {
@@ -51,5 +51,57 @@ describe("Policy test execution", () => {
     const results: unknown[] = [];
     await runCompliance(connection(), [starterCases[0]], "strict", "", new AbortController().signal, (result) => results.push(result));
     expect(results).toEqual([expect.objectContaining({ status: "failed", error: "Guardrail returned an invalid result." })]);
+  });
+});
+
+
+describe("Multiple policy checks", () => {
+  const connection = () => playgroundConnection(new APIClient(() => "policy-test-key"), "session", "", "");
+  it.each(["", "strict,", "strict,invalid name", "strict,strict", "a,b,c,d,e"])("rejects invalid selection %s before transport", async (selection) => {
+    const transport = vi.spyOn(globalThis, "fetch");
+    await expect(runCompliance(connection(), starterCases, selection, "", new AbortController().signal, () => {})).rejects.toThrow();
+    expect(transport).not.toHaveBeenCalled();
+  });
+  it("validates the whole suite before dispatch", async () => {
+    const transport = vi.spyOn(globalThis, "fetch");
+    await expect(runCompliance(connection(), [...starterCases, { ...starterCases[0], id: "bad", prompt: " " }], ["strict", "privacy"], "", new AbortController().signal, () => {})).rejects.toThrow("prompt");
+    await expect(runCompliance(connection(), [starterCases[0], starterCases[0]], "strict", "", new AbortController().signal, () => {})).rejects.toThrow("IDs");
+    expect(transport).not.toHaveBeenCalled();
+    expect(compliancePolicies(" strict, privacy ")).toEqual(["strict", "privacy"]);
+  });
+  it("keeps decisions, failures and execution IDs separate for every case and policy", async () => {
+    const transport = vi.spyOn(globalThis, "fetch").mockImplementation(async (_path, options) => {
+      const body = JSON.parse(String(options?.body));
+      if (body.guardrail_name === "offline") return new Response('{"error":{"message":"Scanner offline"}}', { status: 503 });
+      return new Response(JSON.stringify({ allowed: body.guardrail_name === "allow", execution_id: `${body.guardrail_name}-${body.text}`, checks: { scanner: body.guardrail_name } }));
+    });
+    const results: ComplianceResult[] = [];
+    await runCompliance(connection(), starterCases.slice(0, 2), ["allow", "block", "offline"], "model-a", new AbortController().signal, (result) => results.push(result));
+    expect(results).toHaveLength(6);
+    for (const item of starterCases.slice(0, 2)) {
+      expect(results.filter((result) => result.id === item.id)).toEqual(expect.arrayContaining([
+        expect.objectContaining({ policy: "allow", status: "allowed", matched: item.expected === "allow", executionID: `allow-${item.prompt}` }),
+        expect.objectContaining({ policy: "block", status: "blocked", matched: item.expected === "block", executionID: `block-${item.prompt}` }),
+        expect.objectContaining({ policy: "offline", status: "failed", error: "Scanner offline" })
+      ]));
+    }
+    expect(transport.mock.calls.every(([path, options]) => path === "/guardrails/apply_guardrail" && JSON.parse(String(options?.body)).model === "model-a")).toBe(true);
+    const csv = complianceCSV(starterCases.slice(0, 2), results);
+    expect(csv.split("\r\n")[0]).toBe('"category","framework","prompt","expected","status","matched","error","execution_id","latency_ms","policy"');
+    expect(csv.split("\r\n")).toHaveLength(8);
+    expect(csv.match(/"offline"/g)).toHaveLength(2);
+    expect(csv.match(/"Scanner offline"/g)).toHaveLength(2);
+  });
+  it("bounds concurrency globally across the product and does not dispatch cancelled checks", async () => {
+    const controller = new AbortController(), results: ComplianceResult[] = [], deferred: ((response: Response) => void)[] = [];
+    const transport = vi.spyOn(globalThis, "fetch").mockImplementation(() => new Promise<Response>((resolve) => deferred.push(resolve)));
+    const running = runCompliance(connection(), starterCases, ["one", "two", "three", "four"], "", controller.signal, (result) => results.push(result));
+    expect(transport).toHaveBeenCalledTimes(3);
+    controller.abort(); deferred.forEach((resolve) => resolve(new Response('{"allowed":true}'))); await running;
+    expect(transport).toHaveBeenCalledTimes(3);
+    expect(results).toHaveLength(12);
+    expect(new Set(results.map((result) => JSON.stringify([result.id, result.policy]))).size).toBe(12);
+    expect(results.every((result) => result.status === "cancelled")).toBe(true);
+    expect(results.filter((result) => result.latencyMS === undefined)).toHaveLength(9);
   });
 });

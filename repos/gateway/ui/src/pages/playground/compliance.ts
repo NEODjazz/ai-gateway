@@ -2,7 +2,7 @@ import { csvCell } from "../../csv";
 import type { PlaygroundConnection } from "./requests";
 
 export type ComplianceCase = { id: string; category: string; framework: string; prompt: string; expected: "allow" | "block" };
-export type ComplianceResult = { id: string; status: "allowed" | "blocked" | "failed" | "cancelled"; matched?: boolean; checks?: Record<string, string>; error?: string; executionID?: string; anonymizedText?: string; replacements?: number; latencyMS: number };
+export type ComplianceResult = { id: string; policy?: string; status: "allowed" | "blocked" | "failed" | "cancelled"; matched?: boolean; checks?: Record<string, string>; error?: string; executionID?: string; anonymizedText?: string; replacements?: number; latencyMS?: number };
 export const maximumCases = 500;
 export const maximumImportBytes = 1024 * 1024;
 export const starterCases: ComplianceCase[] = [
@@ -46,30 +46,44 @@ export function parseComplianceCSV(text: string): ComplianceCase[] {
   });
 }
 
+export const maximumPolicies = 4;
+
+export function compliancePolicies(value: string | string[]): string[] {
+  const policies = typeof value === "string" ? value.split(",").map((name) => name.trim()) : [...value];
+  if (!policies.length || policies.some((name) => !/^[a-zA-Z0-9._-]{1,128}$/.test(name))) throw new Error("Enter a valid guardrail policy name or comma-separated names.");
+  if (policies.length > maximumPolicies || new Set(policies).size !== policies.length) throw new Error("Select up to four distinct guardrail policies.");
+  return policies;
+}
+
 export function complianceCSV(cases: ComplianceCase[], results?: ComplianceResult[]): string {
-  const byID = new Map(results?.map((result) => [result.id, result]));
-  const header = ["category", "framework", "prompt", "expected", ...(results ? ["status", "matched", "error", "execution_id", "latency_ms"] : [])];
-  const rows = cases.map((item) => { const result = byID.get(item.id); return [item.category, item.framework, item.prompt, item.expected, ...(results ? [result?.status || "not_run", result?.matched, result?.error, result?.executionID, result?.latencyMS] : [])]; });
+  const header = ["category", "framework", "prompt", "expected", ...(results ? ["status", "matched", "error", "execution_id", "latency_ms", "policy"] : [])];
+  const byID = new Map<string, ComplianceResult[]>();
+  results?.forEach((result) => byID.set(result.id, [...(byID.get(result.id) || []), result]));
+  const rows = cases.flatMap((item) => (byID.get(item.id) || [undefined]).map((result) => [item.category, item.framework, item.prompt, item.expected, ...(results ? [result?.status || "not_run", result?.matched, result?.error, result?.executionID, result?.latencyMS, result?.policy] : [])]));
   return [header, ...rows].map((row) => row.map(csvCell).join(",")).join("\r\n") + "\r\n";
 }
 
-export async function runCompliance(connection: PlaygroundConnection, cases: ComplianceCase[], policy: string, model: string, signal: AbortSignal, onResult: (result: ComplianceResult) => void): Promise<void> {
-  if (!/^[a-zA-Z0-9._-]{1,128}$/.test(policy)) throw new Error("Enter a valid guardrail policy name.");
+export async function runCompliance(connection: PlaygroundConnection, cases: ComplianceCase[], selection: string | string[], model: string, signal: AbortSignal, onResult: (result: ComplianceResult) => void): Promise<void> {
+  const policies = compliancePolicies(selection);
   if (cases.length > maximumCases) throw new Error("Select at most 500 test cases.");
+  if (new Set(cases.map((item) => item.id)).size !== cases.length) throw new Error("Test case IDs must be distinct.");
+  if (cases.some((item) => !item.prompt.trim() || new TextEncoder().encode(item.prompt).length > 64 * 1024)) throw new Error("Each prompt must contain 1–65536 bytes.");
+  const total = cases.length * policies.length;
   let cursor = 0;
   async function worker() {
-    while (cursor < cases.length) {
-      const item = cases[cursor++];
+    while (cursor < total) {
+      const position = cursor++;
+      const item = cases[Math.floor(position / policies.length)], policy = policies[position % policies.length];
+      if (signal.aborted) { onResult({ id: item.id, policy, status: "cancelled" }); continue; }
       const start = performance.now();
-      if (signal.aborted) { onResult({ id: item.id, status: "cancelled", latencyMS: 0 }); continue; }
       try {
         const result = await connection.client.request<{ allowed: boolean; checks: Record<string, string>; execution_id: string; anonymized_text?: string; replacements?: number }>(connection.path("/guardrails/apply_guardrail"), { maximumResponseBytes: 1024 * 1024, method: "POST", signal, body: { guardrail_name: policy, text: item.prompt, ...(model ? { model } : {}) } });
-        if (signal.aborted) { onResult({ id: item.id, status: "cancelled", latencyMS: performance.now() - start }); continue; }
+        if (signal.aborted) { onResult({ id: item.id, policy, status: "cancelled", latencyMS: performance.now() - start }); continue; }
         if (typeof result?.allowed !== "boolean") throw new Error("Guardrail returned an invalid result.");
-        onResult({ id: item.id, status: result.allowed ? "allowed" : "blocked", matched: result.allowed === (item.expected === "allow"), checks: result.checks, executionID: result.execution_id,
+        onResult({ id: item.id, policy, status: result.allowed ? "allowed" : "blocked", matched: result.allowed === (item.expected === "allow"), checks: result.checks, executionID: result.execution_id,
           anonymizedText: result.anonymized_text, replacements: result.replacements, latencyMS: performance.now() - start });
-      } catch (cause) { onResult({ id: item.id, status: signal.aborted ? "cancelled" : "failed", error: signal.aborted ? undefined : cause instanceof Error ? cause.message : "Guardrail request failed", latencyMS: performance.now() - start }); }
+      } catch (cause) { onResult({ id: item.id, policy, status: signal.aborted ? "cancelled" : "failed", error: signal.aborted ? undefined : cause instanceof Error ? cause.message : "Guardrail request failed", latencyMS: performance.now() - start }); }
     }
   }
-  await Promise.all(Array.from({ length: Math.min(3, cases.length) }, () => worker()));
+  await Promise.all(Array.from({ length: Math.min(3, total) }, () => worker()));
 }

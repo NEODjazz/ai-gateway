@@ -5,7 +5,8 @@ import { GatewayButton } from "../../components/GatewayButton";
 import { ModalFrame } from "../../components/ModalFrame";
 import { PageTabs } from "../../components/PageTabs";
 import { AreaControl, SelectControl, TextControl } from "./Controls";
-import { complianceCSV, maximumCases, maximumImportBytes, parseComplianceCSV, runCompliance, starterCases, type ComplianceCase, type ComplianceResult } from "./compliance";
+import { complianceCSV, compliancePolicies, maximumPolicies, maximumCases, maximumImportBytes, parseComplianceCSV, runCompliance, starterCases, type ComplianceCase, type ComplianceResult } from "./compliance";
+import { parseResourceCatalog, type ResourceCatalog } from "./resources";
 import type { PlaygroundConnection } from "./requests";
 
 function download(name: string, value: string) {
@@ -28,7 +29,11 @@ export function CompliancePlayground({ connection, connectionChanged, connection
   const [framework, setFramework] = useState("all");
   const [tab, setTab] = useState<"quick" | "batch">("quick");
   const [quickText, setQuickText] = useState("");
-  const [quickResult, setQuickResult] = useState<ComplianceResult>();
+  const [quickResults, setQuickResults] = useState<ComplianceResult[]>([]);
+  const [runPolicies, setRunPolicies] = useState<string[]>([]);
+  const [catalog, setCatalog] = useState<ResourceCatalog>();
+  const [catalogBusy, setCatalogBusy] = useState(false), [catalogError, setCatalogError] = useState("");
+  const catalogGeneration = useRef(0), catalogAbort = useRef<AbortController | undefined>(undefined);
   const [runCases, setRunCases] = useState<ComplianceCase[]>([]);
   const [results, setResults] = useState<ComplianceResult[]>([]);
   const [running, setRunning] = useState(false);
@@ -46,24 +51,46 @@ export function CompliancePlayground({ connection, connectionChanged, connection
   const visible = cases.filter((item) => (category === "all" || item.category === category) && (framework === "all" || item.framework === framework) && `${item.prompt} ${item.category} ${item.framework}`.toLowerCase().includes(query.toLowerCase()));
   const selectedCases = cases.filter((item) => selected.has(item.id));
   useEffect(() => () => { generation.current++; abort.current?.abort(); }, []);
-  useEffect(() => { if (!active) abort.current?.abort(); }, [active]);
+  useEffect(() => { if (!active) { abort.current?.abort(); catalogGeneration.current++; catalogAbort.current?.abort(); setCatalogBusy(false); } }, [active]);
   useEffect(() => {
     if (previousConnection.current !== connection) { previousConnection.current = connection; reset(); setPolicy(""); setModel(""); }
   }, [connection]);
 
-  function reset() { generation.current++; abort.current?.abort(); abort.current = undefined; setRunning(false); setError(""); setResults([]); setRunCases([]); setQuickResult(undefined); }
+  useEffect(() => {
+    catalogGeneration.current++; catalogAbort.current?.abort(); setCatalogBusy(false); setCatalog(undefined); setCatalogError("");
+    return () => { catalogGeneration.current++; catalogAbort.current?.abort(); };
+  }, [connection, model]);
+  async function loadPolicies() {
+    if (running || catalogBusy || connectionChanged) return;
+    const controller = new AbortController(), current = ++catalogGeneration.current;
+    catalogAbort.current = controller; setCatalogBusy(true); setCatalogError("");
+    try {
+      const result = parseResourceCatalog(await connection.client.request<unknown>(connection.path(`/v1/playground/catalog${model.trim() ? `?model=${encodeURIComponent(model.trim())}` : ""}`), { signal: controller.signal, maximumResponseBytes: 1024 * 1024 }));
+      if (current === catalogGeneration.current && !controller.signal.aborted) setCatalog(result);
+    } catch (cause) { if (current === catalogGeneration.current) setCatalogError(cause instanceof Error ? cause.message : "Could not load policies."); }
+    finally { if (current === catalogGeneration.current) { setCatalogBusy(false); catalogAbort.current = undefined; } }
+  }
+  function togglePolicy(name: string, checked: boolean) {
+    const names = policy.trim() ? policy.split(",").map((item) => item.trim()) : [];
+    const next = checked ? [...names, name] : names.filter((item) => item !== name);
+    try { if (next.length) compliancePolicies(next); setPolicy(next.join(", ")); setError(""); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : "Invalid policies."); }
+  }
+
+  function reset() { generation.current++; abort.current?.abort(); abort.current = undefined; setRunning(false); setError(""); setResults([]); setRunCases([]); setQuickResults([]); setRunPolicies([]); }
   async function execute(items: ComplianceCase[], quick = false) {
     if (running) return;
     if (connectionChanged) { setError("Apply connection changes before testing."); return; }
-    if (!/^[a-zA-Z0-9._-]{1,128}$/.test(policy)) { setError("Enter a valid guardrail policy name."); return; }
+    let policies: string[];
+    try { policies = compliancePolicies(policy); } catch (cause) { setError(cause instanceof Error ? cause.message : "Invalid policies."); return; }
     if (!items.length) { setError("Select at least one test case."); return; }
     if (items.some((item) => !item.prompt.trim() || new TextEncoder().encode(item.prompt).length > 64 * 1024)) { setError("Each prompt must contain 1–65536 bytes."); return; }
     const controller = new AbortController(); abort.current = controller;
     const current = ++generation.current; setRunning(true); setError("");
-    if (quick) setQuickResult(undefined); else { setResults([]); setRunCases(items); setTab("batch"); }
-    try { await runCompliance(connection, items, policy, model.trim(), controller.signal, (result) => {
+    if (quick) setQuickResults([]); else { setRunPolicies(policies); setResults([]); setRunCases(items); setTab("batch"); }
+    try { await runCompliance(connection, items, policies, model.trim(), controller.signal, (result) => {
       if (generation.current !== current) return;
-      if (quick) setQuickResult({ ...result, matched: undefined }); else setResults((existing) => [...existing, result]);
+      if (quick) setQuickResults((existing) => [...existing, { ...result, matched: undefined }]); else setResults((existing) => [...existing, result]);
     }); } catch (cause) { if (generation.current === current) setError(cause instanceof Error ? cause.message : "Tests failed"); }
     finally { if (generation.current === current) { setRunning(false); abort.current = undefined; } }
   }
@@ -91,20 +118,26 @@ export function CompliancePlayground({ connection, connectionChanged, connection
   const counts = { allowed: 0, blocked: 0, failed: 0, cancelled: 0, matched: 0 };
   results.forEach((result) => { counts[result.status]++; if (result.matched) counts.matched++; });
   function resultDetails(result: ComplianceResult) {
-    return <><strong>{result.status}</strong>{result.error && <span role="alert"> {result.error}</span>}{result.matched !== undefined && <span> · {result.matched ? "Expected outcome" : "Unexpected outcome"}</span>}
-      <span> · {Math.round(result.latencyMS)} ms</span>{result.executionID && <code> · {result.executionID}</code>}
+    return <><strong>{result.policy}: {result.status}</strong>{result.error && <span role="alert"> {result.error}</span>}{result.matched !== undefined && <span> · {result.matched ? "Expected outcome" : "Unexpected outcome"}</span>}
+      <span> · {result.latencyMS === undefined ? "Latency unavailable" : `${Math.round(result.latencyMS)} ms`}</span>{result.executionID && <code> · {result.executionID}</code>}
       {result.checks && <details><summary>Checks</summary><pre>{JSON.stringify(result.checks, null, 2)}</pre></details>}
       {result.anonymizedText && <details><summary>Anonymized text ({result.replacements ?? "—"} replacements)</summary><pre>{result.anonymizedText}</pre></details>}</>;
   }
   return <div className="playground-compliance">
     <section className="playground-parameters-card playground-compliance-connection">{connectionControls}
-      <TextControl label="Guardrail policy" value={policy} disabled={running} onUpdate={setPolicy} placeholder="Enter an attached policy name" />
-      <TextControl label="Policy test model" value={model} disabled={running} onUpdate={setModel} placeholder="Optional model ID for policy authorization" />
-      <p className="muted">Tests call the selected policy without generating model output. Mandatory policies and credential permissions remain enforced. Results are policy checks, not regulatory certification. Baseline expectations are examples; adapt them to your policy.</p>
+      <TextControl label="Guardrail policy" value={policy} disabled={running} onUpdate={setPolicy} placeholder="strict, privacy (up to four distinct policies)" />
+      <TextControl label="Policy test model" value={model} disabled={running || catalogBusy} onUpdate={(value) => { setModel(value); setPolicy(""); reset(); }} placeholder="Optional model ID for policy authorization" />
+      <GatewayButton view="outlined" disabled={running || catalogBusy || connectionChanged} onClick={() => void loadPolicies()}>Load policies</GatewayButton>
+      <p className="muted">Select up to {maximumPolicies} policies from the authorized catalog or enter comma-separated names. Each prompt is tested independently against each policy; failed checks never count as allowed.</p>
+      <div className="playground-resource-list">{catalog?.policies.map((name) => <Check key={name} label={`Test policy ${name}`} checked={policy.split(",").some((item) => item.trim() === name)} disabled={running || connectionChanged} onUpdate={(checked) => togglePolicy(name, checked)} />)}</div>
+      {catalog?.truncated && <p role="status">Catalog limited to 256 entries. Other authorized policies can be entered by name.</p>}
+      {catalog && !catalog.policies.length && !catalog.policy_error && <p className="muted">No policies available in this authorization scope.</p>}
+      {(catalogError || catalog?.policy_error) && <p role="alert">{catalogError || catalog?.policy_error}</p>}
+      <p className="muted">Tests call the selected policies without generating model output. Mandatory policies and credential permissions remain enforced. Results are policy checks, not regulatory certification. Baseline expectations are examples; adapt them to your policy.</p>
     </section>
     <PageTabs label="Compliance results" value={tab} items={[{ value: "quick", label: "Quick test" }, { value: "batch", label: "Batch results" }]} onUpdate={setTab} />
     {tab === "quick" && <section className="playground-parameters-card"><AreaControl label="Quick test prompt" value={quickText} disabled={running} rows={4} onUpdate={setQuickText} /><GatewayButton disabled={running || connectionChanged || !quickText.trim()} onClick={() => void execute([{ id: "quick", category: "Custom", framework: "Custom", prompt: quickText, expected: "allow" }], true)}>Test policy</GatewayButton>
-      {quickResult && <div aria-live="polite">{resultDetails(quickResult)}</div>}</section>}
+      <div aria-live="polite">{quickResults.map((result) => <div key={result.policy}>{resultDetails(result)}</div>)}</div></section>}
     <section className="playground-parameters-card">
       <h2>Test suite</h2><div className="playground-compliance-filters"><TextControl label="Search test cases" value={query} onUpdate={setQuery} />
         <SelectControl label="Category" value={category} options={[{ value: "all", content: "All categories" }, ...[...new Set(cases.map((item) => item.category))].sort().map((value) => ({ value, content: value }))]} onUpdate={setCategory} />
@@ -119,9 +152,10 @@ export function CompliancePlayground({ connection, connectionChanged, connection
       </article>)}</div><div className="playground-actions"><GatewayButton disabled={running || connectionChanged || !selectedCases.length} onClick={() => void execute(selectedCases)}>Run selected tests</GatewayButton>
         {running && <GatewayButton view="outlined" onClick={() => abort.current?.abort()}>Stop tests</GatewayButton>}<GatewayButton view="outlined" onClick={reset}>Reset results</GatewayButton></div>
     </section>
-    {tab === "batch" && <section className="playground-parameters-card"><h2>Batch results</h2><p aria-live="polite">{results.length}/{runCases.length} completed · {counts.allowed} allowed · {counts.blocked} blocked · {counts.failed} failed · {counts.cancelled} cancelled · {counts.matched} expected outcomes</p>
+    {tab === "batch" && <section className="playground-parameters-card"><h2>Batch results</h2><p aria-live="polite">{results.length}/{runCases.length * runPolicies.length} completed · {counts.allowed} allowed · {counts.blocked} blocked · {counts.failed} failed · {counts.cancelled} cancelled · {counts.matched} expected outcomes</p>
       <GatewayButton view="outlined" disabled={running || !results.length} onClick={() => download("ai-gateway-policy-results.csv", complianceCSV(runCases, results))}>Export policy results</GatewayButton>
-      {runCases.map((item) => { const result = results.find((candidate) => candidate.id === item.id); return <article className="playground-policy-case" key={item.id}><pre>{item.prompt}</pre>{result ? resultDetails(result) : <span>{running ? "Pending" : "Not run"}</span>}</article>; })}</section>}
+      <p className="muted">{runCases.length} prompts × {runPolicies.length} policies · totals count individual policy checks.</p>
+      {runCases.map((item) => <article className="playground-policy-case" key={item.id}><pre>{item.prompt}</pre>{runPolicies.map((name) => { const result = results.find((candidate) => candidate.id === item.id && candidate.policy === name); return <div key={name}>{result ? resultDetails(result) : <span>{name}: {running ? "Pending" : "Not run"}</span>}</div>; })}</article>)}</section>}
     {error && <p role="alert" className="form-error">{error}</p>}
     {adding && <ModalFrame label="Add policy test case" onClose={() => setAdding(false)}><div className="modal"><h2>Add test case</h2><AreaControl label="Test prompt" rows={4} value={newPrompt} onUpdate={setNewPrompt} /><TextControl label="Test category" value={newCategory} onUpdate={setNewCategory} /><TextControl label="Test framework" value={newFramework} onUpdate={setNewFramework} /><SelectControl label="Expected policy outcome" value={expected} options={[{ value: "allow", content: "Allow" }, { value: "block", content: "Block" }]} onUpdate={setExpected} />{error && <p role="alert" className="form-error">{error}</p>}<div className="playground-actions"><GatewayButton disabled={importBusy} onClick={addCase}>Add case</GatewayButton><GatewayButton view="outlined" onClick={() => setAdding(false)}>Cancel</GatewayButton></div></div></ModalFrame>}
   </div>;

@@ -932,3 +932,56 @@ console errors or warnings were observed. Local proof screenshots 77–78 are
 under output/playwright/playground; fixtures and screenshots are not committed.
 The preview services were stopped. Deployment and real provider/microphone
 operations were not performed, and the full Playground Goal remains open.
+
+
+## Multiple Compliance policies
+
+Compliance must test every selected prompt independently against every selected
+policy. The policy catalog uses the active Playground credential and optional
+model authorization scope; explicit authorized names remain available when
+catalog discovery is partial. AI Gateway exposes policies and their guardrail
+checks through one execution contract, so these targets share one selection list.
+
+Acceptance requirements:
+
+- Select one to four distinct policies from authorized catalog choices or enter
+  comma-separated names. Validate the whole selection and suite before transport.
+- Bound execution to 500 prompts, 2,000 checks and three concurrent requests across
+  the entire run. Each request retains gateway authentication, authorization,
+  mandatory checks, rate limiting and audit behavior; no model generation occurs.
+- Keep allowed, blocked, failed and cancelled outcomes separate for every
+  prompt/policy pair. Display individual execution IDs, latency and scanner details;
+  unstarted cancelled checks have no reported latency. Totals count policy checks.
+- Reset, unmount, connection changes and inactive workspaces cancel outstanding
+  requests. Late results cannot replace a new run or credential-scoped catalog.
+  Changing the optional authorization model clears catalog selections and results.
+- Quick results cannot change the target snapshot of an earlier batch. CSV results
+  contain a row per prompt/policy pair with the policy name, independent status,
+  error and execution ID. Existing CSV fields keep their order; `policy` is appended.
+  The import/template schema remains category/framework/prompt/expected.
+
+This increment does not add a second guardrail authorization model or change the
+public API, database schema, deployment configuration or credential storage.
+
+
+Implementation and verification:
+
+- Implemented authorized catalog checkboxes and explicit names, independent
+  quick/batch outcomes, snapshot-preserving export and bounded global scheduling.
+- Thirty focused Compliance regressions pass. The complete UI coverage run passes
+  790 tests in 85 files; TypeScript and embedded asset production build pass.
+  A final focused rerun also verifies the actual UI-created CSV Blob and URL cleanup.
+- `gofmt -w .`, `go vet ./...`, `go test ./...`, `go test -race ./...` and
+  `go build ./...` pass with the module-compatible Go toolchain. Local PostgreSQL
+  scenarios remain unrun without dedicated DSNs; the required CI job uses three
+  isolated real PostgreSQL test databases.
+- A temporary preview with actual embedded UI/CSP and synthetic scanner responses
+  verifies three prompts against two policies: one allow, two blocks and three
+  independent failures. Screenshot 79 records the completed run. Browser console
+  contains no warnings/errors. Browser download delivery remains unverified because
+  the browser adapter did not return its download event; generated CSV contents
+  and the export control are covered by regression tests.
+- Temporary preview processes and their two loopback ports were stopped/closed.
+  No real provider execution, secrets, microphone access or deployment changes
+  were used for this verification. The full Goal awaits its final requirements
+  audit and local deployment rather than treating this increment as completion.
