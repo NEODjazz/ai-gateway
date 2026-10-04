@@ -72,21 +72,41 @@ export class APIClient {
 
   private async json<T>(response: Response, limit?: number): Promise<T> {
     if (limit === undefined) return response.json() as Promise<T>;
-    const decoder = new TextDecoder(); let text = "";
-    for (const chunk of await this.limitedBytes(response, limit)) text += decoder.decode(chunk, { stream: true });
-    text += decoder.decode(); return JSON.parse(text) as T;
+    return JSON.parse(await this.text(response, limit)) as T;
   }
 
-  async request<T>(path: string, { maximumResponseBytes, ...options }: RequestOptions = {}): Promise<T> {
+  private async text(response: Response, limit?: number): Promise<string> {
+    if (limit === undefined) return response.text();
+    const decoder = new TextDecoder(); let text = "";
+    for (const chunk of await this.limitedBytes(response, limit)) text += decoder.decode(chunk, { stream: true });
+    return text + decoder.decode();
+  }
+
+  async request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+    return this.jsonRequest<T>(path, options, options.body === undefined ? undefined : JSON.stringify(options.body));
+  }
+
+  // Validate pre-encoded JSON without replacing its original numeric literals.
+  async requestJSONText(path: string, body: string, options: Omit<RequestOptions, "body"> = {}): Promise<string | undefined> {
+    if (new TextEncoder().encode(body).length > 1024 * 1024) throw new Error("JSON request exceeds the 1 MiB limit.");
+    try { JSON.parse(body); } catch { throw new Error("JSON request must contain valid JSON."); }
+    return this.jsonRequest<string | undefined>(path, { ...options, body }, body, async (response, limit) => {
+      const text = await this.text(response, limit);
+      JSON.parse(text);
+      return text;
+    });
+  }
+
+  private async jsonRequest<T>(path: string, { maximumResponseBytes, ...options }: RequestOptions, body: string | undefined, readResponse: (response: Response, limit?: number) => Promise<T> = (response, limit) => this.json<T>(response, limit)): Promise<T> {
     const response = await fetch(path, {
       credentials: this.options.credentials,
       ...options,
       headers: this.headers(options, "application/json"),
-      body: options.body === undefined ? undefined : JSON.stringify(options.body)
+      body
     });
     if (!response.ok) return this.throwResponseError(response, maximumResponseBytes);
     if (response.status === 204) return undefined as T;
-    return this.json<T>(response, maximumResponseBytes);
+    return readResponse(response, maximumResponseBytes);
   }
 
   async requestForm<T>(path: string, body: FormData, options: Omit<RequestInit, "body"> = {}): Promise<T> {

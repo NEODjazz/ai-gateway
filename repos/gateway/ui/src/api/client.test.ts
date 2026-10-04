@@ -1,6 +1,32 @@
 import { APIClient, APIError } from "./client";
 
 describe("APIClient", () => {
+  it("sends bounded pre-encoded JSON without rounding numeric literals or quoting the JSON document", async () => {
+    const body = '{"arguments":{"id":9007199254740993,"decimal":0.1234567890123456789012345}}';
+    const mock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response('{"ok":true}'));
+    const client = new APIClient(() => "test-key", { credentials: "omit", sessionEvents: false });
+    expect(await client.requestJSONText("/test", body, { method: "POST", maximumResponseBytes: 32 })).toBe('{"ok":true}');
+    const options = mock.mock.calls[0][1]!;
+    expect(options.body).toBe(body); expect(options.credentials).toBe("omit");
+    expect(new Headers(options.headers).get("Content-Type")).toBe("application/json");
+    expect(new Headers(options.headers).get("Authorization")).toBe("Bearer test-key");
+    expect(options).not.toHaveProperty("maximumResponseBytes");
+    mock.mockResolvedValue(new Response('{"id":9007199254740993}'));
+    expect(await client.requestJSONText("/test", body)).toBe('{"id":9007199254740993}');
+    mock.mockResolvedValue(new Response('"too long"'));
+    await expect(client.requestJSONText("/test", body, { maximumResponseBytes: 4 })).rejects.toMatchObject({ code: "response_too_large" });
+    mock.mockResolvedValue(new Response("broken"));
+    await expect(client.requestJSONText("/test", body)).rejects.toThrow();
+    mock.mockResolvedValue(new Response(null, { status: 204 }));
+    expect(await client.requestJSONText("/test", body)).toBeUndefined();
+    mock.mockResolvedValue(new Response('{"error":{"code":"denied","message":"Denied"}}', { status: 403 }));
+    await expect(client.requestJSONText("/test", body)).rejects.toMatchObject({ code: "denied", status: 403 });
+  });
+  it.each(["", "[", "undefined", '{"id":NaN}', '"' + "я".repeat(524288) + '"'])("rejects invalid or oversized pre-encoded JSON before credential or transport use", async (body) => {
+    const mock = vi.spyOn(globalThis, "fetch"), credential = vi.fn(() => "test-key");
+    await expect(new APIClient(credential).requestJSONText("/test", body)).rejects.toThrow(/JSON request/);
+    expect(mock).not.toHaveBeenCalled(); expect(credential).not.toHaveBeenCalled();
+  });
   it("bounds JSON and binary responses before buffering oversized content", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response('"oversized"'));
     const client = new APIClient(() => "test-key");

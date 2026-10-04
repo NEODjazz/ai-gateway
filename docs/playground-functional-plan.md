@@ -147,6 +147,10 @@ compatibility must be distinguished from merely having an endpoint selector.
 - [x] Added explicit test-gateway origin trust mirrored in browser CSP and public
   page metadata. Unknown origins fail before transport; session credentials and
   cookies remain excluded from custom calls. Realtime remains same-origin.
+- [x] Preserved reviewed JSON numeric literals in direct MCP tool arguments and
+  original JSON results in typed model continuation, without browser rounding.
+  Object/size validation, explicit approval, cancellation and retry action keys
+  remain enforced.
 - [ ] Finish media/tool output, policy selection and full conversation verification.
 - [ ] Complete endpoint-specific execution and media/tool handling.
 - [ ] Complete comparison, compliance and agent views.
@@ -377,3 +381,20 @@ cookies, and recorded no unsafe request. Remote CORS must also permit the
 console origin and the selected endpoint's headers, including `X-Session-ID` for
 Chat turns. Realtime continues to reject another origin before ticket transport.
 No real provider, billing or deployment call was involved in this verification.
+
+## Direct tool JSON precision
+
+Direct Playground MCP calls send the original reviewed argument JSON after object
+and byte-limit validation. Parsing for validation does not replace the wire body.
+The bounded original MCP result JSON is retained as the typed tool output rather
+than serialized again from JavaScript numbers. Large integer identifiers and
+precise decimal literals therefore survive the browser hop. Changed malformed
+arguments fail before transport, and invalid/oversized results cannot continue a
+model turn. Stable retry keys, explicit execution/decline and normal Gateway
+policy, authorization and billing remain unchanged.
+
+Regression coverage reproduces the original rounding of `9007199254740993` to
+`9007199254740992`, covers nested integers and precise decimals in actual fetch
+bodies/results, and checks bounded response reads, API errors and cancellation.
+This scope covers direct tool arguments/results; ordinary resource discovery and
+advanced-parameter objects still use the standard browser JSON parser.

@@ -32,12 +32,15 @@ export function toolInvocations(endpoint: TextEndpoint, payload: Record<string, 
 export async function executeTool(connection: PlaygroundConnection, call: ToolInvocation, signal: AbortSignal): Promise<string> {
   if (call.issue || !call.serverID || !call.arguments || call.output !== undefined) throw new Error("This call cannot be executed.");
   if (signal.aborted) throw new DOMException("Tool call cancelled", "AbortError");
-  const result = await connection.client.request<unknown>(connection.path(`/v1/mcp/servers/${encodeURIComponent(call.serverID)}/tools/${encodeURIComponent(call.name)}`), {
-    method: "POST", body: { arguments: call.arguments }, signal, headers: { "Idempotency-Key": call.idempotencyKey }, maximumResponseBytes: 1024 * 1024
+  // Validate again at execution, but preserve exactly what was reviewed.
+  jsonObject(call.rawArguments, "Tool arguments");
+  const output = await connection.client.requestJSONText(connection.path(`/v1/mcp/servers/${encodeURIComponent(call.serverID)}/tools/${encodeURIComponent(call.name)}`), `{"arguments":${call.rawArguments}}`, {
+    method: "POST", signal, headers: { "Idempotency-Key": call.idempotencyKey }, maximumResponseBytes: 1024 * 1024
   });
   if (signal.aborted) throw new DOMException("Tool call cancelled", "AbortError");
+  if (output === undefined) throw new Error("MCP returned an invalid result. Execution may already have completed; retry uses the same idempotency key.");
+  const result: unknown = JSON.parse(output);
   if (!object(result) || !Array.isArray(result.content) || result.content.some((item) => !object(item) || typeof item.type !== "string") || (result.isError !== undefined && typeof result.isError !== "boolean")) throw new Error("MCP returned an invalid result. Execution may already have completed; retry uses the same idempotency key.");
-  const output = JSON.stringify(result);
   if (new TextEncoder().encode(output).length > 128 * 1024) throw new Error("Tool result exceeds the 128 KiB continuation limit. Execution may already have completed; retry uses the same idempotency key.");
   return output;
 }

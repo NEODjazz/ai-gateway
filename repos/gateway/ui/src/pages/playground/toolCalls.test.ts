@@ -28,6 +28,30 @@ describe("Playground tool approvals", () => {
     expect(() => toolInvocations("chat", response("../unsafe"), selected)).toThrow("identity");
     expect(() => toolInvocations("responses", { output: Array.from({ length: 33 }, (_, n) => ({ type: "function_call", call_id: `call_${n}`, name: "forecast", arguments: "{}" })) }, selected)).toThrow("32");
   });
+  it("revalidates changed raw arguments before execution, retaining the reviewed bound and object shape", async () => {
+    const [call] = toolInvocations("chat", response(), selected);
+    const mock = vi.spyOn(globalThis, "fetch");
+    for (const rawArguments of ["null", "[]", "broken", JSON.stringify({ text: "x".repeat(65536) })]) {
+      await expect(executeTool(connection, { ...call, rawArguments }, new AbortController().signal)).rejects.toThrow(/Tool arguments/);
+    }
+    expect(mock).not.toHaveBeenCalled();
+  });
+  it("preserves numeric tool results for typed model continuation", async () => {
+    const output = '{"content":[{"type":"text","text":"ok"}],"structuredContent":{"id":9007199254740993,"decimal":0.1234567890123456789012345}}';
+    const mock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(output));
+    const [call] = toolInvocations("responses", { output: [{ type: "function_call", call_id: "call_exact", name: "forecast", arguments: "{}" }] }, selected);
+    const result = await executeTool(connection, call, new AbortController().signal);
+    expect(result).toBe(output); expect(mock).toHaveBeenCalledOnce();
+    expect(toolOutputs([{ ...call, output: result, status: "completed" }])[0].content).toBe(output);
+  });
+  it("preserves the reviewed numeric arguments on the wire instead of rounding through JavaScript", async () => {
+    const raw = '{"count":9007199254740993,"limit":0.1234567890123456789012345,"nested":{"id":9223372036854775807}}';
+    const mock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response('{"content":[]}'));
+    const [call] = toolInvocations("chat", response("call_exact", raw), selected);
+    await executeTool(connection, call, new AbortController().signal);
+    expect(mock.mock.calls[0][1]?.body).toBe(`{"arguments":${raw}}`);
+    expect(new Headers(mock.mock.calls[0][1]?.headers).get("Idempotency-Key")).toBe(call.idempotencyKey);
+  });
   it("uses the independent credential and reuses idempotency on retries; tool errors remain typed results", async () => {
     const mock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response('{"content":[{"type":"text","text":"Unavailable"}],"isError":true}'));
     const [call] = toolInvocations("chat", response(), selected);
