@@ -6,7 +6,7 @@ import { ResourceControls } from "./ResourceControls";
 import { emptyResources, withResources } from "./resources";
 import { playgroundConnection } from "./requests";
 
-const connection = playgroundConnection(new APIClient(() => "console-key"), "custom", "test-key", "https://gateway.example.test/v1");
+const connection = playgroundConnection(new APIClient(() => "console-key"), "custom", "test-key", `${window.location.origin}/v1`);
 const catalog = { mcp_servers: [{ id: "weather", name: "Weather" }], mcp_toolsets: [{ id: "read", name: "Read only", server_ids: ["weather"], tool_grants: { weather: ["forecast"] } }], policies: ["strict"], tags: ["work"], agents: [], truncated: false };
 const json = (value: unknown) => new Response(JSON.stringify(value));
 function Harness({ model = "model" }: { model?: string }) {
@@ -21,7 +21,7 @@ describe("Playground resource controls", () => {
     render(<Harness />); await open(); expect(mock).not.toHaveBeenCalled();
     await userEvent.click(screen.getByRole("button", { name: "Load resource catalog" }));
     await screen.findByLabelText("MCP toolset");
-    expect(mock.mock.calls[0][0]).toBe("https://gateway.example.test/v1/playground/catalog?model=model");
+    expect(mock.mock.calls[0][0]).toBe(`${window.location.origin}/v1/playground/catalog?model=model`);
     expect(new Headers(mock.mock.calls[0][1]?.headers).get("Authorization")).toBe("Bearer test-key");
     expect(mock.mock.calls[0][1]?.credentials).toBe("omit");
     await userEvent.click(screen.getByLabelText("MCP toolset")); await userEvent.click(screen.getByRole("option", { name: "Read only" }));

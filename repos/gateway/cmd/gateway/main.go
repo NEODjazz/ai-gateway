@@ -197,6 +197,10 @@ func main() {
 	}
 	if cfg.AdminUI.Enabled {
 		handler = handler.WithAdminUI()
+		handler, err = handler.WithPlaygroundOrigins(cfg.AdminUI.PlaygroundOrigins)
+		if err != nil {
+			log.Fatal(err)
+		}
 	}
 	if cfg.AdminUI.SSO.Enabled && !cfg.AdminUI.Enabled {
 		log.Fatal("browser SSO requires the admin UI")

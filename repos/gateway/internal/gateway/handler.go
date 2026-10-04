@@ -92,6 +92,7 @@ type Handler struct {
 	audit              AuditClient
 	apiDocs            apiDocsConfig
 	adminUI            bool
+	playgroundOrigins  []string
 	browserSSO         *BrowserSSO
 	ssoManagement      SSOManagementClient
 	adminState         *AdminStateRuntime

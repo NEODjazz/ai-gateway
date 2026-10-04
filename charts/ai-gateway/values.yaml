@@ -35,6 +35,9 @@ gateway:
         value: "1"
   port: 8080
   adminUI:
+    # Exact browser HTTP(S) origins for explicit test-key Playground calls.
+    # Empty keeps the console same-origin. HTTPS required except loopback.
+    playgroundOrigins: []
     enabled: true
     sso:
       enabled: false

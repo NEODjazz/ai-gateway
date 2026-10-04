@@ -144,6 +144,9 @@ compatibility must be distinguished from merely having an endpoint selector.
   approve/decline in Agent Chat, Compare, A2A and Batch Test, replica-safe CAS,
   stable tool action keys, native history continuation, bounded failure state,
   cancellation intent and fail-closed recovery of interrupted execution.
+- [x] Added explicit test-gateway origin trust mirrored in browser CSP and public
+  page metadata. Unknown origins fail before transport; session credentials and
+  cookies remain excluded from custom calls. Realtime remains same-origin.
 - [ ] Finish media/tool output, policy selection and full conversation verification.
 - [ ] Complete endpoint-specific execution and media/tool handling.
 - [ ] Complete comparison, compliance and agent views.
@@ -355,3 +358,22 @@ isolated browser preview with synthetic resources. The durable approval view
 was also verified with two pending calls: one explicit approval, one decline,
 and a completed task after continuation. No real provider or billing call was
 made by this browser verification.
+
+## Custom test Gateway origin verification
+
+Custom test-key connections default to the console's own origin. An administrator
+can opt in to at most sixteen exact origins through
+`ADMIN_UI_PLAYGROUND_ORIGINS` or Helm `gateway.adminUI.playgroundOrigins`.
+HTTPS is required outside loopback. Startup rejects wildcards, credentials,
+non-root paths, query/fragment, invalid ports and ambiguous browser IP spellings.
+The validated list appears in uncached public page metadata and CSP `connect-src`;
+other CSP directives, SSO trust and remote CORS remain unchanged.
+
+Browser verification used the real embedded UI handlers and two isolated loopback
+servers. An untrusted port produced a visible error without switching the active
+connection. A configured port loaded its models and returned a synthetic Chat
+response with the explicit test key; the target rejected any unexpected key or
+cookies, and recorded no unsafe request. Remote CORS must also permit the
+console origin and the selected endpoint's headers, including `X-Session-ID` for
+Chat turns. Realtime continues to reject another origin before ticket transport.
+No real provider, billing or deployment call was involved in this verification.

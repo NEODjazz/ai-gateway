@@ -90,9 +90,16 @@ describe("Playground connection", () => {
   it("never forwards the console credential to a custom host", () => {
     expect(() => playgroundConnection(new APIClient(() => "console-token"), "session", "", "https://other.example.test")).toThrow(/never forwarded/);
   });
+  it("refuses an untrusted foreign host before any fetch or authorization header", () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    expect(() => playgroundConnection(new APIClient(() => "console-token"), "custom", "test-key", "https://other.example.test/v1")).toThrow("not trusted");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
   it("uses only the explicit test key and omits browser cookies for independent calls", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}"));
+    const meta = document.createElement("meta"); meta.name = "ai-gateway-playground-origins"; meta.content = '["https://other.example.test"]'; document.head.append(meta);
     const connection = playgroundConnection(new APIClient(() => "console-token"), "custom", "Bearer test-key", "https://other.example.test/v1");
+    meta.remove();
     await connection.client.request(connection.path("/v1/models"));
     expect(fetchMock.mock.calls[0][0]).toBe("https://other.example.test/v1/models");
     expect(new Headers(fetchMock.mock.calls[0][1]?.headers).get("Authorization")).toBe("Bearer test-key");

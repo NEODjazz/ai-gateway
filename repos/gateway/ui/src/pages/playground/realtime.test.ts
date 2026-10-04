@@ -20,7 +20,9 @@ describe("Realtime transport and audio", () => {
   });
   it("rejects cross-origin gateways before sending a credential and ignores a late cancelled ticket", async () => {
     const fetch = vi.spyOn(globalThis, "fetch");
-    await expect(openRealtimeSocket(playgroundConnection(new APIClient(() => "session"), "custom", "test-key", "https://other.test/v1"), "model", new AbortController().signal)).rejects.toThrow("same origin"); expect(fetch).not.toHaveBeenCalled();
+    const meta = document.createElement("meta"); meta.name = "ai-gateway-playground-origins"; meta.content = '["https://other.test"]'; document.head.append(meta);
+    const external = playgroundConnection(new APIClient(() => "session"), "custom", "test-key", "https://other.test/v1"); meta.remove();
+    await expect(openRealtimeSocket(external, "model", new AbortController().signal)).rejects.toThrow("same origin"); expect(fetch).not.toHaveBeenCalled();
     const abort = new AbortController(); fetch.mockImplementation(async () => { abort.abort(); return new Response('{}'); });
     await expect(openRealtimeSocket(connection(), "model", abort.signal)).rejects.toMatchObject({ name: "AbortError" });
   });

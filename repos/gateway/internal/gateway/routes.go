@@ -333,7 +333,7 @@ func Routes(handler Handler) http.Handler {
 		registerAPIDocs(mux, handler.apiDocs)
 	}
 	if handler.adminUI {
-		registerAdminUI(mux)
+		registerAdminUI(mux, handler.playgroundOrigins...)
 	}
 	observed := observabilityMiddleware(handler.metrics, handler.browserSSOMiddleware(mux))
 	return otelhttp.NewHandler(observed, "ai-gateway.http",

@@ -495,6 +495,14 @@ func TestLoadAPIDocsConfiguration(t *testing.T) {
 }
 
 func TestLoadAdminUIConfiguration(t *testing.T) {
+	t.Setenv("ADMIN_UI_PLAYGROUND_ORIGINS", "")
+	if len(Load().AdminUI.PlaygroundOrigins) != 0 {
+		t.Fatal("custom Playground origins must default to empty")
+	}
+	t.Setenv("ADMIN_UI_PLAYGROUND_ORIGINS", "https://one.example.test,http://localhost:8081 https://two.example.test")
+	if len(Load().AdminUI.PlaygroundOrigins) != 3 {
+		t.Fatal("custom Playground origins environment was not loaded")
+	}
 	if cfg := Load(); !cfg.AdminUI.Enabled {
 		t.Fatal("admin UI should be enabled by default")
 	}

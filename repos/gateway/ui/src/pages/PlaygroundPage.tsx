@@ -1,3 +1,4 @@
+import { playgroundOrigins } from "./playground/origins";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Checkbox, Select, TextArea, TextInput } from "@gravity-ui/uikit";
 import type { SSEEvent } from "../api/client";
@@ -247,6 +248,7 @@ export function PlaygroundPage() {
           <TextControl label="Custom gateway base URL" disabled={running || keySource === "session"} value={baseURL} onUpdate={setBaseURL} placeholder="Optional custom gateway URL" />
           {connectionChanged && <GatewayButton disabled={running} onClick={applyConnection}>Apply connection</GatewayButton>}
           <p className="playground-default-note muted">Active: {connection.source === "session" ? "current UI session" : "test API key"}{connection.baseURL ? ` · ${connection.baseURL}` : " · this gateway"}. Test keys stay in memory.</p>
+          <p className="playground-default-note muted">{playgroundOrigins().length ? `Trusted test gateway origins: ${playgroundOrigins().join(", ")}.` : "Custom URLs must use this console’s origin. Ask an administrator to trust an additional test gateway origin."} Realtime requires this console’s origin.</p>
   </>;
   return <>
     <PageHeader eyebrow="Inference" title="Playground" description="Explore models, tune requests and inspect live responses." />

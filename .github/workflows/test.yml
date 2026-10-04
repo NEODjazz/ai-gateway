@@ -305,6 +305,15 @@ jobs:
           grep -A1 'name: ASSISTANT_RUN_RETENTION_SECONDS' <<< "$rendered" | grep -q 'value: "2592000"'
           grep -A1 'name: A2A_TASK_TTL_SECONDS' <<< "$rendered" | grep -q 'value: "2592000"'
 
+      - name: Verify Playground browser origin trust rendering
+        if: matrix.chart == 'ai-gateway'
+        shell: bash
+        run: |
+          default_rendered="$(helm template ai-gateway charts/ai-gateway --namespace ai-gateway)"
+          grep -A1 'name: ADMIN_UI_PLAYGROUND_ORIGINS' <<< "$default_rendered" | grep -q 'value: ""'
+          rendered="$(helm template ai-gateway charts/ai-gateway --namespace ai-gateway --set 'gateway.adminUI.playgroundOrigins[0]=https://test-gateway.example.com' --set 'gateway.adminUI.playgroundOrigins[1]=http://127.0.0.1:8081')"
+          grep -A1 'name: ADMIN_UI_PLAYGROUND_ORIGINS' <<< "$rendered" | grep -q 'value: "https://test-gateway.example.com,http://127.0.0.1:8081"'
+
       - name: Verify Azure service principal Secret reference
         if: matrix.chart == 'ai-gateway'
         shell: bash

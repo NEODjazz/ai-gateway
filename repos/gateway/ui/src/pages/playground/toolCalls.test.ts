@@ -3,7 +3,7 @@ import { playgroundConnection } from "./requests";
 import { executeTool, toolInvocations, toolOutputs } from "./toolCalls";
 const selected = [{ serverID: "weather", name: "forecast", inputSchema: {} }];
 const response = (id = "call_1", args = '{}', name = "forecast") => ({ choices: [{ message: { tool_calls: [{ id, type: "function", function: { name, arguments: args } }] } }] });
-const connection = playgroundConnection(new APIClient(() => "console-key"), "custom", "test-key", "https://gateway.example.test/v1");
+const connection = playgroundConnection(new APIClient(() => "console-key"), "custom", "test-key", `${window.location.origin}/v1`);
 describe("Playground tool approvals", () => {
   it("binds functions only to selected tools, retaining server, arguments and a stable idempotency key", () => {
     const [call] = toolInvocations("chat", response("call_1", '{"city":"Rome"}'), selected);
@@ -34,7 +34,7 @@ describe("Playground tool approvals", () => {
     const output = await executeTool(connection, call, new AbortController().signal);
     mock.mockResolvedValue(new Response(output)); await executeTool(connection, call, new AbortController().signal);
     expect(JSON.parse(output).isError).toBe(true);
-    expect(mock.mock.calls[0][0]).toBe("https://gateway.example.test/v1/mcp/servers/weather/tools/forecast");
+    expect(mock.mock.calls[0][0]).toBe(`${window.location.origin}/v1/mcp/servers/weather/tools/forecast`);
     for (const [, options] of mock.mock.calls) {
       const headers = new Headers(options?.headers); expect(headers.get("Authorization")).toBe("Bearer test-key"); expect(headers.get("Idempotency-Key")).toBe(call.idempotencyKey); expect(options?.credentials).toBe("omit");
     }

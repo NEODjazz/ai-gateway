@@ -54,6 +54,8 @@ spec:
               value: ":8080"
             - name: ADMIN_UI_ENABLED
               value: {{ .Values.gateway.adminUI.enabled | quote }}
+            - name: ADMIN_UI_PLAYGROUND_ORIGINS
+              value: {{ join "," (default (list) .Values.gateway.adminUI.playgroundOrigins) | quote }}
             - name: ADMIN_SSO_ENABLED
               value: {{ default false (get $adminSSO "enabled") | quote }}
             - name: ADMIN_SSO_AUTHORIZATION_URL

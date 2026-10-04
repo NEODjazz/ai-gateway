@@ -81,8 +81,9 @@ type APIDocsConfig struct {
 }
 
 type AdminUIConfig struct {
-	Enabled bool
-	SSO     BrowserSSOConfig
+	Enabled           bool
+	PlaygroundOrigins []string
+	SSO               BrowserSSOConfig
 }
 
 type BrowserSSOConfig struct {
@@ -363,7 +364,7 @@ func Load() Config {
 			Enabled:         envBool("API_DOCS_ENABLED", false),
 			TryItOutEnabled: envBool("API_DOCS_TRY_IT_OUT_ENABLED", false),
 		},
-		AdminUI: AdminUIConfig{Enabled: envBool("ADMIN_UI_ENABLED", true), SSO: BrowserSSOConfig{
+		AdminUI: AdminUIConfig{Enabled: envBool("ADMIN_UI_ENABLED", true), PlaygroundOrigins: strings.Fields(strings.ReplaceAll(env("ADMIN_UI_PLAYGROUND_ORIGINS", ""), ",", " ")), SSO: BrowserSSOConfig{
 			Enabled: envBool("ADMIN_SSO_ENABLED", false), AuthorizationURL: strings.TrimSpace(os.Getenv("ADMIN_SSO_AUTHORIZATION_URL")),
 			TokenURL: strings.TrimSpace(os.Getenv("ADMIN_SSO_TOKEN_URL")), ClientID: strings.TrimSpace(os.Getenv("ADMIN_SSO_CLIENT_ID")),
 			ClientSecret: os.Getenv("ADMIN_SSO_CLIENT_SECRET"), RedirectURL: strings.TrimSpace(os.Getenv("ADMIN_SSO_REDIRECT_URL")),

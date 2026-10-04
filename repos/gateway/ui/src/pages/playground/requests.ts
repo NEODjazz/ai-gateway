@@ -1,3 +1,4 @@
+import { assertPlaygroundOrigin } from "./origins";
 import { APIClient } from "../../api/client";
 
 export type TextEndpoint = "chat" | "responses";
@@ -138,6 +139,7 @@ export function playgroundConnection(sessionClient: APIClient, source: KeySource
   if (source === "session" && baseURL) throw new Error("Use an explicit test API key for a custom gateway URL. The console credential is never forwarded.");
   const normalizedKey = key.trim().replace(/^Bearer\s+/i, "");
   if (source === "custom" && !normalizedKey) throw new Error("Enter a test API key.");
+  assertPlaygroundOrigin(baseURL);
   return { client: source === "session" ? sessionClient : new APIClient(() => normalizedKey, { credentials: "omit", sessionEvents: false }),
     path: (path) => gatewayPath(baseURL, path), baseURL, source };
 }

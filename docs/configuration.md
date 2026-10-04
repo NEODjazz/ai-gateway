@@ -16,6 +16,7 @@ OpenAPI, а не в этом документе.
 | --- | --- | --- |
 | `HTTP_ADDR` | `:8080` | HTTP listener |
 | `ADMIN_UI_ENABLED` | `true` | UI на `/ui/` |
+| `ADMIN_UI_PLAYGROUND_ORIGINS` | пусто | До 16 точных доверенных HTTP(S) origins для Playground с отдельным test key; HTTPS, кроме loopback; разделитель — запятая или пробел |
 | `API_DOCS_ENABLED` | `false` | Swagger UI и `/openapi.yaml` |
 | `API_DOCS_TRY_IT_OUT_ENABLED` | `false` | Browser calls из Swagger UI |
 | `DEFAULT_PROVIDER` | `PROVIDER_TYPE` или `demo` | Provider по умолчанию |
@@ -35,6 +36,28 @@ OpenAPI, а не в этом документе.
 | `REDIS_DB` | `0` | Redis DB |
 | `REDIS_PREFIX` | `ai-gateway` | Namespace Redis keys |
 | `REDIS_PASSWORD` | пусто | Redis credential |
+
+### Playground: дополнительный Gateway URL
+
+По умолчанию browser CSP и Playground разрешают только origin самой консоли.
+Для отдельного test Gateway задайте `gateway.adminUI.playgroundOrigins` в Helm,
+например `['https://test-gateway.example.com']`. Это соответствует
+`ADMIN_UI_PLAYGROUND_ORIGINS=https://test-gateway.example.com` при запуске процесса.
+Указывайте только origin, без `/v1`, wildcard, userinfo, query или fragment.
+Некорректная конфигурация при включённой консоли останавливает запуск Gateway.
+HTTP допустим только для
+`localhost` или loopback IP; HTTPS-консоль всё равно требует HTTPS URL.
+Изменение списка требует перезапуска процесса и перезагрузки страницы консоли.
+
+UI показывает доверенные origins и отклоняет неизвестный адрес до отправки ключа.
+Для custom URL нужен явно введённый test API key: UI-сессия не пересылается,
+а browser cookies исключены. Доверие расширяет только CSP `connect-src`;
+скрипты, изображения, worker и SSO trust не меняются. На удалённом Gateway
+отдельно требуется CORS, допускающий origin консоли, нужные HTTP methods и
+headers: `Authorization`, `Content-Type`, `X-Session-ID`, `Idempotency-Key`,
+`A2A-Version` — в зависимости от выбранного endpoint.
+Этот список не включает CORS автоматически. Browser Realtime по-прежнему
+работает только на origin самой консоли.
 
 ### Static provider endpoint
 

@@ -18,6 +18,8 @@ function streamResponse(chunks: string[]) {
   }), { status: 200, headers: { "Content-Type": "text/event-stream" } });
 }
 
+afterEach(() => document.querySelectorAll('meta[name="ai-gateway-playground-origins"]').forEach((node) => node.remove()));
+
 describe("PlaygroundPage", () => {
   it("blocks new turns for queued Responses, preserves failed refreshes and commits final output once", async () => {
     let inference = 0, reads = 0;
@@ -236,7 +238,22 @@ describe("PlaygroundPage", () => {
     expect(screen.getByLabelText("Message")).toHaveValue("Keep this prompt");
   });
 
+  it("keeps the active session when an untrusted custom URL is rejected before transport", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ data: [{ id: "model-a" }] })));
+    authenticated(); await screen.findByText("1 authorized model");
+    await userEvent.click(screen.getByLabelText("Virtual key source"));
+    await userEvent.click(screen.getByRole("option", { name: "Test API key" }));
+    await userEvent.type(screen.getByLabelText("Test API key"), "independent-test-key");
+    await userEvent.type(screen.getByLabelText("Custom gateway base URL"), "https://untrusted.example.test/v1");
+    await userEvent.click(screen.getByRole("button", { name: "Apply connection" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("not trusted");
+    expect(fetchMock.mock.calls.every(([path]) => String(path) === "/v1/models")).toBe(true);
+    expect(screen.getByText(/Active: current UI session/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Test API key")).toHaveValue("independent-test-key");
+  });
+
   it("tests another key independently and excludes it from storage and exported code", async () => {
+    const meta = document.createElement("meta"); meta.name = "ai-gateway-playground-origins"; meta.content = '["https://other.example.test"]'; document.head.append(meta);
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(JSON.stringify({ data: [{ id: "model-a" }] })));
     authenticated(); await screen.findByText("1 authorized model");
     await userEvent.click(screen.getByLabelText("Virtual key source"));

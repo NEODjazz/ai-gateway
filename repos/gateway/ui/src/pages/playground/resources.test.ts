@@ -3,7 +3,7 @@ import { defaultGenerationSettings, buildTextRequest, playgroundConnection, requ
 import { checkPolicies, emptyResources, parseResourceCatalog, policyChecks, validateMCPSelection, withResources } from "./resources";
 
 const body = (endpoint: "chat" | "responses") => buildTextRequest({ endpoint, model: "model", input: "Prompt", instructions: "", streaming: false, settings: defaultGenerationSettings });
-const connection = () => playgroundConnection(new APIClient(() => "test-key"), "custom", "test-virtual-key", "https://gateway.example.test/v1");
+const connection = () => playgroundConnection(new APIClient(() => "test-key"), "custom", "test-virtual-key", `${window.location.origin}/v1`);
 describe("Playground resources", () => {
   it.each(["chat", "responses"] as const)("keeps MCP constraints in the %s function dialect", (endpoint) => {
     const schema = { type: "object", properties: { count: { type: "integer", minimum: 1, maximum: 5 } }, required: ["count"], additionalProperties: false };
@@ -35,7 +35,7 @@ describe("Playground resources", () => {
     const mock = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response('{"allowed":false}'));
     await expect(checkPolicies(connection(), ["strict", "other"], "Prompt", "model", new AbortController().signal)).rejects.toThrow("blocked by policy strict");
     expect(mock).toHaveBeenCalledOnce();
-    expect(mock.mock.calls[0][0]).toBe("https://gateway.example.test/guardrails/apply_guardrail");
+    expect(mock.mock.calls[0][0]).toBe(`${window.location.origin}/guardrails/apply_guardrail`);
     expect(mock.mock.calls[0][1]?.credentials).toBe("omit");
     mock.mockResolvedValueOnce(new Response('{}'));
     await expect(checkPolicies(connection(), ["strict"], "Prompt", "model", new AbortController().signal)).rejects.toThrow("invalid decision");
