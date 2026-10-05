@@ -122,3 +122,8 @@ type to the public Responses contract without changing existing fields or URLs.
 Playground displays reasoning separately from the answer. A reasoning-only
 response remains reasoning-only; the Gateway does not invent an answer when the
 model exhausts its output allowance before producing an assistant message.
+
+Some native streaming backends omit `output_index` on item events. The Lemonade
+adapter supplies it from stable item IDs announced in `response.output_item.added`.
+Unknown or conflicting identities are rejected; generic provider validation is
+unchanged. The mapping is bounded and isolated to each request.

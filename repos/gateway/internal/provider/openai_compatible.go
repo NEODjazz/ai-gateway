@@ -1042,6 +1042,10 @@ func (p OpenAICompatible) Responses(ctx context.Context, request openai.Response
 }
 
 func (p OpenAICompatible) StreamResponses(ctx context.Context, request openai.ResponseRequest, write ResponseStreamWriter) (openai.ResponseResponse, error) {
+	return p.streamResponses(ctx, request, write, nil)
+}
+
+func (p OpenAICompatible) streamResponses(ctx context.Context, request openai.ResponseRequest, write ResponseStreamWriter, normalize func(string) (string, error)) (openai.ResponseResponse, error) {
 	if err := p.ValidateResponseParameters(request); err != nil {
 		return openai.ResponseResponse{}, err
 	}
@@ -1106,7 +1110,7 @@ func (p OpenAICompatible) StreamResponses(ctx context.Context, request openai.Re
 			return nil
 		}
 	}
-	response, err := streamResponseData(resp.Body, request.Model, forward)
+	response, err := streamResponseDataNormalized(resp.Body, request.Model, forward, nil, normalize)
 	if err != nil {
 		return openai.ResponseResponse{}, err
 	}
@@ -1488,6 +1492,10 @@ func streamResponseData(body io.Reader, fallbackModel string, write ResponseStre
 }
 
 func streamResponseDataValidated(body io.Reader, fallbackModel string, write ResponseStreamWriter, validate func(openai.ResponseResponse) error) (openai.ResponseResponse, error) {
+	return streamResponseDataNormalized(body, fallbackModel, write, validate, nil)
+}
+
+func streamResponseDataNormalized(body io.Reader, fallbackModel string, write ResponseStreamWriter, validate func(openai.ResponseResponse) error, normalize func(string) (string, error)) (openai.ResponseResponse, error) {
 	response := openai.ResponseResponse{
 		Object: "response",
 		Model:  fallbackModel,
@@ -1512,6 +1520,13 @@ func streamResponseDataValidated(body io.Reader, fallbackModel string, write Res
 				return io.ErrUnexpectedEOF
 			}
 			return io.EOF
+		}
+		if normalize != nil {
+			var err error
+			payload, err = normalize(payload)
+			if err != nil {
+				return err
+			}
 		}
 		var decoded map[string]any
 		decoder := json.NewDecoder(strings.NewReader(payload))

@@ -122,3 +122,87 @@ func TestGenericChatStreamStillRejectsChangingTimestamp(t *testing.T) {
 		t.Fatalf("generic timestamp validation changed: %v", err)
 	}
 }
+
+func TestLemonadeResponsesResolveMissingOutputIndices(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		for _, payload := range []string{
+			`{"type":"response.output_item.added","item":{"id":"rs_1","type":"reasoning","content":[],"summary":[]}}`,
+			`{"type":"response.reasoning_text.delta","item_id":"rs_1","delta":"Thought"}`,
+			`{"type":"response.output_item.added","item":{"id":"msg_1","type":"message","role":"assistant","content":[]}}`,
+			`{"type":"response.content_part.added","item_id":"msg_1","part":{"type":"output_text","text":""}}`,
+			`{"type":"response.output_text.delta","item_id":"msg_1","delta":"Hello"}`,
+			`{"type":"response.output_item.done","item":{"id":"rs_1","type":"reasoning","content":[{"type":"reasoning_text","text":"Thought"}],"summary":[]}}`,
+			`{"type":"response.output_text.done","item_id":"msg_1","text":"Hello"}`,
+			`{"type":"response.output_item.done","item":{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"output_text","text":"Hello"}]}}`,
+			`{"type":"response.completed","response":{"id":"r","status":"completed","output":[{"id":"rs_1","type":"reasoning","content":[{"type":"reasoning_text","text":"Thought"}]},{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"output_text","text":"Hello"}]}],"usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}}`,
+		} {
+			fmt.Fprintf(w, "data: %s\n\n", payload)
+		}
+	}))
+	t.Cleanup(server.Close)
+	client := NewLemonade(server.URL, "", true)
+	for range 2 {
+		events := 0
+		response, err := client.StreamResponses(t.Context(), openai.ResponseRequest{Model: "native", Input: "hello", Stream: true}, func(kind, payload string) error {
+			events++
+			if kind == "response.completed" {
+				return nil
+			}
+			var event struct {
+				ItemID string `json:"item_id"`
+				Item   struct {
+					ID string `json:"id"`
+				} `json:"item"`
+				Index *int `json:"output_index"`
+			}
+			if err := json.Unmarshal([]byte(payload), &event); err != nil {
+				return err
+			}
+			id := event.ItemID
+			if id == "" {
+				id = event.Item.ID
+			}
+			want := 0
+			if id == "msg_1" {
+				want = 1
+			}
+			if event.Index == nil || *event.Index != want {
+				t.Fatalf("event=%s index=%v want=%d", kind, event.Index, want)
+			}
+			return nil
+		})
+		if err != nil || events != 9 || response.OutputText != "Hello" || len(response.Output) != 2 || response.Output[0].Content[0].Text != "Thought" || response.Usage.TotalTokens != 5 {
+			t.Fatalf("response=%+v events=%d err=%v", response, events, err)
+		}
+	}
+}
+
+func TestLemonadeResponsesNormalizationRejectsAmbiguousIndices(t *testing.T) {
+	for _, payload := range []string{
+		`{"type":"response.output_item.added","item":{"type":"reasoning"}}`,
+		`{"type":"response.output_text.delta","item_id":"unknown","delta":"x"}`,
+		`{"type":"response.output_item.added","item":{"id":"msg_1","type":"message"},"output_index":0}`,
+		`{"type":"response.reasoning_text.delta","item_id":"rs_1","output_index":1,"delta":"x"}`,
+		`{"type":"response.reasoning_text.delta","item_id":"rs_1","output_index":-1,"delta":"x"}`,
+		`{"type":"response.reasoning_text.delta","item_id":"rs_1","output_index":null,"delta":"x"}`,
+		`{"type":"response.reasoning_text.delta","item_id":"rs_1","output_index":"0","delta":"x"}`,
+		`{"type":"response.output_item.done","item_id":"rs_1","item":{"id":"different","type":"reasoning"}}`,
+	} {
+		normalizer := newLemonadeResponseStreamNormalizer()
+		if _, err := normalizer(`{"type":"response.output_item.added","item":{"id":"rs_1","type":"reasoning"}}`); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := normalizer(payload); err == nil {
+			t.Fatalf("invalid event accepted: %s", payload)
+		}
+	}
+	first, second := newLemonadeResponseStreamNormalizer(), newLemonadeResponseStreamNormalizer()
+	for _, normalize := range []func(string) (string, error){first, second} {
+		payload := `{"type":"response.output_item.added","item":{"id":"rs_1","type":"reasoning"},"extension":9007199254740993}`
+		got, err := normalize(payload)
+		if err != nil || !strings.Contains(got, `"output_index":0`) || !strings.Contains(got, `9007199254740993`) {
+			t.Fatalf("normalized=%s err=%v", got, err)
+		}
+	}
+}

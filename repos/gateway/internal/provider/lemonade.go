@@ -150,7 +150,7 @@ func (p Lemonade) StreamResponses(ctx context.Context, request openai.ResponseRe
 	if err := p.ValidateResponseParameters(request); err != nil {
 		return openai.ResponseResponse{}, err
 	}
-	return p.compatible.StreamResponses(ctx, request, write)
+	return p.compatible.streamResponses(ctx, request, write, newLemonadeResponseStreamNormalizer())
 }
 
 func (p Lemonade) ValidateCompletionParameters(request openai.CompletionRequest) error {
