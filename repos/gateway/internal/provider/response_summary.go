@@ -49,9 +49,10 @@ func applyResponseSummaryEvent(response *openai.ResponseResponse, outputIndex in
 	if err != nil {
 		return err
 	}
-	item := ensureResponseOutputItem(response, outputIndex)
-	item.Type = "reasoning"
-	item.Role, item.Content = "", nil
+	item, err := ensureResponseReasoningItem(response, outputIndex)
+	if err != nil {
+		return err
+	}
 	if id, ok := decoded["item_id"].(string); ok {
 		item.ID = id
 	}

@@ -482,8 +482,8 @@ func validateResponseOutputItemsMode(items []openai.ResponseOutputItem, allowSpa
 		} else if item.Role != "" {
 			return errors.New("provider returned role on a non-message response output item")
 		}
-		if item.Type != "message" && len(item.Content) > 0 {
-			return errors.New("provider returned content on a non-message response output item")
+		if item.Type != "message" && item.Type != "reasoning" && len(item.Content) > 0 {
+			return errors.New("provider returned content on a response output item that is neither message nor reasoning")
 		}
 		if item.Type != "reasoning" && len(item.Summary) > 0 {
 			return errors.New("provider returned summary on a non-reasoning response output item")
@@ -506,6 +506,11 @@ func validateResponseOutputItemsMode(items []openai.ResponseOutputItem, allowSpa
 			}
 		}
 		if item.Type == "reasoning" {
+			for _, part := range item.Content {
+				if part.Type != "" && part.Type != "reasoning_text" {
+					return errors.New("provider returned unsupported response reasoning content type")
+				}
+			}
 			for _, part := range item.Summary {
 				if part.Type != "" && part.Type != "summary_text" {
 					return errors.New("provider returned unsupported response reasoning summary type")
@@ -661,9 +666,9 @@ func validateResponseOutputContent(part openai.ResponseOutputContent) error {
 		if part.Text != "" || len(part.Annotations) != 0 || len(part.Logprobs) != 0 {
 			return errors.New("provider returned text data in response refusal")
 		}
-	case "summary_text":
+	case "summary_text", "reasoning_text":
 		if part.Refusal != "" || len(part.Annotations) != 0 || len(part.Logprobs) != 0 {
-			return errors.New("provider returned unsupported response summary data")
+			return errors.New("provider returned unsupported response reasoning text data")
 		}
 	}
 	if len(part.Annotations) > maxResponseStreamContentParts {

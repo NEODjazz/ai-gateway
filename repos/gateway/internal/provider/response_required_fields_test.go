@@ -8,6 +8,8 @@ import (
 
 func TestResponseStreamRequiresTypedEventTextBeforeDelivery(t *testing.T) {
 	events := map[string]string{
+		"response.reasoning_text.delta":          "delta",
+		"response.reasoning_text.done":           "text",
 		"response.output_text.delta":             "delta",
 		"response.output_text.done":              "text",
 		"response.refusal.delta":                 "delta",
@@ -37,6 +39,8 @@ func TestResponseStreamAllowsEmptyRequiredEventText(t *testing.T) {
 	events := []struct {
 		event, field, suffix string
 	}{
+		{"response.reasoning_text.delta", "delta", ""},
+		{"response.reasoning_text.done", "text", ""},
 		{"response.output_text.delta", "delta", ""},
 		{"response.output_text.done", "text", ""},
 		{"response.refusal.delta", "delta", ""},

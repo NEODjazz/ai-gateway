@@ -1737,6 +1737,9 @@ func streamResponseDataValidated(body io.Reader, fallbackModel string, write Res
 			item.Content[contentIndex] = snapshot
 			response.OutputText = ""
 		}
+		if err := applyResponseReasoningTextEvent(&response, outputIndex, event, decoded); err != nil {
+			return err
+		}
 		if err := applyResponseSummaryEvent(&response, outputIndex, event, decoded); err != nil {
 			return err
 		}

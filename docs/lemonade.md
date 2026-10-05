@@ -111,3 +111,14 @@ The native contract was inspected in the official
 [API documentation](https://lemonade-server.ai/docs/api/) and
 [source revision ee87a42eaba7387fd17ae59b36d3e99239633eae](https://github.com/lemonade-sdk/lemonade/tree/ee87a42eaba7387fd17ae59b36d3e99239633eae).
 Different server/backend releases still require a live smoke test before use.
+
+## Responses reasoning content
+
+Responses accepts `reasoning_text` in a reasoning item's `content`, separately
+from `summary_text` in `summary` and the assistant message. Both JSON and native
+`response.reasoning_text.delta` / `.done` streaming events retain this content.
+Buffered streams also emit reasoning text events. This adds a supported content
+type to the public Responses contract without changing existing fields or URLs.
+Playground displays reasoning separately from the answer. A reasoning-only
+response remains reasoning-only; the Gateway does not invent an answer when the
+model exhausts its output allowance before producing an assistant message.

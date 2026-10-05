@@ -11014,7 +11014,7 @@ components:
         input_tokens: {type: integer, minimum: 0}
     ResponseOutputContent:
       type: object
-      description: Content union. `output_text` uses `text`, `annotations`, and `logprobs`; `refusal` uses only `refusal`; `summary_text` uses only `text`.
+      description: Content union. `output_text` uses `text`, `annotations`, and `logprobs`; `refusal` uses only `refusal`; `summary_text` and `reasoning_text` use only `text`. Reasoning items carry `reasoning_text` in `content` and `summary_text` in `summary`.
       required: [type]
       properties:
         logprobs:
@@ -11029,7 +11029,7 @@ components:
               - type: object
                 additionalProperties: true
               - type: 'null'
-        type: {type: string, enum: [output_text, refusal, summary_text]}
+        type: {type: string, enum: [output_text, refusal, summary_text, reasoning_text]}
         text: {type: string}
         refusal: {type: string}
     ResponseCompactRequest:

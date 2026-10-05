@@ -123,6 +123,39 @@ describe("Playground text execution", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ output: [{ type: "reasoning", summary: [{ type: "summary_text", text: "Summary" }] }, { type: "message", content: [{ type: "refusal", refusal: "Cannot assist" }] }] })));
     expect(await runText(connection(), "responses", { model: "model" }, options())).toMatchObject({ text: "Cannot assist", reasoning: "Summary" });
   });
+  it.each(["json", "stream"])("retains reasoning content separately from the answer over %s", async (transport) => {
+    const output = [{ type: "reasoning", content: [{ type: "reasoning_text", text: "Full thought" }], summary: [{ type: "summary_text", text: "Summary" }], encrypted_content: "opaque" }, { type: "message", content: [{ type: "output_text", text: "Answer" }] }];
+    const response = { id: "resp_reason", status: "completed", output, usage: { input_tokens: 3, output_tokens: 2 } };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(transport === "json" ? new Response(JSON.stringify(response)) : sse([
+      { type: "response.reasoning_text.delta", delta: "Partial thought" },
+      { type: "response.reasoning_summary_text.delta", delta: "Partial summary" },
+      { type: "response.completed", response }
+    ]));
+    const onText = vi.fn();
+    const result = await runText(connection(), "responses", { model: "model", stream: transport === "stream" }, { ...options(), onText });
+    expect(result).toMatchObject({ text: "Answer", reasoning: "Full thought\nSummary", usage: { input_tokens: 3 } });
+    expect(result.response.output).toEqual(output);
+    expect(onText).toHaveBeenLastCalledWith("Answer");
+  });
+  it.each(["json", "stream"])("does not turn a reasoning-only %s response into an answer", async (transport) => {
+    const response = { id: "resp_reason", status: "completed", output: [{ type: "reasoning", content: [{ type: "reasoning_text", text: "Thought" }], summary: [] }] };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(transport === "json" ? new Response(JSON.stringify(response)) : sse([
+      { type: "response.reasoning_text.delta", delta: "Thought" },
+      { type: "response.completed", response }
+    ]));
+    const onText = vi.fn();
+    const result = await runText(connection(), "responses", { model: "model", stream: transport === "stream" }, { ...options(), onText });
+    expect(result).toMatchObject({ text: "", reasoning: "Thought" });
+    expect(result.firstTokenMS).toBeUndefined();
+    expect(onText.mock.calls.every(([text]) => text === "")).toBe(true);
+  });
+  it("bounds streamed reasoning text", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(sse([
+      { type: "response.reasoning_text.delta", delta: "x".repeat(1024 * 1024) },
+      { type: "response.reasoning_text.delta", delta: "x".repeat(1024 * 1024 + 1) }
+    ]));
+    await expect(runText(connection(), "responses", { stream: true }, options())).rejects.toThrow("Reasoning output exceeds");
+  });
   it("does not treat nested Responses failure as a success", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(sse([{ type: "response.failed", response: { status: "failed", error: { message: "Failed upstream" } } }]));
     await expect(runText(connection(), "responses", { model: "model", stream: true }, options())).rejects.toThrow("Failed upstream");
