@@ -1893,7 +1893,7 @@ func (r Router) EditImage(ctx context.Context, req modules.RequestContext) (open
 		setAttemptMetadata(&attemptCtx, started, err)
 		setAttemptCounters(&attemptCtx, totalRetries, fallbackCount)
 		if err == nil {
-			if validationErr := validateImageGenerationResponse(response, attemptCtx.ImageEditRequest.GenerationRequest()); validationErr != nil {
+			if validationErr := validateAdapterImageResponse(client, response, attemptCtx.ImageEditRequest.GenerationRequest()); validationErr != nil {
 				err = validationErr
 			} else {
 				attemptCtx.ImageGenerationResponse = &response
@@ -2108,7 +2108,7 @@ func (r Router) CreateImageVariation(ctx context.Context, req modules.RequestCon
 		setAttemptMetadata(&attemptCtx, started, err)
 		setAttemptCounters(&attemptCtx, totalRetries, fallbackCount)
 		if err == nil {
-			if validationErr := validateImageGenerationResponse(response, attemptCtx.ImageVariationRequest.GenerationRequest()); validationErr != nil {
+			if validationErr := validateAdapterImageResponse(client, response, attemptCtx.ImageVariationRequest.GenerationRequest()); validationErr != nil {
 				err = validationErr
 			} else {
 				attemptCtx.ImageGenerationResponse = &response
@@ -4084,6 +4084,8 @@ func (r Router) weightedOrder(candidates []Endpoint) []Endpoint {
 
 func providerFor(endpoint config.ProviderEndpointConfig) Client {
 	switch endpoint.Type {
+	case "lemonade":
+		return NewLemonade(endpoint.BaseURL, endpoint.APIKey, endpoint.Stream)
 	case "ollama":
 		return newOllamaWithToken(endpoint.BaseURL, endpoint.APIKey, endpoint.Stream)
 	case "openai":

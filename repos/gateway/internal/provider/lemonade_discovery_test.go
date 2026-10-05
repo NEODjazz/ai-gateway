@@ -13,10 +13,10 @@ func TestLemonadeModelCapabilities(t *testing.T) {
 		model lemonadeModelMetadata
 		want  []string
 	}{
-		{"chat characteristics", lemonadeModelMetadata{Recipe: "llamacpp", Labels: []string{"chat", "reasoning", "vision", "tool-calling", "chat-transcription", "realtime-transcription"}}, []string{"chat", "completions", "stream", "responses", "vision", "tools", "audio_input"}},
-		{"flm rejects responses", lemonadeModelMetadata{Recipe: "flm"}, []string{"chat", "completions", "stream"}},
-		{"cloud rejects responses", lemonadeModelMetadata{Recipe: "cloud"}, []string{"chat", "completions", "stream"}},
-		{"legacy chat recipe", lemonadeModelMetadata{Recipe: "llamacpp", Labels: []string{"reasoning"}}, []string{"chat", "completions", "stream", "responses"}},
+		{"chat characteristics", lemonadeModelMetadata{Recipe: "llamacpp", Labels: []string{"chat", "reasoning", "vision", "tool-calling", "chat-transcription", "realtime-transcription"}}, []string{"chat", "stream", "responses", "vision", "tools", "audio_input"}},
+		{"flm rejects responses", lemonadeModelMetadata{Recipe: "flm"}, []string{"chat", "stream"}},
+		{"cloud rejects responses", lemonadeModelMetadata{Recipe: "cloud"}, []string{"chat", "stream"}},
+		{"legacy chat recipe", lemonadeModelMetadata{Recipe: "llamacpp", Labels: []string{"reasoning"}}, []string{"chat", "stream", "responses"}},
 		{"unknown recipe characteristics", lemonadeModelMetadata{Recipe: "future", Labels: []string{"reasoning", "vision", "tool-calling"}}, []string{}},
 		{"embedding alias", lemonadeModelMetadata{Recipe: "llamacpp", Labels: []string{"embedding", "embeddings", "vision"}}, []string{"embeddings"}},
 		{"legacy embedding boolean", lemonadeModelMetadata{Recipe: "llamacpp", Embedding: true}, []string{"embeddings"}},

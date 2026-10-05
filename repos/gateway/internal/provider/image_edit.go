@@ -44,7 +44,7 @@ func (p OpenAICompatible) EditImage(ctx context.Context, request openai.ImageEdi
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return openai.ImageGenerationResponse{}, responseStatusError(p.providerName(), response)
 	}
-	return decodeImageGenerationResponse(response.Body, request.GenerationRequest())
+	return p.decodeImageResponse(response.Body, request.GenerationRequest(), false)
 }
 
 func (p OpenAICompatible) StreamEditImage(ctx context.Context, request openai.ImageEditRequest, write ImageGenerationStreamWriter) (openai.ImageGenerationResponse, error) {

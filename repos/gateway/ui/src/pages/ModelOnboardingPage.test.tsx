@@ -9,6 +9,43 @@ function json(value: unknown, status = 200) {
 }
 
 describe("ModelOnboardingPage", () => {
+  it("offers Lemonade for provider creation and preserves authoritative discovery capabilities", async () => {
+    let created: { type?: string; base_url?: string } | undefined;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, options) => {
+      const path = String(input);
+      if (!options?.method && path === "/admin/v1/providers") return json({ data: [] });
+      if (!options?.method && path === "/admin/v1/credentials") return json({ data: [] });
+      if (!options?.method && path === "/admin/v1/model-catalog") return json({ version: "v1", models: [] });
+      if (!options?.method && path === "/admin/v1/model-groups") return json({ data: [] });
+      if (!options?.method && path === "/admin/v1/provider-capabilities") return json({ data: [{ type: "lemonade", capabilities: ["chat", "responses", "embeddings", "stream", "tools"], auth_types: ["api_key"] }] });
+      if (path === "/admin/v1/providers" && options?.method === "POST") {
+        created = JSON.parse(String(options.body)); return json({ id: "local", ...created }, 201);
+      }
+      if (path.endsWith("/test")) return json({ status: "available", latency_ms: 1, model_count: 2 });
+      if (path.endsWith("/discover-models")) return json({ data: [{ id: "embedding", capabilities: ["embeddings"], capability_source: "provider_metadata" }, { id: "flm-chat", capabilities: ["chat", "stream"], capability_source: "provider_metadata" }] });
+      return json({ error: { message: `Unexpected ${path}` } }, 500);
+    });
+    sessionStorage.setItem("ai-gateway.admin-token", "token");
+    render(<MemoryRouter><AuthProvider><ModelOnboardingPage /></AuthProvider></MemoryRouter>);
+    await screen.findByRole("option", { name: "+ Create provider" });
+    await userEvent.selectOptions(screen.getByLabelText("Provider"), "__new");
+    await userEvent.selectOptions(screen.getByLabelText("Provider type"), "lemonade");
+    await userEvent.type(screen.getByLabelText("Provider ID"), "local");
+    await userEvent.type(screen.getByLabelText("Base URL"), "http://localhost:13305/v1");
+    await userEvent.click(screen.getByRole("button", { name: "Test & discover models" }));
+    await screen.findByText("embedding");
+    expect(created).toMatchObject({ type: "lemonade", base_url: "http://localhost:13305/v1" });
+    expect(screen.queryByLabelText("Secret")).not.toBeInTheDocument();
+    const candidates = screen.getAllByRole("checkbox");
+    await userEvent.click(candidates[0]);
+    await userEvent.click(candidates[1]);
+    const embedding = screen.getByLabelText("Capabilities embedding").closest(".model-multi-control")!;
+    const chat = screen.getByLabelText("Capabilities flm-chat").closest(".model-multi-control")!;
+    expect(embedding).toHaveTextContent("embeddings");
+    expect(embedding).not.toHaveTextContent("chat");
+    expect(chat).toHaveTextContent("chat");
+    expect(chat).not.toHaveTextContent("responses");
+  });
   it("creates a service principal credential during Azure onboarding", async () => {
     let credential: { provider_id: string; secret: string } | undefined;
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, options) => {

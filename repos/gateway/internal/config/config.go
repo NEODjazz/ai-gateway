@@ -444,7 +444,7 @@ func validateProviderAdmission(endpoints []ProviderEndpointConfig) error {
 		if endpoint.RerankPath != "" && (!strings.HasPrefix(endpoint.RerankPath, "/") || strings.ContainsAny(endpoint.RerankPath, "?#") || strings.Contains(endpoint.RerankPath, "..")) {
 			result = errors.Join(result, fmt.Errorf("provider %q rerank_path must be an absolute path without query, fragment, or traversal", name))
 		}
-		if endpoint.Type == "ollama" {
+		if endpoint.Type == "ollama" || endpoint.Type == "lemonade" {
 			if parsed, err := url.Parse(endpoint.BaseURL); err != nil || parsed.RawQuery != "" || parsed.ForceQuery || strings.Contains(endpoint.BaseURL, "#") {
 				result = errors.Join(result, fmt.Errorf("provider %q base_url must not contain query or fragment", name))
 			}

@@ -639,9 +639,11 @@ type RerankRequest struct {
 }
 
 type RerankResponse struct {
-	ID      string              `json:"id,omitempty"`
-	Results []RerankResult      `json:"results"`
-	Meta    *RerankResponseMeta `json:"meta,omitempty"`
+	// UsageReported distinguishes a provider-reported zero from absent usage.
+	UsageReported bool                `json:"-"`
+	ID            string              `json:"id,omitempty"`
+	Results       []RerankResult      `json:"results"`
+	Meta          *RerankResponseMeta `json:"meta,omitempty"`
 }
 
 type RerankResult struct {

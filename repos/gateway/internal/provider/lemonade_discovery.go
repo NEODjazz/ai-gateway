@@ -81,10 +81,12 @@ func lemonadeModelCapabilities(item lemonadeModelMetadata) ([]string, error) {
 	capabilities := []string{}
 	switch mode {
 	case "chat":
-		capabilities = append(capabilities, "chat", "completions", "stream")
+		// Legacy completions use the gateway's chat capability rather than a
+		// separate model capability; discovery must produce valid deployments.
+		capabilities = append(capabilities, "chat", "stream")
 		// Cloud and FLM explicitly reject Responses despite supporting Chat.
 		switch item.Recipe {
-		case "llamacpp", "ryzenai-llm", "vllm":
+		case "llamacpp", "llamacpp-hrx", "ryzenai-llm", "vllm", "ds4":
 			capabilities = append(capabilities, "responses")
 		}
 		if labels["vision"] {

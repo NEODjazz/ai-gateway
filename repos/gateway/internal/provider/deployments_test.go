@@ -748,6 +748,7 @@ func TestManagedProviderCapabilityProfilesExposeValidatedImageGenerationOptions(
 		"gemini":     {"n", "response_format", "resolution", "aspect_ratio"},
 		"together":   {"n", "response_format", "size", "output_format", "seed"},
 		"xai":        {"n", "quality", "response_format", "resolution", "aspect_ratio"},
+		"lemonade":   {"n", "response_format", "size", "seed"},
 	}
 	for _, profile := range ManagedProviderCapabilityProfiles() {
 		hasOperation := slices.Contains(profile.Operations, "image_generation")
@@ -765,6 +766,7 @@ func TestManagedProviderCapabilityProfilesExposeValidatedImageEditOptions(t *tes
 		"openrouter": {SupportedOptions: []string{"n", "quality", "size", "user", "background", "output_format", "output_compression"}, MaxImages: 8},
 		"gemini":     {SupportedOptions: []string{"n", "response_format"}, MaxImages: 8},
 		"xai":        {SupportedOptions: []string{"n", "quality", "response_format"}, MaxImages: 5},
+		"lemonade":   {SupportedOptions: []string{"mask", "n", "response_format", "size"}, MaxImages: 1},
 	}
 	for _, profile := range ManagedProviderCapabilityProfiles() {
 		want, listed := expected[profile.Type]
@@ -778,7 +780,8 @@ func TestManagedProviderCapabilityProfilesExposeValidatedImageVariationOptions(t
 	all := []string{"n", "response_format", "size", "user"}
 	expected := map[string][]string{
 		"openai": all, "openai-compatible": all, "azure-openai": all,
-		"gemini": {"n", "response_format"},
+		"gemini":   {"n", "response_format"},
+		"lemonade": {"n", "response_format", "size"},
 	}
 	for _, profile := range ManagedProviderCapabilityProfiles() {
 		want, listed := expected[profile.Type]
@@ -799,6 +802,7 @@ func TestManagedProviderCapabilityProfilesExposeValidatedAudioTranscriptionOptio
 		"groq":       {"language", "prompt", "response_format", "temperature", "timestamp_granularities"},
 		"together":   {"language", "response_format", "temperature", "timestamp_granularities"},
 		"xai":        {"language", "keywords"},
+		"lemonade":   {"language", "response_format"},
 	}
 	for _, profile := range ManagedProviderCapabilityProfiles() {
 		want, listed := expected[profile.Type]
@@ -833,6 +837,7 @@ func TestManagedProviderCapabilityProfilesExposeValidatedAudioSpeechOptions(t *t
 		"groq":       {"response_format", "speed"},
 		"together":   {"language", "response_format", "stream_format"},
 		"xai":        {"language", "response_format", "speed", "stream_format"},
+		"lemonade":   {"response_format", "speed"},
 	}
 	streaming := map[string]bool{"openai": true, "openai-compatible": true, "azure-openai": true}
 	for _, profile := range ManagedProviderCapabilityProfiles() {

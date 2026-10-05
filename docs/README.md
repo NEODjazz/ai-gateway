@@ -11,6 +11,8 @@ package и Helm template.
   проверка API и UI.
 - [Inference API](inference.md) — endpoints, capabilities, adapters, routing,
   streaming и cache.
+- [Lemonade](lemonade.md) — подключение локального сервера, discovery моделей,
+  поддерживаемые операции и ограничения адаптера.
 - [Managed control plane](control-plane.md) — Providers/Credentials/Deployments,
   persistence, UI и audit.
 - [Конфигурация](configuration.md) — основные environment variables,

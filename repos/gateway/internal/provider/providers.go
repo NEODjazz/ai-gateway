@@ -172,7 +172,7 @@ type ProviderContainerCreateParameterPolicy struct {
 	SupportedOptions []string `json:"supported_options"`
 }
 
-var managedProviderTypes = []string{"demo", "ollama", "openai", "openai-compatible", "openrouter", "azure-openai", "anthropic", "gemini", "vertex-gemini", "cohere", "mistral", "voyage", "bedrock", "groq", "deepseek", "cerebras", "nvidia-nim", "together", "xai", "opensandbox"}
+var managedProviderTypes = []string{"demo", "ollama", "lemonade", "openai", "openai-compatible", "openrouter", "azure-openai", "anthropic", "gemini", "vertex-gemini", "cohere", "mistral", "voyage", "bedrock", "groq", "deepseek", "cerebras", "nvidia-nim", "together", "xai", "opensandbox"}
 
 var managedOperationCapabilities = []string{
 	"chat", "completions", "responses", "interactions", "count_tokens", "embeddings", "rerank", "moderation",
@@ -328,7 +328,7 @@ func normalizeManagedProvider(input ManagedProvider) (ManagedProvider, error) {
 			return ManagedProvider{}, ErrInvalidProvider
 		}
 	}
-	if input.Type == "ollama" {
+	if input.Type == "ollama" || input.Type == "lemonade" {
 		parsed, err := url.Parse(input.BaseURL)
 		if err != nil || parsed.RawQuery != "" || parsed.ForceQuery || strings.Contains(input.BaseURL, "#") {
 			return ManagedProvider{}, ErrInvalidProvider

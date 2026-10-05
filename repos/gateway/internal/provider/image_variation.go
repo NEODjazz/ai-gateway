@@ -59,5 +59,5 @@ func (p OpenAICompatible) CreateImageVariation(ctx context.Context, request open
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return openai.ImageGenerationResponse{}, responseStatusError(p.providerName(), response)
 	}
-	return decodeImageGenerationResponse(response.Body, request.GenerationRequest())
+	return p.decodeImageResponse(response.Body, request.GenerationRequest(), false)
 }

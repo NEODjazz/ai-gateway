@@ -42,6 +42,7 @@ type openAICompatibleChatRequest struct {
 	RandomSeed          *int64                         `json:"random_seed,omitempty"`
 	UserID              string                         `json:"user_id,omitempty"`
 	NativeThinking      *deepSeekThinking              `json:"thinking,omitempty"`
+	RepeatPenalty       *float64                       `json:"repeat_penalty,omitempty"`
 }
 
 type deepSeekThinking struct {
@@ -182,6 +183,10 @@ type OpenAICompatible struct {
 	exactResponseUsage    bool
 	exactEmbeddingUsage   bool
 	exactCompletionUsage  bool
+	validateReportedUsage bool
+	imageUnitUsage        bool
+	transcriptionDecoder  func(io.Reader, openai.AudioTranscriptionRequest) (openai.AudioTranscriptionResponse, error)
+	rerankDecoder         func(io.Reader) (openai.RerankResponse, error)
 	upstreamStream        bool
 	rerankPath            string
 	completionStreamUsage bool
@@ -218,6 +223,9 @@ func (p OpenAICompatible) providerName() string {
 
 func (p OpenAICompatible) mapChatParameters(request *openAICompatibleChatRequest) {
 	switch p.providerName() {
+	case "lemonade":
+		request.RepeatPenalty = request.RepetitionPenalty
+		request.RepetitionPenalty = nil
 	case "mistral":
 		request.RandomSeed = request.Seed
 		request.Seed = nil
@@ -308,6 +316,9 @@ func (p OpenAICompatible) Rerank(ctx context.Context, request openai.RerankReque
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return openai.RerankResponse{}, responseStatusError(p.providerName(), resp)
+	}
+	if p.rerankDecoder != nil {
+		return p.rerankDecoder(resp.Body)
 	}
 	var response openai.RerankResponse
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&response); err != nil {
@@ -425,6 +436,17 @@ func (p OpenAICompatible) completion(ctx context.Context, request openai.Complet
 	var response openai.CompletionResponse
 	if stream {
 		forward := write
+		if p.validateReportedUsage {
+			forward = func(payload string) error {
+				if err := validateLemonadeTokenUsage([]byte(payload), false); err != nil {
+					return err
+				}
+				if write != nil {
+					return write(payload)
+				}
+				return nil
+			}
+		}
 		if p.exactCompletionUsage {
 			forward = func(payload string) error {
 				if err := validateExactPromptCompletionUsageChunk(payload, p.providerName()+" Completions"); err != nil {
@@ -438,7 +460,13 @@ func (p OpenAICompatible) completion(ctx context.Context, request openai.Complet
 		}
 		response, err = streamCompletionData(resp.Body, request, forward)
 	} else {
-		response, err = decodeCompletionResponse(resp.Body)
+		var reader io.Reader = resp.Body
+		if p.validateReportedUsage {
+			reader, err = lemonadeUsageReader(reader, false)
+		}
+		if err == nil {
+			response, err = decodeCompletionResponse(reader)
+		}
 	}
 	if err != nil {
 		return openai.CompletionResponse{}, err
@@ -994,7 +1022,14 @@ func (p OpenAICompatible) Responses(ctx context.Context, request openai.Response
 		return openai.ResponseResponse{}, responseStatusError(p.providerName(), resp)
 	}
 
-	response, err := decodeResponseJSON(resp.Body)
+	var reader io.Reader = resp.Body
+	if p.validateReportedUsage {
+		reader, err = lemonadeUsageReader(reader, true)
+		if err != nil {
+			return openai.ResponseResponse{}, err
+		}
+	}
+	response, err := decodeResponseJSON(reader)
 	if err != nil {
 		return openai.ResponseResponse{}, err
 	}
@@ -1047,6 +1082,17 @@ func (p OpenAICompatible) StreamResponses(ctx context.Context, request openai.Re
 	}
 
 	forward := write
+	if p.validateReportedUsage {
+		forward = func(event, payload string) error {
+			if err := validateLemonadeResponseEvent(payload); err != nil {
+				return err
+			}
+			if write != nil {
+				return write(event, payload)
+			}
+			return nil
+		}
+	}
 	if p.exactResponseUsage {
 		forward = func(event, payload string) error {
 			if event == "response.completed" || event == "response.incomplete" {

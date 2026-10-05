@@ -12447,7 +12447,7 @@ components:
       required: [id, type, enabled]
       properties:
         id: {type: string, minLength: 1, maxLength: 128}
-        type: {type: string, enum: [demo, ollama, openai, openai-compatible, openrouter, azure-openai, anthropic, gemini, vertex-gemini, cohere, mistral, voyage, bedrock, groq, deepseek, cerebras, nvidia-nim, together, xai, opensandbox]}
+        type: {type: string, enum: [demo, ollama, lemonade, openai, openai-compatible, openrouter, azure-openai, anthropic, gemini, vertex-gemini, cohere, mistral, voyage, bedrock, groq, deepseek, cerebras, nvidia-nim, together, xai, opensandbox]}
         base_url:
           type: string
           format: uri
@@ -12482,7 +12482,7 @@ components:
       additionalProperties: false
       required: [type, operations, capabilities, auth_types, chat_parameters, response_parameters, interaction_parameters, embedding_parameters, rerank_parameters, completion_parameters, moderation_parameters, search_parameters, image_generation_parameters, image_edit_parameters, image_variation_parameters, audio_transcription_parameters, audio_translation_parameters, audio_speech_parameters, ocr_parameters, video_create_parameters, video_extend_parameters, fine_tuning_create_parameters, container_create_parameters, chat_model_parameters, response_model_parameters]
       properties:
-        type: {type: string, enum: [demo, ollama, openai, openai-compatible, openrouter, azure-openai, anthropic, gemini, vertex-gemini, cohere, mistral, voyage, bedrock, groq, deepseek, cerebras, nvidia-nim, together, xai, opensandbox]}
+        type: {type: string, enum: [demo, ollama, lemonade, openai, openai-compatible, openrouter, azure-openai, anthropic, gemini, vertex-gemini, cohere, mistral, voyage, bedrock, groq, deepseek, cerebras, nvidia-nim, together, xai, opensandbox]}
         operations:
           type: array
           uniqueItems: true

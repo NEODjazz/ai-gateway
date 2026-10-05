@@ -34,6 +34,10 @@ func TestRemoteBillingPreservesReportedZeroUsage(t *testing.T) {
 			req.EmbeddingRequest = &openai.EmbeddingRequest{Model: "model", Input: "count these tokens"}
 			req.EmbeddingResponse = &openai.EmbeddingResponse{UsageReported: true}
 		}},
+		{"rerank", func(req *RequestContext) {
+			req.RerankRequest = &openai.RerankRequest{Model: "model", Query: "count these tokens", Documents: []any{"document"}}
+			req.RerankResponse = &openai.RerankResponse{UsageReported: true}
+		}},
 		{"compaction", func(req *RequestContext) {
 			req.ResponseRequest = &openai.ResponseRequest{Model: "model", Input: "count these tokens"}
 			req.CompactedResponse = &openai.CompactedResponse{}
@@ -56,6 +60,11 @@ func TestRemoteBillingEstimatesMissingZeroUsage(t *testing.T) {
 	got := billingRequest(&req)
 	if !got.UsageEstimated || got.TotalTokens == 0 {
 		t.Fatalf("missing usage was treated as an exact zero: %+v", got)
+	}
+	req = RequestContext{RerankRequest: &openai.RerankRequest{Model: "model", Query: "query", Documents: []any{"document"}}, RerankResponse: &openai.RerankResponse{}}
+	got = billingRequest(&req)
+	if !got.UsageEstimated || got.TotalTokens == 0 {
+		t.Fatalf("missing rerank usage was treated as an exact zero: %+v", got)
 	}
 }
 

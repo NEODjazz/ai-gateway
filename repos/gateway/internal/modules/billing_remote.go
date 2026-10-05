@@ -473,6 +473,7 @@ func billingRequest(req *RequestContext) UsageRequest {
 	}
 	if req.RerankResponse != nil {
 		request.Phase = "commit"
+		request.InputTokens, request.OutputTokens, request.TotalTokens = 0, 0, 0
 		if req.RerankResponse.Meta != nil {
 			if req.RerankResponse.Meta.Tokens != nil {
 				request.InputTokens = req.RerankResponse.Meta.Tokens.InputTokens
@@ -484,7 +485,8 @@ func billingRequest(req *RequestContext) UsageRequest {
 				request.InputTokens = request.TotalTokens
 			}
 		}
-		request.UsageEstimated = request.TotalTokens == 0
+		reportedUsage = req.RerankResponse.UsageReported || request.TotalTokens > 0
+		request.UsageEstimated = !reportedUsage
 	}
 	if req.ModerationResponse != nil {
 		request.Phase = "commit"
