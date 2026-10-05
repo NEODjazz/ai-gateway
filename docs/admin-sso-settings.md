@@ -1,6 +1,6 @@
 # Настройка browser SSO в UI
 
-Администратор открывает **System → Settings → Single sign-on**. Browser login
+Администратор открывает **Settings → Settings → Single sign-on**. Browser login
 использует OIDC authorization code с PKCE S256 и nonce. Managed SSO проверяет
 RS256/ES256 ID token для browser client, независимо от resource access tokens API. Service principal для
 доступа к Azure inference настраивается отдельно в Providers / Credentials.

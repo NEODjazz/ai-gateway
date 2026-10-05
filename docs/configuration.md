@@ -1,9 +1,12 @@
 # Конфигурация
 
-Browser SSO также настраивается global admin через **System → Settings** после
-миграции PostgreSQL 014 и подготовки encryption key. См.
-[настройку SSO в UI](admin-sso-settings.md): draft/test/activate и влияние на JWT
-trust всех клиентов. Environment settings остаются fallback до активации.
+Browser SSO настраивается global admin через **Settings → Settings → Single sign-on**
+после Auth migrations 014–017 и подготовки encryption key. См.
+[настройку SSO в UI](admin-sso-settings.md): draft/test/activate, несколько
+connections и server-side sessions. Browser ID-token trust и API access-token
+trust независимы. API issuer registry требует migration 018; смена browser
+connection не изменяет доверие API-клиентов. Legacy `ADMIN_SSO_*` не является
+fallback для browser login.
 
 Helm values — рекомендуемый интерфейс Kubernetes-конфигурации. Charts
 преобразуют их в environment variables и Secrets. При локальном запуске те же
@@ -20,6 +23,7 @@ OpenAPI, а не в этом документе.
 | `API_DOCS_ENABLED` | `false` | Swagger UI и `/openapi.yaml` |
 | `API_DOCS_TRY_IT_OUT_ENABLED` | `false` | Browser calls из Swagger UI |
 | `DEFAULT_PROVIDER` | `PROVIDER_TYPE` или `demo` | Provider по умолчанию |
+| `PROVIDER_TYPE` / `OLLAMA_URL` | `demo` / `http://127.0.0.1:11434` | Legacy одиночный provider при отсутствии `PROVIDERS_JSON`; для нескольких deployments используйте managed control plane |
 | `PROVIDERS_JSON` | пусто | Static provider endpoints; managed snapshot заменяет их после bootstrap |
 | `MODEL_CATALOG_JSON` | empty catalog | Capabilities и pricing contract |
 | `GUARDRAIL_POLICIES_JSON` | `{}` | Static DLP/AV policies |
@@ -28,7 +32,7 @@ OpenAPI, а не в этом документе.
 | `ROUTING_STRATEGY` | `weighted` | `weighted` или `adaptive` |
 | `ADAPTIVE_ROUTING_EWMA_ALPHA` | `0.2` | Сглаживание adaptive routing |
 | `RESPONSES_AFFINITY_TTL_SECONDS` | `3600` | Affinity для `previous_response_id` |
-| `RESPONSES_OWNERSHIP_TTL_SECONDS` | `2592000` | Срок хранения неизменяемой привязки сохраняемого Response к владельцу и deployment; требует Redis |
+| `RESPONSES_OWNERSHIP_TTL_SECONDS` | `2592000` | Срок хранения неизменяемой привязки сохраняемого Response к владельцу и deployment; PostgreSQL при durable control plane, иначе Redis или memory fallback |
 | `PROVIDER_CONTROL_PLANE_POSTGRES_DSN` | пусто | Durable versioned admin state |
 | `CREDENTIAL_ENCRYPTION_KEY` | ephemeral без DSN | Общий ключ provider credentials, MCP, logging, A2A и managed SSO; 32+ байта для SSO, legacy control plane требует 16+ |
 | `PROVIDER_CONTROL_PLANE_REFRESH_SECONDS` | `1` | Poll durable revision |
@@ -80,9 +84,11 @@ headers: `Authorization`, `Content-Type`, `X-Session-ID`, `Idempotency-Key`,
 10,000,000 RPM и 1,000,000,000 TPM. Те же поля у managed Provider задают
 общий предел для всех ссылающихся deployments; оба scope применяются атомарно.
 
-Поддерживаемые static adapter types: `demo`, `ollama`, `openai`,
-`openai-compatible`, `openrouter`, `azure-openai`, `anthropic`, `gemini`,
-`cohere`, `mistral`, `cerebras`, `nvidia-nim`, `together`. Capability задаётся явно для
+Актуальный список типов, операций и parameter policy доступен через
+`GET /admin/v1/provider-capabilities`. Подключение `lemonade` описано в
+[отдельном руководстве](lemonade.md); список managed types приведён ниже.
+Static factory и managed registry могут иметь разные требования к auth/base URL;
+capability нельзя выводить только из совместимого URL. Capability задаётся явно для
 ограниченных endpoints. Используемые значения: `chat`, `responses`,
 `embeddings`, `rerank`, `stream`, `tools`, `structured_output`, `mcp`, `vision`,
 `web_search`, `realtime`, `audio`, `audio_input`.
@@ -137,7 +143,10 @@ Deployment — до Model Group. UI использует выбор из уже 
 Provider принимает `demo`, `ollama`, `openai`, `openai-compatible`,
 `openrouter`, `azure-openai`, `anthropic`, `gemini`, `cohere`, `mistral`,
 `voyage`, `bedrock`, `groq`, `deepseek`, `cerebras`, `nvidia-nim`, `together` и
-`xai`.
+`xai`, `vertex-gemini`, `lemonade` и `opensandbox`.
+
+`opensandbox` — adapter контейнерного runtime, а не универсальный inference
+endpoint. Не назначайте ему Chat/Responses только по факту наличия provider.
 
 `cerebras` использует bearer credential, обнаруживает модели через `/v1/models`
 и поддерживает Chat Completions с streaming, function tools, JSON Schema output,
@@ -293,6 +302,13 @@ request для service `bedrock`, включая payload hash и временн�
 Неверный JSON credential отклоняется при сохранении. `auth_type=bearer` сохраняет
 прежний режим для частных совместимых endpoints.
 
+AWS environment дополнительно использует `AWS_SESSION_TOKEN` для temporary
+credentials, `AWS_CONTAINER_CREDENTIALS_RELATIVE_URI` для ECS,
+`AWS_CONTAINER_AUTHORIZATION_TOKEN` или `AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE`
+для защищённого container endpoint. `AWS_EC2_METADATA_DISABLED=true` запрещает
+последний шаг через EC2 IMDS. Передавайте секреты/token files через выбранный
+secret/workload identity mechanism; это credentials Gateway, не пользователей API.
+
 ## Gateway modules
 
 | Модуль | URL | Required default | Особенность |
@@ -333,6 +349,19 @@ Files API возвращает `503`, если `PROVIDER_CONTROL_PLANE_POSTGRES_
 настроен. Квота сериализуется отдельно для каждого owner key и поэтому не
 переполняется конкурентными загрузками.
 
+### A2A durable tasks и subscriptions
+
+| Переменная | Default | Ограничение |
+| --- | --- | --- |
+| `A2A_TASK_OWNER_QUOTA` | `1000` | Число durable tasks владельца; 1–100000 |
+| `A2A_TASK_TTL_SECONDS` | `2592000` | Retention tasks; 60 секунд–365 дней |
+| `A2A_SUBSCRIPTION_LIMIT` | `256` | Process-local subscriptions; 1–10000 |
+| `A2A_SUBSCRIPTION_DURATION_SECONDS` | `300` | Lifetime subscription; 1–3600 секунд |
+| `A2A_SUBSCRIPTION_POLL_MILLISECONDS` | `1000` | Проверка durable state; 100–10000 ms |
+
+A2A state требует того же PostgreSQL control-plane DSN. Подробнее о durable
+ресурсах и jobs: [lifecycle](resource-lifecycle.md).
+
 ## Cache и telemetry
 
 | Переменная | Default |
@@ -371,7 +400,17 @@ Files API возвращает `503`, если `PROVIDER_CONTROL_PLANE_POSTGRES_
 | `AUTH_JWT_TEAM_ID_CLAIM` | `team_id` | Dot-separated claim path |
 | `AUTH_JWT_ROLES_CLAIM` | `roles` | Dot-separated claim path |
 | `AUTH_JWT_IDENTITY_MODE` | `legacy` | `directory` требует pre-provisioned issuer/subject/audience binding, active directory и явные grants |
-| `AUTH_JWT_ROLE_MAPPINGS_JSON` | `{}` | Mapping внешних role values в `user`, `developer`, `team_admin`, `admin`; directory mode требует непустой mapping |
+| `AUTH_JWT_ROLE_MAPPINGS_JSON` | `{}` | Mapping внешних role values в `user`, `developer`, `org_admin`, `team_admin`, `admin`; directory mode требует непустой mapping и текущие directory approvals |
+
+### Legacy browser environment
+
+`ADMIN_SSO_ENABLED`, `ADMIN_SSO_AUTHORIZATION_URL`, `ADMIN_SSO_TOKEN_URL`,
+`ADMIN_SSO_CLIENT_ID`, `ADMIN_SSO_CLIENT_SECRET`, `ADMIN_SSO_REDIRECT_URL`,
+`ADMIN_SSO_SCOPES`, `ADMIN_SSO_SESSION_KEY` и `ADMIN_SSO_SESSION_TTL_SECONDS`
+сохраняются в legacy config reader для совместимости. Они не включают новый
+browser identity flow: активируйте независимый managed connection. Старые
+resource-token cookies не авторизуют UI; `migration_required` указывает на
+необходимость переноса. API `AUTH_JWT_*` при этом сохраняет собственное доверие.
 
 Production должен использовать уникальные `AUTH_KEY_HASH_SECRET` и management
 secret, отключённые demo keys и static fallback после миграции ключей.

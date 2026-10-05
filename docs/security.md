@@ -4,8 +4,11 @@
 document, точные issuer/audience, предварительную directory binding и явные
 role mappings. Активация требует проверочного входа тем же administrator и
 virtual-key session; права directory повторно проверяются перед сменой trust.
-Выбор нового issuer влияет на все JWT clients, поэтому рабочий профиль не
-активируется автоматически при обновлении приложения.
+Browser connection проверяет ID token своего client и создаёт локальную
+server-side session. API access-token issuers настраиваются независимо;
+активация browser connection не меняет доверие API-клиентов. Organization
+берётся из проверенной directory binding, а не из произвольного request header.
+Подробности изоляции и `org_admin`: [Organization identity](organization-identity.md).
 
 Provisioned OIDC users используют `AUTH_JWT_IDENTITY_MODE=directory`: проверенная
 issuer/subject/audience identity связывается с активным пользователем directory,
@@ -25,6 +28,26 @@ Virtual Keys хранятся как HMAC-SHA256 lookup values с отдельн
 Production OIDC использует direct JWKS URL, точные issuer/audience и только
 RS256/ES256. HS256 и built-in demo/static keys предназначены для migration и
 локальной разработки.
+
+### Независимые границы browser и API trust
+
+```mermaid
+flowchart LR
+    Browser["Browser login"] --> OIDC["Selected browser OIDC connection"]
+    OIDC --> ID["Verified ID token: issuer, audience, nonce, PKCE"]
+    ID --> Directory["Approved directory binding, organization and roles"]
+    Directory --> Session["Local server session + HttpOnly cookie"]
+    Session --> UI["UI and scoped Gateway authorization"]
+    API["API client access token"] --> Issuer["Independent API issuer trust / JWKS"]
+    Issuer --> APIAuth["API identity mode and grants"]
+    APIAuth --> Gateway["Authorized inference"]
+    UI --> Gateway
+```
+
+Смена browser connection не добавляет API issuer. Session revocation, directory
+membership и organization binding проверяются сервером; cookie или UI dropdown
+не создаёт произвольную tenant identity. Tokens и secrets не входят в диаграмму
+межсервисного content pipeline.
 
 ## Межсервисные контракты
 

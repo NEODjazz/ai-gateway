@@ -1,5 +1,11 @@
 # Inference API и совместимость
 
+Полный список операций: [API index](api-index.md). Матрица функциональных
+семейств: [API coverage](api-coverage.md). Данный документ раскрывает
+operation-specific provider contracts; начальная таблица ниже не исчерпывает
+все HTTP routes. PDF preprocessing: [Docling](document-processing.md),
+async ownership/accounting: [Lifecycle](resource-lifecycle.md).
+
 ## Публичные endpoints
 
 Gateway реализует OpenAI-compatible endpoints:

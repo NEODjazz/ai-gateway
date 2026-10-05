@@ -24,7 +24,8 @@ flowchart LR
     subgraph Providers["AI providers"]
         OpenAI["OpenAI-compatible / Azure / OpenRouter"]
         Anthropic["Anthropic"]
-        Ollama["Ollama"]
+        Ollama["Local: Ollama / Lemonade"]
+        Native["Native: Gemini / Vertex / Bedrock / other adapters"]
         Demo["Demo fallback"]
     end
 
@@ -32,7 +33,12 @@ flowchart LR
     AvIcap["Antivirus ICAP server"]
     ClickHouse[("ClickHouse<br/>usage_events")]
     Redis[("Redis<br/>gateway limits + exact cache")]
-    Postgres[("PostgreSQL<br/>billing ledger + durable outbox")]
+    Postgres[("PostgreSQL<br/>identity, control plane, files/jobs, ledger + outbox")]
+    subgraph Documents["Optional PDF processing"]
+        DocAPI["Docling API :5001"]
+        DocRedis[("Dedicated Redis RQ + PVC")]
+        DocWorker["CPU workers"]
+    end
 
     Client -->|"OpenAI-compatible HTTP/SSE"| Gateway
     Gateway -->|"POST /authorize"| Auth
@@ -43,12 +49,18 @@ flowchart LR
     Gateway --> OpenAI
     Gateway --> Anthropic
     Gateway --> Ollama
+    Gateway --> Native
     Gateway --> Demo
     DLP -->|"ICAP REQMOD"| DlpIcap
     AV -->|"ICAP REQMOD"| AvIcap
     Billing -->|"JSONEachRow over HTTP"| ClickHouse
     Gateway -->|"atomic limits + cache"| Redis
     Billing -->|"ledger + outbox"| Postgres
+    Gateway -->|"managed state, owner-bound resources"| Postgres
+    Auth -->|"directory, keys, SSO sessions"| Postgres
+    Gateway -->|"authorized PDF + opaque owner scope"| DocAPI
+    DocAPI -->|"bounded admission + enqueue"| DocRedis
+    DocWorker -->|"consume jobs + save results"| DocRedis
 ```
 
 ## Сервисы и ответственность
@@ -60,55 +72,61 @@ flowchart LR
 | DLP | `GET /healthz`, `GET /readyz`, `POST /scan` | Извлекает текст запроса и отправляет его в настроенный ICAP-сервис через `REQMOD`; readiness проверяет ICAP через content-free `OPTIONS` |
 | AV | `GET /healthz`, `GET /readyz`, `POST /scan` | HTTP-to-ICAP адаптер для текста и отдельных бинарных image attachments; readiness проверяет ICAP через content-free `OPTIONS` |
 | Anonymizer | `GET /healthz`, `POST /anonymize` | Маскирует значения по настраиваемым RE2-правилам и возвращает преобразованный контент с placeholder map |
+| Docling (optional) | internal conversion/task API :5001 | Inline PDF conversion; dedicated Redis RQ admission and CPU workers; see [document processing](document-processing.md) |
 | Billing | `GET /healthz`, `GET /livez`, `POST /usage`, `/internal/v1/*` | Резервирует budgets, собирает tokens и cost, ведёт request/audit logs и после ответа пишет usage event в ClickHouse; `/healthz` является readiness check |
 
 `RequestContext` существует только внутри gateway. Между сервисами используются отдельные минимальные DTO: исходный bearer token получает только auth, DLP получает текстовую проекцию, AV — текст и отдельные validated binary attachments, anonymizer — текстовую проекцию без image URL/base64, а billing — identity fingerprint, provider metadata и счетчики tokens без prompt/response content. Ответ каждого сервиса применяется к локальному контексту по явному allowlist полей.
 
 ## Обработка запроса
 
-### Нестрируемый запрос
+### Нестриминговый запрос
 
 ```mermaid
 sequenceDiagram
     participant C as Client
     participant G as Gateway
     participant A as Auth
-    participant D as DLP
-    participant V as AV
-    participant N as Anonymizer
+    participant DOC as Docling API / queue / workers
+    participant D as Content modules
     participant B as Billing
-    participant P as AI provider endpoint
+    participant PG as PostgreSQL
+    participant P as AI provider
     participant CH as ClickHouse
 
-    C->>G: /v1/chat/completions or /v1/responses
-    G->>A: POST /authorize (token only)
-    A-->>G: identity + roles
-    loop each compatible endpoint by priority
-        opt dlp_enabled
-            G->>D: POST /scan (text projection)
-            D-->>G: accepted context or 451/error
-        end
-        opt av_enabled
-            G->>V: POST /scan (text projection)
-            V-->>G: accepted context or 451/error
-        end
-        G->>N: POST /anonymize (maskable content only)
-        N-->>G: masked request + placeholder map
-        G->>B: POST /usage (identity fingerprint + counters)
-        B-->>G: prompt estimate / policy result
-        G->>P: provider-specific request
-        alt provider succeeded
-            P-->>G: response + optional usage
-            G->>B: POST /usage (usage counters, no content)
-            B->>CH: insert usage event
-            B-->>G: enriched context
-            G->>G: deanonymize response
-            G-->>C: OpenAI-compatible response
-        else modules/provider/post-billing failed
-            G->>G: try next compatible endpoint
-        end
+    C->>G: Chat / Responses request
+    G->>A: authorize token or local browser session
+    A-->>G: verified identity + policy
+    G->>G: authorize model and tools
+    opt inline PDF and docling deployment policy
+        G->>DOC: AV-checked PDF + owner scope
+        DOC-->>G: complete bounded extracted text
     end
+    G->>D: enabled DLP / AV / anonymization
+    D-->>G: allowed masked request
+    G->>B: reserve estimated input + maximum output
+    B->>PG: atomic budget reservation
+    PG-->>B: reservation
+    B-->>G: allowed
+    G->>P: selected deployment request
+    P-->>G: response + usage
+    G->>B: commit actual usage with execution ID
+    B->>PG: transaction: ledger + durable outbox
+    PG-->>B: committed
+    B-->>G: settled usage
+    G->>G: restore placeholders
+    G-->>C: response
+    B->>PG: outbox worker claims pending event
+    B->>CH: at-least-once delivery by event_id
 ```
+
+Схема показывает успешный запрос с обязательными remote модулями и durable
+billing; optional modules, cache hits и legacy memory stores имеют отдельные
+ветки. ClickHouse insert не является транзакцией ответа inference: durable
+outbox позволяет повторить доставку после сбоя. Cache hit не вызывает provider
+и фиксирует нулевой provider usage. PDF conversion выполняется до token reserve;
+после него сохраняется binding выбранного deployment, поэтому converted запрос
+не переключается на другой deployment. См. [жизненный цикл](resource-lifecycle.md).
+
 
 Порядок provider pipeline задан в `repos/gateway/cmd/gateway/main.go`:
 
@@ -226,7 +244,7 @@ Guardrail Policies and scoped attachments, Projects/Access Groups, MCP Servers/T
 Policy templates и Logging Destinations.
 Изменение сначала сохраняет versioned JSONB snapshot с optimistic revision и
 только затем считается успешным. При ошибке runtime snapshot откатывается.
-Реплики сверяют durable revision и Redis revision marker, перечитывают snapshot
+Реплики сверяют durable revision в PostgreSQL, перечитывают snapshot
 и атомарно перестраивают provider clients. Plaintext credentials границу Router
 не покидают: PostgreSQL получает только AES-GCM nonce/ciphertext и metadata.
 Bearer secrets для logging destinations шифруются отдельным domain-separated
@@ -237,8 +255,9 @@ UI показывает только metadata destinations и process-local coun
 prompt/response content и требует append-only audit preflight до внешнего HTTP-вызова.
 
 Gateway также раздаёт встроенный `/ui/` control-plane console без внешних CDN.
-UI является недоверенным статическим клиентом: bearer хранится только в
-`sessionStorage`, а модели, бюджеты и audit читаются через те же admin RBAC API,
+UI является недоверенным статическим клиентом: при key login bearer хранится в
+`sessionStorage`; browser OIDC использует серверную session и HttpOnly cookie.
+Модели, бюджеты и audit читаются через те же admin RBAC API,
 что используются CLI-клиентами. Отключение UI не меняет доступность API.
 Playground использует те же `/v1/models`, `/v1/chat/completions` и
 `/v1/responses`, а не отдельный привилегированный API. SSE читается
@@ -408,12 +427,12 @@ Helm chart передает anonymizer переменную `REDIS_ADDR` и от
 ### Billing state
 
 - ClickHouse используется как append-only хранилище `usage_events` через HTTP insert в `JSONEachRow`, когда `BILLING_USAGE_EVENTS_ENABLED=true`.
-- Billing использует lifecycle `reserve -> commit/cancel`. При `BILLING_DURABLE_OUTBOX_ENABLED=true` ledger и outbox транзакционно сохраняются в PostgreSQL. Worker использует `SKIP LOCKED`, stale-lock recovery и backoff; `event_id=request_id:phase` дедуплицирует enqueue между репликами и рестартами. Доставка в ClickHouse имеет семантику at-least-once, поэтому точный финансовый расчет должен дедуплицировать события по `event_id`.
+- Billing использует lifecycle `reserve -> commit/cancel`. При `BILLING_DURABLE_OUTBOX_ENABLED=true` ledger и outbox транзакционно сохраняются в PostgreSQL. Worker использует `SKIP LOCKED`, stale-lock recovery и backoff; `event_id=request_id:phase` дедуплицирует enqueue между репликами и рестартами. Здесь `request_id` — внутренний execution ID, а не внешний `X-Request-ID`; независимые клиентские запросы не разделяют billing lifecycle. Доставка в ClickHouse имеет семантику at-least-once, поэтому точный финансовый расчет должен дедуплицировать события по `event_id`.
 - PostgreSQL policy checker сериализует matching policies через row locks и атомарно применяет cost/token budgets по global/organization/key/user/team/model/provider/deployment/tag scope и hour/day/week/month period. Enforcement и management summary дополнительно изолированы по трехбуквенной валюте: reservation другой валюты не попадает в расход policy. Batch summary для UI вычисляет все текущие окна одним join-запросом без N+1. Организация, теги и точный deployment фиксируются в reservation; запрос с несколькими тегами расходует каждый совпавший tag budget, а fallback переносит deployment reservation до начала исполнения. Reserve учитывает максимальный output или безопасный fallback, commit — фактический usage, cancel и TTL освобождают capacity.
 - UI `/budgets/{id}` читает policy и summary из billing control plane, показывает точные границы текущего окна, cost/token headroom и ссылку на identity scope. Он не пересчитывает ledger и не объединяет валюты; edit возвращается в форму с configured-target selector, disable проходит тот же audited API.
 - Повторный active reserve с тем же `request_id` идемпотентен и при failover переносит reservation на новый provider/model scope. Повторное использование finalized `request_id` или смена billing identity отклоняется как `409 billing_conflict`.
 - Reservation сохраняет `catalog_version`, `pricing_key` и обе ставки. Commit всегда использует этот snapshot, даже если active catalog успел измениться или удалить модель; те же audit fields пишутся в ClickHouse.
-- Runtime model registry атомарно заменяется через admin API и синхронизируется между gateway replicas через Redis. Router передает billing выбранный pricing snapshot, поэтому обновление capabilities/prices не требует рестарта и не меняет цену in-flight reservation.
+- Runtime model registry атомарно заменяется через admin API. В managed durable mode PostgreSQL snapshot является источником истины; replicas перечитывают его при изменении revision. Redis может хранить legacy catalog/revision state, но не заменяет durable control plane. Router передает billing выбранный pricing snapshot, поэтому обновление capabilities/prices не требует рестарта и не меняет цену in-flight reservation.
 - Management mutations используют fail-closed PostgreSQL audit preflight: append-only `attempted` фиксируется до side effect, затем добавляется `succeeded` или `failed`. Журнал не содержит Bearer/API keys или тела inference-запросов и читается только через admin RBAC.
 - HTTP metrics, JSON request log и `http.route` span attribute используют статический шаблон из `gatewayRoutes`; dynamic IDs заменяются именованными placeholders. Неизвестный URL получает bounded label `unmatched`, поэтому новые admin routes наблюдаемы без утечки tenant-controlled path segments и без ручного списка в telemetry middleware.
 - Shadow endpoints исключены из primary/fallback routing и model listing. Асинхронная mirror-копия создается после guardrails/anonymization, имеет собственные admission/timeout, не запускает billing, не меняет circuit health и отбрасывает ответ.
@@ -453,6 +472,16 @@ flowchart TB
     Billing --> ChSvc
     Gw -->|"rate limits + exact cache"| RedisSvc
     Billing -->|"atomic budgets + durable outbox"| PgSvc
+    Auth -->|"directory + SSO sessions"| PgSvc
+    Gw -->|"control plane + files/jobs"| PgSvc
+    subgraph PDF["Optional stack in gateway Helm release"]
+        DocSvc["Docling API :5001"]
+        DocQueue[("Docling Redis RQ + PVC")]
+        DocWorkers["CPU worker Deployment"]
+        DocSvc --> DocQueue
+        DocWorkers --> DocQueue
+    end
+    Gw --> DocSvc
     Anon -. "vault client not implemented" .-> RedisSvc
     DLP --> DlpIcap["External DLP ICAP"]
     AV --> AvIcap["External AV ICAP"]

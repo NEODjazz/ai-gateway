@@ -4,12 +4,17 @@ The console is a route-based React application embedded in the gateway binary at
 `/ui/`. It deliberately uses only documented gateway APIs. A bearer credential
 is validated through `/admin/v1/session` before it is placed in
 `sessionStorage`, so invalid values never open the console and the credential is
-cleared when the browser tab closes.
+cleared when the browser tab closes. Browser OIDC instead uses a local server
+session and HttpOnly cookie; provider ID/access tokens are not stored in browser
+JavaScript. Browser connections and API JWT issuers have independent trust
+configuration; see [SSO settings](../../../docs/admin-sso-settings.md).
 
 The session response contains bounded identity/scope metadata and explicit
-capabilities only. Global management routes require `admin`; the scoped team and
-user directory is available to `team_admin`; Playground and API Reference remain
-available to other authenticated credentials. Hidden navigation is a UX guard,
+capabilities only. Global management routes require `admin`; scoped directories
+use `team_directory`; organization Usage/Logs and virtual keys use
+`organization_reports` and `organization_keys`. `org_admin` remains within its
+verified organization. Playground and API Reference use `inference` and `api_docs`.
+See [UI routes and access](../../../docs/admin-ui.md). Hidden navigation is a UX guard,
 while backend RBAC remains authoritative for every operation. The sidebar shows
 the authenticated user, roles, and optional team without exposing a token.
 
@@ -118,9 +123,10 @@ npm run build
 HTML shell for `/ui/*` deep links and returns `404` for unknown asset paths.
 
 The route manifest contains 36 dashboard destinations. Routes backed by existing
-gateway APIs are fully interactive. Search tools and executable skill content are
-visibly marked unavailable instead of showing mock data or pretending that
-persistence and enforcement exist.
+gateway APIs are interactive; operation availability is checked by the backend.
+Search and Skills use their public APIs and expose adapter/access errors without
+substituting mock results. Registering a tool policy or agent profile does not
+itself implement an agent execution loop.
 
 The Logs workspace combines request and audit events. Request-log view, preset
 or custom date-time window (bounded to 90 days), applied filters, and the selected request detail are URL state, so an
@@ -182,8 +188,10 @@ CSV CRUD forms. Server creation suggests the canonical
 servers, and both tables expose reference counts. Assignment details identify
 Access Groups and non-secret virtual-key IDs. Delete actions are protected by
 server-to-toolset and toolset-to-key/group impact checks. The console does not
-collect MCP OAuth tokens or claim direct network health because MCP execution
-remains provider-mediated in this gateway architecture.
+implement an MCP OAuth login flow. A server can have a write-only encrypted bearer
+token for Gateway-owned discovery and tool execution. Provider execution requires
+explicit `allow_provider_execution`; client-executed tools remain outside
+Gateway's execution/accounting boundary. See [MCP](../../../docs/mcp.md).
 
 Guardrail Monitor is a dedicated overview and module drill-down workspace. It
 uses server-side time, policy, source, outcome and DLP/AV filters; shows pass

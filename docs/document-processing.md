@@ -72,6 +72,38 @@ processing logs.
 
 ## Enablement
 
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant G as Gateway
+    participant A as Docling API
+    participant Q as Redis RQ
+    participant W as CPU worker
+    participant P as Model deployment
+    C->>G: Chat / Responses with inline PDF
+    G->>G: Authenticate, authorize model, pin deployment, scan AV if enabled
+    G->>A: PDF + opaque owner scope
+    A->>Q: Atomic admission slot + enqueue
+    A-->>G: Internal task ID
+    W->>Q: Claim job
+    W->>W: Convert PDF, OCR and extract text
+    W->>Q: Save result or failure with TTL
+    loop Until terminal state or request deadline
+        G->>A: Read task with same owner scope
+        A->>Q: Read status/result
+        A-->>G: Status or complete bounded text
+    end
+    G->>G: Validate text limit, DLP, anonymization, tokens and budget
+    G->>P: Text request on original binding
+    P-->>G: Model response
+    G-->>C: Gateway response
+```
+
+Отключение клиента прекращает ожидание Gateway, но не освобождает очередь
+раньше завершения/expiry задания. Политика worker timeout и result TTL
+ограничивает оставшуюся работу. Ни API task ID, ни plaintext PDF не попадают
+в публичную inference metadata.
+
 In UI open **Deployments → Edit → Document processing (PDF)** and choose `docling`.
 `native` requires a genuine native file-input deployment; `docling` requires Chat
 or Responses support but does not require native `file_input` on model/adapter.
@@ -91,6 +123,29 @@ Gateway environment:
 - `DOCLING_MAX_TEXT_BYTES`: per-result decoded text limit, default 4194304;
   the combined request text limit remains 4194304.
 
+Docling API/worker configuration is separate from Gateway configuration:
+
+| Variable / Helm field | Default or source | Meaning |
+| --- | --- | --- |
+| `DOCLING_SERVE_API_KEY` | Existing Secret `api-key` | Internal API authentication; Gateway uses the matching `DOCLING_API_KEY` |
+| `DOCLING_SERVE_ENG_RQ_REDIS_URL` | Existing Secret `redis-url` | Dedicated RQ connection for API and workers |
+| `DOCUMENT_QUEUE_CAPACITY` / `docling.capacity` | `16`, valid 1–1024 | Global unfinished job slots |
+| `DOCUMENT_QUEUE_WAIT_SECONDS` / `docling.queueWaitSeconds` | `120`, valid 1–600 | TTL before a queued job starts |
+| `docling.workerReplicas` | `2` | Workers; capacity is not multiplied by replica count |
+| `DOCLING_PORT` (Compose only) | `5001` | Host loopback publication; not a Gateway provider port |
+| `DOCLING_SERVE_ENG_RQ_JOB_TIMEOUT` / `DOCLING_SERVE_MAX_DOCUMENT_TIMEOUT` | Image pin: `120` seconds | Running conversion timeout |
+| `DOCLING_SERVE_ENG_RQ_RESULTS_TTL` / `DOCLING_SERVE_ENG_RQ_FAILURE_TTL` | Image pin: `600` seconds | Terminal payload retention |
+| `DOCLING_SERVE_MAX_NUM_PAGES` / `DOCLING_SERVE_MAX_FILE_SIZE` | Image pin: `32` / `16777216` bytes | Conversion bounds, independent of Playground's 8 MiB attachment limit |
+| `DOCLING_NUM_THREADS` / `DOCLING_DEVICE` | Image pin: `2` / `cpu` | Conversion runtime |
+
+The pinned [Dockerfile](../services/docling/Dockerfile) also disables upstream UI,
+API docs, remote services and capabilities discovery, requires `rq`, restricts
+sources/targets and limits Redis timeouts/options cache. These image settings
+are part of the validated boundary, not user-selectable deployment capabilities.
+The wrapper applies its own PDF/owner/request checks in addition to them.
+Helm resource/scratch limits are in [values](../charts/ai-gateway/values.yaml);
+do not raise document limits without re-running the real processing suite.
+
 Local optional services are in `docker-compose.docling.yml`. Supply a private env
 file containing `DOCLING_API_KEY`, then start it with
 `docker compose --env-file /path/to/private.env -f docker-compose.docling.yml up -d`.
@@ -108,7 +163,26 @@ cluster DNS. Adapt the DNS policy for a cluster using different DNS labels.
 Kubernetes needs a CNI that enforces NetworkPolicy. No existing Secret or working
 deployment is modified by adding these templates.
 
-## Verification
+## Ошибки и диагностика
+
+| Gateway status / code | Причина | Действие |
+| --- | --- | --- |
+| `503 document_queue_full` | Admission limit или недостаток queue capacity | Проверить workers, Redis memory и зависшие задания; не увеличивать лимит без проверки ресурсов |
+| `503 document_processing_unavailable` | Internal API/queue недоступны | Проверить API readiness, service routing и secret references |
+| `504 document_processing_timeout` | Истекло время ожидания conversion | Проверить worker duration, число страниц и CPU; HTTP cancellation не отменяет worker |
+| `413 document_context_too_large` | Converted text или input context превышает лимит | Сократить документ либо выбрать модель с подтверждённым большим context; текст не обрезается молча |
+| `400 content_rejected` | Pre-conversion security rejection | Проверить policy/AV; provider inference не запускается |
+| `502 document_processing_failed` | Неполный, пустой, некорректный result или другая conversion error | Проверить metadata-only processing logs; native fallback запрещён |
+
+Это mapping document preparation в
+[Gateway handler](../repos/gateway/internal/gateway/document_processing.go).
+Другие стадии имеют собственные коды: `provider rejected parameter store` у
+Ollama относится к native Responses storage; provider `context deadline exceeded`
+после conversion относится к inference timeout. Увеличение `Maximum output tokens`
+не увеличивает input context и не лечит timeout; configure catalog input limit
+и deployment timeout отдельно.
+
+### Проверки реализации
 
 `python3 services/docling/check.py` builds the image and creates a unique isolated
 stack. It checks real Redis/RQ admission concurrency, stopped workers, explicit
