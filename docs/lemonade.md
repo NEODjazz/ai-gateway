@@ -112,6 +112,10 @@ The native contract was inspected in the official
 [source revision ee87a42eaba7387fd17ae59b36d3e99239633eae](https://github.com/lemonade-sdk/lemonade/tree/ee87a42eaba7387fd17ae59b36d3e99239633eae).
 Different server/backend releases still require a live smoke test before use.
 
+See [Lemonade API validation](lemonade-validation.md) for the 2026.40.0 live
+results, complete API scope inventory, remaining coverage limits, and opt-in
+integration test commands.
+
 ## Responses reasoning content
 
 Responses accepts `reasoning_text` in a reasoning item's `content`, separately
