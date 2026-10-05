@@ -397,6 +397,9 @@ func containsString(values []string, expected string) bool {
 }
 
 func parseDiscoveredModels(providerType string, payload []byte) ([]DiscoveredModel, error) {
+	if providerType == "lemonade" {
+		return parseLemonadeModels(payload)
+	}
 	ids := []string{}
 	if providerType == "ollama" {
 		var body struct {
