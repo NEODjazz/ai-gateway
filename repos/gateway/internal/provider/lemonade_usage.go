@@ -53,10 +53,6 @@ func lemonadeUsageReader(reader io.Reader, responses bool) (io.Reader, error) {
 	return bytes.NewReader(payload), nil
 }
 
-func lemonadeChatStreamUsage(payload string) (string, error) {
-	return payload, validateLemonadeTokenUsage([]byte(payload), false)
-}
-
 func validateLemonadeResponseEvent(payload string) error {
 	var envelope struct {
 		Response json.RawMessage `json:"response"`

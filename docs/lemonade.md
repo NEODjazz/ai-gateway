@@ -65,6 +65,9 @@ An upscaler is not advertised as an image generator. Native Realtime transcripti
 does not imply support for Gateway's generation Realtime contract.
 
 Parameters outside the implemented native contract are rejected explicitly.
+Chat SSE retains the first reported `created` timestamp for the whole response,
+including when the native backend timestamps individual chunks separately.
+Invalid timestamps and changing stream IDs/models remain errors.
 Chat `repetition_penalty` maps to native `repeat_penalty` (range 1–2);
 `max_tokens` and `max_completion_tokens` are mutually exclusive. Responses output
 limit aliases use `max_output_tokens`. `store: false` is accepted for stateless

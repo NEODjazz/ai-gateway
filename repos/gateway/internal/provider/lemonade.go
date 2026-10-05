@@ -108,14 +108,14 @@ func (p Lemonade) ChatCompletions(ctx context.Context, request openai.ChatComple
 		}
 		return decodeChatCompletionResponse(reader, response)
 	}
-	return p.compatible.chatCompletions(ctx, request, decode, lemonadeChatStreamUsage)
+	return p.compatible.chatCompletions(ctx, request, decode, newLemonadeChatStreamNormalizer())
 }
 
 func (p Lemonade) StreamChatCompletions(ctx context.Context, request openai.ChatCompletionRequest, write ChatCompletionStreamWriter) (openai.ChatCompletionResponse, error) {
 	if err := p.ValidateChatParameters(request); err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
-	return p.compatible.streamChatCompletions(ctx, request, write, lemonadeChatStreamUsage)
+	return p.compatible.streamChatCompletions(ctx, request, write, newLemonadeChatStreamNormalizer())
 }
 
 func (p Lemonade) ValidateResponseParameters(request openai.ResponseRequest) error {
