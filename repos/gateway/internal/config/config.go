@@ -15,6 +15,7 @@ import (
 
 	"ai-gateway-gateway/internal/azureurl"
 	"ai-gateway-gateway/internal/modelcatalog"
+	"ai-gateway-gateway/internal/promptinjection"
 )
 
 type Config struct {
@@ -168,11 +169,12 @@ type ProviderConfig struct {
 }
 
 type GuardrailPolicyConfig struct {
-	DLP                bool     `json:"dlp"`
-	OutputDLP          bool     `json:"output_dlp,omitempty"`
-	AV                 bool     `json:"av"`
-	Anonymization      string   `json:"anonymization,omitempty"`
-	AnonymizationRules []string `json:"anonymization_rules,omitempty"`
+	PromptInjection    *promptinjection.Config `json:"prompt_injection,omitempty"`
+	DLP                bool                    `json:"dlp"`
+	OutputDLP          bool                    `json:"output_dlp,omitempty"`
+	AV                 bool                    `json:"av"`
+	Anonymization      string                  `json:"anonymization,omitempty"`
+	AnonymizationRules []string                `json:"anonymization_rules,omitempty"`
 }
 
 type ProviderEndpointConfig struct {

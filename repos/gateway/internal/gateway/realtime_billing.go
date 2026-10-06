@@ -27,12 +27,13 @@ const maxRealtimeAudioBufferBytes = 1 << 30
 var errRealtimeInputTranscriptionUnsupported = errors.New("realtime input transcription is not supported")
 
 type realtimeBillingTracker struct {
-	pipeline modules.Pipeline
-	template modules.RequestContext
-	model    string
-	enabled  bool
-	billing  bool
-	admit    func(context.Context, int) error
+	promptCheck func(context.Context, *modules.RequestContext) error
+	pipeline    modules.Pipeline
+	template    modules.RequestContext
+	model       string
+	enabled     bool
+	billing     bool
+	admit       func(context.Context, int) error
 
 	mu                 sync.Mutex
 	sessionTokens      int
@@ -237,12 +238,17 @@ func (t *realtimeBillingTracker) handleProviderAudioEvent(event realtimeEventEnv
 }
 
 func (t *realtimeBillingTracker) scanRealtimeAudio(ctx context.Context, format, audio string) error {
-	if t.template.Metadata["provider.modules.av.enabled"] != "true" {
+	if t.template.Metadata["provider.modules.av.enabled"] != "true" && t.promptCheck == nil {
 		return nil
 	}
 	request := cloneRealtimeBillingRequest(t.template)
 	request.RequestID = newExecutionID()
 	request.Attachments = []openai.ImageAttachment{{MediaType: realtimeAudioMediaType(format), Data: audio}}
+	if t.promptCheck != nil {
+		if err := t.promptCheck(ctx, &request); err != nil {
+			return err
+		}
+	}
 	return t.pipeline.RunNamed(ctx, &request, "av")
 }
 
@@ -444,7 +450,7 @@ func decodeStrictRealtimeJSON(raw json.RawMessage, target any) error {
 }
 
 func (t *realtimeBillingTracker) scanClientEvent(ctx context.Context, event realtimeEventEnvelope) error {
-	if t.template.Metadata["provider.modules.dlp.enabled"] != "true" {
+	if t.template.Metadata["provider.modules.dlp.enabled"] != "true" && t.promptCheck == nil {
 		return nil
 	}
 	var value json.RawMessage
@@ -457,6 +463,15 @@ func (t *realtimeBillingTracker) scanClientEvent(ctx context.Context, event real
 		value = event.Response
 	default:
 		return nil
+	}
+	if t.promptCheck != nil {
+		request := cloneRealtimeBillingRequest(t.template)
+		request.RequestID = newExecutionID()
+		request.Request.Messages = nil
+		request.ResponseRequest = &openai.ResponseRequest{Input: value}
+		if err := t.promptCheck(ctx, &request); err != nil {
+			return err
+		}
 	}
 	projection, err := realtimeTextProjection(value)
 	if err != nil {

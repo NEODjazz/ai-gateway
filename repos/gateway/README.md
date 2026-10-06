@@ -194,7 +194,11 @@ resource, so policy assignment never requires a cross-service key/team update.
 The Guardrails UI presents these gateway-native policies as one workflow: joined
 deployment/attachment coverage, create/edit, detail inspection, policy-filtered
 monitoring and bounded multi-policy dry-run comparison with an anonymized
-preview. Request outcome logs expose only the effective profile/rule names and
+preview. Policies can opt into bounded prompt injection heuristics and/or a
+configured classifier deployment. Classifier calls have separate billing; checker
+failures block by default, and unreadable attachments require explicit opt-in.
+See [prompt injection protection](../../docs/prompt-injection.md).
+Request outcome logs expose only the effective profile/rule names and
 replacement count. The gateway keeps scanner endpoints and credentials in
 the independently operated DLP/AV services and stores no executable guardrail
 code in its control plane.

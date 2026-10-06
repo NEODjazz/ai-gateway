@@ -175,7 +175,7 @@ func (r Router) Completions(ctx context.Context, req modules.RequestContext) (op
 			return openai.CompletionResponse{}, err
 		}
 		progress.enter(endpoint)
-		attemptCtx := providerAttemptContext(req, endpoint)
+		attemptCtx := r.providerAttemptContext(req, endpoint)
 		r.applyCatalogPricing(ctx, &attemptCtx, endpoint, request.Model)
 		if endpoint.GuardrailPolicy != "" && !endpoint.GuardrailPolicyValid {
 			err := fmt.Errorf("%s/%s has unknown guardrail policy %q", endpoint.Type, endpoint.Name, endpoint.GuardrailPolicy)
@@ -281,7 +281,7 @@ func (r Router) StreamCompletions(ctx context.Context, req modules.RequestContex
 			return openai.CompletionResponse{}, false, err
 		}
 		progress.enter(endpoint)
-		attemptCtx := providerAttemptContext(req, endpoint)
+		attemptCtx := r.providerAttemptContext(req, endpoint)
 		r.applyCatalogPricing(ctx, &attemptCtx, endpoint, request.Model)
 		if endpoint.GuardrailPolicy != "" && !endpoint.GuardrailPolicyValid {
 			err := fmt.Errorf("%s/%s has unknown guardrail policy %q", endpoint.Type, endpoint.Name, endpoint.GuardrailPolicy)

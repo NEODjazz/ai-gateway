@@ -24,6 +24,8 @@ package и Helm template.
   refresh и проверка реальными сервисами.
 - [PDF / Docling](document-processing.md) — native или preprocessing,
   API/очередь/workers, quotas, ошибки и ограничения OCR.
+- [Prompt injection protection](prompt-injection.md) — policies, heuristics,
+  classifier deployment, errors, вложения и billing.
 - [Конфигурация](configuration.md) — основные environment variables,
   providers, capabilities, модули и хранилища.
 - [Индекс environment names](environment-reference.md) — production Go reads

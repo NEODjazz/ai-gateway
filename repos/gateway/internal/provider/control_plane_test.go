@@ -18,6 +18,7 @@ import (
 	"ai-gateway-gateway/internal/modelcatalog"
 	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/openai"
+	"ai-gateway-gateway/internal/promptinjection"
 )
 
 type memoryControlPlaneStore struct {
@@ -584,5 +585,38 @@ func TestModelOnboardingAtomicallyUpdatesExistingDeployment(t *testing.T) {
 	}
 	if deployments := replica.ListModelDeployments(t.Context()); len(deployments) != 1 || !slices.Equal(deployments[0].Capabilities, []string{"embeddings"}) {
 		t.Fatalf("replica deployments=%+v", deployments)
+	}
+}
+
+func TestControlPlanePromptInjectionClassifierPolicyDurableSave(t *testing.T) {
+	store := &memoryControlPlaneStore{}
+	runtime, err := NewWithError(Config{ControlPlaneStore: store, ControlPlaneRefresh: time.Nanosecond, Endpoints: []config.ProviderEndpointConfig{{Name: "judge", Type: "demo", Models: []string{"judge-model"}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	saved, err := runtime.(*Router).UpdateGuardrailPolicyDurable(ctx, "protect", GuardrailPolicy{Enabled: true, PromptInjection: &promptinjection.Config{LLMAPICheck: true, JudgeDeploymentID: "judge"}})
+	if err != nil || saved.PromptInjection == nil || saved.PromptInjection.JudgeDeploymentID != "judge" {
+		t.Fatalf("durable classifier policy: %v", err)
+	}
+	restored, err := NewWithError(Config{ControlPlaneStore: store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy, found := restored.(*Router).GetGuardrailPolicy("protect")
+	if !found || policy.PromptInjection == nil || !policy.PromptInjection.LLMAPICheck {
+		t.Fatal("classifier policy lost during restoration")
+	}
+	store.mu.Lock()
+	store.saveErr = errors.New("database unavailable")
+	store.mu.Unlock()
+	_, err = runtime.(*Router).UpdateGuardrailPolicyDurable(ctx, "protect", injectionPolicy(promptinjection.Config{HeuristicsCheck: true}))
+	if err == nil {
+		t.Fatal("expected durable save failure")
+	}
+	previous, _ := runtime.(*Router).GetGuardrailPolicy("protect")
+	if previous.PromptInjection == nil || !previous.PromptInjection.LLMAPICheck {
+		t.Fatal("failed persistence changed active detector configuration")
 	}
 }

@@ -26,7 +26,7 @@ OpenAPI, а не в этом документе.
 | `PROVIDER_TYPE` / `OLLAMA_URL` | `demo` / `http://127.0.0.1:11434` | Legacy одиночный provider при отсутствии `PROVIDERS_JSON`; для нескольких deployments используйте managed control plane |
 | `PROVIDERS_JSON` | пусто | Static provider endpoints; managed snapshot заменяет их после bootstrap |
 | `MODEL_CATALOG_JSON` | empty catalog | Capabilities и pricing contract |
-| `GUARDRAIL_POLICIES_JSON` | `{}` | Static DLP/AV policies |
+| `GUARDRAIL_POLICIES_JSON` | `{}` | Static scanner, anonymization and prompt injection policies |
 | `GUARDRAIL_MONITOR_CAPACITY` | `1000` | Process-local monitor capacity, диапазон 1–10000 |
 | `GUARDRAIL_MONITOR_TTL_SECONDS` | `604800` | Redis retention событий monitor |
 | `ROUTING_STRATEGY` | `weighted` | `weighted` или `adaptive` |

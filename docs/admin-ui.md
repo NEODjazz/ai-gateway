@@ -70,6 +70,12 @@ PDF: **Models & endpoints → Deployments → Edit → Document processing (PDF)
 Выберите `native` либо `docling`; запуск optional stack и ограничения описаны в
 [Document processing](document-processing.md).
 
+Prompt injection: **AI Gateway → Guardrails → Create/Edit policy → Prompt injection
+detection**. Доступны локальные heuristics и classifier deployment, настройки
+fail-on-error, вложений и лимитов. Затем привяжите policy к deployment или через
+Policies. **Test Guardrails** выполняет настоящую проверку; LLM-классификация
+имеет отдельный billing. Детали и ограничения: [Prompt injection](prompt-injection.md).
+
 Browser login: **Settings → Settings → Single sign-on**. Presets, connections,
 проверка identity, activation/rollback и отдельные API issuers описаны в
 [SSO settings](admin-sso-settings.md). Browser identity не изменяет API trust.

@@ -4722,10 +4722,10 @@ paths:
           in: query
           schema: {type: integer, minimum: 1, maximum: 1000, default: 100}
         - {name: window, in: query, schema: {type: string, enum: [retained, 15m, 1h, 24h], default: retained}}
-        - {name: module, in: query, schema: {type: string, enum: [dlp, av]}}
+        - {name: module, in: query, schema: {type: string, enum: [dlp, av, prompt_injection]}}
         - {name: policy, in: query, schema: {type: string, maxLength: 128}}
         - {name: outcome, in: query, schema: {type: string, enum: [passed, rejected, unavailable]}}
-        - {name: source, in: query, schema: {type: string, enum: [inference, inference_output, compliance, guardrail_api]}}
+        - {name: source, in: query, schema: {type: string, enum: [inference, inference_output, compliance, guardrail_api, prompt_injection_judge]}}
       responses:
         '200': {description: Guardrail monitoring snapshot, content: {application/json: {schema: {$ref: '#/components/schemas/GuardrailMonitorSnapshot'}}}}
         '400': {$ref: '#/components/responses/InvalidRequest'}
@@ -13062,6 +13062,34 @@ components:
       properties:
         data: {type: array, maxItems: 50, items: {$ref: '#/components/schemas/DeploymentHealthCheck'}}
         errors: {type: array, maxItems: 50, items: {$ref: '#/components/schemas/DeploymentHealthBatchError'}}
+    PromptInjectionConfig:
+      type: object
+      additionalProperties: false
+      description: Opt-in input protection. Heuristics run first, then a configured classifier. All matching policies must pass. Detector errors block by default; attacks always block.
+      anyOf:
+        - required: [heuristics_check]
+          properties: {heuristics_check: {const: true}}
+        - required: [llm_api_check]
+          properties: {llm_api_check: {const: true}}
+      properties:
+        heuristics_check: {type: boolean, default: false}
+        llm_api_check: {type: boolean, default: false}
+        similarity_threshold: {type: number, minimum: 0.75, maximum: 1, default: 0.85}
+        judge_deployment_id: {type: string, maxLength: 128, description: Required for LLM detection. Enabled Chat deployment delegated by an administrator; usage is billed separately to the original caller.}
+        judge_system_prompt: {type: string, maxLength: 8192, description: Optional classifier instructions; the gateway provides a default.}
+        safe_response: {type: string, maxLength: 64, default: SAFE, description: Exact verdict with no whitespace or control characters.}
+        unsafe_response: {type: string, maxLength: 64, default: UNSAFE, description: Must differ from safe_response. Unexpected or empty verdicts are detector failures.}
+        fail_on_error: {type: boolean, default: true, description: "False allows detector failures and records unavailable. Attacks, unreadable attachments without explicit opt-in, and classifier accounting failures still block."}
+        skip_unscannable_attachments: {type: boolean, default: false, description: Allow binary attachments and unresolved references without scanning their contents. Extracted document text remains scanned.}
+        timeout_seconds: {type: integer, minimum: 1, maximum: 30, default: 5}
+        max_input_bytes: {type: integer, minimum: 1024, maximum: 1048576, default: 262144}
+      allOf:
+        - if:
+            required: [llm_api_check]
+            properties: {llm_api_check: {const: true}}
+          then:
+            required: [judge_deployment_id]
+            properties: {judge_deployment_id: {minLength: 1}}
     GuardrailPolicyInput:
       type: object
       additionalProperties: false
@@ -13073,6 +13101,7 @@ components:
         av: {type: boolean}
         anonymization: {type: string, enum: [disabled, basic, strict, custom], description: Per-request anonymization profile. Omit to leave the safe global default unchanged.}
         anonymization_rules: {type: array, maxItems: 256, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9._-]+$'}, description: Required only for custom anonymization. Every selected name must exist in the active anonymizer rule inventory when the policy is saved.}
+        prompt_injection: {$ref: '#/components/schemas/PromptInjectionConfig'}
         enabled: {type: boolean}
     GuardrailApplyRequest:
       type: object
@@ -13093,10 +13122,11 @@ components:
         checks:
           type: object
           additionalProperties: false
-          required: [dlp, av, anonymizer]
+          required: [dlp, av, anonymizer, prompt_injection]
           properties:
             dlp: {type: string, enum: [disabled, passed, rejected]}
             av: {type: string, enum: [disabled, passed, rejected]}
+            prompt_injection: {type: string, enum: [disabled, passed, rejected, unavailable]}
             anonymizer: {type: string, enum: [disabled, passed, unavailable]}
         content_stored: {type: boolean, const: false}
         anonymized_text: {type: string, maxLength: 65536, description: Present only when the selected policy enables anonymization. The submitted raw text is never returned.}
@@ -13150,6 +13180,7 @@ components:
         scope: {type: string}
         matched_via: {type: array, items: {type: string, enum: [global, organization, team, user, key, key_id, key_alias, model, provider, deployment, tag]}}
         policy_status: {type: string, enum: [enabled, disabled, missing, unavailable]}
+        prompt_injection: {type: boolean}
         dlp: {type: boolean}
         output_dlp: {type: boolean}
         av: {type: boolean}
@@ -13168,6 +13199,7 @@ components:
       properties:
         matched_attachments: {type: array, items: {$ref: '#/components/schemas/ResolvedPolicyAttachment'}}
         effective_policies: {type: array, uniqueItems: true, items: {type: string}}
+        prompt_injection: {type: boolean}
         dlp: {type: boolean}
         output_dlp: {type: boolean}
         av: {type: boolean}
@@ -13229,7 +13261,7 @@ components:
         request_id: {type: string, maxLength: 128}
         policy: {type: string, maxLength: 128}
         module: {type: string, maxLength: 32}
-        source: {type: string, enum: [inference, inference_output, compliance, guardrail_api]}
+        source: {type: string, enum: [inference, inference_output, compliance, guardrail_api, prompt_injection_judge]}
         outcome: {type: string, enum: [passed, rejected, unavailable]}
         duration_ms: {type: integer, format: int64, minimum: 0}
     GuardrailMonitorFilter:
@@ -13238,10 +13270,10 @@ components:
       required: [window]
       properties:
         window: {type: string, enum: [retained, 15m, 1h, 24h]}
-        module: {type: string, enum: [dlp, av]}
+        module: {type: string, enum: [dlp, av, prompt_injection]}
         policy: {type: string, maxLength: 128}
         outcome: {type: string, enum: [passed, rejected, unavailable]}
-        source: {type: string, enum: [inference, inference_output, compliance, guardrail_api]}
+        source: {type: string, enum: [inference, inference_output, compliance, guardrail_api, prompt_injection_judge]}
     GuardrailTimelineBucket:
       type: object
       additionalProperties: false

@@ -35,7 +35,7 @@ func (r Router) CountTokens(ctx context.Context, req modules.RequestContext) (To
 		if endpoint.GuardrailPolicy != "" && !endpoint.GuardrailPolicyValid {
 			return TokenCountResult{}, modules.ErrGuardrailUnavailable
 		}
-		attempt := providerAttemptContext(req, endpoint)
+		attempt := r.providerAttemptContext(req, endpoint)
 		if req.Request.GeminiCachedContent != "" && cachedContentPolicyIdentity(attempt) != req.Request.GeminiCachedContentPolicy {
 			return TokenCountResult{}, ErrCachedContentPolicyChanged
 		}

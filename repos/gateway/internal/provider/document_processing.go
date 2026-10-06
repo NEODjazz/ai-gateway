@@ -104,7 +104,7 @@ func (r Router) PrepareDocumentInput(ctx context.Context, req modules.RequestCon
 	if selected.GuardrailPolicy != "" && !selected.GuardrailPolicyValid {
 		return req, modules.ErrGuardrailUnavailable
 	}
-	scan := providerAttemptContext(req, *selected)
+	scan := r.providerAttemptContext(req, *selected)
 	if scan.Metadata["provider.modules.av.enabled"] == "true" {
 		if err := r.modules.RunNamed(ctx, &scan, "av"); err != nil {
 			return req, err

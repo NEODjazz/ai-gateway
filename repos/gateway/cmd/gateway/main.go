@@ -72,6 +72,9 @@ func main() {
 
 	modelRegistry := modelcatalog.NewRegistry(cfg.Catalog, registryStoreFor(redisStore), time.Second)
 	providerConfig := provider.Config{
+		PromptInjectionObserver: func(ctx context.Context, req *modules.RequestContext, policy, outcome string, duration time.Duration) {
+			guardrailMonitor.RecordContext(ctx, gateway.GuardrailEvent{RequestID: req.RequestID, Policy: policy, Module: "prompt_injection", Source: req.Metadata["guardrail.monitor.source"], Outcome: outcome, DurationMS: duration.Milliseconds()})
+		},
 		BackgroundAuthorization: gatewayPipeline,
 		Default:                 cfg.Provider.Default,
 		Endpoints:               cfg.Provider.Endpoints,

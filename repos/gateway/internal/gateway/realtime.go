@@ -83,6 +83,11 @@ func (h Handler) Realtime(w http.ResponseWriter, r *http.Request) {
 		}
 		return nil
 	})
+	if checker, ok := h.provider.(interface {
+		CheckPromptInjection(context.Context, *modules.RequestContext) error
+	}); ok && selected.Metadata["provider.guardrail.policy"] != "" {
+		tracker.promptCheck = checker.CheckPromptInjection
+	}
 	defer tracker.Close(r.Context(), errors.New("realtime session closed"))
 
 	serve := websocket.Handler(func(client *websocket.Conn) {

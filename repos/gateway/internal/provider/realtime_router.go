@@ -36,7 +36,7 @@ func (r Router) OpenRealtime(ctx context.Context, identity modules.RequestContex
 			progress.fail(err)
 			continue
 		}
-		attempt := providerAttemptContext(identity, endpoint)
+		attempt := r.providerAttemptContext(identity, endpoint)
 		attempt.Metadata["gateway.api_type"] = "realtime"
 		attempt.Metadata["provider.realtime_audio_input.enabled"] = boolString(hasCapability(endpoint.Capabilities, "audio_input"))
 		attempt.Metadata["provider.realtime_audio_output.enabled"] = boolString(hasCapability(endpoint.Capabilities, "audio"))

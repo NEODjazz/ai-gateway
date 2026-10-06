@@ -22,6 +22,7 @@ import (
 	"ai-gateway-gateway/internal/modelcatalog"
 	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/openai"
+	"ai-gateway-gateway/internal/promptinjection"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -390,6 +391,7 @@ type StreamingResponseClient interface {
 var ErrStreamingUnsupported = errors.New("streaming unsupported")
 
 type Config struct {
+	PromptInjectionObserver modules.PromptInjectionObserver
 	DocumentConverter       documentprocessing.Converter
 	BackgroundAuthorization modules.Pipeline
 	Default                 string
@@ -468,6 +470,8 @@ type Endpoint struct {
 }
 
 type Router struct {
+	promptObserver          modules.PromptInjectionObserver
+	promptAdmission         *admissionController
 	documentConverter       documentprocessing.Converter
 	backgroundAuthorization modules.Pipeline
 	defaultProvider         string
@@ -692,6 +696,8 @@ func NewWithError(cfg Config) (Provider, error) {
 			embedder: newOpenAIEmbedder(cfg.SemanticEmbeddingURL, cfg.SemanticEmbeddingAPIKey, cfg.SemanticEmbeddingModel),
 		}),
 	}
+	router.promptObserver = cfg.PromptInjectionObserver
+	router.promptAdmission = newAdmissionController(8, 32, time.Second)
 	router.deployments = &deploymentRegistry{}
 	router.deployments.current.Store(&initialDeployments)
 	router.endpointState = &endpointRegistry{}
@@ -704,7 +710,7 @@ func NewWithError(cfg Config) (Provider, error) {
 	router.modelGroups.current.Store(&emptyModelGroups)
 	initialGuardrails := make(map[string]GuardrailPolicy, len(cfg.GuardrailPolicies))
 	for name, policy := range cfg.GuardrailPolicies {
-		initialGuardrails[name] = GuardrailPolicy{Name: name, DLP: policy.DLP, OutputDLP: policy.OutputDLP && policy.DLP, AV: policy.AV, Anonymization: policy.Anonymization, AnonymizationRules: append([]string(nil), policy.AnonymizationRules...), Enabled: true}
+		initialGuardrails[name] = GuardrailPolicy{PromptInjection: promptinjection.Clone(policy.PromptInjection), Name: name, DLP: policy.DLP, OutputDLP: policy.OutputDLP && policy.DLP, AV: policy.AV, Anonymization: policy.Anonymization, AnonymizationRules: append([]string(nil), policy.AnonymizationRules...), Enabled: true}
 	}
 	router.guardrails = &guardrailRegistry{}
 	router.guardrails.current.Store(&initialGuardrails)
@@ -740,6 +746,19 @@ func NewWithError(cfg Config) (Provider, error) {
 		}
 		router.controlPlane.nextRefresh.Store(time.Now().Add(refresh).UnixNano())
 	}
+	normalizedPolicies := make(map[string]GuardrailPolicy)
+	for name, policy := range *router.guardrails.current.Load() {
+		normalized, err := normalizeGuardrailPolicy(name, policy)
+		if err != nil {
+			return nil, fmt.Errorf("guardrail policy %q: %w", name, err)
+		}
+		if normalized.Enabled && normalized.PromptInjection != nil && normalized.PromptInjection.LLMAPICheck && !router.validPromptJudge(normalized.PromptInjection.JudgeDeploymentID) {
+			return nil, fmt.Errorf("guardrail policy %q: classifier deployment unavailable", name)
+		}
+		normalizedPolicies[name] = normalized
+	}
+	router.guardrails.current.Store(&normalizedPolicies)
+	router.modules = router.modules.Prepend(modules.NewPromptInjectionModule(router.promptPolicies, router.promptJudge, cfg.PromptInjectionObserver))
 	return router, nil
 }
 
@@ -782,7 +801,7 @@ func (r Router) ChatCompletions(ctx context.Context, req modules.RequestContext)
 			}
 			return openai.ChatCompletionResponse{}, err
 		}
-		attemptCtx := providerAttemptContext(req, endpoint)
+		attemptCtx := r.providerAttemptContext(req, endpoint)
 		if request.GeminiCachedContent != "" && cachedContentPolicyIdentity(attemptCtx) != request.GeminiCachedContentPolicy {
 			return openai.ChatCompletionResponse{}, ErrCachedContentPolicyChanged
 		}
@@ -994,7 +1013,7 @@ func (r Router) StreamChatCompletions(ctx context.Context, req modules.RequestCo
 			}
 			return openai.ChatCompletionResponse{}, false, err
 		}
-		attemptCtx := providerAttemptContext(req, endpoint)
+		attemptCtx := r.providerAttemptContext(req, endpoint)
 		if request.GeminiCachedContent != "" && cachedContentPolicyIdentity(attemptCtx) != request.GeminiCachedContentPolicy {
 			return openai.ChatCompletionResponse{}, false, ErrCachedContentPolicyChanged
 		}
@@ -1175,7 +1194,7 @@ func (r Router) Responses(ctx context.Context, req modules.RequestContext) (open
 			}
 			return openai.ResponseResponse{}, err
 		}
-		attemptCtx := providerAttemptContext(req, endpoint)
+		attemptCtx := r.providerAttemptContext(req, endpoint)
 		r.applyCatalogPricing(ctx, &attemptCtx, endpoint, request.Model)
 		if endpoint.GuardrailPolicy != "" && !endpoint.GuardrailPolicyValid {
 			err := fmt.Errorf("%s/%s has unknown guardrail policy %q", endpoint.Type, endpoint.Name, endpoint.GuardrailPolicy)
@@ -1335,7 +1354,7 @@ func (r Router) Embeddings(ctx context.Context, req modules.RequestContext) (ope
 			}
 			return openai.EmbeddingResponse{}, err
 		}
-		attemptCtx := providerAttemptContext(req, endpoint)
+		attemptCtx := r.providerAttemptContext(req, endpoint)
 		r.applyCatalogPricing(ctx, &attemptCtx, endpoint, request.Model)
 		input, _ := openai.InspectEmbeddingInput(request.Input)
 		if input.Tokenized() && attemptCtx.Metadata["provider.modules.dlp.enabled"] == "true" {
@@ -1437,7 +1456,7 @@ func (r Router) Rerank(ctx context.Context, req modules.RequestContext) (openai.
 			}
 			return openai.RerankResponse{}, err
 		}
-		attemptCtx := providerAttemptContext(req, endpoint)
+		attemptCtx := r.providerAttemptContext(req, endpoint)
 		r.applyCatalogPricing(ctx, &attemptCtx, endpoint, request.Model)
 		if endpoint.GuardrailPolicy != "" && !endpoint.GuardrailPolicyValid {
 			err := fmt.Errorf("%s/%s has unknown guardrail policy %q", endpoint.Type, endpoint.Name, endpoint.GuardrailPolicy)
@@ -1542,7 +1561,7 @@ func (r Router) Moderations(ctx context.Context, req modules.RequestContext) (op
 			}
 			return openai.ModerationResponse{}, err
 		}
-		attemptCtx := providerAttemptContext(req, endpoint)
+		attemptCtx := r.providerAttemptContext(req, endpoint)
 		r.applyCatalogPricing(ctx, &attemptCtx, endpoint, request.Model)
 		if endpoint.GuardrailPolicy != "" && !endpoint.GuardrailPolicyValid {
 			err := fmt.Errorf("%s/%s has unknown guardrail policy %q", endpoint.Type, endpoint.Name, endpoint.GuardrailPolicy)
@@ -1645,7 +1664,7 @@ func (r Router) GenerateImage(ctx context.Context, req modules.RequestContext) (
 			continue
 		}
 		progress.enter(endpoint)
-		attemptCtx := providerAttemptContext(req, endpoint)
+		attemptCtx := r.providerAttemptContext(req, endpoint)
 		r.applyCatalogPricing(ctx, &attemptCtx, endpoint, request.Model)
 		if endpoint.GuardrailPolicy != "" && !endpoint.GuardrailPolicyValid {
 			err := fmt.Errorf("%s/%s has unknown guardrail policy %q", endpoint.Type, endpoint.Name, endpoint.GuardrailPolicy)
@@ -1731,7 +1750,7 @@ func (r Router) StreamGenerateImage(ctx context.Context, req modules.RequestCont
 			continue
 		}
 		progress.enter(endpoint)
-		attemptCtx := providerAttemptContext(req, endpoint)
+		attemptCtx := r.providerAttemptContext(req, endpoint)
 		r.applyCatalogPricing(ctx, &attemptCtx, endpoint, request.Model)
 		if endpoint.GuardrailPolicy != "" && !endpoint.GuardrailPolicyValid {
 			err := fmt.Errorf("%s/%s has unknown guardrail policy %q", endpoint.Type, endpoint.Name, endpoint.GuardrailPolicy)
@@ -1867,7 +1886,7 @@ func (r Router) EditImage(ctx context.Context, req modules.RequestContext) (open
 			continue
 		}
 		progress.enter(endpoint)
-		attemptCtx := providerAttemptContext(req, endpoint)
+		attemptCtx := r.providerAttemptContext(req, endpoint)
 		r.applyCatalogPricing(ctx, &attemptCtx, endpoint, request.Model)
 		if endpoint.GuardrailPolicy != "" && !endpoint.GuardrailPolicyValid {
 			err := fmt.Errorf("%s/%s has unknown guardrail policy %q", endpoint.Type, endpoint.Name, endpoint.GuardrailPolicy)
@@ -1949,7 +1968,7 @@ func (r Router) StreamEditImage(ctx context.Context, req modules.RequestContext,
 			continue
 		}
 		progress.enter(endpoint)
-		attemptCtx := providerAttemptContext(req, endpoint)
+		attemptCtx := r.providerAttemptContext(req, endpoint)
 		r.applyCatalogPricing(ctx, &attemptCtx, endpoint, request.Model)
 		if endpoint.GuardrailPolicy != "" && !endpoint.GuardrailPolicyValid {
 			err := fmt.Errorf("%s/%s has unknown guardrail policy %q", endpoint.Type, endpoint.Name, endpoint.GuardrailPolicy)
@@ -2082,7 +2101,7 @@ func (r Router) CreateImageVariation(ctx context.Context, req modules.RequestCon
 			continue
 		}
 		progress.enter(endpoint)
-		attemptCtx := providerAttemptContext(req, endpoint)
+		attemptCtx := r.providerAttemptContext(req, endpoint)
 		r.applyCatalogPricing(ctx, &attemptCtx, endpoint, request.Model)
 		if endpoint.GuardrailPolicy != "" && !endpoint.GuardrailPolicyValid {
 			err := fmt.Errorf("%s/%s has unknown guardrail policy %q", endpoint.Type, endpoint.Name, endpoint.GuardrailPolicy)
@@ -2226,7 +2245,7 @@ func (r Router) StreamResponses(ctx context.Context, req modules.RequestContext,
 			}
 			return openai.ResponseResponse{}, false, err
 		}
-		attemptCtx := providerAttemptContext(req, endpoint)
+		attemptCtx := r.providerAttemptContext(req, endpoint)
 		r.applyCatalogPricing(ctx, &attemptCtx, endpoint, request.Model)
 		if endpoint.GuardrailPolicy != "" && !endpoint.GuardrailPolicyValid {
 			err := fmt.Errorf("%s/%s has unknown guardrail policy %q", endpoint.Type, endpoint.Name, endpoint.GuardrailPolicy)

@@ -89,10 +89,15 @@ Virtual Key или provider credential.
 
 ## Guardrails
 
-Для каждой provider attempt порядок следующий: DLP, AV, anonymization, billing
+Для каждой provider attempt порядок следующий: opt-in prompt injection detection, DLP, AV, anonymization, billing
 reserve, provider, billing commit/cancel, deanonymization. DLP/AV получают
 проекцию до masking, поэтому scanner видит исходный чувствительный текст, но не
 identity/credential.
+
+[Prompt injection protection](prompt-injection.md) проверяет вход до основной
+модели и cache replay. Классификатор получает только проекцию содержимого;
+его отдельный execution ID и billing сохраняют identity исходного клиента.
+Guardrail monitor хранит только policy, результат и время проверки.
 
 Анонимизация защищает provider boundary, а не меняет клиентский контракт:
 gateway восстанавливает request-local placeholders в успешном ответе. Поэтому

@@ -7,17 +7,20 @@ import (
 	"sort"
 	"strings"
 	"sync/atomic"
+
+	"ai-gateway-gateway/internal/promptinjection"
 )
 
 type GuardrailPolicy struct {
-	Name               string   `json:"name"`
-	Description        string   `json:"description,omitempty"`
-	DLP                bool     `json:"dlp"`
-	OutputDLP          bool     `json:"output_dlp"`
-	AV                 bool     `json:"av"`
-	Anonymization      string   `json:"anonymization,omitempty"`
-	AnonymizationRules []string `json:"anonymization_rules,omitempty"`
-	Enabled            bool     `json:"enabled"`
+	PromptInjection    *promptinjection.Config `json:"prompt_injection,omitempty"`
+	Name               string                  `json:"name"`
+	Description        string                  `json:"description,omitempty"`
+	DLP                bool                    `json:"dlp"`
+	OutputDLP          bool                    `json:"output_dlp"`
+	AV                 bool                    `json:"av"`
+	Anonymization      string                  `json:"anonymization,omitempty"`
+	AnonymizationRules []string                `json:"anonymization_rules,omitempty"`
+	Enabled            bool                    `json:"enabled"`
 }
 type guardrailRegistry struct {
 	current atomic.Pointer[map[string]GuardrailPolicy]
@@ -79,6 +82,9 @@ func (r *Router) UpdateGuardrailPolicy(name string, policy GuardrailPolicy) (Gua
 	if err != nil {
 		return GuardrailPolicy{}, err
 	}
+	if policy.Enabled && policy.PromptInjection != nil && policy.PromptInjection.LLMAPICheck && !r.validPromptJudge(policy.PromptInjection.JudgeDeploymentID) {
+		return GuardrailPolicy{}, ErrInvalidGuardrailPolicy
+	}
 	name = policy.Name
 	if r.guardrails == nil {
 		r.guardrails = &guardrailRegistry{}
@@ -96,6 +102,7 @@ func (r *Router) UpdateGuardrailPolicy(name string, policy GuardrailPolicy) (Gua
 }
 
 func cloneGuardrailPolicy(policy GuardrailPolicy) GuardrailPolicy {
+	policy.PromptInjection = promptinjection.Clone(policy.PromptInjection)
 	policy.AnonymizationRules = append([]string(nil), policy.AnonymizationRules...)
 	return policy
 }
@@ -124,13 +131,20 @@ func normalizeGuardrailPolicy(name string, policy GuardrailPolicy) (GuardrailPol
 		return GuardrailPolicy{}, ErrInvalidGuardrailPolicy
 	}
 	policy.AnonymizationRules = normalizedAnonymizationRuleSet(policy.AnonymizationRules)
-	if name == "" || len(name) > 128 || len(policy.Description) > 1024 || (!policy.DLP && !policy.AV && policy.Anonymization == "") || (policy.OutputDLP && !policy.DLP) || !validAnonymizationPolicy(policy) {
+	if name == "" || len(name) > 128 || len(policy.Description) > 1024 || (!policy.DLP && !policy.AV && policy.Anonymization == "" && policy.PromptInjection == nil) || (policy.OutputDLP && !policy.DLP) || !validAnonymizationPolicy(policy) {
 		return GuardrailPolicy{}, ErrInvalidGuardrailPolicy
 	}
 	for _, value := range name {
 		if !(value >= 'a' && value <= 'z') && !(value >= 'A' && value <= 'Z') && !(value >= '0' && value <= '9') && value != '-' && value != '_' && value != '.' {
 			return GuardrailPolicy{}, ErrInvalidGuardrailPolicy
 		}
+	}
+	if policy.PromptInjection != nil {
+		normalized, err := promptinjection.Normalize(*policy.PromptInjection)
+		if err != nil {
+			return GuardrailPolicy{}, ErrInvalidGuardrailPolicy
+		}
+		policy.PromptInjection = &normalized
 	}
 	policy.Name = name
 	return policy, nil

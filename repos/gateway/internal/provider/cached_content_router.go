@@ -33,7 +33,7 @@ func (r Router) CreateCachedContent(ctx context.Context, identity modules.Reques
 		}
 		attempt := identity
 		attempt.Request = request
-		attempt = providerAttemptContext(attempt, endpoint)
+		attempt = r.providerAttemptContext(attempt, endpoint)
 		attempt.Metadata["gateway.api_type"] = "cached_content"
 		r.applyCatalogPricing(ctx, &attempt, endpoint, request.Model)
 		if admit != nil {

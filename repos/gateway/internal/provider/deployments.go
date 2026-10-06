@@ -249,6 +249,12 @@ func (r *Router) DeleteModelDeployment(id string) error {
 
 func (r Router) runtimeEndpoints() []Endpoint {
 	_ = (&r).refreshControlPlane(context.Background())
+	return r.activeEndpoints()
+}
+
+// activeEndpoints reads the current immutable registries without refreshing
+// persistent state. It is safe to use while a control-plane mutation holds its lock.
+func (r Router) activeEndpoints() []Endpoint {
 	configured := r.configuredEndpoints()
 	if r.deployments == nil {
 		return configured

@@ -129,7 +129,7 @@ func (r Router) CountResponseInputTokens(ctx context.Context, req modules.Reques
 	if endpoint.GuardrailPolicy != "" && !endpoint.GuardrailPolicyValid {
 		return openai.ResponseInputTokenCount{}, modules.ErrGuardrailUnavailable
 	}
-	attempt := providerAttemptContext(req, endpoint)
+	attempt := r.providerAttemptContext(req, endpoint)
 	if err := r.modules.RunTokenCount(ctx, &attempt); err != nil {
 		return openai.ResponseInputTokenCount{}, fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err)
 	}

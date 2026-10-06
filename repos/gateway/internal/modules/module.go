@@ -121,6 +121,25 @@ func NewPipelineWithObserver(modules []Module, observer ModuleObserver) Pipeline
 	return Pipeline{modules: modules, observer: observer}
 }
 
+// Prepend returns an independent pipeline retaining its observer.
+func (p Pipeline) Prepend(module Module) Pipeline {
+	result := make([]Module, 0, len(p.modules)+1)
+	result = append(result, module)
+	result = append(result, p.modules...)
+	return Pipeline{modules: result, observer: p.observer}
+}
+
+// Without returns an independent pipeline excluding one module.
+func (p Pipeline) Without(name string) Pipeline {
+	result := make([]Module, 0, len(p.modules))
+	for _, module := range p.modules {
+		if module.Name() != name {
+			result = append(result, module)
+		}
+	}
+	return Pipeline{modules: result, observer: p.observer}
+}
+
 func (p Pipeline) HasModule(name string) bool {
 	for _, module := range p.modules {
 		if module.Name() == name {
