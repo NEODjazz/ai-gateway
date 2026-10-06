@@ -1,5 +1,22 @@
 # Безопасность и границы данных
 
+[SSO settings в UI](admin-sso-settings.md) используют encrypted PostgreSQL
+document, точные issuer/audience, предварительную directory binding и явные
+role mappings. Активация требует проверочного входа тем же administrator и
+virtual-key session; права directory повторно проверяются перед сменой trust.
+Browser connection проверяет ID token своего client и создаёт локальную
+server-side session. API access-token issuers настраиваются независимо;
+активация browser connection не меняет доверие API-клиентов. Organization
+берётся из проверенной directory binding, а не из произвольного request header.
+Подробности изоляции и `org_admin`: [Organization identity](organization-identity.md).
+
+Provisioned OIDC users используют `AUTH_JWT_IDENTITY_MODE=directory`: проверенная
+issuer/subject/audience identity связывается с активным пользователем directory,
+а права, группы и лимиты загружаются при каждой авторизации. Roles должны совпасть
+с явным mapping и ролями directory. Пустые grants запрещают доступ; идентификатор
+credential стабилен при refresh. Default `legacy` сохраняет старый claims-only
+режим и требует явного переключения для этой политики. См. [Auth](../repos/auth/README.md).
+
 ## Authentication
 
 Клиент передаёт `Authorization: Bearer <credential>`. Gateway отправляет токен
@@ -11,6 +28,26 @@ Virtual Keys хранятся как HMAC-SHA256 lookup values с отдельн
 Production OIDC использует direct JWKS URL, точные issuer/audience и только
 RS256/ES256. HS256 и built-in demo/static keys предназначены для migration и
 локальной разработки.
+
+### Независимые границы browser и API trust
+
+```mermaid
+flowchart LR
+    Browser["Browser login"] --> OIDC["Selected browser OIDC connection"]
+    OIDC --> ID["Verified ID token: issuer, audience, nonce, PKCE"]
+    ID --> Directory["Approved directory binding, organization and roles"]
+    Directory --> Session["Local server session + HttpOnly cookie"]
+    Session --> UI["UI and scoped Gateway authorization"]
+    API["API client access token"] --> Issuer["Independent API issuer trust / JWKS"]
+    Issuer --> APIAuth["API identity mode and grants"]
+    APIAuth --> Gateway["Authorized inference"]
+    UI --> Gateway
+```
+
+Смена browser connection не добавляет API issuer. Session revocation, directory
+membership и organization binding проверяются сервером; cookie или UI dropdown
+не создаёт произвольную tenant identity. Tokens и secrets не входят в диаграмму
+межсервисного content pipeline.
 
 ## Межсервисные контракты
 
@@ -24,6 +61,25 @@ RS256/ES256. HS256 и built-in demo/static keys предназначены дл�
 
 `RequestContext` не является network DTO. Remote responses применяются по
 allowlist полей и не могут перезаписать identity или routing state целиком.
+При ошибке provider в request metadata остаются статус и, где он определён,
+ограниченный `failure_class`. Raw error и текст ошибки фонового ответа не
+копируются в metadata, передаваемую последующим модулям или сохраняемую в
+background jobs. Provider и module traces, а также логи ошибок provider
+worker, cache и optional modules, не записывают сырой текст ошибки.
+Это также относится к optional modules сервисов Auth, Billing и Anonymizer:
+их журналы содержат имя модуля и факт пропуска, но не текст ошибки.
+Gateway operational logs пишут фиксированный тип сбоя без пользовательских
+идентификаторов и raw error; внешний `X-Request-ID` в HTTP-логах и traces
+представлен SHA-256 fingerprint. Журнал management actions сервиса Auth
+также записывает только fingerprint внешнего request ID.
+Нестандартные HTTP methods записываются как `OTHER`.
+Billing readiness возвращает только фиксированную причину недоступности,
+не раскрывая подробности подключения к хранилищу.
+Внутренний `/usage` Billing не переносит сырой `error` в metadata обработки;
+для диагностики сохраняются статус и ограниченный `failure_class`.
+Новые ошибки доставки durable billing outbox записываются в PostgreSQL как
+ограниченные коды `event_decode_failed` или `usage_delivery_failed`. Ранее
+сохранённые значения `last_error` это изменение не переписывает.
 
 Internal `/authorize`, `/usage`, `/scan`, `/anonymize` и `/internal/v1/*`
 должны оставаться cluster-internal. Service contracts защищаются отдельными
@@ -33,16 +89,26 @@ Virtual Key или provider credential.
 
 ## Guardrails
 
-Для каждой provider attempt порядок следующий: DLP, AV, anonymization, billing
+Для каждой provider attempt порядок следующий: opt-in prompt injection detection, DLP, AV, anonymization, billing
 reserve, provider, billing commit/cancel, deanonymization. DLP/AV получают
 проекцию до masking, поэтому scanner видит исходный чувствительный текст, но не
 identity/credential.
+
+[Prompt injection protection](prompt-injection.md) проверяет вход до основной
+модели и cache replay. Классификатор получает только проекцию содержимого;
+его отдельный execution ID и billing сохраняют identity исходного клиента.
+Guardrail monitor хранит только policy, результат и время проверки.
 
 Анонимизация защищает provider boundary, а не меняет клиентский контракт:
 gateway восстанавливает request-local placeholders в успешном ответе. Поэтому
 проверять masking нужно на входе provider или через cluster-internal ответ
 anonymizer; наличие исходного значения в клиентском ответе само по себе не
 означает, что оно было отправлено provider.
+
+Chat DLP и анонимизация включают обычный текст и неподписанное
+`reasoning_content` во входных сообщениях и ответах. Подписанные reasoning-блоки
+входят в DLP-проекцию, но не изменяются, поскольку изменение текста сделало бы
+подпись недействительной.
 
 Guardrail policy также задаёт профиль анонимизации: `disabled`, `basic`,
 `strict` или `custom`. `custom` содержит явный набор имён правил, доступных через
@@ -99,3 +165,6 @@ Gateway отвечает только на `ping`; необъявленные pr
 - Swagger `Try it out` и demo/static auth отключайте вне trusted environment;
 - Request Logs, traces и metrics не должны содержать prompt, response, Bearer,
   raw provider error или unbounded tenant labels.
+
+Порядок provisioning, scope, отзыва и безопасного legacy cutover описан в
+[Keycloak/OpenWebUI profile](identity-keycloak-openwebui.md).

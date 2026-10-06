@@ -17,6 +17,12 @@ type ChatGenerationOptions struct {
 	Store                *bool                 `json:"store,omitempty"`
 	Modalities           []string              `json:"modalities,omitempty"`
 	Audio                *ChatAudioOptions     `json:"audio,omitempty"`
+	Moderation           *ProviderModeration   `json:"moderation,omitempty"`
+	ClearThinking        *bool                 `json:"clear_thinking,omitempty"`
+	CitationOptions      string                `json:"citation_options,omitempty"`
+	Thinking             *ChatThinkingOptions  `json:"thinking,omitempty"`
+	IncludeReasoning     *bool                 `json:"include_reasoning,omitempty"`
+	ReasoningFormat      string                `json:"reasoning_format,omitempty"`
 	ReasoningEffort      string                `json:"reasoning_effort,omitempty"`
 	SafePrompt           *bool                 `json:"safe_prompt,omitempty"`
 	N                    *int                  `json:"n,omitempty"`
@@ -42,6 +48,10 @@ type ChatGenerationOptions struct {
 	LogitBias            map[string]int        `json:"logit_bias,omitempty"`
 }
 
+type ChatThinkingOptions struct {
+	Type string `json:"type"`
+}
+
 type ChatWebSearchOptions struct {
 	SearchContextSize string                     `json:"search_context_size,omitempty"`
 	UserLocation      *ChatWebSearchUserLocation `json:"user_location,omitempty"`
@@ -51,6 +61,12 @@ type ChatWebSearchOptions struct {
 	BlockedDomains    []string                   `json:"-"`
 	AllowedCallers    []string                   `json:"-"`
 	ResponseInclusion string                     `json:"-"`
+	GeminiTimeRange   *GeminiSearchTimeRange     `json:"-"`
+}
+
+type GeminiSearchTimeRange struct {
+	StartTime string `json:"startTime"`
+	EndTime   string `json:"endTime"`
 }
 
 type ChatWebFetchOptions struct {
@@ -79,6 +95,7 @@ type PromptCacheOptions struct {
 	Mode                 string `json:"mode,omitempty"`
 	TTL                  string `json:"ttl,omitempty"`
 	ComparisonResponseID string `json:"comparison_response_id,omitempty"`
+	Prewarm              *bool  `json:"prewarm,omitempty"`
 }
 
 type ChatPrediction struct {
@@ -88,6 +105,9 @@ type ChatPrediction struct {
 
 func (o ChatGenerationOptions) Validate() string {
 	if message := ValidateMetadata(o.Metadata); message != "" {
+		return message
+	}
+	if message := validateProviderModeration(o.Moderation); message != "" {
 		return message
 	}
 	if o.N != nil && (*o.N < 1 || *o.N > 128) {
@@ -127,6 +147,9 @@ func (o ChatGenerationOptions) Validate() string {
 		if message := ValidatePromptCacheOptions(o.PromptCacheOptions); message != "" {
 			return message
 		}
+		if o.PromptCacheOptions.Prewarm != nil {
+			return "prompt_cache_options.prewarm is only supported by Responses"
+		}
 		if o.PromptCacheOptions.ComparisonResponseID != "" {
 			return "prompt_cache_options.comparison_response_id is only supported by Responses"
 		}
@@ -137,10 +160,24 @@ func (o ChatGenerationOptions) Validate() string {
 	if o.PromptMode != "" && o.PromptMode != "reasoning" {
 		return "prompt_mode must be reasoning"
 	}
+	if o.IncludeReasoning != nil && o.ReasoningFormat != "" {
+		return "include_reasoning and reasoning_format are mutually exclusive"
+	}
+	if o.CitationOptions != "" && o.CitationOptions != "enabled" && o.CitationOptions != "disabled" {
+		return "citation_options must be enabled or disabled"
+	}
+	if o.Thinking != nil && o.Thinking.Type != "enabled" && o.Thinking.Type != "disabled" {
+		return "thinking.type must be enabled or disabled"
+	}
+	switch o.ReasoningFormat {
+	case "", "hidden", "raw", "parsed":
+	default:
+		return "reasoning_format must be hidden, raw, or parsed"
+	}
 	if message := validateChatPrediction(o.Prediction); message != "" {
 		return message
 	}
-	if !validServiceTier(o.ServiceTier) {
+	if !ValidServiceTier(o.ServiceTier) {
 		return "unsupported service_tier value"
 	}
 	if !validVerbosity(o.Verbosity) {
@@ -367,9 +404,21 @@ func responseTextVerbosity(text any) (string, bool, bool) {
 	return verbosity, true, validVerbosity(verbosity)
 }
 
-func validServiceTier(value string) bool {
+func ValidServiceTier(value string) bool {
 	switch value {
 	case "", "auto", "default", "on_demand", "flex", "performance", "scale", "priority", "fast", "ultrafast", "standard_only":
+		return true
+	default:
+		return false
+	}
+}
+
+func ValidReportedServiceTier(value string) bool {
+	if ValidServiceTier(value) {
+		return true
+	}
+	switch value {
+	case "standard", "batch":
 		return true
 	default:
 		return false

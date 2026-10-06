@@ -1,0 +1,42 @@
+# Reviewed API contract changes
+
+The compatibility gate compares this branch with API version 0.1.416 at
+`c32f5652691ba11d8f8e63894e7fcb1be67f8c70`. Its threshold remains
+`WARN`. The adjacent files contain exact, endpoint-specific findings accepted
+for the 0.1.474 update. New findings still fail CI.
+
+- A2A result schemas inherit optional media-resolution data on parts. Existing
+  result shapes are retained.
+- Vector-store responses may return static chunking only when the caller selected
+  static chunking; existing auto responses retain their shape.
+- New native tool variants shift `oneOf` positions in the request schema. The
+  previously accepted variants remain present and covered by request tests.
+- Response enums gained provider capabilities and execution states. Consumers
+  must handle unfamiliar values; the contract lists those now emitted.
+- `prompt_cache_key` and `user` gained explicit length bounds to prevent
+  unbounded request identities. Callers exceeding those bounds receive a
+  validation error.
+
+Remove these accepted findings once the 0.1.474 contract is the comparison
+baseline. Do not use this list for unrelated API changes.
+
+## Saved agent instructions
+
+Agent list and PUT responses now expose truthful `content_stored` and
+`execution_supported` booleans instead of constant false values. Stored content
+means explicitly configured encrypted instructions; executable profiles use the
+A2A runtime. Clients must read these booleans rather than assume false. Omitted
+instructions retain metadata-only storage behavior. Instruction text remains
+absent from list and PUT responses.
+
+The compatibility workflow loads the adjacent error and warning lists. Each
+entry identifies one concrete operation and finding, including the four agent flag
+changes; the WARN threshold and all other checks remain unchanged. New paths,
+fields, status codes or values still fail the gate. Remove the accepted findings
+when the comparison baseline includes these contracts.
+
+The files use the CLI's operation-and-description format, with unescaped path
+parameters. Verification with oasdiff v1.26.1 accepted the reviewed contract and
+rejected three temporary unreviewed changes: deleting `/v1/models`, narrowing
+the agent iteration limit and changing the agent-list response status. No broad
+endpoint exclusions or severity overrides are configured.

@@ -10,11 +10,11 @@ import type { Row } from "../components/DataTable";
 import { formatTimestamp } from "../format";
 
 type Summary = { total: number; passed: number; rejected: number; unavailable: number; duration_ms: number; average_duration_ms: number };
-type Event = { occurred_at: string; request_id?: string; policy?: string; module: "dlp" | "av"; source: "inference" | "inference_output" | "compliance" | "guardrail_api"; outcome: "passed" | "rejected" | "unavailable"; duration_ms: number };
+type Event = { occurred_at: string; request_id?: string; policy?: string; module: "dlp" | "av" | "prompt_injection"; source: "inference" | "inference_output" | "compliance" | "guardrail_api" | "prompt_injection_judge"; outcome: "passed" | "rejected" | "unavailable"; duration_ms: number };
 type Bucket = { started_at: string; summary: Summary };
 type Filters = { window: "retained" | "15m" | "1h" | "24h"; module?: string; policy?: string; outcome?: string; source?: string };
 type Report = { retention: number; retained_events: number; retention_full: boolean; scope: "shared_redis" | "current_replica"; store_available: boolean; store_errors: number; started_at: string; oldest_retained_at?: string; filters: Filters; summary: Summary; by_module: Record<string, Summary>; filtered_summary: Summary; filtered_by_module: Record<string, Summary>; by_policy: Record<string, Summary>; timeline: Bucket[]; events: Event[]; content_stored: boolean };
-type Policy = { name: string; description?: string; dlp: boolean; av: boolean; enabled: boolean };
+type Policy = { name: string; description?: string; dlp: boolean; av: boolean; prompt_injection?: unknown; enabled: boolean };
 
 const emptySummary: Summary = { total: 0, passed: 0, rejected: 0, unavailable: 0, duration_ms: 0, average_duration_ms: 0 };
 
@@ -32,7 +32,7 @@ function GuardrailFilters({ filters, policies, onChange }: { filters: Filters; p
   return <section className="filter-bar guardrail-filter-bar" aria-label="Guardrail report filters">
     <label><span>Window</span><select aria-label="Guardrail window" value={filters.window} onChange={(event) => onChange({ ...filters, window: event.target.value as Filters["window"] })}><option value="retained">Retained history</option><option value="15m">Last 15 minutes</option><option value="1h">Last hour</option><option value="24h">Last 24 hours</option></select></label>
     <label><span>Policy</span><select aria-label="Guardrail policy filter" value={filters.policy || ""} onChange={(event) => onChange({ ...filters, policy: event.target.value || undefined })}><option value="">All policies</option>{policies.map((policy) => <option key={policy.name} value={policy.name}>{policy.name}</option>)}</select></label>
-    <label><span>Source</span><select aria-label="Guardrail source filter" value={filters.source || ""} onChange={(event) => onChange({ ...filters, source: event.target.value || undefined })}><option value="">All sources</option><option value="inference">Inference input</option><option value="inference_output">Inference output</option><option value="compliance">Compliance playground</option><option value="guardrail_api">Guardrail API</option></select></label>
+    <label><span>Source</span><select aria-label="Guardrail source filter" value={filters.source || ""} onChange={(event) => onChange({ ...filters, source: event.target.value || undefined })}><option value="">All sources</option><option value="inference">Inference input</option><option value="inference_output">Inference output</option><option value="compliance">Compliance playground</option><option value="prompt_injection_judge">Classifier controls</option><option value="guardrail_api">Guardrail API</option></select></label>
     <label><span>Outcome</span><select aria-label="Guardrail outcome filter" value={filters.outcome || ""} onChange={(event) => onChange({ ...filters, outcome: event.target.value || undefined })}><option value="">All outcomes</option><option value="passed">Passed</option><option value="rejected">Rejected</option><option value="unavailable">Unavailable</option></select></label>
     <button className="secondary" onClick={() => onChange({ window: "retained" })}>Reset</button>
   </section>;
@@ -43,13 +43,13 @@ export function GuardrailMonitorPage() {
   const navigate = useNavigate();
   const { module } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
-  const selectedModule = module === "dlp" || module === "av" ? module : undefined;
+  const selectedModule = module === "dlp" || module === "av" || module === "prompt_injection" ? module : undefined;
   const [filters, setFilters] = useState<Filters>(() => {
     const requestedWindow = searchParams.get("window");
     const window = requestedWindow === "15m" || requestedWindow === "1h" || requestedWindow === "24h" ? requestedWindow : "retained";
     const requestedSource = searchParams.get("source");
     const requestedOutcome = searchParams.get("outcome");
-    const source = requestedSource === "inference" || requestedSource === "inference_output" || requestedSource === "compliance" || requestedSource === "guardrail_api" ? requestedSource : undefined;
+    const source = requestedSource === "inference" || requestedSource === "inference_output" || requestedSource === "compliance" || requestedSource === "guardrail_api" || requestedSource === "prompt_injection_judge" ? requestedSource : undefined;
     const outcome = requestedOutcome === "passed" || requestedOutcome === "rejected" || requestedOutcome === "unavailable" ? requestedOutcome : undefined;
     return { window, policy: searchParams.get("policy")?.slice(0, 128) || undefined, source, outcome };
   });
@@ -71,7 +71,7 @@ export function GuardrailMonitorPage() {
   useEffect(() => { const controller = new AbortController(); void load(controller.signal); return () => controller.abort(); }, [load]);
   const summary = report?.filtered_summary || emptySummary;
   const passRate = summary.total ? 100 - percentage(summary.rejected + summary.unavailable, summary.total) : 0;
-  const moduleRows: Row[] = useMemo(() => ["dlp", "av"].map((name) => { const item = report?.filtered_by_module[name] || emptySummary; const activePolicies = policies.filter((policy) => policy.enabled && policy[name as "dlp" | "av"]).length; return { id: name, module: name.toUpperCase(), evaluations: item.total, rejected: item.rejected, unavailable: item.unavailable, failure_rate: `${percentage(item.rejected + item.unavailable, item.total).toFixed(1)}%`, average_latency: `${Math.round(item.average_duration_ms)} ms`, policies: activePolicies, status: status(item), _module: name }; }), [policies, report]);
+  const moduleRows: Row[] = useMemo(() => ["dlp", "av", "prompt_injection"].map((name) => { const item = report?.filtered_by_module[name] || emptySummary; const activePolicies = policies.filter((policy) => policy.enabled && policy[name as "dlp" | "av" | "prompt_injection"]).length; return { id: name, module: name.toUpperCase(), evaluations: item.total, rejected: item.rejected, unavailable: item.unavailable, failure_rate: `${percentage(item.rejected + item.unavailable, item.total).toFixed(1)}%`, average_latency: `${Math.round(item.average_duration_ms)} ms`, policies: activePolicies, status: status(item), _module: name }; }), [policies, report]);
   const eventRows: Row[] = (report?.events || []).map((event, index) => ({ id: `${event.request_id || "event"}-${event.occurred_at}-${index}`, occurred_at: formatTimestamp(event.occurred_at), request_id: event.request_id || "—", policy: event.policy || "No policy", module: event.module.toUpperCase(), source: event.source, outcome: event.outcome, duration: `${event.duration_ms} ms` }));
   const policyRows: Row[] = Object.entries(report?.by_policy || {}).map(([name, item]) => ({ id: name || "unassigned", policy: name || "No policy", evaluations: item.total, rejected: item.rejected, unavailable: item.unavailable, failure_rate: `${percentage(item.rejected + item.unavailable, item.total).toFixed(1)}%`, average_latency: `${Math.round(item.average_duration_ms)} ms` }));
   function changeFilters(next: Filters) {

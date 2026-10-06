@@ -208,7 +208,11 @@ func (p OpenAICompatible) postImageJSON(ctx context.Context, path string, body [
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return openai.ImageGenerationResponse{}, responseStatusError(p.providerName(), response)
 	}
-	return decodeImageGenerationResponseWithProviderCost(response.Body, request, allowProviderCost)
+	return p.decodeImageResponse(response.Body, request, allowProviderCost)
+}
+
+func (p OpenAICompatible) decodeImageResponse(body io.Reader, request openai.ImageGenerationRequest, allowProviderCost bool) (openai.ImageGenerationResponse, error) {
+	return decodeImageGenerationResponsePolicy(body, request, allowProviderCost, p.imageUnitUsage)
 }
 
 func decodeImageGenerationResponse(body io.Reader, request openai.ImageGenerationRequest) (openai.ImageGenerationResponse, error) {
@@ -216,6 +220,10 @@ func decodeImageGenerationResponse(body io.Reader, request openai.ImageGeneratio
 }
 
 func decodeImageGenerationResponseWithProviderCost(body io.Reader, request openai.ImageGenerationRequest, allowProviderCost bool) (openai.ImageGenerationResponse, error) {
+	return decodeImageGenerationResponsePolicy(body, request, allowProviderCost, false)
+}
+
+func decodeImageGenerationResponsePolicy(body io.Reader, request openai.ImageGenerationRequest, allowProviderCost, allowMissingUsage bool) (openai.ImageGenerationResponse, error) {
 	payload, err := io.ReadAll(io.LimitReader(body, maxImageGenerationResponseBytes+1))
 	if err != nil || len(payload) > maxImageGenerationResponseBytes {
 		return openai.ImageGenerationResponse{}, errors.New("image generation response exceeds limit")
@@ -228,7 +236,7 @@ func decodeImageGenerationResponseWithProviderCost(body io.Reader, request opena
 	if err := decoder.Decode(&struct{}{}); err != io.EOF {
 		return result, errors.New("invalid trailing image response data")
 	}
-	if err := validateImageGenerationResponseCountWithProviderCost(result, request, true, allowProviderCost); err != nil {
+	if err := validateImageGenerationResponsePolicy(result, request, true, allowProviderCost, allowMissingUsage); err != nil {
 		return openai.ImageGenerationResponse{}, err
 	}
 	return result, nil
@@ -248,6 +256,13 @@ func validateImageGenerationResponseCountWithProviderCost(response openai.ImageG
 
 func validateImageGenerationUnitResponse(response openai.ImageGenerationResponse, request openai.ImageGenerationRequest) error {
 	return validateImageGenerationResponsePolicy(response, request, true, false, true)
+}
+
+func validateAdapterImageResponse(client any, response openai.ImageGenerationResponse, request openai.ImageGenerationRequest) error {
+	if units, ok := client.(imageUnitUsageClient); ok && units.UsesImageUnitUsage() {
+		return validateImageGenerationUnitResponse(response, request)
+	}
+	return validateImageGenerationResponse(response, request)
 }
 
 func validateImageGenerationResponsePolicy(response openai.ImageGenerationResponse, request openai.ImageGenerationRequest, exactCount, allowProviderCost, allowMissingUsage bool) error {

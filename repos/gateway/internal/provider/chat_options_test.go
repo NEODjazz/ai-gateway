@@ -261,8 +261,9 @@ func TestChatCompletionJSONResponseIsBoundedAndExact(t *testing.T) {
 
 func TestCompatibleChatRejectsInvalidResponseEnvelope(t *testing.T) {
 	for name, payload := range map[string]string{
-		"negative timestamp": `{"created":-1,"choices":[]}`,
-		"oversized metadata": `{"metadata":{"trace":"` + strings.Repeat("x", 513) + `"},"choices":[]}`,
+		"negative timestamp":   `{"created":-1,"choices":[]}`,
+		"oversized metadata":   `{"metadata":{"trace":"` + strings.Repeat("x", 513) + `"},"choices":[]}`,
+		"unknown service tier": `{"service_tier":"unknown","choices":[]}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -305,7 +306,7 @@ func TestCompatibleChatRejectsInvalidUsageBeforeDelivery(t *testing.T) {
 }
 
 func TestGenerationControlsAreRejectedByNativeAdapters(t *testing.T) {
-	for _, body := range []string{`{"metadata":{"trace":"one"}}`, `{"store":false}`, `{"modalities":["text"]}`, `{"reasoning_effort":"high"}`, `{"n":2}`, `{"safety_identifier":"hashed-user"}`, `{"prompt_cache_key":"tenant-thread"}`, `{"prompt_cache_options":{"mode":"explicit"}}`, `{"prompt_cache_retention":"24h"}`, `{"prediction":{"type":"content","content":"expected"}}`, `{"service_tier":"priority"}`, `{"user":"legacy-user"}`, `{"verbosity":"low"}`, `{"web_search_options":{}}`, `{"logprobs":false}`, `{"top_logprobs":0}`, `{"frequency_penalty":0}`, `{"presence_penalty":0}`, `{"min_p":0}`, `{"top_k":0}`, `{"top_a":0}`, `{"repetition_penalty":1}`, `{"logit_bias":{"1":0}}`} {
+	for _, body := range []string{`{"metadata":{"trace":"one"}}`, `{"store":false}`, `{"modalities":["text"]}`, `{"thinking":{"type":"enabled"}}`, `{"reasoning_effort":"high"}`, `{"n":2}`, `{"safety_identifier":"hashed-user"}`, `{"prompt_cache_key":"tenant-thread"}`, `{"prompt_cache_options":{"mode":"explicit"}}`, `{"prompt_cache_retention":"24h"}`, `{"prediction":{"type":"content","content":"expected"}}`, `{"service_tier":"priority"}`, `{"user":"legacy-user"}`, `{"verbosity":"low"}`, `{"web_search_options":{}}`, `{"logprobs":false}`, `{"top_logprobs":0}`, `{"frequency_penalty":0}`, `{"presence_penalty":0}`, `{"min_p":0}`, `{"top_k":0}`, `{"top_a":0}`, `{"repetition_penalty":1}`, `{"logit_bias":{"1":0}}`} {
 		var request openai.ChatCompletionRequest
 		if err := json.Unmarshal([]byte(body), &request); err != nil {
 			t.Fatal(err)
@@ -453,6 +454,52 @@ func TestChatWebSearchDisablesResponseCaches(t *testing.T) {
 	}
 }
 
+func TestGeminiSearchTimeRangeRequiresNativeCapability(t *testing.T) {
+	request := openai.ChatCompletionRequest{Model: "test", Messages: []openai.Message{{Role: "user", Content: "news"}}, ChatGenerationOptions: openai.ChatGenerationOptions{WebSearchOptions: &openai.ChatWebSearchOptions{GeminiTimeRange: &openai.GeminiSearchTimeRange{StartTime: "2026-01-01T00:00:00Z", EndTime: "2026-02-01T00:00:00Z"}}}}
+	if got := strings.Join(requiredChatCapabilities(request, false), ","); got != "chat,web_search,gemini_search_time_range" {
+		t.Fatalf("search time-range routing requirements=%s", got)
+	}
+}
+
+func TestGeminiFileSearchDisablesResponseCaches(t *testing.T) {
+	request := modules.RequestContext{CredentialID: "key", Request: openai.ChatCompletionRequest{Model: "test", Messages: []openai.Message{{Role: "user", Content: "find policy"}}, GeminiFileSearch: &openai.GeminiFileSearchConfig{StoreNames: []string{"fileSearchStores/policies"}}}}
+	if providerCacheKey("chat", request) != "" {
+		t.Fatal("exact cache allowed file search")
+	}
+	if _, _, ok := semanticRequest(request, Endpoint{Name: "test"}); ok {
+		t.Fatal("semantic cache allowed file search")
+	}
+	if got := strings.Join(requiredChatCapabilities(request.Request, false), ","); got != "chat,gemini_file_search" {
+		t.Fatalf("file search routing requirements=%s", got)
+	}
+}
+
+func TestGeminiComputerUseDisablesResponseCaches(t *testing.T) {
+	request := modules.RequestContext{CredentialID: "key", Request: openai.ChatCompletionRequest{Model: "test", Messages: []openai.Message{{Role: "user", Content: "browse"}}, GeminiComputerUse: &openai.GeminiComputerUseConfig{Environment: "ENVIRONMENT_BROWSER"}}}
+	if providerCacheKey("chat", request) != "" {
+		t.Fatal("exact cache allowed computer use")
+	}
+	if _, _, ok := semanticRequest(request, Endpoint{Name: "test"}); ok {
+		t.Fatal("semantic cache allowed computer use")
+	}
+	if got := strings.Join(requiredChatCapabilities(request.Request, false), ","); got != "chat,gemini_computer_use" {
+		t.Fatalf("computer use routing requirements=%s", got)
+	}
+}
+
+func TestGeminiMCPDisablesResponseCaches(t *testing.T) {
+	request := modules.RequestContext{CredentialID: "key", Request: openai.ChatCompletionRequest{Model: "test", Messages: []openai.Message{{Role: "user", Content: "forecast"}}, GeminiMCPServerIDs: []string{"weather"}}}
+	if providerCacheKey("chat", request) != "" {
+		t.Fatal("exact cache allowed MCP")
+	}
+	if _, _, ok := semanticRequest(request, Endpoint{Name: "test"}); ok {
+		t.Fatal("semantic cache allowed MCP")
+	}
+	if got := strings.Join(requiredChatCapabilities(request.Request, false), ","); got != "chat,gemini_mcp" {
+		t.Fatalf("MCP routing requirements=%s", got)
+	}
+}
+
 func TestGeminiCodeExecutionDisablesResponseCaches(t *testing.T) {
 	request := modules.RequestContext{CredentialID: "key", Request: openai.ChatCompletionRequest{Model: "test", Messages: []openai.Message{{Role: "user", Content: "calculate"}}, GeminiCodeExecution: true}}
 	if providerCacheKey("chat", request) != "" {
@@ -489,6 +536,70 @@ func TestGeminiGoogleMapsDisablesResponseCaches(t *testing.T) {
 	}
 	if got := strings.Join(requiredChatCapabilities(request.Request, false), ","); got != "chat,google_maps" {
 		t.Fatalf("Google Maps routing requirements=%s", got)
+	}
+}
+
+func TestVertexAudioTimestampRequiresAudioCapabilities(t *testing.T) {
+	enabled := true
+	request := modules.RequestContext{CredentialID: "key", Request: openai.ChatCompletionRequest{
+		Model: "test",
+		Messages: []openai.Message{{Role: "user", Content: []any{
+			map[string]any{"type": "input_audio", "input_audio": map[string]any{"data": "UklGRgAAAABXQVZF", "format": "wav"}},
+		}}},
+		GeminiAudioTimestamp: &enabled,
+	}}
+	if providerCacheKey("chat", request) != "" {
+		t.Fatal("exact cache allowed timestamp-aware audio")
+	}
+	if _, _, ok := semanticRequest(request, Endpoint{Name: "test"}); ok {
+		t.Fatal("semantic cache allowed timestamp-aware audio")
+	}
+	if got := strings.Join(requiredChatCapabilities(request.Request, false), ","); got != "chat,audio_input,gemini_audio_timestamp" {
+		t.Fatalf("audio timestamp routing requirements=%s", got)
+	}
+}
+
+func TestGeminiMediaResolutionRequiresMediaCapabilities(t *testing.T) {
+	request := modules.RequestContext{CredentialID: "key", Request: openai.ChatCompletionRequest{
+		Model: "test",
+		Messages: []openai.Message{{Role: "user", Content: []any{
+			map[string]any{"type": "image_url", "image_url": map[string]any{"url": "data:image/png;base64,iVBORw0KGgo="}},
+		}}},
+		GeminiMediaResolution: "MEDIA_RESOLUTION_HIGH",
+	}}
+	changed := request
+	changed.Request.GeminiMediaResolution = "MEDIA_RESOLUTION_LOW"
+	if providerCacheKey("chat", request) == providerCacheKey("chat", changed) {
+		t.Fatal("exact cache ignored media resolution")
+	}
+	if _, _, ok := semanticRequest(request, Endpoint{Name: "test"}); ok {
+		t.Fatal("semantic cache allowed media-resolution request")
+	}
+	if got := strings.Join(requiredChatCapabilities(request.Request, false), ","); got != "chat,vision,gemini_media_resolution" {
+		t.Fatalf("media resolution routing requirements=%s", got)
+	}
+	request.Request.GeminiMediaResolution = ""
+	part := request.Request.Messages[0].Content.([]any)[0].(map[string]any)
+	part["gemini_media_resolution"] = "MEDIA_RESOLUTION_ULTRA_HIGH"
+	if got := strings.Join(requiredChatCapabilities(request.Request, false), ","); got != "chat,vision,gemini_media_resolution" {
+		t.Fatalf("per-part media resolution routing requirements=%s", got)
+	}
+}
+
+func TestGeminiMediaProcessingRequiresVideoCapability(t *testing.T) {
+	part := map[string]any{
+		"type": "input_video", "input_video": map[string]any{"data": "AAAADGZ0eXBtcDQy", "format": "mp4"},
+		"gemini_media_processing": "STATIC",
+	}
+	request := modules.RequestContext{CredentialID: "key", Request: openai.ChatCompletionRequest{Model: "test", Messages: []openai.Message{{Role: "user", Content: []any{part}}}}}
+	if providerCacheKey("chat", request) != "" {
+		t.Fatal("exact cache allowed media-processing video request")
+	}
+	if _, _, ok := semanticRequest(request, Endpoint{Name: "test"}); ok {
+		t.Fatal("semantic cache allowed media-processing request")
+	}
+	if got := strings.Join(requiredChatCapabilities(request.Request, false), ","); got != "chat,video_input,gemini_media_processing" {
+		t.Fatalf("media processing routing requirements=%s", got)
 	}
 }
 

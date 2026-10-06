@@ -4,14 +4,109 @@ The console is a route-based React application embedded in the gateway binary at
 `/ui/`. It deliberately uses only documented gateway APIs. A bearer credential
 is validated through `/admin/v1/session` before it is placed in
 `sessionStorage`, so invalid values never open the console and the credential is
-cleared when the browser tab closes.
+cleared when the browser tab closes. Browser OIDC instead uses a local server
+session and HttpOnly cookie; provider ID/access tokens are not stored in browser
+JavaScript. Browser connections and API JWT issuers have independent trust
+configuration; see [SSO settings](../../../docs/admin-sso-settings.md).
 
 The session response contains bounded identity/scope metadata and explicit
-capabilities only. Global management routes require `admin`; the scoped team and
-user directory is available to `team_admin`; Playground and API Reference remain
-available to other authenticated credentials. Hidden navigation is a UX guard,
+capabilities only. Global management routes require `admin`; scoped directories
+use `team_directory`; organization Usage/Logs and virtual keys use
+`organization_reports` and `organization_keys`. `org_admin` remains within its
+verified organization. Playground and API Reference use `inference` and `api_docs`.
+See [UI routes and access](../../../docs/admin-ui.md). Hidden navigation is a UX guard,
 while backend RBAC remains authoritative for every operation. The sidebar shows
 the authenticated user, roles, and optional team without exposing a token.
+
+## Sidebar navigation
+
+The sidebar has five labeled sections: **AI Gateway**, **Observability**,
+**Access Control**, **Developer Tools**, and **Settings**. The navigation manifest
+in `src/app/navigation.ts` is independent of route metadata and includes each
+navigable page once. Existing URLs and router capability checks remain unchanged;
+inaccessible links, empty submenus, and empty sections are omitted.
+
+**Models & endpoints** contains Models, Model onboarding, Providers, Credentials,
+Deployments, and Model groups. **Agentic** contains Agent profiles; **MCP** contains
+MCP servers/toolsets; **Tools** contains Search/Tool policies; **Settings** contains
+Router settings, Logging & alerts, and Single sign-on. Response cache and
+Single sign-on are navigation labels for the existing `/cache` and `/settings`
+routes. They do not change the page contracts.
+
+Submenus start collapsed, except the group containing the current route. Boolean
+disclosure preferences are stored under `ai-gateway.sidebar-collapsed.v1` in
+browser local storage; they contain no identity, credential, or authorization data.
+Malformed or unavailable storage falls back to defaults. A route change reopens
+the active group, while a user can deliberately collapse it on the current page.
+Child detail routes keep their parent link selected.
+
+Gravity UI still provides the layout, logo, footer, and compact-mode control.
+The sidebar list uses semantic headings, links, and disclosure buttons with
+`aria-expanded`. Enter/Space toggles groups; Right/Down enters a group, Left closes
+it, and Up/Down/Home/End move among children. In compact mode group buttons open
+a Gravity UI popup with the same authorized links; Escape closes it and returns
+focus. Both navigation modes scroll independently of the fixed account footer.
+
+## Playground
+
+The configuration rail controls Chat Completions and Responses requests. It
+supports optional temperature and Top P, output limits, JSON object/schema
+output, streaming and advanced JSON. Dedicated controls cannot be overridden by
+advanced parameters; other fields are forwarded unchanged for authoritative
+Gateway/provider validation. Empty optional values retain provider defaults.
+
+Use the current UI session for this Gateway or apply an independent test virtual
+key and optional base URL. Test keys stay in component memory. A custom URL
+requires an explicit test key; console credentials and browser cookies are not
+forwarded. A failed test key does not sign out the console. Model discovery uses
+cancellation and generation checks to discard obsolete results.
+
+Responses can continue with `previous_response_id` or browser conversation
+history. Clear resets the session and continuity. Enter sends a message,
+Shift+Enter inserts a newline, and Stop cancels the request. Failed responses
+never become successful transcript turns or continuation IDs. Text output is
+separate from reasoning and function-argument stream events.
+
+Get code exports cURL, Python or JavaScript with `GATEWAY_API_KEY` as an environment
+variable; it never includes the active credential. Response metadata displays
+reported token usage and measured latency/first-token time. Missing usage stays
+unavailable, and finalized costs remain in Usage & spend.
+
+Image/PDF conversation uploads accept up to five files and 8 MiB total. Retained
+browser history is limited to 40 turns and 32 MiB, with visible notification when
+old pairs are dropped. Prompts are limited to 1 MiB, instructions to 64 KiB and
+outgoing text requests to 24 MiB. Playground JSON, binary and stream reads have
+explicit byte limits. Cost estimates require entered input/output rates and
+reported usage, are labeled estimates and exclude non-token billing adjustments.
+
+Compare runs up to three models in parallel with separate sessions, synchronized
+or individual generation settings, per-panel pricing and errors, cancellation,
+history and CSV results. Compliance runs policy checks without model generation,
+with categorized suites, CSV import/export, at most three concurrent checks and
+distinct allowed, blocked, failed and cancelled outcomes.
+
+The endpoint selector also provides native Messages/Interactions and image,
+embedding, speech, transcription, A2A and MCP forms. These construct their actual
+public request dialects. Speech responses stay binary; MCP execution requires an
+explicit click and a unique idempotency key. Code exports preserve these details
+and offer a bounded preview plus a complete download.
+
+The complete implementation requirements and pending work are tracked in
+[the Playground functional plan](../../../docs/playground-functional-plan.md).
+
+## Dependency override
+
+The lockfile pins the navigation package's codemod dependency to `jscodeshift 17.4.0`.
+This version replaces the vulnerable `micromatch → braces` dependency chain
+(GHSA-vfj7-8cjw-p6xm) with `picomatch`; runtime Gravity UI component versions remain
+unchanged. The gateway does not execute navigation codemods. Keep the scoped
+override until the navigation package updates its dependency, and retain
+`npm audit --omit=dev --audit-level=high` in CI.
+
+A standalone TSX codemod dry run validates the new jscodeshift runner. The packaged
+navigation `v4` codemod cannot be validated: its npm tarball omits the referenced
+`codemods/utils` files. This existing packaging limitation is independent of the
+override and does not affect the console bundle.
 
 ## Development
 
@@ -28,9 +123,10 @@ npm run build
 HTML shell for `/ui/*` deep links and returns `404` for unknown asset paths.
 
 The route manifest contains 36 dashboard destinations. Routes backed by existing
-gateway APIs are fully interactive. Search tools and executable skill content are
-visibly marked unavailable instead of showing mock data or pretending that
-persistence and enforcement exist.
+gateway APIs are interactive; operation availability is checked by the backend.
+Search and Skills use their public APIs and expose adapter/access errors without
+substituting mock results. Registering a tool policy or agent profile does not
+itself implement an agent execution loop.
 
 The Logs workspace combines request and audit events. Request-log view, preset
 or custom date-time window (bounded to 90 days), applied filters, and the selected request detail are URL state, so an
@@ -92,8 +188,10 @@ CSV CRUD forms. Server creation suggests the canonical
 servers, and both tables expose reference counts. Assignment details identify
 Access Groups and non-secret virtual-key IDs. Delete actions are protected by
 server-to-toolset and toolset-to-key/group impact checks. The console does not
-collect MCP OAuth tokens or claim direct network health because MCP execution
-remains provider-mediated in this gateway architecture.
+implement an MCP OAuth login flow. A server can have a write-only encrypted bearer
+token for Gateway-owned discovery and tool execution. Provider execution requires
+explicit `allow_provider_execution`; client-executed tools remain outside
+Gateway's execution/accounting boundary. See [MCP](../../../docs/mcp.md).
 
 Guardrail Monitor is a dedicated overview and module drill-down workspace. It
 uses server-side time, policy, source, outcome and DLP/AV filters; shows pass
@@ -113,3 +211,58 @@ configured team registry with organization-owned virtual keys, offers audited
 assignment and removal actions, and excludes teams owned by another
 organization. Reparenting is intentionally explicit: remove the current
 assignment before selecting the team for a different organization.
+
+Comparison sends shared image/PDF attachments to each selected model and retains
+typed history independently. Model refusals are displayed as output. Structured
+tool calls, safe output images and URL citations are shown separately; copy
+controls report clipboard failures. Native Messages/Interactions conversations
+retain bounded visible history. Speech download filenames use the returned MIME
+type rather than the current form setting.
+
+Playground resource discovery uses the selected credential and requires explicit
+loading. MCP toolsets filter server and tool choices; selected schemas are sent
+as model functions without changing semantic constraints. Function-name grants
+and MCP runtime grants are distinct. Select at most 32 tools and 1 MiB of total
+definitions. Responses supports owned vector stores, automatic code containers
+with selected files, and existing container IDs. Resource pagination and scope
+changes discard stale data. Up to four additional policies can check the current
+text prompt before generation; failures and blocks stop the request. Exported
+code includes those checks. Selected request tags are metadata labels; they do
+not change credential tags, mandatory policies or billing attribution.
+
+Selected MCP function calls in text conversations require explicit approval or
+decline. Tool arguments are shown before execution; a model cannot choose a
+server outside the request's selected bindings. Invalid or unbound calls can only
+be declined. Each call uses one idempotency key across retries. A cancelled or
+failed execution may already have completed at the server; retries use the
+Gateway's existing MCP replay contract. No automatic retry or tool loop runs.
+
+Continue explicitly after resolving every call. Chat sends typed tool messages;
+Responses sends function-call outputs, with either API or browser continuity,
+without an empty user message. Tool results are limited to 128 KiB per call and
+32 calls per response; oversized results fail visibly without truncation. Browser
+history drops complete user/assistant/tool groups within its existing limits.
+Resource selections survive workspace-tab changes and reset on identity, model
+or endpoint changes, including a model changed by refreshed discovery.
+
+A2A requests and code exports include the mandatory `A2A-Version: 1.0` header.
+Generated headers allow only that fixed version and MCP idempotency; they cannot
+override authorization.
+
+Agent Builder uses the active Playground credential for administrator-only
+profile CRUD and A2A execution. Saved instructions are loaded explicitly from
+the protected configuration endpoint; drafts and keys stay in browser memory.
+Unsaved configuration cannot execute. Chat continues only completed durable
+tasks using their task/context IDs, exposes task refresh/cancellation and marks
+stateless responses as independent requests. Batch Test runs 1–20 independent
+prompts with two concurrent requests, normal billing, cancellation, per-test
+errors and CSV export. Connect examples omit credentials and saved instructions.
+The current A2A path performs one generation; its governance profile is not an
+MCP execution loop. Instruction-template profiles remain visibly unavailable.
+
+Compare can mix models and authorized saved agents. A2A panels use server-side
+configuration and verified task continuity, and mark tokens/first-token timing
+as unreported. Each model panel reviews its own MCP calls, preserves idempotency
+on retries and sends typed tool results only on explicit continuation. Pending
+tools/tasks block new shared prompts; clearing a panel resets only its history.
+CSV exports distinguish model and agent targets and include agent task state.

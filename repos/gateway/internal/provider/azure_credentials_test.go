@@ -1,12 +1,15 @@
 package provider
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -58,6 +61,103 @@ func TestAzureTokenSourceUsesAndCachesFederatedWorkloadIdentity(t *testing.T) {
 	}
 }
 
+func TestAzureClientSecretUsesSelectedAudienceAndCachesToken(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		if r.Method != http.MethodPost || r.URL.Path != "/tenant-id/oauth2/v2.0/token" || r.Header.Get("Content-Type") != "application/x-www-form-urlencoded" {
+			t.Errorf("unexpected token request: %s %s", r.Method, r.URL.Path)
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Error(err)
+		}
+		for field, want := range map[string]string{
+			"client_id": "client-id", "client_secret": "s+e&c=r%et",
+			"scope": azureGovernmentFoundryResource + ".default", "grant_type": "client_credentials",
+		} {
+			if got := r.Form.Get(field); got != want {
+				t.Errorf("%s=%q, want %q", field, got, want)
+			}
+		}
+		if r.Form.Get("client_assertion") != "" {
+			t.Error("client assertion sent with client secret")
+		}
+		_, _ = fmt.Fprint(w, `{"access_token":"service-principal-token","expires_in":3600,"token_type":"Bearer"}`)
+	}))
+	t.Cleanup(server.Close)
+	source := newAzureTokenSourceWithPolicy("", "https://proxy.example.test/api/projects/project-a", "usgov", "foundry")
+	if source.authorityBaseURL != azureGovernmentAuthority {
+		t.Fatalf("authority=%q", source.authorityBaseURL)
+	}
+	source.authorityBaseURL = server.URL
+	source.getenv = awsTestEnvironment(map[string]string{
+		"AZURE_TENANT_ID": "tenant-id", "AZURE_CLIENT_ID": "client-id", "AZURE_CLIENT_SECRET": "s+e&c=r%et",
+	})
+	for range 2 {
+		if token, err := source.Token(t.Context()); err != nil || token != "service-principal-token" {
+			t.Fatalf("token=%q err=%v", token, err)
+		}
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("token requests=%d", calls.Load())
+	}
+}
+
+func TestAzureClientSecretRejectsInvalidConfiguration(t *testing.T) {
+	for name, values := range map[string]map[string]string{
+		"missing tenant":       {"AZURE_CLIENT_ID": "client-id", "AZURE_CLIENT_SECRET": "private-token-value"},
+		"missing client":       {"AZURE_TENANT_ID": "tenant-id", "AZURE_CLIENT_SECRET": "private-token-value"},
+		"ambiguous credential": {"AZURE_TENANT_ID": "tenant-id", "AZURE_CLIENT_ID": "client-id", "AZURE_CLIENT_SECRET": "private-token-value", "AZURE_FEDERATED_TOKEN_FILE": "/tmp/token"},
+		"oversized secret":     {"AZURE_TENANT_ID": "tenant-id", "AZURE_CLIENT_ID": "client-id", "AZURE_CLIENT_SECRET": strings.Repeat("s", 8<<10+1)},
+		"unsafe tenant":        {"AZURE_TENANT_ID": "../tenant", "AZURE_CLIENT_ID": "client-id", "AZURE_CLIENT_SECRET": "private-token-value"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			source := newAzureTokenSource("")
+			source.getenv = awsTestEnvironment(values)
+			if _, err := source.Token(t.Context()); err == nil || !strings.Contains(err.Error(), "Azure client secret") || strings.Contains(err.Error(), values["AZURE_CLIENT_SECRET"]) {
+				t.Fatalf("invalid client secret configuration error=%v", err)
+			}
+		})
+	}
+}
+
+func TestAzureClientSecretTokenErrorRedactsResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = fmt.Fprint(w, "secret-token-body")
+	}))
+	t.Cleanup(server.Close)
+	source := newAzureTokenSource("")
+	source.authorityBaseURL = server.URL
+	source.getenv = awsTestEnvironment(map[string]string{
+		"AZURE_TENANT_ID": "tenant-id", "AZURE_CLIENT_ID": "client-id", "AZURE_CLIENT_SECRET": "secret-token-body",
+	})
+	if _, err := source.Token(t.Context()); err == nil || strings.Contains(err.Error(), "secret-token-body") {
+		t.Fatalf("token error exposed credential: %v", err)
+	}
+}
+
+func TestAzureClientSecretDoesNotFollowRedirect(t *testing.T) {
+	var forwarded atomic.Bool
+	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { forwarded.Store(true) }))
+	t.Cleanup(target.Close)
+	authority := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusTemporaryRedirect)
+	}))
+	t.Cleanup(authority.Close)
+	source := newAzureTokenSource("")
+	source.authorityBaseURL = authority.URL
+	source.getenv = awsTestEnvironment(map[string]string{
+		"AZURE_TENANT_ID": "tenant-id", "AZURE_CLIENT_ID": "client-id", "AZURE_CLIENT_SECRET": "private-token-value",
+	})
+	if _, err := source.Token(t.Context()); err == nil {
+		t.Fatal("redirecting Entra authority was accepted")
+	}
+	if forwarded.Load() {
+		t.Fatal("client secret was forwarded to redirect target")
+	}
+}
+
 func TestAzureIdentityEndpointsSelectSupportedCloud(t *testing.T) {
 	for _, test := range []struct {
 		baseURL   string
@@ -65,17 +165,125 @@ func TestAzureIdentityEndpointsSelectSupportedCloud(t *testing.T) {
 		resource  string
 	}{
 		{baseURL: "https://resource.openai.azure.com", authority: azureAuthorityURL, resource: azureOpenAIResource},
+		{baseURL: "https://resource.services.ai.azure.com/openai/v1", authority: azureAuthorityURL, resource: azureFoundryResource},
+		{baseURL: "https://resource.services.ai.azure.com/api/projects/project-a/openai/v1", authority: azureAuthorityURL, resource: azureFoundryResource},
+		{baseURL: "https://proxy.example.test/api/projects/project-a", authority: azureAuthorityURL, resource: azureFoundryResource},
+		{baseURL: "https://proxy.example.test/api/projects/project-a/openai/v1", authority: azureAuthorityURL, resource: azureFoundryResource},
 		{baseURL: "https://resource.openai.azure.us/openai/v1", authority: azureGovernmentAuthority, resource: azureGovernmentResource},
 		{baseURL: "https://resource.cognitiveservices.azure.us", authority: azureGovernmentAuthority, resource: azureGovernmentResource},
+		{baseURL: "https://resource.services.ai.azure.us/api/projects/project-a/openai/v1", authority: azureGovernmentAuthority, resource: azureGovernmentFoundryResource},
 		{baseURL: "https://resource.openai.azure.cn/openai/v1", authority: azureChinaAuthority, resource: azureChinaResource},
 		{baseURL: "https://resource.cognitiveservices.azure.cn", authority: azureChinaAuthority, resource: azureChinaResource},
 		{baseURL: "https://resource.openai.azure.cn.example.test", authority: azureAuthorityURL, resource: azureOpenAIResource},
+		{baseURL: "https://resource.services.ai.azure.com.example.test", authority: azureAuthorityURL, resource: azureOpenAIResource},
+		{baseURL: "https://resource.services.ai.azure.us.example.test", authority: azureAuthorityURL, resource: azureOpenAIResource},
 		{baseURL: "https://custom.example.test", authority: azureAuthorityURL, resource: azureOpenAIResource},
 	} {
 		authority, resource := azureIdentityEndpoints(test.baseURL)
 		if authority != test.authority || resource != test.resource {
 			t.Fatalf("base_url=%q authority=%q resource=%q", test.baseURL, authority, resource)
 		}
+	}
+}
+
+func TestAzureIdentityEndpointsExplicitCloudForProxy(t *testing.T) {
+	for _, test := range []struct {
+		baseURL, cloud, authority, resource string
+	}{
+		{baseURL: "https://proxy.example.test/api/projects/project-a/openai/v1", cloud: "usgov", authority: azureGovernmentAuthority, resource: azureGovernmentFoundryResource},
+		{baseURL: "https://proxy.example.test/openai/v1", cloud: "china", authority: azureChinaAuthority, resource: azureChinaResource},
+		{baseURL: "https://proxy.example.test/api/projects/project-a/openai/v1", cloud: "public", authority: azureAuthorityURL, resource: azureFoundryResource},
+		{baseURL: "https://proxy.example.test/tenant/api/projects/project-a/openai/v1", cloud: "public", authority: azureAuthorityURL, resource: azureFoundryResource},
+	} {
+		source := newAzureTokenSourceWithCloud("", test.baseURL, test.cloud)
+		if source.authorityBaseURL != test.authority || source.resource != test.resource || source.scope != test.resource+".default" {
+			t.Fatalf("base=%q cloud=%q authority=%q resource=%q scope=%q", test.baseURL, test.cloud, source.authorityBaseURL, source.resource, source.scope)
+		}
+	}
+}
+
+func TestAzureIdentityEndpointsExplicitAudience(t *testing.T) {
+	for _, test := range []struct {
+		baseURL, cloud, audience, authority, resource string
+	}{
+		{baseURL: "https://resource.services.ai.azure.com/openai/v1", audience: "cognitive", authority: azureAuthorityURL, resource: azureOpenAIResource},
+		{baseURL: "https://resource.services.ai.azure.com/openai/v1", audience: "foundry", authority: azureAuthorityURL, resource: azureFoundryResource},
+		{baseURL: "https://proxy.example.test/openai/v1", cloud: "usgov", audience: "cognitive", authority: azureGovernmentAuthority, resource: azureGovernmentResource},
+		{baseURL: "https://proxy.example.test/api/projects/project-a/openai/v1", cloud: "usgov", audience: "foundry", authority: azureGovernmentAuthority, resource: azureGovernmentFoundryResource},
+	} {
+		source := newAzureTokenSourceWithPolicy("", test.baseURL, test.cloud, test.audience)
+		if source.authorityBaseURL != test.authority || source.resource != test.resource || source.scope != test.resource+".default" {
+			t.Fatalf("base=%q cloud=%q audience=%q authority=%q resource=%q scope=%q", test.baseURL, test.cloud, test.audience, source.authorityBaseURL, source.resource, source.scope)
+		}
+	}
+}
+
+func TestAzureFoundryFederationUsesProjectScope(t *testing.T) {
+	tokenFile := filepath.Join(t.TempDir(), "federated-token")
+	if err := os.WriteFile(tokenFile, []byte("projected.jwt"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Error(err)
+		}
+		if got := r.Form.Get("scope"); got != azureFoundryResource+".default" {
+			t.Errorf("scope=%q", got)
+		}
+		_, _ = fmt.Fprint(w, `{"access_token":"foundry-token","expires_in":3600,"token_type":"Bearer"}`)
+	}))
+	t.Cleanup(server.Close)
+	source := newAzureTokenSource("", "https://resource.services.ai.azure.com/api/projects/project-a/openai/v1")
+	source.authorityBaseURL = server.URL
+	source.getenv = awsTestEnvironment(map[string]string{
+		"AZURE_TENANT_ID": "tenant-id", "AZURE_CLIENT_ID": "client-id", "AZURE_FEDERATED_TOKEN_FILE": tokenFile,
+	})
+	if token, err := source.Token(t.Context()); err != nil || token != "foundry-token" {
+		t.Fatalf("token=%q err=%v", token, err)
+	}
+}
+
+func TestAzureGovernmentFoundryFederationUsesSovereignScope(t *testing.T) {
+	tokenFile := filepath.Join(t.TempDir(), "federated-token")
+	if err := os.WriteFile(tokenFile, []byte("projected.jwt"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Error(err)
+		}
+		if got := r.Form.Get("scope"); got != azureGovernmentFoundryResource+".default" {
+			t.Errorf("scope=%q", got)
+		}
+		_, _ = fmt.Fprint(w, `{"access_token":"government-token","expires_in":3600,"token_type":"Bearer"}`)
+	}))
+	t.Cleanup(server.Close)
+	source := newAzureTokenSource("", "https://resource.services.ai.azure.us/api/projects/project-a/openai/v1")
+	if source.authorityBaseURL != azureGovernmentAuthority {
+		t.Fatalf("authority=%q", source.authorityBaseURL)
+	}
+	source.authorityBaseURL = server.URL
+	source.getenv = awsTestEnvironment(map[string]string{
+		"AZURE_TENANT_ID": "tenant-id", "AZURE_CLIENT_ID": "client-id", "AZURE_FEDERATED_TOKEN_FILE": tokenFile,
+	})
+	if token, err := source.Token(t.Context()); err != nil || token != "government-token" {
+		t.Fatalf("token=%q err=%v", token, err)
+	}
+}
+
+func TestAzureGovernmentFoundryManagedIdentityUsesSovereignResource(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("resource"); got != azureGovernmentFoundryResource {
+			t.Errorf("resource=%q", got)
+		}
+		_, _ = fmt.Fprintf(w, `{"access_token":"government-token","expires_on":%d,"token_type":"Bearer"}`, time.Now().Add(time.Hour).Unix())
+	}))
+	t.Cleanup(server.Close)
+	source := newAzureTokenSource("", "https://resource.services.ai.azure.us/api/projects/project-a/openai/v1")
+	source.imdsURL = server.URL
+	source.getenv = awsTestEnvironment(nil)
+	if token, err := source.Token(t.Context()); err != nil || token != "government-token" {
+		t.Fatalf("token=%q err=%v", token, err)
 	}
 }
 
@@ -205,6 +413,9 @@ func TestAzureTokenSourceRejectsInvalidFederatedResponses(t *testing.T) {
 		{name: "authority failure", status: http.StatusServiceUnavailable, body: "sensitive error"},
 		{name: "malformed response", status: http.StatusOK, body: "{"},
 		{name: "excessive lifetime", status: http.StatusOK, body: `{"access_token":"token","expires_in":90000,"token_type":"Bearer"}`},
+		{name: "token with space", status: http.StatusOK, body: `{"access_token":"bad token","expires_in":3600,"token_type":"Bearer"}`},
+		{name: "token with tab", status: http.StatusOK, body: `{"access_token":"bad\ttoken","expires_in":3600,"token_type":"Bearer"}`},
+		{name: "token with NUL", status: http.StatusOK, body: `{"access_token":"bad\u0000token","expires_in":3600,"token_type":"Bearer"}`},
 		{name: "oversized response", status: http.StatusOK, body: string(make([]byte, azureTokenMaxBytes+1))},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -216,8 +427,8 @@ func TestAzureTokenSourceRejectsInvalidFederatedResponses(t *testing.T) {
 			source := newAzureTokenSource("")
 			source.authorityBaseURL = server.URL
 			source.getenv = awsTestEnvironment(map[string]string{"AZURE_TENANT_ID": "tenant", "AZURE_CLIENT_ID": "client", "AZURE_FEDERATED_TOKEN_FILE": tokenFile})
-			if _, err := source.Token(t.Context()); err == nil {
-				t.Fatal("invalid federated response accepted")
+			if token, err := source.Token(t.Context()); err == nil || token != "" || strings.Contains(err.Error(), "bad token") {
+				t.Fatalf("invalid federated response accepted or exposed: token=%q err=%v", token, err)
 			}
 		})
 	}
@@ -252,6 +463,121 @@ func TestAzureTokenSourceUsesCachedTokenUntilExpiration(t *testing.T) {
 	}
 	if calls.Load() != 3 {
 		t.Fatalf("token calls=%d", calls.Load())
+	}
+}
+
+func TestAzureEntraUnauthorizedResponseRefreshesNextRequest(t *testing.T) {
+	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	var tokenRequests atomic.Int32
+	identity := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprintf(w, `{"access_token":"token-%d","expires_on":%d,"token_type":"Bearer"}`, tokenRequests.Add(1), now.Add(time.Hour).Unix())
+	}))
+	t.Cleanup(identity.Close)
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") == "Bearer token-1" {
+			http.Error(w, "expired", http.StatusUnauthorized)
+			return
+		}
+		if r.Header.Get("Authorization") != "Bearer token-2" {
+			t.Error("request used an unexpected Entra token")
+			http.Error(w, "invalid token", http.StatusUnauthorized)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(backend.Close)
+	source := newAzureTokenSource("")
+	source.now = func() time.Time { return now }
+	source.getenv = awsTestEnvironment(nil)
+	source.imdsURL = identity.URL
+	client := &http.Client{Transport: azureOpenAITransport{base: http.DefaultTransport, tokenSource: source, authType: "entra"}}
+	for _, want := range []int{http.StatusUnauthorized, http.StatusNoContent} {
+		request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, backend.URL, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response, err := client.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if response.StatusCode != want {
+			t.Errorf("status=%d, want %d", response.StatusCode, want)
+		}
+		if err := response.Body.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if tokenRequests.Load() != 2 {
+		t.Fatalf("token requests=%d, want 2", tokenRequests.Load())
+	}
+}
+
+func TestAzureTokenSourceRejectedOldTokenKeepsNewToken(t *testing.T) {
+	source := newAzureTokenSource("")
+	source.token = "new-token"
+	source.refreshAt = time.Now().Add(time.Hour)
+	source.invalidate("old-token")
+	if token, err := source.Token(t.Context()); err != nil || token != "new-token" {
+		t.Fatalf("new token was invalidated: token=%q err=%v", token, err)
+	}
+}
+
+func TestAzureTokenSourceDoesNotRotateExplicitToken(t *testing.T) {
+	source := newAzureTokenSource("operator-token")
+	source.invalidate("operator-token")
+	if token, err := source.Token(t.Context()); err != nil || token != "operator-token" {
+		t.Fatalf("explicit token changed: token=%q err=%v", token, err)
+	}
+}
+
+func TestAzureTokenSourceDoesNotReturnTokenExpiredDuringRefresh(t *testing.T) {
+	base := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	var clock atomic.Int64
+	var calls atomic.Int32
+	clock.Store(base.Add(9 * time.Minute).UnixNano())
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		clock.Store(base.Add(11 * time.Minute).UnixNano())
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(server.Close)
+	source := newAzureTokenSource("")
+	source.now = func() time.Time { return time.Unix(0, clock.Load()) }
+	source.getenv = awsTestEnvironment(nil)
+	source.imdsURL = server.URL
+	source.token = "expired-token"
+	source.refreshAt = base.Add(5 * time.Minute)
+	source.expiresAt = base.Add(10 * time.Minute)
+	if token, err := source.Token(t.Context()); err == nil || token != "" {
+		t.Fatalf("token expired during refresh was returned: token=%q err=%v", token, err)
+	}
+	if token, err := source.Token(t.Context()); err == nil || token != "" || calls.Load() != 1 {
+		t.Fatalf("refresh retried before backoff elapsed: token=%q calls=%d err=%v", token, calls.Load(), err)
+	}
+}
+
+func TestAzureTokenSourceCanceledRefreshDoesNotRejectNextRequest(t *testing.T) {
+	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		_, _ = fmt.Fprintf(w, `{"access_token":"fresh-token","expires_on":%d,"token_type":"Bearer"}`, now.Add(time.Hour).Unix())
+	}))
+	t.Cleanup(server.Close)
+	source := newAzureTokenSource("")
+	source.now = func() time.Time { return now }
+	source.getenv = awsTestEnvironment(nil)
+	source.imdsURL = server.URL
+	canceled, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := source.Token(canceled); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled refresh error=%v", err)
+	}
+	if token, err := source.Token(t.Context()); err != nil || token != "fresh-token" {
+		t.Fatalf("independent request token=%q err=%v", token, err)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("successful token requests=%d, want 1", calls.Load())
 	}
 }
 

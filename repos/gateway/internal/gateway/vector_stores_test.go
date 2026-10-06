@@ -14,6 +14,7 @@ import (
 
 	"ai-gateway-gateway/internal/filestate"
 	"ai-gateway-gateway/internal/modules"
+	"ai-gateway-gateway/internal/openai"
 	"ai-gateway-gateway/internal/vectorstate"
 )
 
@@ -30,7 +31,7 @@ func TestVectorStoreFileBatchHTTPLifecycleAtomicityAndIsolation(t *testing.T) {
 	owner := fileOwnerKey(modules.RequestContext{CredentialID: "credential", UserID: "user"})
 	store := &memoryVectorStore{
 		stores: map[string]vectorstate.VectorStore{"vs_owned": {ID: "vs_owned", OwnerKey: owner, Name: "docs", Status: "completed"}},
-		files:  map[string]vectorstate.File{}, availableFiles: map[string]int64{"file_a": 2, "file_b": 3, "file_c": 5},
+		files:  map[string]vectorstate.File{}, availableFiles: map[string]int64{"file_a": 2, "file_b": 3, "file_c": 5, "file_d": 7},
 	}
 	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{&fileAuthModule{credential: "credential", user: "user"}}), modelsProvider{}).
 		WithVectorStore(store, VectorStoreRuntimeConfig{OwnerQuota: 10, FileQuota: 10, ByteQuota: 100}))
@@ -81,10 +82,10 @@ func TestVectorStoreFileBatchHTTPLifecycleAtomicityAndIsolation(t *testing.T) {
 		}
 	}
 	static := callVectorStore(handler, http.MethodPost, "/v1/vector_stores/vs_owned/file_batches", `{"file_ids":["file_c"],"chunking_strategy":{"type":"static","static":{"max_chunk_size_tokens":800,"chunk_overlap_tokens":400}}}`)
-	if static.Code != http.StatusUnprocessableEntity || !strings.Contains(static.Body.String(), `"vector_store_chunking_unsupported"`) {
+	if static.Code != http.StatusOK || !strings.Contains(static.Body.String(), `"completed":1`) || store.files["vs_owned/file_c"].ChunkingStrategy.Type != "static" {
 		t.Fatalf("static status=%d body=%s", static.Code, static.Body.String())
 	}
-	perFile := callVectorStore(handler, http.MethodPost, "/v1/vector_stores/vs_owned/file_batches", `{"files":[{"file_id":"file_c","attributes":{"region":"us"},"chunking_strategy":{"type":"auto"}}]}`)
+	perFile := callVectorStore(handler, http.MethodPost, "/v1/vector_stores/vs_owned/file_batches", `{"files":[{"file_id":"file_d","attributes":{"region":"us"},"chunking_strategy":{"type":"auto"}}]}`)
 	if perFile.Code != http.StatusOK || !strings.Contains(perFile.Body.String(), `"completed":1`) {
 		t.Fatalf("per-file status=%d body=%s", perFile.Code, perFile.Body.String())
 	}
@@ -122,7 +123,7 @@ func (s *memoryVectorStore) CreateVectorStoreFileBatch(_ context.Context, batch 
 	seen := map[string]struct{}{}
 	added := int64(0)
 	for _, entry := range entries {
-		if entry.FileID == "" || vectorstate.ValidateAttributes(entry.Attributes) != "" {
+		if entry.FileID == "" || vectorstate.ValidateAttributes(entry.Attributes) != "" || !entry.ChunkingStrategy.Valid() {
 			return vectorstate.FileBatch{}, vectorstate.ErrInvalid
 		}
 		size, found := s.availableFiles[entry.FileID]
@@ -148,7 +149,7 @@ func (s *memoryVectorStore) CreateVectorStoreFileBatch(_ context.Context, batch 
 	ids := make([]string, len(entries))
 	for index, entry := range entries {
 		ids[index] = entry.FileID
-		s.files[batch.VectorStoreID+"/"+entry.FileID] = vectorstate.File{VectorStoreID: batch.VectorStoreID, FileID: entry.FileID, OwnerKey: batch.OwnerKey, Status: "completed", Bytes: s.availableFiles[entry.FileID], Attributes: normalizedVectorStoreAttributes(entry.Attributes), CreatedAt: time.Unix(300+int64(index), 0).UTC()}
+		s.files[batch.VectorStoreID+"/"+entry.FileID] = vectorstate.File{VectorStoreID: batch.VectorStoreID, FileID: entry.FileID, OwnerKey: batch.OwnerKey, Status: "completed", Bytes: s.availableFiles[entry.FileID], Attributes: normalizedVectorStoreAttributes(entry.Attributes), ChunkingStrategy: entry.ChunkingStrategy, CreatedAt: time.Unix(300+int64(index), 0).UTC()}
 	}
 	s.batches[batch.ID], s.batchFiles[batch.ID] = batch, ids
 	return batch, nil
@@ -181,10 +182,13 @@ func (s *memoryVectorStore) ListVectorStoreFileBatchFiles(ctx context.Context, o
 	return temporary.ListVectorStoreFiles(ctx, owner, storeID, options)
 }
 
-func (s *memoryVectorStore) AttachVectorStoreFile(_ context.Context, owner, storeID, fileID string, attributes map[string]any, quota int, byteQuota int64) (vectorstate.File, error) {
+func (s *memoryVectorStore) AttachVectorStoreFile(_ context.Context, owner, storeID, fileID string, attributes map[string]any, chunking vectorstate.ChunkingStrategy, quota int, byteQuota int64) (vectorstate.File, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	store, ok := s.stores[storeID]
+	if !chunking.Valid() {
+		return vectorstate.File{}, vectorstate.ErrInvalid
+	}
 	if !ok || store.OwnerKey != owner {
 		return vectorstate.File{}, vectorstate.ErrNotFound
 	}
@@ -209,7 +213,7 @@ func (s *memoryVectorStore) AttachVectorStoreFile(_ context.Context, owner, stor
 	if usedBytes < 0 || bytes < 0 || usedBytes > byteQuota || bytes > byteQuota-usedBytes {
 		return vectorstate.File{}, vectorstate.ErrByteQuotaExceeded
 	}
-	file := vectorstate.File{VectorStoreID: storeID, FileID: fileID, OwnerKey: owner, Status: "completed", Bytes: bytes, Attributes: normalizedVectorStoreAttributes(attributes), CreatedAt: time.Unix(200+int64(count), 0).UTC()}
+	file := vectorstate.File{VectorStoreID: storeID, FileID: fileID, OwnerKey: owner, Status: "completed", Bytes: bytes, Attributes: normalizedVectorStoreAttributes(attributes), ChunkingStrategy: chunking, CreatedAt: time.Unix(200+int64(count), 0).UTC()}
 	s.files[key] = file
 	return file, nil
 }
@@ -484,13 +488,13 @@ func TestVectorStoreFileHTTPLifecyclePaginationAndIsolation(t *testing.T) {
 	for _, fileID := range []string{"file_one", "file_two"} {
 		body := `{"file_id":"` + fileID + `"}`
 		if fileID == "file_one" {
-			body = `{"file_id":"file_one","attributes":{"region":"eu","priority":2,"active":true},"chunking_strategy":{"type":"auto"}}`
+			body = `{"file_id":"file_one","attributes":{"region":"eu","priority":2,"active":true},"chunking_strategy":{"type":"static","static":{"max_chunk_size_tokens":800,"chunk_overlap_tokens":200}}}`
 		}
 		response := callVectorStore(handler, http.MethodPost, "/v1/vector_stores/vs_owned/files", body)
 		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"object":"vector_store.file"`) || !strings.Contains(response.Body.String(), fileID) {
 			t.Fatalf("attach %s status=%d body=%s", fileID, response.Code, response.Body.String())
 		}
-		if fileID == "file_one" && (!strings.Contains(response.Body.String(), `"priority":2`) || !strings.Contains(response.Body.String(), `"active":true`) || !strings.Contains(response.Body.String(), `"chunking_strategy":{"type":"auto"}`)) {
+		if fileID == "file_one" && (!strings.Contains(response.Body.String(), `"priority":2`) || !strings.Contains(response.Body.String(), `"active":true`) || !strings.Contains(response.Body.String(), `"chunking_strategy":{"static":{"chunk_overlap_tokens":200,"max_chunk_size_tokens":800},"type":"static"}`)) {
 			t.Fatalf("attach attributes body=%s", response.Body.String())
 		}
 	}
@@ -598,6 +602,38 @@ func TestVectorStoreFileContentRejectsUnavailableAndUnsearchableFiles(t *testing
 	}
 }
 
+func TestVectorStoreFileContentUsesPersistedStaticChunking(t *testing.T) {
+	owner := fileOwnerKey(modules.RequestContext{CredentialID: "credential", UserID: "user"})
+	content := strings.Repeat("данные alpha ", 160)
+	store := &memoryVectorStore{
+		stores: map[string]vectorstate.VectorStore{"vs_owned": {ID: "vs_owned", OwnerKey: owner}},
+		files: map[string]vectorstate.File{"vs_owned/file_text": {
+			VectorStoreID: "vs_owned", FileID: "file_text", OwnerKey: owner, Status: "completed", Bytes: int64(len(content)),
+			ChunkingStrategy: vectorstate.ChunkingStrategy{Type: "static", MaxChunkSizeTokens: 100, ChunkOverlapTokens: 20},
+		}},
+	}
+	files := &memoryFileStore{files: map[string]filestate.File{
+		"file_text": {ID: "file_text", OwnerKey: owner, Filename: "text.txt", Purpose: "assistants", ContentType: "text/plain", Bytes: int64(len(content)), Content: []byte(content)},
+	}}
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{&fileAuthModule{credential: "credential", user: "user"}}), modelsProvider{}).
+		WithFileStore(files, FileRuntimeConfig{MaxBytes: 8192, OwnerQuotaBytes: 16384}).
+		WithVectorStore(store, VectorStoreRuntimeConfig{OwnerQuota: 10, FileQuota: 10, ByteQuota: 16384}))
+	response := callVectorStore(handler, http.MethodGet, "/v1/vector_stores/vs_owned/files/file_text/content", "")
+	var payload struct {
+		Content []struct {
+			Text string `json:"text"`
+		} `json:"content"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil || response.Code != http.StatusOK || len(payload.Content) < 2 {
+		t.Fatalf("status=%d chunks=%d err=%v body=%s", response.Code, len(payload.Content), err, response.Body.String())
+	}
+	for index, chunk := range payload.Content {
+		if tokens := openai.EstimateContextTokens(chunk.Text); tokens > 100 {
+			t.Fatalf("chunk %d has %d estimated tokens", index, tokens)
+		}
+	}
+}
+
 func TestVectorStoreFilesRejectInvalidMissingDuplicateAndQuota(t *testing.T) {
 	owner := fileOwnerKey(modules.RequestContext{CredentialID: "credential", UserID: "user"})
 	store := &memoryVectorStore{
@@ -629,7 +665,6 @@ func TestVectorStoreFilesRejectInvalidMissingDuplicateAndQuota(t *testing.T) {
 		{"/v1/vector_stores/vs_owned/files", `{"file_id":"file_one","chunking_strategy":{"type":"auto","static":{"max_chunk_size_tokens":800,"chunk_overlap_tokens":400}}}`, http.StatusBadRequest},
 		{"/v1/vector_stores/vs_owned/files", `{"file_id":"file_one","chunking_strategy":{"type":"static","static":{"max_chunk_size_tokens":99,"chunk_overlap_tokens":0}}}`, http.StatusBadRequest},
 		{"/v1/vector_stores/vs_owned/files", `{"file_id":"file_one","chunking_strategy":{"type":"static","static":{"max_chunk_size_tokens":800,"chunk_overlap_tokens":401}}}`, http.StatusBadRequest},
-		{"/v1/vector_stores/vs_owned/files", `{"file_id":"file_one","chunking_strategy":{"type":"static","static":{"max_chunk_size_tokens":800,"chunk_overlap_tokens":400}}}`, http.StatusUnprocessableEntity},
 		{"/v1/vector_stores/vs_owned/files", `{"file_id":"file_one","chunking_strategy":{"type":"unknown"}}`, http.StatusBadRequest},
 		{"/v1/vector_stores/missing/files", `{"file_id":"file_one"}`, http.StatusNotFound},
 		{"/v1/vector_stores/vs_owned/files?extra=1", `{"file_id":"file_one"}`, http.StatusBadRequest},
@@ -639,9 +674,6 @@ func TestVectorStoreFilesRejectInvalidMissingDuplicateAndQuota(t *testing.T) {
 		response := callVectorStore(handler, http.MethodPost, test.path, test.body)
 		if response.Code != test.code {
 			t.Fatalf("path=%s status=%d body=%s", test.path, response.Code, response.Body.String())
-		}
-		if test.code == http.StatusUnprocessableEntity && !strings.Contains(response.Body.String(), `"code":"vector_store_chunking_unsupported"`) {
-			t.Fatalf("path=%s missing capability error body=%s", test.path, response.Body.String())
 		}
 	}
 	if response := callVectorStore(handler, http.MethodPost, "/v1/vector_stores/vs_owned/files", `{"file_id":"file_one"}`); response.Code != http.StatusOK {

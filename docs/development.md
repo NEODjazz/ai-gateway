@@ -28,6 +28,13 @@ Dockerfiles и Helm values отдельно; изменение language baselin
 - SQL migration: обновить source migration и embedded Helm ConfigMap copy.
 - UI route: обновить route manifest, navigation semantic icon и frontend tests.
 
+Sidebar объединяет доступные страницы в блоки и раскрывающиеся подменю.
+При ширине окна до 767 px он автоматически переходит в компактный режим;
+подменю доступны через кнопки с иконками и с клавиатуры. Возврат к широкому
+окну восстанавливает выбранный пользователем режим панели. При проверке UI
+проверяйте отсутствие горизонтального переполнения страницы в каждом режиме
+Playground, раскрытие подменю и возврат фокуса после Escape.
+
 Не добавляйте внутренний `RequestContext` в wire contract и не логируйте
 secrets для упрощения диагностики.
 
@@ -51,9 +58,18 @@ README и соответствие source migrations их Helm ConfigMap copies.
 
 ## CI и releases
 
-`.github/workflows/test.yml` проверяет OpenAPI, каждый Go module и UI. OpenAPI
-PR diff сравнивается с точным base commit и блокирует definite/potential
-breaking changes.
+[CI workflow](../.github/workflows/test.yml) проверяет OpenAPI, шесть Go modules
+(vet, race tests, coverage), React typecheck/tests/build и production dependency
+audit, восемь Helm charts и сборку шести Go images. OpenAPI PR diff сравнивается
+с точным base commit и блокирует definite/potential breaking changes.
+
+Обязательные отдельные jobs используют реальные PostgreSQL databases для
+control plane, identities и billing, ClickHouse для organization reporting,
+Keycloak/OpenWebUI для identity integration и Docling/Redis/workers для
+conversion/OCR, admission и owner isolation. Локальный `go test ./...` без DSN
+не заменяет эти сценарии: opt-in integration tests могут быть skipped.
+[Проверка Lemonade](lemonade-validation.md) остаётся opt-in с реальным сервером;
+наличие локального сервера не является требованием unit tests.
 
 `.github/workflows/release.yml` собирает отдельные images компонентов и
 публикует release artifacts по принятой tag policy. Runtime image не должен

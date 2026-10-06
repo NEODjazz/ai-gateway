@@ -71,6 +71,20 @@ func synthesizeResponseStream(response openai.ResponseResponse, write provider.R
 			return err
 		}
 		for contentIndex, part := range item.Content {
+			if item.Type == "reasoning" && part.Type == "reasoning_text" {
+				for _, suffix := range []string{"delta", "done"} {
+					data := map[string]any{"item_id": item.ID, "output_index": index, "content_index": contentIndex}
+					if suffix == "delta" {
+						data["delta"] = part.Text
+					} else {
+						data["text"] = part.Text
+					}
+					if err := emit("response.reasoning_text."+suffix, data); err != nil {
+						return err
+					}
+				}
+				continue
+			}
 			empty := part
 			empty.Text = ""
 			empty.Refusal = ""

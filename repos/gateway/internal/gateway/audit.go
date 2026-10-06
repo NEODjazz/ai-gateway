@@ -115,7 +115,7 @@ func (h Handler) auditOutcome(ctx context.Context, audit ManagementAudit, event 
 	}
 	event.Outcome = outcome
 	if _, err := h.audit.AppendAudit(ctx, audit, event); err != nil {
-		log.Printf("management audit outcome append failed: %v", err)
+		log.Print("management audit outcome append failed")
 	}
 }
 func defaultString(value, fallback string) string {

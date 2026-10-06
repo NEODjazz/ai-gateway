@@ -42,7 +42,7 @@ func (p Pipeline) Run(ctx context.Context, req *RequestContext) error {
 			if module.Required() {
 				return fmt.Errorf("%s module failed: %w", module.Name(), err)
 			}
-			log.Printf("optional module %s skipped after error: %v", module.Name(), err)
+			log.Printf("optional module %s skipped after error", module.Name())
 		}
 	}
 	return nil

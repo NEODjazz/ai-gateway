@@ -1,10 +1,11 @@
 import { createContext, type PropsWithChildren, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { loginConnections, type LoginConnection } from "./ssoConnections";
 import { APIClient } from "../api/client";
 
 const storageKey = "ai-gateway.admin-token";
 const browserSSOMarker = "browser-sso";
 
-export type ConsoleCapability = "admin" | "api_docs" | "inference" | "team_directory";
+export type ConsoleCapability = "admin" | "api_docs" | "inference" | "team_directory" | "organization_reports" | "organization_keys";
 
 export type AdminSession = {
   user_id?: string;
@@ -16,6 +17,7 @@ export type AdminSession = {
   allowed_models: string[];
   allowed_tools: string[];
   capabilities: ConsoleCapability[];
+  organization_capabilities?: ("organization_reports" | "organization_keys")[];
 };
 
 type AuthValue = {
@@ -24,10 +26,14 @@ type AuthValue = {
   client: APIClient;
   signIn: (token: string) => Promise<void>;
   restoreSession: () => Promise<void>;
+  ssoConnections: LoginConnection[];
   ssoEnabled: boolean;
   ssoChecking: boolean;
   hasCapability: (capability: ConsoleCapability) => boolean;
-  signOut: () => void;
+  prepareSSOSignIn: () => void;
+  signOut: () => Promise<void>;
+  signingOut: boolean;
+  signOutError: string;
 };
 
 const AuthContext = createContext<AuthValue | null>(null);
@@ -35,28 +41,56 @@ const AuthContext = createContext<AuthValue | null>(null);
 export function AuthProvider({ children }: PropsWithChildren) {
   const [token, setToken] = useState(() => sessionStorage.getItem(storageKey) || "");
   const [session, setSession] = useState<AdminSession | null>(null);
+  const [ssoConnections, setSSOConnections] = useState<LoginConnection[]>([]);
   const [ssoEnabled, setSSOEnabled] = useState(false);
   const [ssoChecking, setSSOChecking] = useState(() => !token && window.location.pathname.startsWith("/ui"));
   const ssoDiscoveryStarted = useRef(false);
-  const signOut = useCallback(() => {
-    sessionStorage.removeItem(storageKey);
-    setSession(null);
-    setToken("");
-    void fetch("/auth/sso/logout", { method: "POST" }).catch(() => undefined);
+  const identityGeneration = useRef(0);
+  const logoutInFlight = useRef<Promise<void> | null>(null);
+  const [signingOut, setSigningOut] = useState(false);
+  const [signOutError, setSignOutError] = useState("");
+  const prepareSSOSignIn = useCallback(() => {
+    identityGeneration.current++;
+    setSignOutError("");
+    sessionStorage.removeItem(storageKey); setSession(null); setToken("");
   }, []);
+  const signOut = useCallback(() => {
+    if (logoutInFlight.current) return logoutInFlight.current;
+    const generation = identityGeneration.current;
+    setSigningOut(true);
+    setSignOutError("");
+    const operation = (async () => {
+      try {
+        const response = await fetch("/auth/sso/logout", { method: "POST", signal: AbortSignal.timeout(10000) });
+        if (!response.ok) throw new Error("logout failed");
+        if (generation === identityGeneration.current) prepareSSOSignIn();
+      } catch {
+        if (generation === identityGeneration.current) setSignOutError("Server sign out could not be confirmed. Retry sign out.");
+      } finally {
+        logoutInFlight.current = null;
+        setSigningOut(false);
+      }
+    })();
+    logoutInFlight.current = operation;
+    return operation;
+  }, [prepareSSOSignIn]);
   const validate = useCallback(async (candidate: string) => {
     const candidateClient = new APIClient(() => candidate === browserSSOMarker ? "" : candidate);
-    return candidateClient.request<AdminSession>("/admin/v1/session");
+    const identity = await candidateClient.request<AdminSession>("/admin/v1/session");
+    const scopedCapabilities = (identity.organization_capabilities || []).filter((capability) => ["organization_reports", "organization_keys"].includes(capability));
+    return { ...identity, capabilities: [...identity.capabilities, ...scopedCapabilities] };
   }, []);
   const restoreSession = useCallback(async () => {
     if (!token) return;
-    setSession(await validate(token));
+    const generation = identityGeneration.current;
+    const identity = await validate(token);
+    if (generation === identityGeneration.current) setSession(identity);
   }, [token, validate]);
   useEffect(() => {
-    const expired = () => signOut();
+    const expired = () => prepareSSOSignIn();
     window.addEventListener("control-plane-session-expired", expired);
     return () => window.removeEventListener("control-plane-session-expired", expired);
-  }, [signOut]);
+  }, [prepareSSOSignIn]);
   useEffect(() => {
     let active = true;
     if (ssoDiscoveryStarted.current || !window.location.pathname.startsWith("/ui")) {
@@ -64,15 +98,18 @@ export function AuthProvider({ children }: PropsWithChildren) {
       return () => { active = false; };
     }
     ssoDiscoveryStarted.current = true;
+    const generation = identityGeneration.current;
     void fetch("/auth/sso/config", { headers: { Accept: "application/json" } })
-      .then(async (response) => response.ok ? response.json() as Promise<{ enabled?: boolean }> : { enabled: false })
+      .then(async (response) => response.ok ? response.json() as Promise<{ enabled?: boolean; connections?: unknown }> : { enabled: false })
       .then(async (config) => {
         if (!active) return;
+        const choices = loginConnections("connections" in config ? config.connections : undefined);
+        setSSOConnections(choices);
         setSSOEnabled(Boolean(config.enabled));
         if (!config.enabled || token) return;
         try {
           const authenticated = await validate("");
-          if (!active) return;
+          if (!active || generation !== identityGeneration.current) return;
           sessionStorage.setItem(storageKey, browserSSOMarker);
           setToken(browserSSOMarker);
           setSession(authenticated);
@@ -90,17 +127,24 @@ export function AuthProvider({ children }: PropsWithChildren) {
     client: new APIClient(() => token === browserSSOMarker ? "" : token),
     signIn: async (next) => {
       const normalized = next.trim().replace(/^Bearer\s+/i, "");
+      const generation = ++identityGeneration.current;
       const authenticated = await validate(normalized);
+      if (generation !== identityGeneration.current) return;
+      setSignOutError("");
       sessionStorage.setItem(storageKey, normalized);
       setSession(authenticated);
       setToken(normalized);
     },
     restoreSession,
+    ssoConnections,
     ssoEnabled,
     ssoChecking,
     hasCapability: (capability) => Boolean(session?.capabilities.includes(capability)),
-    signOut
-  }), [restoreSession, session, signOut, ssoChecking, ssoEnabled, token, validate]);
+    prepareSSOSignIn,
+    signOut,
+    signingOut,
+    signOutError
+  }), [restoreSession, session, signOut, ssoChecking, ssoEnabled, ssoConnections, token, validate, prepareSSOSignIn, signingOut, signOutError]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 

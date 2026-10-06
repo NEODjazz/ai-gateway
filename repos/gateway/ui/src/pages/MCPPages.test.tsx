@@ -6,7 +6,7 @@ import { MCPServersPage, MCPToolsetsPage } from "./MCPPages";
 
 const json = (payload: unknown, status = 200) => Promise.resolve(new Response(JSON.stringify(payload), { status, headers: { "Content-Type": "application/json" } }));
 const connector = "mcp:weather@https://mcp.example.test/v1";
-const server = { id: "weather", label: "Weather production", description: "Forecast tools", server_url: "https://mcp.example.test/v1", transport: "streamable-http", tools: [connector], enabled: true, credential_configured: true };
+const server = { id: "weather", label: "Weather production", description: "Forecast tools", server_url: "https://mcp.example.test/v1", transport: "streamable-http", tools: [connector], enabled: true, allow_provider_execution: false, credential_configured: true };
 const toolset = { id: "weather-read", name: "Weather read", description: "Read-only weather", tools: [connector], enabled: true };
 
 function renderPage(page: "servers" | "toolsets") {
@@ -38,12 +38,13 @@ describe("MCP management pages", () => {
     await userEvent.type(within(form).getByLabelText("MCP server label"), "Finance production");
     await userEvent.type(within(form).getByLabelText("MCP server URL"), "https://finance.example.test/mcp/");
     await userEvent.type(within(form).getByLabelText("MCP server bearer credential"), "finance-secret");
+    await userEvent.click(within(form).getByLabelText("Allow native provider execution"));
     expect(within(form).getByText("mcp:finance@https://finance.example.test/mcp")).toBeInTheDocument();
     await userEvent.click(within(form).getByRole("button", { name: "Use suggestion" }));
     await userEvent.click(within(form).getByRole("button", { name: "Create MCP server" }));
     await waitFor(() => expect(fetchMock.mock.calls.some(([url, options]) => url === "/admin/v1/mcp/servers/finance" && options?.method === "PUT")).toBe(true));
     const request = fetchMock.mock.calls.find(([url, options]) => url === "/admin/v1/mcp/servers/finance" && options?.method === "PUT");
-    expect(JSON.parse(String(request?.[1]?.body))).toMatchObject({ label: "Finance production", server_url: "https://finance.example.test/mcp/", bearer_token: "finance-secret", tools: ["mcp:finance@https://finance.example.test/mcp"], enabled: true });
+    expect(JSON.parse(String(request?.[1]?.body))).toMatchObject({ label: "Finance production", server_url: "https://finance.example.test/mcp/", bearer_token: "finance-secret", tools: ["mcp:finance@https://finance.example.test/mcp"], enabled: true, allow_provider_execution: true });
   });
 
   it("preserves or explicitly clears a stored server credential", async () => {

@@ -31,14 +31,30 @@ type VectorStore struct {
 }
 
 type File struct {
-	VectorStoreID string
-	FileID        string
-	OwnerKey      string
-	Status        string
-	Bytes         int64
-	Attributes    map[string]any
-	CreatedAt     time.Time
+	VectorStoreID    string
+	FileID           string
+	OwnerKey         string
+	Status           string
+	Bytes            int64
+	Attributes       map[string]any
+	ChunkingStrategy ChunkingStrategy
+	CreatedAt        time.Time
 }
+
+type ChunkingStrategy struct {
+	Type               string
+	MaxChunkSizeTokens int
+	ChunkOverlapTokens int
+}
+
+func (strategy ChunkingStrategy) Valid() bool {
+	if strategy.Type == "auto" {
+		return strategy.MaxChunkSizeTokens == 0 && strategy.ChunkOverlapTokens == 0
+	}
+	return strategy.Type == "static" && strategy.MaxChunkSizeTokens >= 100 && strategy.MaxChunkSizeTokens <= 4096 && strategy.ChunkOverlapTokens >= 0 && strategy.ChunkOverlapTokens <= strategy.MaxChunkSizeTokens/2
+}
+
+func AutoChunkingStrategy() ChunkingStrategy { return ChunkingStrategy{Type: "auto"} }
 
 type FileBatch struct {
 	ID            string
@@ -53,8 +69,9 @@ type FileBatch struct {
 }
 
 type FileBatchEntry struct {
-	FileID     string
-	Attributes map[string]any
+	FileID           string
+	Attributes       map[string]any
+	ChunkingStrategy ChunkingStrategy
 }
 
 type Update struct {
@@ -82,7 +99,7 @@ type Store interface {
 	GetVectorStore(context.Context, string, string) (VectorStore, error)
 	UpdateVectorStore(context.Context, string, string, Update) (VectorStore, error)
 	DeleteVectorStore(context.Context, string, string) error
-	AttachVectorStoreFile(context.Context, string, string, string, map[string]any, int, int64) (File, error)
+	AttachVectorStoreFile(context.Context, string, string, string, map[string]any, ChunkingStrategy, int, int64) (File, error)
 	ListVectorStoreFiles(context.Context, string, string, FileListOptions) ([]File, string, error)
 	GetVectorStoreFile(context.Context, string, string, string) (File, error)
 	UpdateVectorStoreFile(context.Context, string, string, string, map[string]any) (File, error)

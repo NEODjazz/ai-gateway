@@ -1,0 +1,552 @@
+package modules
+
+import (
+	"bytes"
+	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+)
+
+type memorySSOSettings struct {
+	mu       sync.Mutex
+	revision int64
+	payload  []byte
+	err      error
+}
+
+func (s *memorySSOSettings) LoadSSOSettings(context.Context) (int64, []byte, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.revision, bytes.Clone(s.payload), s.err
+}
+func (s *memorySSOSettings) SaveSSOSettings(_ context.Context, revision int64, payload []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.err != nil {
+		return s.err
+	}
+	if revision != s.revision {
+		return ErrSSOConflict
+	}
+	s.revision++
+	s.payload = bytes.Clone(payload)
+	return nil
+}
+func testSSOConfig() SSOProfileConfig {
+	return SSOProfileConfig{Issuer: "https://idp.example/tenant", Audience: "console", JWKSURL: "https://idp.example/jwks", AuthorizationURL: "https://idp.example/authorize", TokenURL: "https://idp.example/token", ClientID: "console", RedirectURL: "https://gateway.example/auth/sso/callback", Scopes: []string{"openid", "profile"}, RolesClaim: "roles", RoleMappings: map[string]string{"gateway-admin": "admin", "gateway-user": "user"}, SessionTTLSeconds: 3600}
+}
+func testSSOManager(t *testing.T) (*SSOManager, *memorySSOSettings) {
+	t.Helper()
+	store := &memorySSOSettings{}
+	manager, err := NewSSOManager(store, strings.Repeat("k", 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.now = func() time.Time { return time.Unix(1000, 0) }
+	return manager, store
+}
+func TestSSODraftEncryptionRedactionRevisionAndTicket(t *testing.T) {
+	ctx := context.Background()
+	manager, store := testSSOManager(t)
+	secret := "test-client-secret"
+	input := SSODraftInput{SSOProfileConfig: testSSOConfig(), ClientSecret: &secret}
+	view, err := manager.SaveDraft(ctx, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, revision, err := manager.Load(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if revision != 1 || state.Draft.ClientSecret != secret || !view.Draft.ClientSecretConfigured {
+		t.Fatal("draft not stored")
+	}
+	encoded, _ := json.Marshal(view)
+	if bytes.Contains(encoded, []byte(secret)) || bytes.Contains(encoded, []byte("session_key")) || bytes.Contains(store.payload, []byte(secret)) || bytes.Contains(store.payload, []byte(state.Draft.SessionKey)) {
+		t.Fatal("secret exposed or stored in plaintext")
+	}
+	if _, err := manager.SaveDraft(ctx, input); !errors.Is(err, ErrSSOConflict) {
+		t.Fatal("stale revision accepted")
+	}
+	ticket, err := manager.StartTest(ctx, 1, "admin-user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, _, _ = manager.Load(ctx)
+	if !validSSOTicket(state.Attempt, ticket, manager.now()) || validSSOTicket(state.Attempt, strings.Repeat("x", 43), manager.now()) || validSSOTicket(state.Attempt, ticket, manager.now().Add(5*time.Minute)) {
+		t.Fatal("ticket checks failed")
+	}
+	if bytes.Contains(store.payload, []byte(ticket)) {
+		t.Fatal("raw ticket persisted")
+	}
+	oldKey := state.Draft.SessionKey
+	input.ExpectedRevision = 2
+	input.ClientSecret = nil
+	input.ClientID = "another-client"
+	if _, err := manager.SaveDraft(ctx, input); !errors.Is(err, ErrSSOConfiguration) {
+		t.Fatal("write-only secret was silently transferred to another client")
+	}
+	input.ClientID = "console"
+	view, err = manager.SaveDraft(ctx, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, _, _ = manager.Load(ctx)
+	if state.Draft.ClientSecret != secret || state.Draft.SessionKey == oldKey || state.Attempt != nil || view.TestStatus != "not_started" {
+		t.Fatal("edit retained proof or changed preserved secret")
+	}
+	blank := ""
+	input.ClientSecret = &blank
+	input.ExpectedRevision = 3
+	view, err = manager.SaveDraft(ctx, input)
+	if err != nil || view.Draft.ClientSecretConfigured {
+		t.Fatal("explicit secret clearing failed")
+	}
+	other, _ := NewSSOManager(store, strings.Repeat("z", 32))
+	if _, _, err := other.Load(ctx); !errors.Is(err, ErrSSOUnavailable) {
+		t.Fatal("wrong encryption key accepted")
+	}
+	store.payload[len(store.payload)-1] ^= 1
+	if _, _, err := manager.Load(ctx); !errors.Is(err, ErrSSOUnavailable) {
+		t.Fatal("tampered ciphertext accepted")
+	}
+}
+func TestSSOConfigurationRejectsUnsafeOrIncompleteTrust(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		mutate func(*SSOProfileConfig)
+	}{
+		{"foreign token endpoint", func(p *SSOProfileConfig) { p.TokenURL = "https://evil.example/token" }},
+		{"http issuer", func(p *SSOProfileConfig) { p.Issuer = "http://idp.example/tenant" }},
+		{"userinfo", func(p *SSOProfileConfig) { p.JWKSURL = "https://password@idp.example/jwks" }},
+		{"query", func(p *SSOProfileConfig) { p.TokenURL += "?secret=value" }},
+		{"callback path", func(p *SSOProfileConfig) { p.RedirectURL = "https://gateway.example/evil" }},
+		{"missing openid", func(p *SSOProfileConfig) { p.Scopes = []string{"profile"} }},
+		{"scope injection", func(p *SSOProfileConfig) { p.Scopes = []string{"openid", "profile email"} }},
+		{"missing mappings", func(p *SSOProfileConfig) { p.RoleMappings = nil }},
+		{"invalid role", func(p *SSOProfileConfig) { p.RoleMappings = map[string]string{"owner": "superuser"} }},
+		{"unbounded ttl", func(p *SSOProfileConfig) { p.SessionTTLSeconds = 86401 }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			p := testSSOConfig()
+			test.mutate(&p)
+			if p.Validate() == nil {
+				t.Fatal("invalid trust accepted")
+			}
+		})
+	}
+	p := testSSOConfig()
+	p.RedirectURL = "http://ai-gateway.localhost/auth/sso/callback"
+	if err := p.Validate(); err != nil {
+		t.Fatal("localhost redirect rejected")
+	}
+	if _, err := NewSSOManager(&memorySSOSettings{}, "short"); !errors.Is(err, ErrSSOUnavailable) {
+		t.Fatal("weak encryption key accepted")
+	}
+}
+
+func TestSSOTestActivationDirectoryRevocationAndRollback(t *testing.T) {
+	ctx := context.Background()
+	manager, _ := testSSOManager(t)
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(jwkSet{Keys: []jsonWebKey{rsaJWK("test", &key.PublicKey)}})
+	}))
+	defer server.Close()
+	config := testSSOConfig()
+	config.Issuer = server.URL
+	config.JWKSURL = server.URL + "/jwks"
+	config.TokenURL = server.URL + "/token"
+	config.AuthorizationURL = server.URL + "/authorize"
+	manager.now = time.Now
+	module, store, _ := directoryJWTModule(t)
+	store.principal.Issuer = config.Issuer
+	store.principal.Roles = []string{"admin"}
+	module.sso = manager
+	store.principal.Audience = config.ClientID
+	view, err := manager.SaveDraft(ctx, SSODraftInput{SSOProfileConfig: config})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := module.ChangeSSO(ctx, "activate", view.Revision, "directory-user"); !errors.Is(err, ErrSSOConfiguration) {
+		t.Fatal("untested draft activated")
+	}
+	ticket, err := manager.StartTest(ctx, view.Revision, "other-admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	nonce := strings.Repeat("n", 43)
+	claims := map[string]any{"iat": time.Now().Unix(), "nonce": nonce, "iss": config.Issuer, "aud": config.ClientID, "sub": "external-subject", "roles": []string{"gateway-admin"}, "exp": time.Now().Add(time.Hour).Unix()}
+	token := signRS256JWT(t, "test", key, claims)
+	if err := module.VerifySSOTest(ctx, view.Draft.ID, ticket, token, nonce); !errors.Is(err, ErrUnauthorized) {
+		t.Fatal("another admin's proof accepted")
+	}
+	view, _ = manager.View(ctx)
+	ticket, err = manager.StartTest(ctx, view.Revision, "directory-user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := module.VerifySSOTest(ctx, view.Draft.ID, ticket, token, nonce); err != nil {
+		t.Fatal(err)
+	}
+	if err := module.VerifySSOTest(ctx, view.Draft.ID, ticket, token, nonce); !errors.Is(err, ErrSSOConfiguration) {
+		t.Fatal("proof replay accepted")
+	}
+	view, _ = manager.View(ctx)
+	store.principal.Enabled = false
+	if _, err := module.ChangeSSO(ctx, "activate", view.Revision, "directory-user"); !errors.Is(err, ErrUnauthorized) {
+		t.Fatal("deprovisioned administrator activated trust")
+	}
+	store.principal.Enabled = true
+	view, err = module.ChangeSSO(ctx, "activate", view.Revision, "directory-user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.Active == nil || view.Draft != nil || !view.CanRollback {
+		t.Fatal("activation state invalid")
+	}
+	req := RequestContext{APIKey: token}
+	if err := module.Handle(ctx, &req); !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("browser configuration changed independent API JWT trust: %v", err)
+	}
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := module.currentJWTModule(ctx); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Wait()
+	view, err = module.ChangeSSO(ctx, "disable", view.Revision, "directory-user")
+	if err != nil || view.Active.Enabled {
+		t.Fatal("disable failed")
+	}
+	if err := module.Handle(ctx, &RequestContext{APIKey: token}); !errors.Is(err, ErrUnauthorized) {
+		t.Fatal("browser disable changed independent API JWT trust")
+	}
+	view, err = module.ChangeSSO(ctx, "rollback", view.Revision, "directory-user")
+	if err != nil || !view.Active.Enabled {
+		t.Fatal("disable rollback failed")
+	}
+}
+
+func TestSSOStoreFailureLeavesVirtualKeysAvailable(t *testing.T) {
+	manager, store := testSSOManager(t)
+	store.err = ErrSSOUnavailable
+	module := NewAuthModuleWithVirtualKeys(true, []VirtualKey{{Token: "test-admin-key", UserID: "admin", Roles: []string{"admin"}}})
+	module.sso = manager
+	if err := module.Handle(context.Background(), &RequestContext{APIKey: "test-admin-key"}); err != nil {
+		t.Fatal("key fallback failed")
+	}
+	if _, err := module.currentJWTModule(context.Background()); !errors.Is(err, ErrJWTUnavailable) {
+		t.Fatal("SSO outage failed open")
+	}
+}
+
+func TestSSODiscoveryValidatesIssuerEndpointsAndPKCE(t *testing.T) {
+	var issuer string
+	mode := "valid"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		metadata := map[string]any{"issuer": issuer, "authorization_endpoint": issuer + "/authorize", "token_endpoint": issuer + "/token", "jwks_uri": issuer + "/jwks", "code_challenge_methods_supported": []string{"S256"}}
+		switch mode {
+		case "issuer":
+			metadata["issuer"] = "https://foreign.example"
+		case "endpoint":
+			metadata["token_endpoint"] = "https://foreign.example/token"
+		case "pkce":
+			metadata["code_challenge_methods_supported"] = []string{"plain"}
+		case "redirect":
+			http.Redirect(w, &http.Request{}, "https://foreign.example", 302)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(metadata)
+	}))
+	defer server.Close()
+	issuer = server.URL
+	if _, err := DiscoverSSO(context.Background(), issuer); err != nil {
+		t.Fatal(err)
+	}
+	for _, invalid := range []string{"issuer", "endpoint", "pkce", "redirect"} {
+		mode = invalid
+		if _, err := DiscoverSSO(context.Background(), issuer); !errors.Is(err, ErrSSOConfiguration) {
+			t.Fatalf("%s accepted: %v", invalid, err)
+		}
+	}
+}
+
+func TestSSOSharedKeyMigrationAndReadOnlyLegacy(t *testing.T) {
+	ctx := context.Background()
+	master, legacy := strings.Repeat("m", 32), strings.Repeat("h", 32)
+	store := &memorySSOSettings{}
+	old, err := NewSSOManager(store, legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := SSOSettingsState{SchemaVersion: 1, Active: &SSOProfile{SSOProfileConfig: testSSOConfig(), ID: "active-profile", Enabled: true, ClientSecret: "fixture-client-secret", SessionKey: "fixture-session-key"}, Previous: &SSOProfile{ID: "previous-profile"}, CanRollback: true, Attempt: &SSOAttempt{ActorID: "admin", Status: "passed"}}
+	if err := old.save(ctx, 0, state); err != nil {
+		t.Fatal(err)
+	}
+	original := bytes.Clone(store.payload)
+	reader, err := newRuntimeSSOManager(store, "", legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	read, revision, err := reader.Load(ctx)
+	if err != nil || revision != 1 || read.Active.ID != state.Active.ID {
+		t.Fatal("legacy trust unavailable without master key")
+	}
+	if err := reader.save(ctx, revision, state); !errors.Is(err, ErrSSOUnavailable) {
+		t.Fatal("legacy hash secret used for new encryption")
+	}
+	if _, err := reader.View(ctx); !errors.Is(err, ErrSSOUnavailable) {
+		t.Fatal("writable settings advertised without master key")
+	}
+	if !bytes.Equal(original, store.payload) {
+		t.Fatal("read-only legacy load changed ciphertext")
+	}
+	manager, err := newRuntimeSSOManager(store, master, legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, revision, err := manager.Load(ctx)
+	if err != nil || revision != 2 {
+		t.Fatal("legacy settings not rewrapped")
+	}
+	state.APITrustSeparated = true
+	config := state.Active.SSOProfileConfig
+	state.APITrust = &config
+	before, _ := json.Marshal(state)
+	after, _ := json.Marshal(got)
+	if !bytes.Equal(before, after) {
+		t.Fatal("migration changed SSO identities, sessions or verification state")
+	}
+	if bytes.Equal(original, store.payload) || bytes.Contains(store.payload, []byte(state.Active.ClientSecret)) {
+		t.Fatal("migration failed to encrypt with new key")
+	}
+	canonical, err := NewSSOManager(store, master)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, revision, err := canonical.Load(ctx); err != nil || revision != 2 {
+		t.Fatal("new key cannot read migrated settings")
+	}
+	if _, _, err := old.Load(ctx); !errors.Is(err, ErrSSOUnavailable) {
+		t.Fatal("hash secret still decrypts migrated data")
+	}
+	if _, _, err := reader.Load(ctx); !errors.Is(err, ErrSSOUnavailable) {
+		t.Fatal("missing master key silently lost active SSO")
+	}
+	if _, revision, err := manager.Load(ctx); err != nil || revision != 2 {
+		t.Fatal("migration repeated")
+	}
+}
+
+// An administrator edits the old revision just before the migration CAS.
+type conflictingSSOMigrationStore struct {
+	*memorySSOSettings
+	replacement []byte
+	once        sync.Once
+}
+
+func (s *conflictingSSOMigrationStore) SaveSSOSettings(ctx context.Context, revision int64, payload []byte) error {
+	s.once.Do(func() {
+		s.mu.Lock()
+		s.revision++
+		s.payload = bytes.Clone(s.replacement)
+		s.mu.Unlock()
+	})
+	return s.memorySSOSettings.SaveSSOSettings(ctx, revision, payload)
+}
+
+func TestSSOMigrationPreservesConcurrentEdit(t *testing.T) {
+	ctx := context.Background()
+	oldKey, newKey := strings.Repeat("h", 32), strings.Repeat("m", 32)
+	initial, replacement := &memorySSOSettings{}, &memorySSOSettings{}
+	for _, store := range []*memorySSOSettings{initial, replacement} {
+		manager, err := NewSSOManager(store, oldKey)
+		if err != nil {
+			t.Fatal(err)
+		}
+		id := "old"
+		if store == replacement {
+			id = "concurrent-edit"
+		}
+		if err := manager.save(ctx, 0, SSOSettingsState{SchemaVersion: 1, Draft: &SSOProfile{ID: id}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store := &conflictingSSOMigrationStore{memorySSOSettings: initial, replacement: replacement.payload}
+	manager, err := newRuntimeSSOManager(store, newKey, oldKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, revision, err := manager.Load(ctx)
+	if err != nil || revision != 3 || state.Draft.ID != "concurrent-edit" {
+		t.Fatal("migration overwrote concurrent settings")
+	}
+}
+
+func TestSSOSharedKeyUnavailableFailsClosed(t *testing.T) {
+	ctx := context.Background()
+	store := &memorySSOSettings{}
+	manager, err := newRuntimeSSOManager(store, "", "short-hash-fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, revision, err := manager.Load(ctx); err != nil || revision != 0 {
+		t.Fatal("empty store broke existing env configuration")
+	}
+	if err := manager.save(ctx, 0, SSOSettingsState{SchemaVersion: 1}); !errors.Is(err, ErrSSOUnavailable) {
+		t.Fatal("missing key accepted for encryption")
+	}
+	if _, err := newRuntimeSSOManager(store, "short-master", strings.Repeat("h", 32)); !errors.Is(err, ErrSSOUnavailable) {
+		t.Fatal("short master accepted")
+	}
+	store.revision, store.payload = 1, []byte("invalid-ciphertext")
+	if _, _, err := manager.Load(ctx); !errors.Is(err, ErrSSOUnavailable) {
+		t.Fatal("corruption ignored")
+	}
+	if _, err := manager.JWTModule(ctx, AuthModule{}); !errors.Is(err, ErrJWTUnavailable) {
+		t.Fatal("unreadable active settings fell back to env JWT trust")
+	}
+}
+
+func TestNewSSOSettingsUseOnlySharedEncryptionKey(t *testing.T) {
+	ctx := context.Background()
+	master, hash := strings.Repeat("m", 32), strings.Repeat("h", 32)
+	store := &memorySSOSettings{}
+	writer, err := newRuntimeSSOManager(store, master, hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret := "fixture-new-sso-secret"
+	if _, err := writer.SaveDraft(ctx, SSODraftInput{SSOProfileConfig: testSSOConfig(), ClientSecret: &secret}); err != nil {
+		t.Fatal(err)
+	}
+	reader, err := newRuntimeSSOManager(store, master, strings.Repeat("different-hash", 3))
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, revision, err := reader.Load(ctx)
+	if err != nil || revision != 1 || state.Draft.ClientSecret != secret {
+		t.Fatal("SSO encryption depends on virtual-key hash secret")
+	}
+	old, err := NewSSOManager(store, hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := old.Load(ctx); !errors.Is(err, ErrSSOUnavailable) {
+		t.Fatal("new SSO document encrypted with hash secret")
+	}
+}
+
+func TestBrowserSSOLifecycleDoesNotReplaceAPITrust(t *testing.T) {
+	ctx := context.Background()
+	manager, _ := testSSOManager(t)
+	base := AuthModule{jwtConfig: JWTAuthConfig{Issuer: "https://api.example", Audience: "api-resource", IdentityMode: "legacy"}}
+	for _, enabled := range []bool{true, false} {
+		state := SSOSettingsState{SchemaVersion: 1, APITrustSeparated: true, Active: &SSOProfile{SSOProfileConfig: testSSOConfig(), ID: "browser", Enabled: enabled}}
+		_, revision, err := manager.Load(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := manager.save(ctx, revision, state); err != nil {
+			t.Fatal(err)
+		}
+		current, err := manager.JWTModule(ctx, base)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if current.jwtConfig.Issuer != base.jwtConfig.Issuer || current.jwtConfig.Audience != base.jwtConfig.Audience {
+			t.Fatal("browser profile replaced API trust")
+		}
+	}
+}
+
+func TestLegacySSOAPITrustMigrationIsIndependentAndIdempotent(t *testing.T) {
+	ctx := context.Background()
+	manager, store := testSSOManager(t)
+	config := testSSOConfig()
+	old := SSOSettingsState{SchemaVersion: 1, Active: &SSOProfile{SSOProfileConfig: config, ID: "legacy", Enabled: false}}
+	if err := manager.save(ctx, 0, old); err != nil {
+		t.Fatal(err)
+	}
+	current, err := manager.JWTModule(ctx, AuthModule{})
+	if err != nil || current.jwtConfig.Issuer != config.Issuer || current.jwtConfig.Audience != config.Audience {
+		t.Fatalf("legacy API trust changed during upgrade: %v", err)
+	}
+	state, revision, err := manager.Load(ctx)
+	if err != nil || revision != 2 || !state.APITrustSeparated || state.APITrust == nil {
+		t.Fatal("migration did not persist separate trust")
+	}
+	state.Active.SSOProfileConfig.Issuer = "https://other.example"
+	state.Active.JWKSURL = "https://other.example/jwks"
+	state.Active.AuthorizationURL = "https://other.example/authorize"
+	state.Active.TokenURL = "https://other.example/token"
+	state.Active.Audience = "browser-resource"
+	if err := manager.save(ctx, revision, state); err != nil {
+		t.Fatal(err)
+	}
+	current, err = manager.JWTModule(ctx, AuthModule{})
+	if err != nil || current.jwtConfig.Issuer != config.Issuer || current.jwtConfig.Audience != config.Audience {
+		t.Fatal("editing browser changed captured API trust")
+	}
+	_, revision, err = manager.Load(ctx)
+	if err != nil || revision != 3 || store.revision != 3 {
+		t.Fatal("migration repeated")
+	}
+}
+
+func TestSSOAllowsOnlyExplicitSplitOrigins(t *testing.T) {
+	profile := testSSOConfig()
+	profile.Issuer = "https://accounts.example"
+	profile.AuthorizationURL = profile.Issuer + "/authorize"
+	profile.TokenURL = "https://tokens.example/token"
+	profile.JWKSURL = "https://keys.example/jwks"
+	if profile.Validate() == nil {
+		t.Fatal("unapproved cross-origin endpoints accepted")
+	}
+	profile.EndpointOrigins = []string{"https://tokens.example", "https://keys.example"}
+	if err := profile.Validate(); err != nil {
+		t.Fatal("explicitly approved endpoints rejected", err)
+	}
+	profile.EndpointOrigins = []string{"https://tokens.example.evil", "https://keys.example"}
+	if profile.Validate() == nil {
+		t.Fatal("host suffix allowed foreign endpoint")
+	}
+	profile.EndpointOrigins = []string{"https://tokens.example/path", "https://keys.example"}
+	if profile.Validate() == nil {
+		t.Fatal("path accepted as trusted origin")
+	}
+	profile.EndpointOrigins = []string{"http://tokens.example", "https://keys.example"}
+	if profile.Validate() == nil {
+		t.Fatal("insecure origin accepted")
+	}
+}
+
+func TestSSOClientAudienceCannotOverlapAPIResourceAudience(t *testing.T) {
+	manager, _ := testSSOManager(t)
+	profile := testSSOConfig()
+	module := AuthModule{sso: manager, jwtConfig: profile.jwtConfig()}
+	if _, err := module.SaveSSODraft(t.Context(), SSODraftInput{SSOProfileConfig: profile}); !errors.Is(err, ErrSSOConfiguration) {
+		t.Fatal("browser client overlaps API resource trust")
+	}
+	module.jwtConfig.Audience = "api-resource"
+	if _, err := module.SaveSSODraft(t.Context(), SSODraftInput{SSOProfileConfig: profile}); err != nil {
+		t.Fatal("independent browser audience rejected", err)
+	}
+}

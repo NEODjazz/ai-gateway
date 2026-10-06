@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -45,6 +46,145 @@ func TestTokenCountRejectsUnsupportedAdapterBeforePolicy(t *testing.T) {
 	assertUnsupportedParameter(t, err, "count_tokens")
 	if spy.calls != 0 {
 		t.Fatal("unsupported adapter ran policy modules")
+	}
+}
+
+func TestTokenCountPreservesGeminiMediaResolution(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1beta/models/model:countTokens" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		var body struct {
+			Request struct {
+				Generation geminiGeneration `json:"generationConfig"`
+			} `json:"generateContentRequest"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body.Request.Generation.MediaResolution != "MEDIA_RESOLUTION_HIGH" {
+			t.Errorf("media resolution=%q", body.Request.Generation.MediaResolution)
+		}
+		_, _ = w.Write([]byte(`{"totalTokens":1120}`))
+	}))
+	defer server.Close()
+	router := New(Config{Endpoints: []config.ProviderEndpointConfig{{
+		Name: "gemini", Type: "gemini", BaseURL: server.URL, Models: []string{"model"},
+		Capabilities: []string{"chat", "vision", "gemini_media_resolution"}, AVEnabled: true,
+	}}}).(*Router)
+	result, err := router.CountTokens(t.Context(), modules.RequestContext{Request: openai.ChatCompletionRequest{
+		Model: "model",
+		Messages: []openai.Message{{Role: "user", Content: []any{
+			map[string]any{"type": "image_url", "image_url": map[string]any{"url": "data:image/png;base64,iVBORw0KGgo="}},
+		}}},
+		GeminiMediaResolution: "MEDIA_RESOLUTION_HIGH",
+	}})
+	if err != nil || result.InputTokens != 1120 {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+}
+
+func TestTokenCountPreservesGeminiMediaProcessing(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Request struct {
+				Contents []geminiContent `json:"contents"`
+			} `json:"generateContentRequest"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if got := body.Request.Contents[0].Parts[0].MediaProcessing; got != "AGENTIC" {
+			t.Errorf("media processing=%q", got)
+		}
+		_, _ = w.Write([]byte(`{"totalTokens":240}`))
+	}))
+	defer server.Close()
+	router := New(Config{Endpoints: []config.ProviderEndpointConfig{{
+		Name: "gemini", Type: "gemini", BaseURL: server.URL, Models: []string{"model"},
+		Capabilities: []string{"chat", "video_input", "gemini_media_processing"}, AVEnabled: true,
+	}}}).(*Router)
+	result, err := router.CountTokens(t.Context(), modules.RequestContext{Request: openai.ChatCompletionRequest{
+		Model: "model", Messages: []openai.Message{{Role: "user", Content: []any{
+			map[string]any{"type": "input_video", "input_video": map[string]any{"data": "AAAADGZ0eXBtcDQy", "format": "mp4"}, "gemini_media_processing": "AGENTIC"},
+		}}},
+	}})
+	if err != nil || result.InputTokens != 240 {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+}
+
+func TestTokenCountPreservesGeminiFileSearch(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Request struct {
+				Tools []geminiTool `json:"tools"`
+			} `json:"generateContentRequest"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if len(body.Request.Tools) != 1 || body.Request.Tools[0].FileSearch == nil || body.Request.Tools[0].FileSearch.StoreNames[0] != "fileSearchStores/policies" {
+			t.Errorf("file search tool lost: %+v", body.Request.Tools)
+		}
+		_, _ = w.Write([]byte(`{"totalTokens":48}`))
+	}))
+	defer server.Close()
+	router := New(Config{Endpoints: []config.ProviderEndpointConfig{{
+		Name: "gemini", Type: "gemini", BaseURL: server.URL, Models: []string{"model"}, Capabilities: []string{"chat", "gemini_file_search"},
+	}}}).(*Router)
+	result, err := router.CountTokens(t.Context(), modules.RequestContext{Request: openai.ChatCompletionRequest{
+		Model: "model", Messages: []openai.Message{{Role: "user", Content: "find policy"}}, GeminiFileSearch: &openai.GeminiFileSearchConfig{StoreNames: []string{"fileSearchStores/policies"}},
+	}})
+	if err != nil || result.InputTokens != 48 {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+}
+
+func TestTokenCountPreservesGeminiComputerUse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Request struct {
+				Tools []geminiTool `json:"tools"`
+			} `json:"generateContentRequest"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if len(body.Request.Tools) != 1 || body.Request.Tools[0].ComputerUse == nil || body.Request.Tools[0].ComputerUse.Environment != "ENVIRONMENT_BROWSER" {
+			t.Errorf("computer use tool lost: %+v", body.Request.Tools)
+		}
+		_, _ = w.Write([]byte(`{"totalTokens":64}`))
+	}))
+	defer server.Close()
+	router := New(Config{Endpoints: []config.ProviderEndpointConfig{{Name: "gemini", Type: "gemini", BaseURL: server.URL, Models: []string{"model"}, Capabilities: []string{"chat", "gemini_computer_use"}}}}).(*Router)
+	result, err := router.CountTokens(t.Context(), modules.RequestContext{Request: openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "browse"}}, GeminiComputerUse: &openai.GeminiComputerUseConfig{Environment: "ENVIRONMENT_BROWSER"}}})
+	if err != nil || result.InputTokens != 64 {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+}
+
+func TestTokenCountPreservesGeminiMCPServers(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Request struct {
+				Tools []geminiTool `json:"tools"`
+			} `json:"generateContentRequest"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if len(body.Request.Tools) != 1 || len(body.Request.Tools[0].MCPServers) != 1 || body.Request.Tools[0].MCPServers[0].Name != "weather" {
+			t.Errorf("MCP server lost: %+v", body.Request.Tools)
+		}
+		_, _ = w.Write([]byte(`{"totalTokens":72}`))
+	}))
+	defer server.Close()
+	router := New(Config{Endpoints: []config.ProviderEndpointConfig{{Name: "gemini", Type: "gemini", BaseURL: server.URL, Models: []string{"model"}, Capabilities: []string{"chat", "gemini_mcp"}}}}).(*Router)
+	transport := openai.GeminiStreamableHTTPTransport{URL: "https://mcp.example.test/v1", Timeout: "30s", SSEReadTimeout: "60s", TerminateOnClose: true}
+	result, err := router.CountTokens(t.Context(), modules.RequestContext{Request: openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "forecast"}}, GeminiMCPServerIDs: []string{"weather"}, GeminiMCPServers: []openai.GeminiMCPServer{{Name: "weather", StreamableHTTPTransport: transport}}}})
+	if err != nil || result.InputTokens != 72 {
+		t.Fatalf("result=%+v err=%v", result, err)
 	}
 }
 

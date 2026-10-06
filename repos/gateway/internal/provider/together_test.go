@@ -945,12 +945,14 @@ func TestTogetherRerankAcceptsObjectDocuments(t *testing.T) {
 }
 
 func TestTogetherRerankRejectsTrailingAndOversizedResponses(t *testing.T) {
+	maxInt := int(^uint(0) >> 1)
 	tests := []struct {
 		name string
 		body string
 	}{
 		{name: "trailing", body: `{"id":"rerank","results":[],"usage":{"prompt_tokens":1,"completion_tokens":0,"total_tokens":1}} {}`},
 		{name: "oversized", body: strings.Repeat(" ", (8<<20)+1)},
+		{name: "usage overflow", body: fmt.Sprintf(`{"id":"rerank","results":[],"usage":{"prompt_tokens":%d,"completion_tokens":1,"total_tokens":%d}}`, maxInt, -maxInt-1)},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -962,6 +964,27 @@ func TestTogetherRerankRejectsTrailingAndOversizedResponses(t *testing.T) {
 			_, err := NewTogether(server.URL, "key", false).Rerank(t.Context(), openai.RerankRequest{Model: "model", Query: "query", Documents: []any{"document"}})
 			if err == nil {
 				t.Fatal("invalid response accepted")
+			}
+		})
+	}
+}
+
+func TestRerankResultRejectsTokenUsageOverflow(t *testing.T) {
+	maxInt := int(^uint(0) >> 1)
+	for _, test := range []struct {
+		name   string
+		input  int
+		output int
+		valid  bool
+	}{
+		{name: "overflow", input: maxInt, output: 1},
+		{name: "exact boundary", input: maxInt - 1, output: 1, valid: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			response := openai.RerankResponse{Meta: &openai.RerankResponseMeta{Tokens: &openai.RerankTokens{InputTokens: test.input, OutputTokens: test.output}}}
+			err := validateRerankResponse(response, 1)
+			if (err == nil) != test.valid {
+				t.Fatalf("validation=%v for usage %+v", err, response.Meta.Tokens)
 			}
 		})
 	}

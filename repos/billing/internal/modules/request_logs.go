@@ -313,14 +313,34 @@ func requestLogQuery(filter RequestLogFilter, includeCursor bool) (url.Values, [
 	return params, where, nil
 }
 
+type ScopedRequestLogReporter interface {
+	GetRequestLogScoped(context.Context, string, string) (RequestLog, error)
+}
+
 func (r *ClickHouseUsageReporter) GetRequestLog(ctx context.Context, requestID string) (RequestLog, error) {
+	return r.getRequestLog(ctx, requestID, "")
+}
+func (r *ClickHouseUsageReporter) GetRequestLogScoped(ctx context.Context, requestID, organization string) (RequestLog, error) {
+	if strings.TrimSpace(organization) == "" || len(organization) > 256 {
+		return RequestLog{}, errors.New("organization is required")
+	}
+	return r.getRequestLog(ctx, requestID, organization)
+}
+func (r *ClickHouseUsageReporter) getRequestLog(ctx context.Context, requestID, organization string) (RequestLog, error) {
 	if r == nil || r.client == nil || strings.TrimSpace(requestID) == "" {
 		return RequestLog{}, errors.New("request id is required")
+	}
+	where := "request_id = {request_id:String} AND phase IN ('commit','cancel')"
+	if organization != "" {
+		where += " AND organization_id = {organization_id:String}"
 	}
 	params := url.Values{
 		"output_format_json_quote_64bit_integers": {"0"},
 		"param_request_id":                        {requestID},
-		"query":                                   {fmt.Sprintf("SELECT %s FROM %s WHERE request_id = {request_id:String} AND phase IN ('commit','cancel') ORDER BY parseDateTimeBestEffort(timestamp) DESC,event_id DESC LIMIT 1 FORMAT JSONEachRow", requestLogColumns(), r.table)},
+		"query":                                   {fmt.Sprintf("SELECT %s FROM %s WHERE %s ORDER BY parseDateTimeBestEffort(timestamp) DESC,event_id DESC LIMIT 1 FORMAT JSONEachRow", requestLogColumns(), r.table, where)},
+	}
+	if organization != "" {
+		params.Set("param_organization_id", organization)
 	}
 	rows, err := r.queryRequestLogs(ctx, params)
 	if err != nil {

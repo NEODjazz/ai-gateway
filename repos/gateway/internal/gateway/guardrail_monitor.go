@@ -208,10 +208,10 @@ func normalizeGuardrailEvent(event GuardrailEvent) (GuardrailEvent, bool) {
 	event.Policy = boundedMonitorValue(event.Policy, 128)
 	event.Module = boundedMonitorValue(event.Module, 32)
 	event.Source = boundedMonitorValue(event.Source, 32)
-	if (event.Module != "dlp" && event.Module != "av") || (event.Outcome != "passed" && event.Outcome != "rejected" && event.Outcome != "unavailable") {
+	if (event.Module != "dlp" && event.Module != "av" && event.Module != "prompt_injection") || (event.Outcome != "passed" && event.Outcome != "rejected" && event.Outcome != "unavailable") {
 		return GuardrailEvent{}, false
 	}
-	if event.Source != "compliance" && event.Source != "guardrail_api" && event.Source != "inference_output" {
+	if event.Source != "compliance" && event.Source != "guardrail_api" && event.Source != "inference_output" && event.Source != "prompt_injection_judge" {
 		event.Source = "inference"
 	}
 	if event.OccurredAt.IsZero() {
@@ -385,7 +385,7 @@ func (h Handler) GetGuardrailMonitor(w http.ResponseWriter, r *http.Request) {
 	if filter.Window == "" {
 		filter.Window = "retained"
 	}
-	if !allowedValue(filter.Window, "retained", "15m", "1h", "24h") || !allowedValue(filter.Module, "", "dlp", "av") || len(filter.Policy) > 128 || !allowedValue(filter.Outcome, "", "passed", "rejected", "unavailable") || !allowedValue(filter.Source, "", "inference", "inference_output", "compliance", "guardrail_api") {
+	if !allowedValue(filter.Window, "retained", "15m", "1h", "24h") || !allowedValue(filter.Module, "", "dlp", "av", "prompt_injection") || len(filter.Policy) > 128 || !allowedValue(filter.Outcome, "", "passed", "rejected", "unavailable") || !allowedValue(filter.Source, "", "inference", "inference_output", "compliance", "guardrail_api", "prompt_injection_judge") {
 		writeError(w, http.StatusBadRequest, "invalid_request", "invalid guardrail monitor filter")
 		return
 	}

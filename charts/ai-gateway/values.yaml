@@ -1,3 +1,10 @@
+# Use the same existing Secret in the gateway and auth releases (32+ bytes).
+# Inline key is for encrypted values sources only; prefer existingSecret.
+credentialEncryption:
+  existingSecret: ""
+  secretKey: CREDENTIAL_ENCRYPTION_KEY
+  key: ""
+
 image:
   repository: ghcr.io/neodjazz/ai-gateway-gateway
   # Defaults to Chart.appVersion when empty.
@@ -14,6 +21,12 @@ devMode:
 
 gateway:
   replicaCount: 1
+  azureIdentity:
+    tenantId: ""
+    clientId: ""
+    # Reference an existing Secret; never put the client secret in chart values.
+    clientSecretSecretName: ""
+    clientSecretSecretKey: AZURE_CLIENT_SECRET
   # Resolve external provider names before cluster search suffixes. This also
   # avoids corporate DNS suffix timeouts for multi-label public hostnames.
   dnsConfig:
@@ -22,6 +35,9 @@ gateway:
         value: "1"
   port: 8080
   adminUI:
+    # Exact browser HTTP(S) origins for explicit test-key Playground calls.
+    # Empty keeps the console same-origin. HTTPS required except loopback.
+    playgroundOrigins: []
     enabled: true
     sso:
       enabled: false
@@ -78,6 +94,11 @@ gateway:
     runStepQuota: 10000
     # Retention for terminal runs. Expired rows are evicted during creation.
     runRetentionSeconds: 2592000
+  conversations:
+    # Maximum durable conversations per credential-and-user owner.
+    ownerQuota: 10000
+    # Maximum retained input and output items per conversation.
+    itemQuota: 4096
   a2aTasks:
     # Maximum retained tasks per credential-and-user owner.
     ownerQuota: 1000
@@ -105,12 +126,13 @@ gateway:
   routing:
     strategy: weighted
     adaptiveEwmaAlpha: "0.2"
+    # With controlPlane.postgresDsn, Responses affinity and ownership use PostgreSQL.
     responsesAffinityTtlSeconds: 3600
     responsesOwnershipTtlSeconds: 2592000
   controlPlane:
     # PostgreSQL is the source of truth; empty DSN keeps runtime-only management.
     postgresDsn: ""
-    # Required (minimum 16 characters) whenever postgresDsn is set.
+    # Deprecated alias for credentialEncryption.key; minimum 16 bytes for existing installations.
     credentialEncryptionKey: ""
     refreshSeconds: 1
   management:
@@ -264,3 +286,33 @@ securityContext:
   capabilities:
     drop:
       - ALL
+
+# Opt-in document processing; existing deployments retain native behavior.
+docling:
+  enabled: false
+  # Existing Secret keys: api-key, redis-url, redis-password.
+  # redis-url points at <release-fullname>-docling-redis:6379 and uses this password.
+  existingSecret: ""
+  image:
+    repository: ghcr.io/neodjazz/ai-gateway-docling
+    tag: ""
+    pullPolicy: IfNotPresent
+  apiReplicas: 1
+  workerReplicas: 2
+  capacity: 16
+  queueWaitSeconds: 120
+  apiResources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {cpu: "1", memory: 1Gi}
+  workerResources:
+    requests: {cpu: 500m, memory: 2Gi}
+    limits: {cpu: "2", memory: 4Gi}
+  redis:
+    image: redis:7.4.6-alpine
+    persistence:
+      size: 2Gi
+      storageClass: ""
+    resources:
+      requests: {cpu: 100m, memory: 128Mi}
+      limits: {cpu: "1", memory: 768Mi}
+  networkPolicy: true

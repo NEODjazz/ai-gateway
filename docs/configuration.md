@@ -1,5 +1,13 @@
 # Конфигурация
 
+Browser SSO настраивается global admin через **Settings → Settings → Single sign-on**
+после Auth migrations 014–017 и подготовки encryption key. См.
+[настройку SSO в UI](admin-sso-settings.md): draft/test/activate, несколько
+connections и server-side sessions. Browser ID-token trust и API access-token
+trust независимы. API issuer registry требует migration 018; смена browser
+connection не изменяет доверие API-клиентов. Legacy `ADMIN_SSO_*` не является
+fallback для browser login.
+
 Helm values — рекомендуемый интерфейс Kubernetes-конфигурации. Charts
 преобразуют их в environment variables и Secrets. При локальном запуске те же
 переменные задаются процессу напрямую. HTTP resources и payloads описаны в
@@ -11,25 +19,49 @@ OpenAPI, а не в этом документе.
 | --- | --- | --- |
 | `HTTP_ADDR` | `:8080` | HTTP listener |
 | `ADMIN_UI_ENABLED` | `true` | UI на `/ui/` |
+| `ADMIN_UI_PLAYGROUND_ORIGINS` | пусто | До 16 точных доверенных HTTP(S) origins для Playground с отдельным test key; HTTPS, кроме loopback; разделитель — запятая или пробел |
 | `API_DOCS_ENABLED` | `false` | Swagger UI и `/openapi.yaml` |
 | `API_DOCS_TRY_IT_OUT_ENABLED` | `false` | Browser calls из Swagger UI |
 | `DEFAULT_PROVIDER` | `PROVIDER_TYPE` или `demo` | Provider по умолчанию |
+| `PROVIDER_TYPE` / `OLLAMA_URL` | `demo` / `http://127.0.0.1:11434` | Legacy одиночный provider при отсутствии `PROVIDERS_JSON`; для нескольких deployments используйте managed control plane |
 | `PROVIDERS_JSON` | пусто | Static provider endpoints; managed snapshot заменяет их после bootstrap |
 | `MODEL_CATALOG_JSON` | empty catalog | Capabilities и pricing contract |
-| `GUARDRAIL_POLICIES_JSON` | `{}` | Static DLP/AV policies |
+| `GUARDRAIL_POLICIES_JSON` | `{}` | Static scanner, anonymization and prompt injection policies |
 | `GUARDRAIL_MONITOR_CAPACITY` | `1000` | Process-local monitor capacity, диапазон 1–10000 |
 | `GUARDRAIL_MONITOR_TTL_SECONDS` | `604800` | Redis retention событий monitor |
 | `ROUTING_STRATEGY` | `weighted` | `weighted` или `adaptive` |
 | `ADAPTIVE_ROUTING_EWMA_ALPHA` | `0.2` | Сглаживание adaptive routing |
 | `RESPONSES_AFFINITY_TTL_SECONDS` | `3600` | Affinity для `previous_response_id` |
-| `RESPONSES_OWNERSHIP_TTL_SECONDS` | `2592000` | Срок хранения неизменяемой привязки сохраняемого Response к владельцу и deployment; требует Redis |
+| `RESPONSES_OWNERSHIP_TTL_SECONDS` | `2592000` | Срок хранения неизменяемой привязки сохраняемого Response к владельцу и deployment; PostgreSQL при durable control plane, иначе Redis или memory fallback |
 | `PROVIDER_CONTROL_PLANE_POSTGRES_DSN` | пусто | Durable versioned admin state |
-| `PROVIDER_CREDENTIAL_ENCRYPTION_KEY` | ephemeral без DSN | AES-GCM key; с DSN требуется минимум 16 символов |
+| `CREDENTIAL_ENCRYPTION_KEY` | ephemeral без DSN | Общий ключ provider credentials, MCP, logging, A2A и managed SSO; 32+ байта для SSO, legacy control plane требует 16+ |
 | `PROVIDER_CONTROL_PLANE_REFRESH_SECONDS` | `1` | Poll durable revision |
 | `REDIS_ADDR` | пусто | Shared cache/rate/circuit/affinity/monitor state |
 | `REDIS_DB` | `0` | Redis DB |
 | `REDIS_PREFIX` | `ai-gateway` | Namespace Redis keys |
 | `REDIS_PASSWORD` | пусто | Redis credential |
+
+### Playground: дополнительный Gateway URL
+
+По умолчанию browser CSP и Playground разрешают только origin самой консоли.
+Для отдельного test Gateway задайте `gateway.adminUI.playgroundOrigins` в Helm,
+например `['https://test-gateway.example.com']`. Это соответствует
+`ADMIN_UI_PLAYGROUND_ORIGINS=https://test-gateway.example.com` при запуске процесса.
+Указывайте только origin, без `/v1`, wildcard, userinfo, query или fragment.
+Некорректная конфигурация при включённой консоли останавливает запуск Gateway.
+HTTP допустим только для
+`localhost` или loopback IP; HTTPS-консоль всё равно требует HTTPS URL.
+Изменение списка требует перезапуска процесса и перезагрузки страницы консоли.
+
+UI показывает доверенные origins и отклоняет неизвестный адрес до отправки ключа.
+Для custom URL нужен явно введённый test API key: UI-сессия не пересылается,
+а browser cookies исключены. Доверие расширяет только CSP `connect-src`;
+скрипты, изображения, worker и SSO trust не меняются. На удалённом Gateway
+отдельно требуется CORS, допускающий origin консоли, нужные HTTP methods и
+headers: `Authorization`, `Content-Type`, `X-Session-ID`, `Idempotency-Key`,
+`A2A-Version` — в зависимости от выбранного endpoint.
+Этот список не включает CORS автоматически. Browser Realtime по-прежнему
+работает только на origin самой консоли.
 
 ### Static provider endpoint
 
@@ -52,19 +84,46 @@ OpenAPI, а не в этом документе.
 10,000,000 RPM и 1,000,000,000 TPM. Те же поля у managed Provider задают
 общий предел для всех ссылающихся deployments; оба scope применяются атомарно.
 
-Поддерживаемые static adapter types: `demo`, `ollama`, `openai`,
-`openai-compatible`, `openrouter`, `azure-openai`, `anthropic`, `gemini`,
-`cohere`, `mistral`, `cerebras`, `nvidia-nim`, `together`. Capability задаётся явно для
+Актуальный список типов, операций и parameter policy доступен через
+`GET /admin/v1/provider-capabilities`. Подключение `lemonade` описано в
+[отдельном руководстве](lemonade.md); список managed types приведён ниже.
+Static factory и managed registry могут иметь разные требования к auth/base URL;
+capability нельзя выводить только из совместимого URL. Capability задаётся явно для
 ограниченных endpoints. Используемые значения: `chat`, `responses`,
 `embeddings`, `rerank`, `stream`, `tools`, `structured_output`, `mcp`, `vision`,
 `web_search`, `realtime`, `audio`, `audio_input`.
 Capability names are exact and cannot be duplicated; deployment mutations reject
 unknown or misspelled values.
 Route выбирает endpoint только при наличии capabilities, выведенных из запроса. Moderation deployments должны явно указывать capability `moderation`; она не выводится из совместимого URL автоматически.
+Для Chat SSE преждевременное закрытие upstream до `[DONE]` или непустого `finish_reason` считается ошибкой; частичный ответ не проходит post-response billing.
 
 Provider API key в static config можно передать полем `api_key` или переменной
 `PROVIDER_API_KEY_<NORMALIZED_ENDPOINT_NAME>`. Managed credentials шифруются в
 control-plane snapshot и никогда не возвращаются read API.
+Для локального `ollama` credential не требуется. Удалённый Ollama endpoint
+получает настроенный `api_key` или managed credential в `Authorization: Bearer`
+для chat, streaming, embeddings и completions. Redirects не выполняются.
+`base_url` принимает корень сервера, `/api` или `/v1`; адаптер приводит
+последние два варианта к общему корню, поскольку native и совместимые операции
+используют разные пути. Discovery применяет ту же нормализацию и считает ответ
+без поля `models` ошибкой, сохраняя допустимый пустой список `models: []`.
+Discovery других провайдеров также отклоняет успешный HTTP-ответ без обязательного
+массива моделей (`models` для Cohere, `data` для совместимого каталога).
+В мастере подключения моделей список discovery подтверждает только идентификаторы.
+Возможности модели выбираются вручную, если ответ не содержит
+`capability_source: provider_metadata`. Для Ollama это поле появляется после
+успешного чтения `/api/show`; ошибка чтения оставляет возможности неизвестными.
+После ручного изменения UI показывает источник «Selected by operator». Ранее
+созданные deployments и записи каталога не меняются автоматически.
+Если модель найдена, но ни один допустимый deployment не поддерживает
+запрошенные возможности Chat, Responses, Embeddings, Rerank, Moderations или
+legacy Completions, ошибка маршрутизации указывает недостающую capability.
+Для неизвестного model ID сохраняется обычная ошибка отсутствия endpoint.
+Cohere discovery проходит все страницы `next_page_token` перед публикацией списка;
+повторный токен или ошибка последующей страницы отклоняют весь результат.
+Для Azure OpenAI `base_url` с окончанием `/openai` в GA/preview-режиме использует
+`/openai/v1` и для inference, и для discovery; versioned deployment URL сохраняет
+маршрут `/openai/deployments/{deployment}`.
 
 ### Managed control plane
 
@@ -84,7 +143,10 @@ Deployment — до Model Group. UI использует выбор из уже 
 Provider принимает `demo`, `ollama`, `openai`, `openai-compatible`,
 `openrouter`, `azure-openai`, `anthropic`, `gemini`, `cohere`, `mistral`,
 `voyage`, `bedrock`, `groq`, `deepseek`, `cerebras`, `nvidia-nim`, `together` и
-`xai`.
+`xai`, `vertex-gemini`, `lemonade` и `opensandbox`.
+
+`opensandbox` — adapter контейнерного runtime, а не универсальный inference
+endpoint. Не назначайте ему Chat/Responses только по факту наличия provider.
 
 `cerebras` использует bearer credential, обнаруживает модели через `/v1/models`
 и поддерживает Chat Completions с streaming, function tools, JSON Schema output,
@@ -130,12 +192,40 @@ Provider form загружает этот профиль и показывает
 аутентификации для выбранного типа. Ошибка capability endpoint не блокирует
 список и редактирование providers: форма использует встроенный безопасный набор.
 
-Для `azure-openai` режим `auth_type=entra` использует статический bearer token
-из привязанного write-only credential. Без credential gateway сначала проверяет
-AKS workload identity через `AZURE_TENANT_ID`, `AZURE_CLIENT_ID` и абсолютный
+Для `azure-openai` режим `auth_type=entra` поддерживает два вида привязанного
+write-only credential в UI **Credentials** и мастере **Model Onboarding**:
+готовый bearer token или service principal (Tenant ID, Client ID и Client Secret). Service principal доступен
+только для credential, привязанного к Azure provider с `auth_type=entra`;
+gateway сам получает и обновляет краткоживущий access token. При ротации
+выберите вид credential повторно и введите новые значения: секретные поля
+не возвращаются через API. Готовый bearer token не обновляется автоматически.
+Без привязанного credential gateway сначала проверяет
+service principal через `AZURE_TENANT_ID`, `AZURE_CLIENT_ID` и
+`AZURE_CLIENT_SECRET`, затем AKS workload identity через первые два поля и абсолютный
 `AZURE_FEDERATED_TOKEN_FILE`, затем локальные `IDENTITY_ENDPOINT` и
-`IDENTITY_HEADER` App Service/Container Apps, затем Azure VM IMDS. Projected token
-обменивается на scope `https://cognitiveservices.azure.com/.default` через
+`IDENTITY_HEADER` App Service/Container Apps, затем Azure VM IMDS. Клиентский
+секрет и projected token обмениваются на короткоживущий access token; повторное получение
+выполняется до истечения срока. `AZURE_CLIENT_SECRET` и
+`AZURE_FEDERATED_TOKEN_FILE` нельзя задавать одновременно: неоднозначная или
+неполная конфигурация отклоняется без fallback на IMDS.
+В Helm chart service principal включается только явной ссылкой на существующий
+Kubernetes Secret; значение секрета не указывается в chart values:
+
+```yaml
+gateway:
+  azureIdentity:
+    tenantId: <tenant-id>
+    clientId: <client-id>
+    clientSecretSecretName: azure-service-principal
+    clientSecretSecretKey: AZURE_CLIENT_SECRET
+```
+
+Для этого способа provider должен иметь `auth_type=entra` без привязанного
+статического credential. Выбранный для endpoint cloud и `azure_audience`
+определяют token scope и authority.
+
+По умолчанию для Azure OpenAI resource endpoint в public cloud используется scope
+`https://cognitiveservices.azure.com/.default` через
 public-cloud Entra authority. Для endpoint с suffix `.openai.azure.us` или
 `.cognitiveservices.azure.us` gateway автоматически использует authority
 `https://login.microsoftonline.us` и resource
@@ -146,6 +236,34 @@ identity. Для endpoint с suffix `.openai.azure.cn` или
 `https://cognitiveservices.azure.cn/`. Выбор sovereign cloud выполняется только
 по полному host suffix; другие и похожие внешние домены остаются на public-cloud
 defaults.
+Foundry resource и project endpoints с host suffix `.services.ai.azure.com`
+используют Entra scope `https://ai.azure.com/.default`; project URL
+`/api/projects/{project}` автоматически дополняется `/openai/v1`.
+Для Azure endpoint за собственным hostname можно задать `azure_cloud=public`,
+`usgov` или `china` при `auth_type=entra`; без настройки cloud определяется по URL.
+Если endpoint требует конкретный Entra token audience, задайте
+`azure_audience=cognitive` или `azure_audience=foundry` при `auth_type=entra`.
+Без этого поля audience по-прежнему определяется по URL. Foundry audience в
+Azure China не поддерживается.
+Для Foundry project в Government выбираются authority `login.microsoftonline.us`
+и audience `https://ai.azure.us/`. `azure_cloud=china` для Foundry project
+отклоняется, поскольку этот контракт не поддерживается.
+Для project endpoint `api_version` должен быть пустым; неверная конфигурация
+отклоняется до provider execution. Это правило и запрет `azure_cloud=china`
+действуют также для project URL за reverse proxy с префиксом пути.
+Azure provider URL с `.`/`..` в сегментах пути, двойным разделителем или
+кодированным разделителем отклоняется до выполнения, чтобы proxy и gateway
+не могли по-разному определить границу проекта и deployment.
+Для Azure OpenAI provider с датированной `api_version` можно указать
+resource-root URL и в стартовом конфиге, и в control plane. Каждый model deployment получает собственный путь
+`/openai/deployments/{upstream_model}`; если `upstream_model` не указан,
+используется единственное имя из `models`. Для нескольких имен без явного
+`upstream_model` конфигурация отклоняется как неоднозначная. В стартовом конфиге
+`model_aliases` задаёт upstream deployment: несколько публичных имён допустимы,
+если все они указывают на одно и то же имя deployment. Явно заданный
+deployment URL сохраняется. Пустая версия использует `/openai/v1`.
+Для датированных версий Responses и связанные resource operations используют
+resource-level `/openai/responses`, а Chat и Embeddings остаются под deployment path.
 `AZURE_CLIENT_ID` также выбирает
 user-assigned managed identity. Разрешены только loopback и link-local identity
 endpoints; redirects и некорректные/просроченные ответы отклоняются. Временный
@@ -184,6 +302,13 @@ request для service `bedrock`, включая payload hash и временн�
 Неверный JSON credential отклоняется при сохранении. `auth_type=bearer` сохраняет
 прежний режим для частных совместимых endpoints.
 
+AWS environment дополнительно использует `AWS_SESSION_TOKEN` для temporary
+credentials, `AWS_CONTAINER_CREDENTIALS_RELATIVE_URI` для ECS,
+`AWS_CONTAINER_AUTHORIZATION_TOKEN` или `AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE`
+для защищённого container endpoint. `AWS_EC2_METADATA_DISABLED=true` запрещает
+последний шаг через EC2 IMDS. Передавайте секреты/token files через выбранный
+secret/workload identity mechanism; это credentials Gateway, не пользователей API.
+
 ## Gateway modules
 
 | Модуль | URL | Required default | Особенность |
@@ -212,6 +337,8 @@ secret. Это не клиентские Bearer-токены; auth management и
 | `VECTOR_STORE_FILE_QUOTA` | `10000` | Максимальное число файлов в одном vector store; допустимо от 1 до 100000 |
 | `VECTOR_STORE_BYTE_QUOTA` | `1073741824` | Атомарная квота суммарного размера активных файлов одного vector store; допустимо до 1 TiB |
 | `ASSISTANT_OWNER_QUOTA` | `1000` | Максимальное число assistant definitions для пары credential/user; допустимо от 1 до 100000 |
+| `CONVERSATION_OWNER_QUOTA` | `10000` | Максимальное число durable conversations для пары credential/user; допустимо от 1 до 1000000 |
+| `CONVERSATION_ITEM_QUOTA` | `4096` | Максимальное число input/output items в одной conversation; допустимо от 1 до 100000 |
 | `ASSISTANT_THREAD_OWNER_QUOTA` | `10000` | Максимальное число assistant threads для пары credential/user; допустимо от 1 до 1000000 |
 | `ASSISTANT_MESSAGE_THREAD_QUOTA` | `100000` | Максимальное число сообщений в одном assistant thread; допустимо от 1 до 1000000 |
 | `ASSISTANT_RUN_OWNER_QUOTA` | `10000` | Максимальное число сохраненных assistant runs для пары credential/user; допустимо от 1 до 100000 |
@@ -221,6 +348,19 @@ secret. Это не клиентские Bearer-токены; auth management и
 Files API возвращает `503`, если `PROVIDER_CONTROL_PLANE_POSTGRES_DSN` не
 настроен. Квота сериализуется отдельно для каждого owner key и поэтому не
 переполняется конкурентными загрузками.
+
+### A2A durable tasks и subscriptions
+
+| Переменная | Default | Ограничение |
+| --- | --- | --- |
+| `A2A_TASK_OWNER_QUOTA` | `1000` | Число durable tasks владельца; 1–100000 |
+| `A2A_TASK_TTL_SECONDS` | `2592000` | Retention tasks; 60 секунд–365 дней |
+| `A2A_SUBSCRIPTION_LIMIT` | `256` | Process-local subscriptions; 1–10000 |
+| `A2A_SUBSCRIPTION_DURATION_SECONDS` | `300` | Lifetime subscription; 1–3600 секунд |
+| `A2A_SUBSCRIPTION_POLL_MILLISECONDS` | `1000` | Проверка durable state; 100–10000 ms |
+
+A2A state требует того же PostgreSQL control-plane DSN. Подробнее о durable
+ресурсах и jobs: [lifecycle](resource-lifecycle.md).
 
 ## Cache и telemetry
 
@@ -259,6 +399,18 @@ Files API возвращает `503`, если `PROVIDER_CONTROL_PLANE_POSTGRES_
 | `AUTH_JWT_USER_ID_CLAIM` | `sub` | Dot-separated claim path |
 | `AUTH_JWT_TEAM_ID_CLAIM` | `team_id` | Dot-separated claim path |
 | `AUTH_JWT_ROLES_CLAIM` | `roles` | Dot-separated claim path |
+| `AUTH_JWT_IDENTITY_MODE` | `legacy` | `directory` требует pre-provisioned issuer/subject/audience binding, active directory и явные grants |
+| `AUTH_JWT_ROLE_MAPPINGS_JSON` | `{}` | Mapping внешних role values в `user`, `developer`, `org_admin`, `team_admin`, `admin`; directory mode требует непустой mapping и текущие directory approvals |
+
+### Legacy browser environment
+
+`ADMIN_SSO_ENABLED`, `ADMIN_SSO_AUTHORIZATION_URL`, `ADMIN_SSO_TOKEN_URL`,
+`ADMIN_SSO_CLIENT_ID`, `ADMIN_SSO_CLIENT_SECRET`, `ADMIN_SSO_REDIRECT_URL`,
+`ADMIN_SSO_SCOPES`, `ADMIN_SSO_SESSION_KEY` и `ADMIN_SSO_SESSION_TTL_SECONDS`
+сохраняются в legacy config reader для совместимости. Они не включают новый
+browser identity flow: активируйте независимый managed connection. Старые
+resource-token cookies не авторизуют UI; `migration_required` указывает на
+необходимость переноса. API `AUTH_JWT_*` при этом сохраняет собственное доверие.
 
 Production должен использовать уникальные `AUTH_KEY_HASH_SECRET` и management
 secret, отключённые demo keys и static fallback после миграции ключей.
@@ -285,6 +437,19 @@ secret, отключённые demo keys и static fallback после мигр�
 ClickHouse username/password и service/management shared secrets должны
 приходить из Secret. Gateway и Billing должны получать одинаковые catalog JSON
 и billing service secret. Management secret является отдельным credential.
+При `commit` подтвержденный провайдером `total_tokens=0` сохраняется как точный
+ноль; запасная оценка применяется только при отсутствующем или неполном usage.
+Сервис billing использует переданный Gateway признак `usage_estimated`, чтобы
+отличить эти случаи.
+При отмене клиентского запроса Gateway отправляет `cancel` для активного budget
+reserve с отдельным ограниченным по времени context, чтобы снять резерв до TTL.
+Если следующий endpoint в failover отклоняет запрос на preflight, предыдущий
+reserve отменяется перед возвратом ошибки.
+Если проверка формы prompt или права сохранения Responses отклоняет запрос после
+reserve, Gateway также отправляет `cancel` до возврата ошибки клиенту.
+То же правило действует при preflight-отказе Embeddings, Rerank и Moderations,
+включая failover на следующий endpoint.
+Billing-запрос передает статус и класс сбоя, но не сырой текст ошибки провайдера.
 
 ## Anonymizer, DLP и AV
 
@@ -307,3 +472,15 @@ Default values удобны только для локального запус�
 Kubernetes Secrets. Не храните реальные provider keys, DSN passwords,
 encryption keys и shared secrets в Git. Изменение encryption key без
 перешифрования snapshot сделает сохранённые credentials нечитаемыми.
+
+Для directory JWT/Keycloak и внешнего пользовательского OpenWebUI см.
+[профиль identity](identity-keycloak-openwebui.md).
+
+`CREDENTIAL_ENCRYPTION_KEY` передаётся Gateway и Auth с одинаковым значением.
+`PROVIDER_CREDENTIAL_ENCRYPTION_KEY` — deprecated alias только при отсутствии нового
+имени; конфликт значений останавливает запуск. `AUTH_KEY_HASH_SECRET` не заменяется.
+Для Helm используйте `credentialEncryption.existingSecret` / `secretKey` в обоих
+releases. Существующее `gateway.controlPlane.credentialEncryptionKey` поддерживается
+как deprecated inline alias. Переименование не меняет ciphertext; ротация самого
+значения требует миграции всех зашифрованных конфигураций. Перенос старого SSO
+описан в [SSO settings](admin-sso-settings.md#совместимость-ключей).

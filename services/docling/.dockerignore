@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+test_*.py
+integration.py
+check.py
+.env*
+*.pem

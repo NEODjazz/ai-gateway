@@ -35,33 +35,40 @@ func validateModerationResponse(response openai.ModerationResponse, resultCount 
 		return errors.New("moderation response count does not match input")
 	}
 	for _, result := range response.Results {
-		if len(result.Categories) == 0 || len(result.Categories) > 128 || len(result.CategoryScores) != len(result.Categories) || len(result.CategoryAppliedInputTypes) != len(result.Categories) {
-			return errors.New("provider returned invalid moderation categories")
+		if err := validateModerationResult(result); err != nil {
+			return err
 		}
-		flagged := false
-		for category, value := range result.Categories {
-			if strings.TrimSpace(category) == "" || len(category) > 128 {
-				return errors.New("provider returned invalid moderation category")
-			}
-			score, scoreOK := result.CategoryScores[category]
-			inputTypes, typesOK := result.CategoryAppliedInputTypes[category]
-			if !scoreOK || !typesOK || math.IsNaN(score) || math.IsInf(score, 0) || score < 0 || score > 1 || len(inputTypes) == 0 || len(inputTypes) > 2 {
-				return errors.New("provider returned invalid moderation category details")
-			}
-			seen := map[string]bool{}
-			for _, inputType := range inputTypes {
-				if (inputType != "text" && inputType != "image") || seen[inputType] {
-					return errors.New("provider returned invalid moderation input types")
-				}
-				seen[inputType] = true
-			}
-			if value != nil && *value {
-				flagged = true
-			}
+	}
+	return nil
+}
+
+func validateModerationResult(result openai.ModerationResult) error {
+	if len(result.Categories) == 0 || len(result.Categories) > 128 || len(result.CategoryScores) != len(result.Categories) || len(result.CategoryAppliedInputTypes) != len(result.Categories) {
+		return errors.New("provider returned invalid moderation categories")
+	}
+	flagged := false
+	for category, value := range result.Categories {
+		if strings.TrimSpace(category) == "" || len(category) > 128 {
+			return errors.New("provider returned invalid moderation category")
 		}
-		if result.Flagged != flagged {
-			return errors.New("provider returned inconsistent moderation flag")
+		score, scoreOK := result.CategoryScores[category]
+		inputTypes, typesOK := result.CategoryAppliedInputTypes[category]
+		if !scoreOK || !typesOK || math.IsNaN(score) || math.IsInf(score, 0) || score < 0 || score > 1 || len(inputTypes) == 0 || len(inputTypes) > 2 {
+			return errors.New("provider returned invalid moderation category details")
 		}
+		seen := map[string]bool{}
+		for _, inputType := range inputTypes {
+			if (inputType != "text" && inputType != "image") || seen[inputType] {
+				return errors.New("provider returned invalid moderation input types")
+			}
+			seen[inputType] = true
+		}
+		if value != nil && *value {
+			flagged = true
+		}
+	}
+	if result.Flagged != flagged {
+		return errors.New("provider returned inconsistent moderation flag")
 	}
 	return nil
 }

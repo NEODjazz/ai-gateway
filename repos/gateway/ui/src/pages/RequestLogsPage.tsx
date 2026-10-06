@@ -1,5 +1,5 @@
 import { ModalFrame } from "../components/ModalFrame";
-import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Magnifier } from "@gravity-ui/icons";
 import { Icon, TextInput } from "@gravity-ui/uikit";
 import { useSearchParams } from "react-router-dom";
@@ -125,7 +125,9 @@ export function groupRequestLogs(rows: RequestLog[], field: "session_id" | "trac
 }
 
 export function RequestLogsPage({ embedded = false }: { embedded?: boolean }) {
-  const { client } = useAuth();
+  const { client, session } = useAuth();
+  const scoped = Boolean(session?.capabilities.includes("organization_reports") && !session.capabilities.includes("admin"));
+  const organizationID = scoped ? session?.organization_id || "" : "";
   const [searchParams, setSearchParams] = useSearchParams();
   const filterSignature = JSON.stringify(filterKeys.map((key) => searchParams.get(key) || ""));
   const filters = useMemo(() => Object.fromEntries(filterKeys.map((key) => [key, searchParams.get(key) || ""])) as typeof emptyFilters, [filterSignature]);
@@ -137,6 +139,8 @@ export function RequestLogsPage({ embedded = false }: { embedded?: boolean }) {
   const requestedView = searchParams.get("view");
   const view: LogView = requestedView === "sessions" || requestedView === "traces" ? requestedView : "requests";
   const detailID = searchParams.get("log") || "";
+  const activeLoad = useRef<AbortController | null>(null);
+  const loadGeneration = useRef(0);
   const [rows, setRows] = useState<RequestLog[]>([]);
   const [groupRows, setGroupRows] = useState<GroupedRequestLog[]>([]);
   const [draftFilters, setDraftFilters] = useState(filters);
@@ -164,10 +168,15 @@ export function RequestLogsPage({ embedded = false }: { embedded?: boolean }) {
     setSearchParams(next);
   }, [searchParams, setSearchParams]);
   const load = useCallback(async (append = false, requestedCursor: Cursor | GroupCursor = null) => {
+    activeLoad.current?.abort();
+    const controller = new AbortController(); activeLoad.current = controller;
+    const generation = ++loadGeneration.current;
     setLoading(true); setError("");
+    if (!append) { setRows([]); setGroupRows([]); setNextCursor(null); setNextGroupCursor(null); }
     const query = new URLSearchParams({ limit: "50", days });
     if (rangeFrom && rangeTo) { query.set("from", rangeFrom); query.set("to", rangeTo); }
     for (const [key, value] of Object.entries(filters)) if (value) query.set(key, value);
+    if (scoped) query.set("organization_id", organizationID);
     try {
       if (view === "requests") {
         const cursor = requestedCursor as Cursor;
@@ -175,7 +184,8 @@ export function RequestLogsPage({ embedded = false }: { embedded?: boolean }) {
           query.set("before", cursor.before);
           query.set("before_request_id", cursor.requestID);
         }
-        const response = await client.request<LogsResponse>(`/admin/v1/request-logs?${query}`);
+        const response = await client.request<LogsResponse>(`/admin/v1/request-logs?${query}`, { signal: controller.signal });
+        if (controller.signal.aborted || generation !== loadGeneration.current) return;
         setRows((current) => append ? [...current, ...(response.data || [])] : response.data || []);
         setNextCursor(response.next_before && response.next_request_id ? { before: response.next_before, requestID: response.next_request_id } : null);
       } else {
@@ -186,14 +196,15 @@ export function RequestLogsPage({ embedded = false }: { embedded?: boolean }) {
           query.set("before_group_id", cursor.groupID);
           query.set("before_currency", cursor.currency);
         }
-        const response = await client.request<GroupLogsResponse>(`/admin/v1/request-logs/groups?${query}`);
+        const response = await client.request<GroupLogsResponse>(`/admin/v1/request-logs/groups?${query}`, { signal: controller.signal });
+        if (controller.signal.aborted || generation !== loadGeneration.current) return;
         const incoming = (response.data || []).map((row) => ({ ...row, id: `${row.group_id}\0${row.currency}` }));
         setGroupRows((current) => append ? [...current, ...incoming] : incoming);
         setNextGroupCursor(response.next_before && response.next_before_group_id && response.next_before_currency ? { before: response.next_before, groupID: response.next_before_group_id, currency: response.next_before_currency } : null);
       }
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not load request logs"); }
-    finally { setLoading(false); }
-  }, [client, days, filters, rangeFrom, rangeTo, view]);
+    } catch (cause) { if (!controller.signal.aborted && generation === loadGeneration.current) setError(cause instanceof Error ? cause.message : "Could not load request logs"); }
+    finally { if (!controller.signal.aborted && generation === loadGeneration.current) setLoading(false); }
+  }, [client, days, filters, rangeFrom, rangeTo, view, scoped, organizationID]);
   useEffect(() => {
     client.request("/admin/v1/request-logs/settings").then(setSettings).catch(() => undefined);
     const loadOptions = async (path: string, setter: (rows: IdentityOption[]) => void) => {
@@ -202,16 +213,17 @@ export function RequestLogsPage({ embedded = false }: { embedded?: boolean }) {
         setter(response.data || []);
       } catch { setter([]); }
     };
+    if (scoped) { setOrganizations([{ id: organizationID }]); setTeams([]); setUsers([]); return; }
     void loadOptions("/admin/v1/organizations", setOrganizations);
     void loadOptions("/admin/v1/teams", setTeams);
     void loadOptions("/admin/v1/users", setUsers);
-  }, []);
-  useEffect(() => { void load(); }, [load]);
+  }, [client, scoped, organizationID]);
+  useEffect(() => { void load(); return () => activeLoad.current?.abort(); }, [load]);
   useEffect(() => { setDraftFilters(filters); }, [filterSignature]);
   useEffect(() => { setWindowDraft(rangeFrom && rangeTo ? "custom" : days); setFromDraft(localDateTime(rangeFrom)); setToDraft(localDateTime(rangeTo)); }, [rangeSignature]);
   useEffect(() => {
     if (!detailID) { setDetail(undefined); return; }
-    let active = true;
+    let active = true; setDetail(undefined);
     client.request(`/admin/v1/request-logs/${encodeURIComponent(detailID)}`).then((value) => { if (active) setDetail(value); }).catch((cause) => { if (active) setError(cause instanceof Error ? cause.message : "Could not load request details"); });
     return () => { active = false; };
   }, [client, detailID]);
@@ -274,6 +286,7 @@ export function RequestLogsPage({ embedded = false }: { embedded?: boolean }) {
   const hasRows = view === "requests" ? rows.length > 0 : groupRows.length > 0;
   return <>
     {!embedded && <PageHeader eyebrow="Observability" title="Request logs" description="Cursor-paginated final outcomes and server-aggregated sessions and traces without prompts, responses or raw provider errors." />}
+    {scoped && <p role="note">Organization: <strong>{organizationID}</strong>. Every request, session, trace and detail is verified within this organization.</p>}
     <PageTabs label="Request log views" value={view} items={[{ value: "requests", label: "Requests" }, { value: "sessions", label: "Sessions" }, { value: "traces", label: "Traces" }]} onUpdate={(next) => updateQuery({ view: next === "requests" ? "" : next })} />
     <div className="key-toolbar">
       <form className="key-toolbar-right" onSubmit={applyWindow}>
@@ -311,9 +324,9 @@ export function RequestLogsPage({ embedded = false }: { embedded?: boolean }) {
           <label>Tag<input value={draftFilters.tag} onChange={(event) => setDraftFilters((current) => ({ ...current, tag: event.target.value }))} /></label>
           <label>Minimum cost<input type="number" min="0" step="any" value={draftFilters.min_cost} onChange={(event) => setDraftFilters((current) => ({ ...current, min_cost: event.target.value }))} /></label>
           <label>Maximum cost<input type="number" min="0" step="any" value={draftFilters.max_cost} onChange={(event) => setDraftFilters((current) => ({ ...current, max_cost: event.target.value }))} /></label>
-          <label>Organization<select value={draftFilters.organization_id} onChange={(event) => setDraftFilters((current) => ({ ...current, organization_id: event.target.value }))}><option value="">All organizations</option>{organizations.map((item) => <option key={item.id} value={item.id}>{item.name || item.id}</option>)}</select></label>
-          <label>Team<select value={draftFilters.team_id} onChange={(event) => setDraftFilters((current) => ({ ...current, team_id: event.target.value }))}><option value="">All teams</option>{teams.map((item) => <option key={item.id} value={item.id}>{item.name || item.id}</option>)}</select></label>
-          <label>User<select value={draftFilters.user_id} onChange={(event) => setDraftFilters((current) => ({ ...current, user_id: event.target.value }))}><option value="">All users</option>{users.map((item) => <option key={item.id} value={item.id}>{item.name || item.email || item.id}</option>)}</select></label>
+          <label>Organization<select disabled={scoped} value={scoped ? organizationID : draftFilters.organization_id} onChange={(event) => setDraftFilters((current) => ({ ...current, organization_id: event.target.value }))}><option value="">All organizations</option>{organizations.map((item) => <option key={item.id} value={item.id}>{item.name || item.id}</option>)}</select></label>
+          <label>Team{scoped ? <input value={draftFilters.team_id} onChange={(event) => setDraftFilters((current) => ({ ...current, team_id: event.target.value }))} placeholder="Exact ID within this organization" /> : <select value={draftFilters.team_id} onChange={(event) => setDraftFilters((current) => ({ ...current, team_id: event.target.value }))}><option value="">All teams</option>{teams.map((item) => <option key={item.id} value={item.id}>{item.name || item.id}</option>)}</select>}</label>
+          <label>User{scoped ? <input value={draftFilters.user_id} onChange={(event) => setDraftFilters((current) => ({ ...current, user_id: event.target.value }))} placeholder="Exact ID within this organization" /> : <select value={draftFilters.user_id} onChange={(event) => setDraftFilters((current) => ({ ...current, user_id: event.target.value }))}><option value="">All users</option>{users.map((item) => <option key={item.id} value={item.id}>{item.name || item.email || item.id}</option>)}</select>}</label>
           <label>Credential ID<input value={draftFilters.credential_id} onChange={(event) => setDraftFilters((current) => ({ ...current, credential_id: event.target.value }))} /></label>
         </div>
         <div className="modal-actions"><button type="button" className="secondary" onClick={() => setDraftFilters(emptyFilters)}>Reset filters</button><button>Apply filters</button></div>

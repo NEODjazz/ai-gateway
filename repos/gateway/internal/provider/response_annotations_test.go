@@ -41,3 +41,24 @@ func TestResponsesAnnotationIndexBounds(t *testing.T) {
 		}
 	}
 }
+
+func TestResponsesRejectInvalidSnapshotAnnotationsBeforeDelivery(t *testing.T) {
+	annotations := strings.Repeat(`null,`, maxResponseStreamContentParts) + `null`
+	for name, value := range map[string]string{
+		"scalar":   `"invalid"`,
+		"too many": annotations,
+	} {
+		t.Run(name, func(t *testing.T) {
+			part := `{"type":"output_text","text":"text","annotations":[` + value + `]}`
+			document := `{"id":"r","output":[{"type":"message","content":[` + part + `]}]}`
+			if _, err := decodeResponseJSON(strings.NewReader(document)); err == nil {
+				t.Fatalf("invalid JSON annotations accepted: %s", name)
+			}
+			calls := 0
+			wire := "data: {\"type\":\"response.content_part.done\",\"part\":" + part + "}\n\n" + responseTestTerminal
+			if _, err := streamResponseData(strings.NewReader(wire), "m", func(string, string) error { calls++; return nil }); err == nil || calls != 0 {
+				t.Fatalf("invalid SSE annotations delivered: err=%v calls=%d", err, calls)
+			}
+		})
+	}
+}

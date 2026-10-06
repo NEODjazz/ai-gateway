@@ -26,7 +26,7 @@ func (r Router) CreateFineTuningJob(ctx context.Context, identity modules.Reques
 			release()
 			continue
 		}
-		attempt := providerAttemptContext(identity, endpoint)
+		attempt := r.providerAttemptContext(identity, endpoint)
 		attempt.Request.Model = input.Model
 		attempt.Metadata["gateway.api_type"] = "fine_tuning"
 		r.applyCatalogPricing(ctx, &attempt, endpoint, input.Model)

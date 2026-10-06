@@ -8,6 +8,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -124,6 +125,10 @@ func modelAllowed(model string, grants []string) bool {
 	return false
 }
 
+func requestModelAllowed(req modules.RequestContext, model string) bool {
+	return (!req.ModelAccessRestricted || len(req.AllowedModels) > 0) && modelAllowed(model, req.AllowedModels)
+}
+
 func toolAllowed(tool string, grants []string) bool {
 	return modelAllowed(tool, grants)
 }
@@ -201,6 +206,52 @@ func responseRequestToolIdentifiers(request openai.ResponseRequest) ([]string, b
 	if !valid {
 		return nil, false
 	}
+	customNames, hasCustom, message := openai.InspectResponseCustomToolHistory(request.Input)
+	if message != "" {
+		return nil, false
+	}
+	functionNames, hasFunction, message := openai.InspectResponseFunctionToolHistory(request.Input)
+	if message != "" {
+		return nil, false
+	}
+	for _, history := range []struct {
+		names   []string
+		hasTool bool
+		kind    string
+	}{{customNames, hasCustom, "custom"}, {functionNames, hasFunction, "function"}} {
+		for _, name := range history.names {
+			if !slices.Contains(identifiers, name) {
+				identifiers = append(identifiers, name)
+			}
+		}
+		if history.kind == "function" && history.hasTool {
+			for _, name := range request.RunToolNames {
+				if !validFileToken(name, 64) {
+					return nil, false
+				}
+				if !slices.Contains(identifiers, name) {
+					identifiers = append(identifiers, name)
+				}
+			}
+		}
+		if history.hasTool && len(history.names) == 0 {
+			declared := history.kind == "function" && len(request.RunToolNames) > 0
+			for _, tool := range request.Tools {
+				if tool.Type == history.kind {
+					declared = true
+					break
+				}
+			}
+			if !declared {
+				if request.PreviousResponse == "" {
+					return nil, false
+				}
+				if !slices.Contains(identifiers, "*") {
+					identifiers = append(identifiers, "*")
+				}
+			}
+		}
+	}
 	computerOutputs, message := openai.InspectResponseComputerCallOutputs(request.Input)
 	if message != "" {
 		return nil, false
@@ -258,7 +309,7 @@ func (h Handler) authorizeTools(w http.ResponseWriter, req modules.RequestContex
 		return false
 	}
 	for _, identifier := range identifiers {
-		if !h.toolAllowed(identifier, req.AllowedTools) {
+		if (req.ToolAccessRestricted && len(req.AllowedTools) == 0) || !h.toolAllowed(identifier, req.AllowedTools) {
 			writeError(w, http.StatusForbidden, "tool_not_allowed", "credential is not allowed to use tool "+strconv.Quote(identifier))
 			return false
 		}
@@ -353,7 +404,7 @@ func (h Handler) authorizeAccess(w http.ResponseWriter, ctx context.Context, req
 }
 
 func (h Handler) authorizeModel(w http.ResponseWriter, req modules.RequestContext, model string) bool {
-	if !modelAllowed(model, req.AllowedModels) {
+	if !requestModelAllowed(req, model) {
 		writeError(w, 403, "model_not_allowed", "credential is not allowed to use model "+strconv.Quote(model))
 		return false
 	}

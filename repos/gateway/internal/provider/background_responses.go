@@ -36,19 +36,22 @@ type BackgroundResponseSettlementProvider interface {
 }
 
 type backgroundResponseJob struct {
-	RequestID       string            `json:"request_id"`
-	SessionID       string            `json:"session_id,omitempty"`
-	CredentialID    string            `json:"credential_id"`
-	CredentialAlias string            `json:"credential_alias,omitempty"`
-	UserID          string            `json:"user_id,omitempty"`
-	TeamID          string            `json:"team_id,omitempty"`
-	OrganizationID  string            `json:"organization_id,omitempty"`
-	Roles           []string          `json:"roles,omitempty"`
-	Tags            []string          `json:"tags,omitempty"`
-	Provider        string            `json:"provider,omitempty"`
-	Model           string            `json:"model"`
-	Metadata        map[string]string `json:"metadata,omitempty"`
-	Agent           bool              `json:"agent,omitempty"`
+	JWTIdentity           *modules.JWTIdentity `json:"jwt_identity,omitempty"`
+	ModelAccessRestricted bool                 `json:"model_access_restricted,omitempty"`
+	RequestID             string               `json:"request_id"`
+	SessionID             string               `json:"session_id,omitempty"`
+	CredentialID          string               `json:"credential_id"`
+	CredentialAlias       string               `json:"credential_alias,omitempty"`
+	UserID                string               `json:"user_id,omitempty"`
+	TeamID                string               `json:"team_id,omitempty"`
+	OrganizationID        string               `json:"organization_id,omitempty"`
+	Roles                 []string             `json:"roles,omitempty"`
+	Tags                  []string             `json:"tags,omitempty"`
+	Provider              string               `json:"provider,omitempty"`
+	Model                 string               `json:"model"`
+	Metadata              map[string]string    `json:"metadata,omitempty"`
+	ConversationID        string               `json:"conversation_id,omitempty"`
+	Agent                 bool                 `json:"agent,omitempty"`
 }
 
 func backgroundResponsePending(response openai.ResponseResponse) bool {
@@ -66,7 +69,10 @@ func backgroundResponseOwner(req modules.RequestContext) string {
 func backgroundJobMetadata(metadata map[string]string) map[string]string {
 	result := make(map[string]string)
 	for key, value := range metadata {
-		if key == "gateway.api_type" || strings.HasPrefix(key, "provider.") || strings.HasPrefix(key, "policy.") || strings.HasPrefix(key, "model_catalog.") || strings.HasPrefix(key, "billing.") {
+		if key == "provider.error" {
+			continue
+		}
+		if strings.HasPrefix(key, "gateway.document.") || key == "gateway.api_type" || strings.HasPrefix(key, "provider.") || strings.HasPrefix(key, "policy.") || strings.HasPrefix(key, "model_catalog.") || strings.HasPrefix(key, "billing.") {
 			result[key] = value
 		}
 	}
@@ -76,6 +82,7 @@ func backgroundJobMetadata(metadata map[string]string) map[string]string {
 func newBackgroundResponseJob(req modules.RequestContext) backgroundResponseJob {
 	request := req.ResponseRequest
 	job := backgroundResponseJob{
+		JWTIdentity: req.JWTIdentity, ModelAccessRestricted: req.ModelAccessRestricted,
 		RequestID: req.RequestID, SessionID: req.SessionID, CredentialID: req.CredentialID,
 		CredentialAlias: req.CredentialAlias, UserID: req.UserID, TeamID: req.TeamID,
 		OrganizationID: req.OrganizationID, Roles: append([]string(nil), req.Roles...),
@@ -85,6 +92,9 @@ func newBackgroundResponseJob(req modules.RequestContext) backgroundResponseJob 
 		job.Provider = request.Provider
 		job.Model = request.Model
 	}
+	if req.ConversationTurn != nil {
+		job.ConversationID = req.ConversationTurn.Conversation.ID
+	}
 	return job
 }
 
@@ -92,6 +102,7 @@ func (job backgroundResponseJob) requestContext() modules.RequestContext {
 	store := true
 	request := openai.ResponseRequest{Provider: job.Provider, Model: job.Model, Store: &store, Background: true}
 	return modules.RequestContext{
+		JWTIdentity: job.JWTIdentity, ModelAccessRestricted: job.ModelAccessRestricted,
 		RequestID: job.RequestID, SessionID: job.SessionID, CredentialID: job.CredentialID,
 		CredentialAlias: job.CredentialAlias, UserID: job.UserID, TeamID: job.TeamID,
 		OrganizationID: job.OrganizationID, Roles: append([]string(nil), job.Roles...),
@@ -158,6 +169,7 @@ func (r Router) compensateBackgroundResponse(ctx context.Context, req modules.Re
 	}
 	binding := responseOwnership{Endpoint: endpoint.Name, Model: model, Deployment: responseDeploymentIdentity(endpoint), Resource: "response"}
 	_ = r.ownership.remove(ctx, req, responseID, binding)
+	_ = r.releaseConversation(ctx, &req)
 }
 
 func (r Router) compensateBackgroundInteraction(ctx context.Context, req modules.RequestContext, responseID, model string, agent bool, endpoint Endpoint) {
@@ -203,24 +215,45 @@ func (r Router) processBackgroundResponse(ctx context.Context, claimed asyncstat
 		return r.retryBackgroundResponse(ctx, claimed, errors.New("invalid persisted background response job"))
 	}
 	req := job.requestContext()
+	r.restoreBackgroundConversation(&req, job.ConversationID)
 	response, err := r.RetrieveResponse(ctx, req, claimed.ResourceID)
 	if err != nil {
 		return r.retryBackgroundResponse(ctx, claimed, err)
 	}
 	if backgroundResponsePending(response) {
-		return r.retryBackgroundResponse(ctx, claimed, nil)
+		authErr := r.backgroundAuthorization.ReauthorizeBackground(ctx, req)
+		if authErr != nil {
+			if !errors.Is(authErr, modules.ErrUnauthorized) {
+				return r.retryBackgroundResponse(ctx, claimed, authErr)
+			}
+			_, err = r.CancelResponse(ctx, req, claimed.ResourceID)
+			if err != nil {
+				return r.retryBackgroundResponse(ctx, claimed, err)
+			}
+			// Cancellation acknowledgement may omit usage. Retrieve the terminal
+			// result on the next attempt before settling the original reservation.
+			return r.retryBackgroundResponse(ctx, claimed, nil)
+		}
+		if backgroundResponsePending(response) {
+			return r.retryBackgroundResponse(ctx, claimed, nil)
+		}
 	}
 	if response.Status == "failed" || response.Status == "cancelled" {
 		if req.Metadata == nil {
 			req.Metadata = map[string]string{}
 		}
 		req.Metadata["provider.status"] = "error"
-		if response.Error != nil {
-			req.Metadata["provider.error"] = response.Error.Message
-		}
+		delete(req.Metadata, "provider.error")
 	}
 	req.ResponsesResponse = &response
 	if err := r.modules.RunPostResponse(ctx, &req); err != nil && !errors.Is(err, modules.ErrContentRejected) {
+		return r.retryBackgroundResponse(ctx, claimed, err)
+	}
+	if response.Status == "failed" || response.Status == "cancelled" {
+		if err := r.releaseConversation(ctx, &req); err != nil {
+			return r.retryBackgroundResponse(ctx, claimed, err)
+		}
+	} else if err := r.completeConversation(ctx, &req, &response); err != nil {
 		return r.retryBackgroundResponse(ctx, claimed, err)
 	}
 	return r.asyncJobs.CompleteAsyncJob(ctx, claimed.Kind, claimed.ResourceID, claimed.LeaseGeneration)
@@ -237,16 +270,29 @@ func (r Router) processBackgroundInteraction(ctx context.Context, claimed asyncs
 		return r.retryBackgroundResponse(ctx, claimed, err)
 	}
 	if backgroundInteractionPending(response) {
-		return r.retryBackgroundResponse(ctx, claimed, nil)
+		authErr := r.backgroundAuthorization.ReauthorizeBackground(ctx, req)
+		if authErr != nil {
+			if !errors.Is(authErr, modules.ErrUnauthorized) {
+				return r.retryBackgroundResponse(ctx, claimed, authErr)
+			}
+			_, err = r.CancelInteraction(ctx, req, claimed.ResourceID)
+			if err != nil {
+				return r.retryBackgroundResponse(ctx, claimed, err)
+			}
+			// Cancellation acknowledgement may omit usage. Retrieve the terminal
+			// result on the next attempt before settling the original reservation.
+			return r.retryBackgroundResponse(ctx, claimed, nil)
+		}
+		if backgroundInteractionPending(response) {
+			return r.retryBackgroundResponse(ctx, claimed, nil)
+		}
 	}
 	if response.Status == "failed" || response.Status == "cancelled" {
 		if req.Metadata == nil {
 			req.Metadata = map[string]string{}
 		}
 		req.Metadata["provider.status"] = "error"
-		if response.Error != nil {
-			req.Metadata["provider.error"] = response.Error.Message
-		}
+		delete(req.Metadata, "provider.error")
 	}
 	shared := openai.ResponseFromInteraction(response)
 	req.ResponsesResponse = &shared
@@ -277,7 +323,7 @@ func RunBackgroundResponseWorker(ctx context.Context, processor BackgroundRespon
 	defer ticker.Stop()
 	for {
 		if _, err := processor.ProcessBackgroundResponses(ctx); err != nil && ctx.Err() == nil {
-			log.Printf("background response processing failed: %v", err)
+			log.Printf("background response processing failed: %s", failureClass(err))
 		}
 		select {
 		case <-ctx.Done():

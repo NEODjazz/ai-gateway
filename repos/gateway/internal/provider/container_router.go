@@ -31,7 +31,7 @@ func (r Router) CreateContainer(ctx context.Context, identity modules.RequestCon
 			release()
 			continue
 		}
-		attempt := providerAttemptContext(identity, endpoint)
+		attempt := r.providerAttemptContext(identity, endpoint)
 		attempt.Request.Model = input.Model
 		attempt.Metadata["gateway.api_type"] = "container"
 		r.applyCatalogPricing(ctx, &attempt, endpoint, input.Model)

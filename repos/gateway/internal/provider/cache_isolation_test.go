@@ -24,6 +24,8 @@ func TestCacheIsolationIncludesIdentityAndEffectivePolicy(t *testing.T) {
 			r.Metadata = map[string]string{"provider.modules.anonymizer.mode": "disabled"}
 		}},
 		{"grants", func(r *modules.RequestContext) { r.AllowedTools = []string{"new-tool"} }},
+		{"model restrictions", func(r *modules.RequestContext) { r.ModelAccessRestricted = true }},
+		{"tool restrictions", func(r *modules.RequestContext) { r.ToolAccessRestricted = true }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			changed := base
@@ -71,6 +73,13 @@ func TestCacheIsolationIncludesNativeChatState(t *testing.T) {
 			request.Messages[0].AnthropicDocumentMetadata = []openai.DocumentMetadata{{Title: "Report", Context: "Audited"}}
 		}},
 		{"native token reserve", func(request *openai.ChatCompletionRequest) { request.NativeInputTokens = 1 }},
+		{"clear thinking", func(request *openai.ChatCompletionRequest) { value := true; request.ClearThinking = &value }},
+		{"citation options", func(request *openai.ChatCompletionRequest) { request.CitationOptions = "disabled" }},
+		{"thinking", func(request *openai.ChatCompletionRequest) {
+			request.Thinking = &openai.ChatThinkingOptions{Type: "enabled"}
+		}},
+		{"include reasoning", func(request *openai.ChatCompletionRequest) { value := true; request.IncludeReasoning = &value }},
+		{"reasoning format", func(request *openai.ChatCompletionRequest) { request.ReasoningFormat = "parsed" }},
 		{"service tier", func(request *openai.ChatCompletionRequest) { request.BedrockServiceTier = "priority" }},
 		{"performance latency", func(request *openai.ChatCompletionRequest) { request.BedrockPerformanceLatency = "optimized" }},
 		{"additional response fields", func(request *openai.ChatCompletionRequest) {

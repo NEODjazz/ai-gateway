@@ -101,6 +101,7 @@ func (h Handler) mutateModelDeployment(w http.ResponseWriter, r *http.Request, i
 		return
 	}
 	var input struct {
+		DocumentProcessing    string   `json:"document_processing,omitempty"`
 		ID                    string   `json:"id,omitempty"`
 		ProviderID            string   `json:"provider_id,omitempty"`
 		CredentialID          *string  `json:"credential_id,omitempty"`
@@ -135,7 +136,7 @@ func (h Handler) mutateModelDeployment(w http.ResponseWriter, r *http.Request, i
 	if input.CredentialID != nil {
 		credentialID = *input.CredentialID
 	}
-	deployment := provider.ModelDeployment{ID: input.ID, ProviderID: input.ProviderID, CredentialID: credentialID, CredentialSet: input.CredentialID != nil, UpstreamModel: input.UpstreamModel, Models: input.Models, Capabilities: input.Capabilities, Priority: input.Priority, Weight: input.Weight, GuardrailPolicy: input.GuardrailPolicy, RequestTimeoutMS: input.RequestTimeoutMS, MaxRetries: input.MaxRetries, CooldownAfterFailures: input.CooldownAfterFailures, CooldownSeconds: input.CooldownSeconds, MaxParallelRequests: input.MaxParallelRequests, QueueCapacity: input.QueueCapacity, QueueTimeoutMS: input.QueueTimeoutMS, RateLimitRPM: input.RateLimitRPM, RateLimitTPM: input.RateLimitTPM, Enabled: input.Enabled}
+	deployment := provider.ModelDeployment{DocumentProcessing: input.DocumentProcessing, ID: input.ID, ProviderID: input.ProviderID, CredentialID: credentialID, CredentialSet: input.CredentialID != nil, UpstreamModel: input.UpstreamModel, Models: input.Models, Capabilities: input.Capabilities, Priority: input.Priority, Weight: input.Weight, GuardrailPolicy: input.GuardrailPolicy, RequestTimeoutMS: input.RequestTimeoutMS, MaxRetries: input.MaxRetries, CooldownAfterFailures: input.CooldownAfterFailures, CooldownSeconds: input.CooldownSeconds, MaxParallelRequests: input.MaxParallelRequests, QueueCapacity: input.QueueCapacity, QueueTimeoutMS: input.QueueTimeoutMS, RateLimitRPM: input.RateLimitRPM, RateLimitTPM: input.RateLimitTPM, Enabled: input.Enabled}
 	targetID := input.ID
 	if id != "" {
 		targetID = id

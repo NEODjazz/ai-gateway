@@ -199,7 +199,7 @@ func (h Handler) loadVectorSearchChunks(r *http.Request, owner, storeID string, 
 			return nil, errVectorSearchUnsupportedFile
 		}
 		totalBytes += contentBytes
-		for _, text := range splitVectorSearchText(string(file.Content)) {
+		for _, text := range splitVectorSearchTextWithStrategy(string(file.Content), attached.ChunkingStrategy) {
 			if len(chunks) >= maxVectorSearchChunks {
 				return nil, errVectorSearchTooLarge
 			}
@@ -234,10 +234,73 @@ func splitVectorSearchText(value string) []string {
 		text := strings.TrimSpace(string(runes[:count]))
 		if text != "" {
 			chunks = append(chunks, text)
+			if len(chunks) > maxVectorSearchChunks {
+				return chunks
+			}
 		}
 		runes = runes[count:]
 	}
 	return chunks
+}
+
+func splitVectorSearchTextWithStrategy(value string, strategy vectorstate.ChunkingStrategy) []string {
+	if strategy.Type != "static" {
+		return splitVectorSearchText(value)
+	}
+	runes := []rune(value)
+	chunks := make([]string, 0)
+	for start := 0; start < len(runes); {
+		end := largestVectorChunkEnd(runes, start, strategy.MaxChunkSizeTokens)
+		text := strings.TrimSpace(string(runes[start:end]))
+		if text != "" {
+			chunks = append(chunks, text)
+			if len(chunks) > maxVectorSearchChunks {
+				return chunks
+			}
+		}
+		if end == len(runes) {
+			break
+		}
+		next := end
+		if strategy.ChunkOverlapTokens > 0 {
+			next = smallestVectorChunkStart(runes, start, end, strategy.ChunkOverlapTokens)
+		}
+		if next <= start {
+			next = start + 1
+		}
+		start = next
+	}
+	return chunks
+}
+
+func largestVectorChunkEnd(runes []rune, start, tokenLimit int) int {
+	low, high := start+1, len(runes)
+	best := low
+	for low <= high {
+		middle := low + (high-low)/2
+		if openai.EstimateContextTokens(string(runes[start:middle])) <= tokenLimit {
+			best = middle
+			low = middle + 1
+		} else {
+			high = middle - 1
+		}
+	}
+	return best
+}
+
+func smallestVectorChunkStart(runes []rune, lower, end, tokenLimit int) int {
+	low, high := lower+1, end-1
+	best := end
+	for low <= high {
+		middle := low + (high-low)/2
+		if openai.EstimateContextTokens(string(runes[middle:end])) <= tokenLimit {
+			best = middle
+			high = middle - 1
+		} else {
+			low = middle + 1
+		}
+	}
+	return best
 }
 
 func rankVectorSearchResults(response openai.EmbeddingResponse, chunks []vectorSearchChunk, limit int) ([]vectorSearchResult, bool) {

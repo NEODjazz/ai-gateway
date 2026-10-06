@@ -34,6 +34,9 @@ func (OpenRouter) SupportsResponseCustomTools() bool { return true }
 func (OpenRouter) SupportsChatAudio() bool           { return true }
 
 func (p OpenRouter) ValidateChatParameters(request openai.ChatCompletionRequest) error {
+	if err := rejectChatModeration("openrouter", request); err != nil {
+		return err
+	}
 	return p.compatible.ValidateChatParameters(request)
 }
 

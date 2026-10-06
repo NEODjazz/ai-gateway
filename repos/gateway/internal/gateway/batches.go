@@ -539,7 +539,7 @@ func validateBatchBody(endpoint string, body []byte) ([]byte, string, []string, 
 }
 
 func (h Handler) authorizeBatchModel(w http.ResponseWriter, req modules.RequestContext, model string) bool {
-	if !modelAllowed(model, req.AllowedModels) {
+	if !requestModelAllowed(req, model) {
 		writeError(w, http.StatusForbidden, "model_not_allowed", "credential is not allowed to use model "+strconv.Quote(model))
 		return false
 	}
@@ -763,6 +763,33 @@ func (h Handler) executeBatchItem(ctx context.Context, batch batchstate.Batch, i
 		return batchErrorResult(item, "invalid_batch_state", "stored batch identity is invalid"), true, false
 	}
 	identity.RequestID = item.ExecutionID
+	if err := h.pipeline.ReauthorizeBackground(ctx, identity); err != nil {
+		if errors.Is(err, modules.ErrUnauthorized) {
+			return batchErrorResult(item, "principal_authorization_revoked", "principal or queued policy is no longer authorized"), true, false
+		}
+		return nil, false, true
+	}
+	if identity.JWTIdentity != nil {
+		_, model, tools, err := validateBatchBody(item.URL, item.Body)
+		if err != nil {
+			return batchErrorResult(item, "invalid_batch_state", "stored batch request is invalid"), true, false
+		}
+		// Refresh policy attachments and fallback grants instead of trusting
+		// registry snapshots persisted when the batch was queued.
+		for key := range identity.Metadata {
+			if strings.HasPrefix(key, "policy.") || key == provider.EndpointPolicyAttachmentsMetadataKey {
+				delete(identity.Metadata, key)
+			}
+		}
+		check := &discardBatchAuthorizationResponse{}
+		if !h.prepareAccessGroups(check, &identity) || !h.authorizeBatchModel(check, identity, model) || !h.prepareModelFallbacks(check, ctx, &identity, model) || (len(tools) > 0 && !h.authorizeTools(check, identity, tools, true)) {
+			if check.status >= 500 {
+				return nil, false, true
+			}
+			return batchErrorResult(item, "principal_authorization_revoked", "queued request is no longer authorized"), true, false
+		}
+	}
+
 	if identity.Metadata == nil {
 		identity.Metadata = map[string]string{}
 	}
@@ -774,7 +801,7 @@ func (h Handler) executeBatchItem(ctx context.Context, batch batchstate.Batch, i
 		return nil, false, true
 	}
 	if err != nil {
-		log.Printf("batch item %s/%s failed: %v", batch.ID, item.CustomID, err)
+		log.Print("batch item execution failed")
 		return batchErrorResult(item, "provider_error", "batch item execution failed"), true, false
 	}
 	line := openai.BatchOutputLine{ID: "batch_req_" + item.ExecutionID, CustomID: item.CustomID, Response: &openai.BatchOutputResponse{StatusCode: status, RequestID: item.ExecutionID, Body: body}}
@@ -1165,7 +1192,7 @@ func RunBatchWorker(ctx context.Context, handler Handler) {
 	defer ticker.Stop()
 	for {
 		if _, err := handler.ProcessBatchItems(ctx); err != nil && ctx.Err() == nil {
-			log.Printf("batch processing failed: %v", err)
+			log.Print("batch processing failed")
 		}
 		select {
 		case <-ctx.Done():
@@ -1174,3 +1201,10 @@ func RunBatchWorker(ctx context.Context, handler Handler) {
 		}
 	}
 }
+
+// Authorization helpers only need a response sink in a background worker.
+type discardBatchAuthorizationResponse struct{ status int }
+
+func (*discardBatchAuthorizationResponse) Header() http.Header         { return make(http.Header) }
+func (*discardBatchAuthorizationResponse) WriteHeader(int)             {}
+func (*discardBatchAuthorizationResponse) Write(p []byte) (int, error) { return len(p), nil }

@@ -10,6 +10,7 @@ import (
 
 const MaxPayloadBytes = 2 << 20
 const MaxPushConfigPayloadBytes = 16 << 10
+const AgentJobKind = "agent.mcp.v1"
 
 var ErrNotFound = errors.New("A2A task not found")
 var ErrConflict = errors.New("A2A task already exists")

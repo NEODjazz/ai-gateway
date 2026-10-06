@@ -22,7 +22,9 @@
     "@vitejs/plugin-react": "5.0.2",
     "react": "19.2.8",
     "react-dom": "19.2.8",
+    "react-markdown": "10.1.0",
     "react-router-dom": "7.18.2",
+    "remark-gfm": "4.0.1",
     "vite": "7.3.6"
   },
   "devDependencies": {
@@ -35,5 +37,10 @@
     "jsdom": "27.4.0",
     "typescript": "5.9.3",
     "vitest": "3.2.6"
+  },
+  "overrides": {
+    "@gravity-ui/navigation": {
+      "jscodeshift": "17.4.0"
+    }
   }
 }

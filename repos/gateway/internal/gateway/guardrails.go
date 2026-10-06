@@ -12,6 +12,7 @@ import (
 
 	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/openai"
+	"ai-gateway-gateway/internal/promptinjection"
 	"ai-gateway-gateway/internal/provider"
 )
 
@@ -90,13 +91,14 @@ func (h Handler) UpdateGuardrailPolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var input struct {
-		Description        string   `json:"description,omitempty"`
-		DLP                bool     `json:"dlp"`
-		OutputDLP          bool     `json:"output_dlp"`
-		AV                 bool     `json:"av"`
-		Anonymization      string   `json:"anonymization,omitempty"`
-		AnonymizationRules []string `json:"anonymization_rules,omitempty"`
-		Enabled            bool     `json:"enabled"`
+		PromptInjection    *promptinjection.Config `json:"prompt_injection,omitempty"`
+		Description        string                  `json:"description,omitempty"`
+		DLP                bool                    `json:"dlp"`
+		OutputDLP          bool                    `json:"output_dlp"`
+		AV                 bool                    `json:"av"`
+		Anonymization      string                  `json:"anonymization,omitempty"`
+		AnonymizationRules []string                `json:"anonymization_rules,omitempty"`
+		Enabled            bool                    `json:"enabled"`
 	}
 	if !decodeGuardrailJSON(w, r, &input) {
 		return
@@ -125,7 +127,7 @@ func (h Handler) UpdateGuardrailPolicy(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "audit_unavailable", "audit service is unavailable")
 		return
 	}
-	policy := provider.GuardrailPolicy{Description: input.Description, DLP: input.DLP, OutputDLP: input.OutputDLP, AV: input.AV, Anonymization: input.Anonymization, AnonymizationRules: input.AnonymizationRules, Enabled: input.Enabled}
+	policy := provider.GuardrailPolicy{PromptInjection: input.PromptInjection, Description: input.Description, DLP: input.DLP, OutputDLP: input.OutputDLP, AV: input.AV, Anonymization: input.Anonymization, AnonymizationRules: input.AnonymizationRules, Enabled: input.Enabled}
 	var saved provider.GuardrailPolicy
 	var err error
 	if durable, ok := h.provider.(provider.DurableGuardrailController); ok {
@@ -157,11 +159,13 @@ type complianceResult struct {
 }
 
 type guardrailApplyResult struct {
-	ExecutionID   string            `json:"execution_id"`
-	GuardrailName string            `json:"guardrail_name"`
-	Allowed       bool              `json:"allowed"`
-	Checks        map[string]string `json:"checks"`
-	ContentStored bool              `json:"content_stored"`
+	ExecutionID    string            `json:"execution_id"`
+	GuardrailName  string            `json:"guardrail_name"`
+	Allowed        bool              `json:"allowed"`
+	Checks         map[string]string `json:"checks"`
+	ContentStored  bool              `json:"content_stored"`
+	AnonymizedText string            `json:"anonymized_text,omitempty"`
+	Replacements   int               `json:"replacements"`
 }
 
 func (h Handler) ApplyGuardrail(w http.ResponseWriter, r *http.Request) {
@@ -207,7 +211,7 @@ func (h Handler) ApplyGuardrail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	controller, ok := h.guardrailController()
-	if !ok || h.dlp == nil || h.av == nil {
+	if !ok {
 		writeError(w, http.StatusServiceUnavailable, "guardrail_unavailable", "guardrail execution is unavailable")
 		return
 	}
@@ -226,7 +230,10 @@ func (h Handler) ApplyGuardrail(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "audit_unavailable", "audit service is unavailable")
 		return
 	}
-	checks, allowed, _, _, err := h.executeGuardrail(r.Context(), req.RequestID, "guardrail_api", input.Text, policy, false)
+	checks, allowed, anonymizedText, replacements, err := h.executeGuardrail(r.Context(), req, "guardrail_api", input.Text, policy, true)
+	if replacements == 0 {
+		anonymizedText = ""
+	}
 	event.Details = map[string]any{"allowed": allowed, "checks": checks}
 	event.Outcome = "succeeded"
 	if err != nil {
@@ -240,7 +247,7 @@ func (h Handler) ApplyGuardrail(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "guardrail_unavailable", "guardrail execution is unavailable")
 		return
 	}
-	writeJSON(w, http.StatusOK, guardrailApplyResult{ExecutionID: req.RequestID, GuardrailName: policy.Name, Allowed: allowed, Checks: checks, ContentStored: false})
+	writeJSON(w, http.StatusOK, guardrailApplyResult{ExecutionID: req.RequestID, GuardrailName: policy.Name, Allowed: allowed, Checks: checks, ContentStored: false, AnonymizedText: anonymizedText, Replacements: replacements})
 }
 
 func validGuardrailName(value string) bool {
@@ -255,6 +262,10 @@ func validGuardrailName(value string) bool {
 	return true
 }
 
+func guardrailPolicyMatch(req modules.RequestContext, model string) PolicyMatchContext {
+	return PolicyMatchContext{OrganizationID: req.OrganizationID, TeamID: req.TeamID, UserID: req.UserID, CredentialID: req.CredentialID, CredentialAlias: req.CredentialAlias, Model: model, Tags: req.Tags}
+}
+
 func (h Handler) authorizeGuardrailPolicy(w http.ResponseWriter, req modules.RequestContext, name, model string) bool {
 	if hasRole(req.Roles, "admin") {
 		return true
@@ -263,7 +274,7 @@ func (h Handler) authorizeGuardrailPolicy(w http.ResponseWriter, req modules.Req
 		writeError(w, http.StatusServiceUnavailable, "policy_unavailable", "policy attachment registry is unavailable")
 		return false
 	}
-	match := PolicyMatchContext{TeamID: req.TeamID, CredentialID: req.CredentialID, CredentialAlias: req.CredentialAlias, Model: model, Tags: req.Tags}
+	match := guardrailPolicyMatch(req, model)
 	resolution := h.resolvePolicyAttachmentSet(h.access.MatchingPolicyAttachments(match), match)
 	if !resolution.Enforceable {
 		writeError(w, http.StatusServiceUnavailable, "policy_unavailable", "an attached policy is missing or disabled")
@@ -278,9 +289,9 @@ func (h Handler) authorizeGuardrailPolicy(w http.ResponseWriter, req modules.Req
 	return false
 }
 
-func (h Handler) executeGuardrail(ctx context.Context, requestID, source, text string, policy provider.GuardrailPolicy, previewAnonymization bool) (map[string]string, bool, string, int, error) {
+func (h Handler) executeGuardrail(ctx context.Context, identity modules.RequestContext, source, text string, policy provider.GuardrailPolicy, previewAnonymization bool) (map[string]string, bool, string, int, error) {
 	anonymization, rules, profiles := provider.ResolveAnonymization(provider.AnonymizationSetting{Profile: policy.Name, Mode: policy.Anonymization, Rules: policy.AnonymizationRules})
-	scan := modules.RequestContext{RequestID: requestID, Request: openai.ChatCompletionRequest{Messages: []openai.Message{{Role: "user", Content: text}}}, Metadata: map[string]string{
+	scan := modules.RequestContext{RequestID: identity.RequestID, CredentialID: identity.CredentialID, CredentialAlias: identity.CredentialAlias, UserID: identity.UserID, OrganizationID: identity.OrganizationID, TeamID: identity.TeamID, Roles: identity.Roles, Tags: identity.Tags, Request: openai.ChatCompletionRequest{Messages: []openai.Message{{Role: "user", Content: text}}}, Metadata: map[string]string{
 		"provider.modules.dlp.enabled":         strconv.FormatBool(policy.DLP),
 		"provider.modules.av.enabled":          strconv.FormatBool(policy.AV),
 		"provider.guardrail.policy":            policy.Name,
@@ -291,6 +302,24 @@ func (h Handler) executeGuardrail(ctx context.Context, requestID, source, text s
 	}}
 	checks := map[string]string{}
 	allowed := true
+	checks["prompt_injection"] = "disabled"
+	if policy.PromptInjection != nil {
+		checker, ok := h.provider.(interface {
+			CheckPromptInjection(context.Context, *modules.RequestContext) error
+		})
+		if !ok {
+			checks["prompt_injection"] = "unavailable"
+			return checks, false, "", 0, modules.ErrGuardrailUnavailable
+		}
+		err := checker.CheckPromptInjection(ctx, &scan)
+		checks["prompt_injection"] = scan.Metadata["guardrail.prompt_injection.outcome"]
+		if errors.Is(err, modules.ErrContentRejected) {
+			allowed = false
+		} else if err != nil {
+			checks["prompt_injection"] = "unavailable"
+			return checks, false, "", 0, err
+		}
+	}
 	for _, check := range []struct {
 		name    string
 		enabled bool
@@ -299,6 +328,10 @@ func (h Handler) executeGuardrail(ctx context.Context, requestID, source, text s
 		if !check.enabled {
 			checks[check.name] = "disabled"
 			continue
+		}
+		if check.module == nil {
+			checks[check.name] = "unavailable"
+			return checks, false, "", 0, errors.New(check.name + " scanner is unavailable")
 		}
 		err := check.module.Handle(ctx, &scan)
 		if errors.Is(err, modules.ErrContentRejected) {
@@ -337,7 +370,7 @@ func (h Handler) CheckCompliance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	controller, ok := h.guardrailController()
-	if !ok || h.dlp == nil || h.av == nil || h.anonymizer == nil {
+	if !ok {
 		writeError(w, http.StatusServiceUnavailable, "management_unavailable", "compliance checks are unavailable")
 		return
 	}
@@ -358,7 +391,7 @@ func (h Handler) CheckCompliance(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "guardrail policy is missing or disabled")
 		return
 	}
-	checks, allowed, preview, replacements, err := h.executeGuardrail(r.Context(), req.RequestID, "compliance", input.Text, policy, true)
+	checks, allowed, preview, replacements, err := h.executeGuardrail(r.Context(), req, "compliance", input.Text, policy, true)
 	result := complianceResult{RequestID: req.RequestID, Policy: policy.Name, Allowed: allowed, Checks: checks, ContentStored: false, AnonymizedText: preview, Replacements: replacements}
 	if err != nil {
 		writeJSON(w, http.StatusServiceUnavailable, result)

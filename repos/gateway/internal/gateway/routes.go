@@ -24,6 +24,20 @@ var gatewayRoutes = []routeDefinition{
 	{RouteContract{http.MethodGet, "/auth/sso/start"}, func(h Handler) http.Handler { return http.HandlerFunc(h.StartBrowserSSO) }},
 	{RouteContract{http.MethodGet, "/auth/sso/callback"}, func(h Handler) http.Handler { return http.HandlerFunc(h.CompleteBrowserSSO) }},
 	{RouteContract{http.MethodPost, "/auth/sso/logout"}, func(h Handler) http.Handler { return http.HandlerFunc(h.EndBrowserSSO) }},
+	{RouteContract{http.MethodGet, "/auth/sso/test/start"}, func(h Handler) http.Handler { return http.HandlerFunc(h.StartBrowserSSOTest) }},
+	{RouteContract{http.MethodGet, "/auth/sso/test/callback"}, func(h Handler) http.Handler { return http.HandlerFunc(h.CompleteBrowserSSOTest) }},
+	{RouteContract{http.MethodGet, "/admin/v1/api-issuers"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListAPIIssuers) }},
+	{RouteContract{http.MethodPost, "/admin/v1/api-issuers"}, func(h Handler) http.Handler { return http.HandlerFunc(h.MutateAPIIssuer) }},
+	{RouteContract{http.MethodPut, "/admin/v1/api-issuers/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.MutateAPIIssuer) }},
+	{RouteContract{http.MethodPost, "/admin/v1/api-issuers/{id}/test"}, func(h Handler) http.Handler { return http.HandlerFunc(h.MutateAPIIssuer) }},
+	{RouteContract{http.MethodPost, "/admin/v1/api-issuers/{id}/action"}, func(h Handler) http.Handler { return http.HandlerFunc(h.MutateAPIIssuer) }},
+	{RouteContract{http.MethodGet, "/admin/v1/sso/connections"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListSSOConnections) }},
+	{RouteContract{http.MethodPost, "/admin/v1/sso/connections"}, func(h Handler) http.Handler { return http.HandlerFunc(h.CreateSSOConnection) }},
+	{RouteContract{http.MethodGet, "/admin/v1/sso/settings"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GetSSOSettings) }},
+	{RouteContract{http.MethodPut, "/admin/v1/sso/settings"}, func(h Handler) http.Handler { return http.HandlerFunc(h.SaveSSODraft) }},
+	{RouteContract{http.MethodPost, "/admin/v1/sso/discover"}, func(h Handler) http.Handler { return http.HandlerFunc(h.DiscoverSSO) }},
+	{RouteContract{http.MethodPost, "/admin/v1/sso/test"}, func(h Handler) http.Handler { return http.HandlerFunc(h.StartSSOTest) }},
+	{RouteContract{http.MethodPost, "/admin/v1/sso/action"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ChangeSSO) }},
 	{RouteContract{http.MethodGet, "/scim/v2"}, func(h Handler) http.Handler { return http.HandlerFunc(h.SCIMBase) }},
 	{RouteContract{http.MethodGet, "/scim/v2/ServiceProviderConfig"}, func(h Handler) http.Handler { return http.HandlerFunc(h.SCIMServiceProviderConfig) }},
 	{RouteContract{http.MethodGet, "/scim/v2/ResourceTypes"}, func(h Handler) http.Handler { return http.HandlerFunc(h.SCIMResourceTypes) }},
@@ -42,6 +56,7 @@ var gatewayRoutes = []routeDefinition{
 	{RouteContract{http.MethodPut, "/scim/v2/Groups/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ReplaceSCIMGroup) }},
 	{RouteContract{http.MethodPatch, "/scim/v2/Groups/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.PatchSCIMGroup) }},
 	{RouteContract{http.MethodDelete, "/scim/v2/Groups/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.DeleteSCIMGroup) }},
+	{RouteContract{http.MethodGet, "/v1/playground/catalog"}, func(h Handler) http.Handler { return http.HandlerFunc(h.PlaygroundCatalog) }},
 	{RouteContract{http.MethodGet, "/v1/models"}, func(h Handler) http.Handler { return http.HandlerFunc(h.Models) }},
 	{RouteContract{http.MethodGet, "/v1/models/{model}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GetModel) }},
 	{RouteContract{http.MethodPost, "/v1/assistants"}, func(h Handler) http.Handler { return http.HandlerFunc(h.CreateAssistant) }},
@@ -83,7 +98,17 @@ var gatewayRoutes = []routeDefinition{
 	{RouteContract{http.MethodDelete, "/v1/messages/batches/{message_batch_id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.DeleteMessagesBatch) }},
 	{RouteContract{http.MethodGet, "/v1/messages/batches/{message_batch_id}/results"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GetMessagesBatchResults) }},
 	{RouteContract{http.MethodPost, "/v1/responses"}, func(h Handler) http.Handler { return http.HandlerFunc(h.Responses) }},
+	{RouteContract{http.MethodPost, "/v1/conversations"}, func(h Handler) http.Handler { return http.HandlerFunc(h.CreateConversation) }},
+	{RouteContract{http.MethodGet, "/v1/conversations/{conversation_id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GetConversation) }},
+	{RouteContract{http.MethodPost, "/v1/conversations/{conversation_id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.UpdateConversation) }},
+	{RouteContract{http.MethodDelete, "/v1/conversations/{conversation_id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.DeleteConversation) }},
+	{RouteContract{http.MethodPost, "/v1/conversations/{conversation_id}/items"}, func(h Handler) http.Handler { return http.HandlerFunc(h.CreateConversationItems) }},
+	{RouteContract{http.MethodGet, "/v1/conversations/{conversation_id}/items"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListConversationItems) }},
+	{RouteContract{http.MethodGet, "/v1/conversations/{conversation_id}/items/{item_id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GetConversationItem) }},
+	{RouteContract{http.MethodDelete, "/v1/conversations/{conversation_id}/items/{item_id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.DeleteConversationItem) }},
 	{RouteContract{http.MethodGet, "/v1/realtime"}, func(h Handler) http.Handler { return http.HandlerFunc(h.Realtime) }},
+	{RouteContract{http.MethodPost, "/v1/realtime/browser-tickets"}, func(h Handler) http.Handler { return http.HandlerFunc(h.CreateRealtimeBrowserTicket) }},
+	{RouteContract{http.MethodGet, "/v1/realtime/browser"}, func(h Handler) http.Handler { return http.HandlerFunc(h.RealtimeBrowser) }},
 	{RouteContract{http.MethodPost, "/v1/interactions"}, func(h Handler) http.Handler { return http.HandlerFunc(h.Interactions) }},
 	{RouteContract{http.MethodGet, "/v1/interactions/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GetInteraction) }},
 	{RouteContract{http.MethodDelete, "/v1/interactions/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.DeleteInteraction) }},
@@ -94,6 +119,7 @@ var gatewayRoutes = []routeDefinition{
 	{RouteContract{http.MethodDelete, "/v1/responses/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.DeleteResponse) }},
 	{RouteContract{http.MethodPost, "/v1/responses/{id}/cancel"}, func(h Handler) http.Handler { return http.HandlerFunc(h.CancelResponse) }},
 	{RouteContract{http.MethodGet, "/v1/responses/{id}/input_items"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListResponseInputItems) }},
+	{RouteContract{http.MethodGet, "/v1/responses/{id}/containers/{container_id}/files/{file_id}/content"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GetResponseContainerFileContent) }},
 	{RouteContract{http.MethodPost, "/v1/embeddings"}, func(h Handler) http.Handler { return http.HandlerFunc(h.Embeddings) }},
 	{RouteContract{http.MethodPost, "/v1/rerank"}, func(h Handler) http.Handler { return http.HandlerFunc(h.Rerank) }},
 	{RouteContract{http.MethodPost, "/v1/moderations"}, func(h Handler) http.Handler { return http.HandlerFunc(h.Moderations) }},
@@ -184,6 +210,8 @@ var gatewayRoutes = []routeDefinition{
 	{RouteContract{http.MethodPost, "/admin/v1/keys/{id}/disable"}, func(h Handler) http.Handler { return http.HandlerFunc(h.DisableVirtualKey) }},
 	{RouteContract{http.MethodPost, "/admin/v1/keys/{id}/enable"}, func(h Handler) http.Handler { return http.HandlerFunc(h.EnableVirtualKey) }},
 	{RouteContract{http.MethodDelete, "/admin/v1/keys/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.RevokeVirtualKey) }},
+	{RouteContract{http.MethodGet, "/admin/v1/jwt-principals"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListJWTPrincipals) }},
+	{RouteContract{http.MethodPut, "/admin/v1/jwt-principals"}, func(h Handler) http.Handler { return http.HandlerFunc(h.PutJWTPrincipal) }},
 	{RouteContract{http.MethodGet, "/admin/v1/users"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListDirectoryUsers) }},
 	{RouteContract{http.MethodPut, "/admin/v1/users/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.PutDirectoryUser) }},
 	{RouteContract{http.MethodGet, "/admin/v1/teams"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListDirectoryTeams) }},
@@ -192,6 +220,8 @@ var gatewayRoutes = []routeDefinition{
 	{RouteContract{http.MethodGet, "/admin/v1/teams/{id}/members"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListTeamMemberships) }},
 	{RouteContract{http.MethodDelete, "/admin/v1/teams/{id}/members/{user_id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.DeleteTeamMembership) }},
 	{RouteContract{http.MethodGet, "/admin/v1/organizations"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListOrganizations) }},
+	{RouteContract{http.MethodGet, "/admin/v1/organizations/{id}/members"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListOrganizationMemberships) }},
+	{RouteContract{http.MethodPut, "/admin/v1/organizations/{id}/members/{user_id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.PutOrganizationMembership) }},
 	{RouteContract{http.MethodPut, "/admin/v1/organizations/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.PutOrganization) }},
 	{RouteContract{http.MethodPut, "/admin/v1/organizations/{id}/teams/{team_id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.PutOrganizationTeam) }},
 	{RouteContract{http.MethodDelete, "/admin/v1/organizations/{id}/teams/{team_id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.DeleteOrganizationTeam) }},
@@ -262,6 +292,7 @@ var gatewayRoutes = []routeDefinition{
 	{RouteContract{http.MethodPut, "/admin/v1/tool-policies/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.PutToolPolicy) }},
 	{RouteContract{http.MethodDelete, "/admin/v1/tool-policies/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.DeleteToolPolicy) }},
 	{RouteContract{http.MethodGet, "/admin/v1/agent-profiles"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListAgentProfiles) }},
+	{RouteContract{http.MethodGet, "/admin/v1/agent-profiles/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GetAgentProfile) }},
 	{RouteContract{http.MethodPut, "/admin/v1/agent-profiles/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.PutAgentProfile) }},
 	{RouteContract{http.MethodDelete, "/admin/v1/agent-profiles/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.DeleteAgentProfile) }},
 	{RouteContract{http.MethodGet, "/admin/v1/mcp/servers"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListMCPServers) }},
@@ -303,9 +334,9 @@ func Routes(handler Handler) http.Handler {
 		registerAPIDocs(mux, handler.apiDocs)
 	}
 	if handler.adminUI {
-		registerAdminUI(mux)
+		registerAdminUI(mux, handler.playgroundOrigins...)
 	}
-	observed := observabilityMiddleware(handler.metrics, browserSSOAuthMiddleware(handler.browserSSO, mux))
+	observed := observabilityMiddleware(handler.metrics, handler.browserSSOMiddleware(mux))
 	return otelhttp.NewHandler(observed, "ai-gateway.http",
 		otelhttp.WithFilter(func(r *http.Request) bool {
 			return !isInfrastructurePath(r.URL.Path)

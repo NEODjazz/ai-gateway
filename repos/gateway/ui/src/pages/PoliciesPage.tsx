@@ -13,7 +13,7 @@ import { PolicyResolutionResult, type PolicyResolution } from "../components/Pol
 import { StatCard } from "../components/StatCard";
 import type { Row } from "../components/DataTable";
 
-type GuardrailPolicy = { name: string; description?: string; dlp: boolean; output_dlp: boolean; av: boolean; anonymization?: string; anonymization_rules?: string[]; enabled: boolean };
+type GuardrailPolicy = { prompt_injection?: unknown; name: string; description?: string; dlp: boolean; output_dlp: boolean; av: boolean; anonymization?: string; anonymization_rules?: string[]; enabled: boolean };
 type PolicyAttachment = { id: string; policy_name: string; scope: "*" | "specific" | ""; organizations?: string[]; teams?: string[]; users?: string[]; keys?: string[]; models?: string[]; providers?: string[]; deployments?: string[]; tags?: string[] };
 type DirectoryOrganization = { id: string; name?: string };
 type DirectoryTeam = { id: string; name?: string };
@@ -38,7 +38,7 @@ function records<T>(payload: unknown, key = "data"): T[] {
 }
 
 function values(value?: string[]) { return value || []; }
-function policyModules(policy?: GuardrailPolicy) { return [policy?.dlp && "Input DLP", policy?.output_dlp && "Output DLP", policy?.av && "Antivirus", policy?.anonymization && `Anonymizer: ${policy.anonymization}`].filter(Boolean) as string[]; }
+function policyModules(policy?: GuardrailPolicy) { return [policy?.prompt_injection && "Prompt injection", policy?.dlp && "Input DLP", policy?.output_dlp && "Output DLP", policy?.av && "Antivirus", policy?.anonymization && `Anonymizer: ${policy.anonymization}`].filter(Boolean) as string[]; }
 function scopeDimensions(attachment: PolicyAttachment | AttachmentDraft) {
   if (attachment.scope === "*") return ["Global"];
   return [[attachment.organizations, "Organizations"], [attachment.teams, "Teams"], [attachment.users, "Users"], [attachment.keys, "Keys"], [attachment.models, "Models"], [attachment.providers, "Providers"], [attachment.deployments, "Deployments"], [attachment.tags, "Tags"]]

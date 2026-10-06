@@ -1,4 +1,5 @@
 {{- $adminSSO := default (dict) .Values.gateway.adminUI.sso -}}
+{{- $azureIdentity := default (dict) .Values.gateway.azureIdentity -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -49,10 +50,25 @@ spec:
               value: {{ .Values.gateway.telemetry.otlpTracesEndpoint | quote }}
             - name: OTEL_TRACE_SAMPLE_RATIO
               value: {{ .Values.gateway.telemetry.sampleRatio | quote }}
+            {{- if .Values.docling.enabled }}
+            - name: DOCLING_URL
+              value: {{ printf "http://%s-docling-api:5001" (include "ai-gateway.fullname" .) | quote }}
+            - name: DOCLING_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "docling.existingSecret is required" .Values.docling.existingSecret | quote }}
+                  key: api-key
+            - name: DOCLING_TIMEOUT_SECONDS
+              value: "240"
+            - name: DOCLING_MAX_TEXT_BYTES
+              value: "4194304"
+            {{- end }}
             - name: HTTP_ADDR
               value: ":8080"
             - name: ADMIN_UI_ENABLED
               value: {{ .Values.gateway.adminUI.enabled | quote }}
+            - name: ADMIN_UI_PLAYGROUND_ORIGINS
+              value: {{ join "," (default (list) .Values.gateway.adminUI.playgroundOrigins) | quote }}
             - name: ADMIN_SSO_ENABLED
               value: {{ default false (get $adminSSO "enabled") | quote }}
             - name: ADMIN_SSO_AUTHORIZATION_URL
@@ -83,6 +99,17 @@ spec:
               value: {{ .Values.gateway.apiDocs.enabled | quote }}
             - name: API_DOCS_TRY_IT_OUT_ENABLED
               value: {{ .Values.gateway.apiDocs.tryItOutEnabled | quote }}
+            {{- if or $azureIdentity.tenantId $azureIdentity.clientId $azureIdentity.clientSecretSecretName }}
+            - name: AZURE_TENANT_ID
+              value: {{ required "gateway.azureIdentity.tenantId is required" $azureIdentity.tenantId | quote }}
+            - name: AZURE_CLIENT_ID
+              value: {{ required "gateway.azureIdentity.clientId is required" $azureIdentity.clientId | quote }}
+            - name: AZURE_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "gateway.azureIdentity.clientSecretSecretName is required" $azureIdentity.clientSecretSecretName | quote }}
+                  key: {{ default "AZURE_CLIENT_SECRET" $azureIdentity.clientSecretSecretKey | quote }}
+            {{- end }}
             - name: PROVIDER_TYPE
               valueFrom:
                 configMapKeyRef:
@@ -129,6 +156,10 @@ spec:
               value: {{ include "ai-gateway.integerString" .Values.gateway.assistants.runStepQuota | quote }}
             - name: ASSISTANT_RUN_RETENTION_SECONDS
               value: {{ include "ai-gateway.integerString" .Values.gateway.assistants.runRetentionSeconds | quote }}
+            - name: CONVERSATION_OWNER_QUOTA
+              value: {{ include "ai-gateway.integerString" .Values.gateway.conversations.ownerQuota | quote }}
+            - name: CONVERSATION_ITEM_QUOTA
+              value: {{ include "ai-gateway.integerString" .Values.gateway.conversations.itemQuota | quote }}
             - name: A2A_TASK_OWNER_QUOTA
               value: {{ include "ai-gateway.integerString" .Values.gateway.a2aTasks.ownerQuota | quote }}
             - name: A2A_TASK_TTL_SECONDS
@@ -182,12 +213,26 @@ spec:
                   name: {{ include "ai-gateway.providerSecretName" . }}
                   key: PROVIDER_CONTROL_PLANE_POSTGRES_DSN
                   optional: true
+            {{- $credentialKey := include "ai-gateway.credentialEncryptionKey" . }}
+            - name: CREDENTIAL_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  {{- if .Values.credentialEncryption.existingSecret }}
+                  name: {{ .Values.credentialEncryption.existingSecret | quote }}
+                  key: {{ required "credentialEncryption.secretKey is required" .Values.credentialEncryption.secretKey | quote }}
+                  {{- else }}
+                  name: {{ include "ai-gateway.providerSecretName" . }}
+                  key: CREDENTIAL_ENCRYPTION_KEY
+                  optional: true
+                  {{- end }}
+            {{- if not .Values.credentialEncryption.existingSecret }}
             - name: PROVIDER_CREDENTIAL_ENCRYPTION_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ include "ai-gateway.providerSecretName" . }}
                   key: PROVIDER_CREDENTIAL_ENCRYPTION_KEY
                   optional: true
+            {{- end }}
             - name: REDIS_ADDR
               value: {{ .Values.gateway.redis.addr | quote }}
             - name: REDIS_DB

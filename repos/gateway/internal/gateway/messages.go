@@ -172,7 +172,7 @@ func messagesContent(message openai.Message) ([]any, error) {
 			}
 			total += len(raw)
 			var block map[string]any
-			if err := json.Unmarshal(raw, &block); err != nil || block == nil {
+			if err := decodeMessagesArgumentObject(raw, &block); err != nil || block == nil {
 				return nil, errors.New("invalid native content block")
 			}
 			if err := validateNativeMessageBlock(block); err != nil {
@@ -201,7 +201,7 @@ func messagesContent(message openai.Message) ([]any, error) {
 			return nil, errors.New("tool metadata cannot be represented in Messages")
 		}
 		var input map[string]any
-		if err := json.Unmarshal([]byte(call.Function.Arguments), &input); err != nil || input == nil {
+		if err := decodeMessagesArgumentObject([]byte(call.Function.Arguments), &input); err != nil || input == nil {
 			return nil, errors.New("invalid tool arguments")
 		}
 		block := map[string]any{"type": "tool_use", "id": call.ID, "name": call.Function.Name, "input": input}
@@ -724,4 +724,14 @@ func (w *messagesWriter) chatStreamResult(response openai.ChatCompletionResponse
 		w.stopSequence = response.Choices[0].StopSequence
 		w.finishReason = "stop_sequence"
 	}
+}
+
+// Decode native argument objects without converting JSON numbers to float64.
+func decodeMessagesArgumentObject(raw []byte, target *map[string]any) error {
+	if !json.Valid(raw) {
+		return errors.New("invalid JSON object")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	return decoder.Decode(target)
 }

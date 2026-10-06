@@ -11,13 +11,14 @@ import (
 	"ai-gateway-gateway/internal/modelcatalog"
 )
 
-// ModelOnboardingInput is the complete desired model slice. Providers and
-// credentials remain independently managed prerequisites, while catalog,
-// deployments, and routing groups are validated and committed together.
+// ModelOnboardingInput replaces the catalog and creates or explicitly updates
+// listed deployments and groups in one control-plane revision. Providers and
+// credentials remain independently managed prerequisites.
 type ModelOnboardingInput struct {
-	Catalog     modelcatalog.Catalog `json:"catalog"`
-	Deployments []ModelDeployment    `json:"deployments"`
-	ModelGroups []ModelGroup         `json:"model_groups"`
+	Catalog                   modelcatalog.Catalog `json:"catalog"`
+	Deployments               []ModelDeployment    `json:"deployments"`
+	ModelGroups               []ModelGroup         `json:"model_groups"`
+	UpdateExistingDeployments bool                 `json:"update_existing_deployments,omitempty"`
 }
 
 type ModelOnboardingPlan struct {
@@ -68,7 +69,19 @@ func (r *Router) ApplyModelOnboarding(ctx context.Context, expectedRevision int6
 	next := previous
 	next.SchemaVersion = 3
 	next.ModelCatalog = catalogPayload
-	next.Deployments = append(next.Deployments, plan.Deployments...)
+	next.Deployments = append([]ModelDeployment(nil), previous.Deployments...)
+	deploymentIndexes := make(map[string]int, len(next.Deployments))
+	for index, deployment := range next.Deployments {
+		deploymentIndexes[deployment.ID] = index
+	}
+	for _, deployment := range plan.Deployments {
+		if index, exists := deploymentIndexes[deployment.ID]; exists {
+			next.Deployments[index] = deployment
+		} else {
+			deploymentIndexes[deployment.ID] = len(next.Deployments)
+			next.Deployments = append(next.Deployments, deployment)
+		}
+	}
 	groups := make(map[string]ModelGroup, len(next.ModelGroups)+len(plan.ModelGroups))
 	for _, group := range next.ModelGroups {
 		groups[group.ID] = group
@@ -127,14 +140,24 @@ func (r *Router) planModelOnboardingLocked(input ModelOnboardingInput) (ModelOnb
 		return ModelOnboardingPlan{}, ErrInvalidModelOnboarding
 	}
 	nextDeployments := make(map[string]ModelDeployment, len(*currentDeployments)+len(input.Deployments))
+	existingIDs := make(map[string]bool, len(*currentDeployments))
 	for id, deployment := range *currentDeployments {
 		nextDeployments[id] = deployment
+		existingIDs[id] = true
 	}
 	normalizedDeployments := make([]ModelDeployment, 0, len(input.Deployments))
+	seenDeployments := make(map[string]bool, len(input.Deployments))
 	for _, deployment := range input.Deployments {
 		deployment.ID = strings.TrimSpace(deployment.ID)
-		if _, exists := nextDeployments[deployment.ID]; exists {
+		if seenDeployments[deployment.ID] {
+			return ModelOnboardingPlan{}, ErrInvalidModelOnboarding
+		}
+		seenDeployments[deployment.ID] = true
+		if existingIDs[deployment.ID] && !input.UpdateExistingDeployments {
 			return ModelOnboardingPlan{}, ErrDeploymentExists
+		}
+		if existingIDs[deployment.ID] && deployment.DocumentProcessing == "" {
+			deployment.DocumentProcessing = nextDeployments[deployment.ID].DocumentProcessing
 		}
 		if err := r.validateDeployment(deployment); err != nil {
 			return ModelOnboardingPlan{}, ErrInvalidModelOnboarding
@@ -183,7 +206,11 @@ func (r *Router) planModelOnboardingLocked(input ModelOnboardingInput) (ModelOnb
 	}
 	changes := []string{fmt.Sprintf("replace model catalog %s", catalog.Version)}
 	for _, deployment := range normalizedDeployments {
-		changes = append(changes, "create deployment "+deployment.ID)
+		if existingIDs[deployment.ID] {
+			changes = append(changes, "update deployment "+deployment.ID)
+		} else {
+			changes = append(changes, "create deployment "+deployment.ID)
+		}
 	}
 	for _, group := range normalizedGroups {
 		changes = append(changes, "upsert model group "+group.ID)

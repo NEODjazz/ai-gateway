@@ -171,6 +171,9 @@ func decodeMistralAudioSpeech(reader io.Reader) ([]byte, error) {
 }
 
 func (p Mistral) ValidateChatParameters(request openai.ChatCompletionRequest) error {
+	if err := rejectChatModeration("mistral", request); err != nil {
+		return err
+	}
 	if err := rejectLegacyFunctionCalling("mistral", request); err != nil {
 		return err
 	}

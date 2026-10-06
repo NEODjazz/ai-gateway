@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,6 +15,70 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
+
+func TestRemoteBillingPreservesReportedZeroUsage(t *testing.T) {
+	tests := []struct {
+		name  string
+		apply func(*RequestContext)
+	}{
+		{"chat", func(req *RequestContext) { req.Response = &openai.ChatCompletionResponse{UsageReported: true} }},
+		{"completions", func(req *RequestContext) {
+			req.CompletionRequest = &openai.CompletionRequest{Model: "model", Prompt: "count these tokens"}
+			req.CompletionResponse = &openai.CompletionResponse{UsageReported: true}
+		}},
+		{"responses", func(req *RequestContext) {
+			req.ResponseRequest = &openai.ResponseRequest{Model: "model", Input: "count these tokens"}
+			req.ResponsesResponse = &openai.ResponseResponse{InputTokensReported: true, OutputTokensReported: true, TotalTokensReported: true}
+		}},
+		{"embeddings", func(req *RequestContext) {
+			req.EmbeddingRequest = &openai.EmbeddingRequest{Model: "model", Input: "count these tokens"}
+			req.EmbeddingResponse = &openai.EmbeddingResponse{UsageReported: true}
+		}},
+		{"rerank", func(req *RequestContext) {
+			req.RerankRequest = &openai.RerankRequest{Model: "model", Query: "count these tokens", Documents: []any{"document"}}
+			req.RerankResponse = &openai.RerankResponse{UsageReported: true}
+		}},
+		{"compaction", func(req *RequestContext) {
+			req.ResponseRequest = &openai.ResponseRequest{Model: "model", Input: "count these tokens"}
+			req.CompactedResponse = &openai.CompactedResponse{}
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			req := RequestContext{Request: openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "count these tokens"}}}}
+			test.apply(&req)
+			got := billingRequest(&req)
+			if got.Phase != "commit" || got.InputTokens != 0 || got.OutputTokens != 0 || got.TotalTokens != 0 || got.UsageEstimated {
+				t.Fatalf("reported zero was replaced by estimated usage: %+v", got)
+			}
+		})
+	}
+}
+
+func TestRemoteBillingEstimatesMissingZeroUsage(t *testing.T) {
+	req := RequestContext{Request: openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "count these tokens"}}}, Response: &openai.ChatCompletionResponse{}}
+	got := billingRequest(&req)
+	if !got.UsageEstimated || got.TotalTokens == 0 {
+		t.Fatalf("missing usage was treated as an exact zero: %+v", got)
+	}
+	req = RequestContext{RerankRequest: &openai.RerankRequest{Model: "model", Query: "query", Documents: []any{"document"}}, RerankResponse: &openai.RerankResponse{}}
+	got = billingRequest(&req)
+	if !got.UsageEstimated || got.TotalTokens == 0 {
+		t.Fatalf("missing rerank usage was treated as an exact zero: %+v", got)
+	}
+}
+
+func TestRemoteBillingEstimatesPartialResponseUsage(t *testing.T) {
+	req := RequestContext{
+		Request:           openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "count these tokens"}}},
+		ResponseRequest:   &openai.ResponseRequest{Model: "model", Input: "count these tokens"},
+		ResponsesResponse: &openai.ResponseResponse{InputTokensReported: true, TotalTokensReported: true},
+	}
+	got := billingRequest(&req)
+	if !got.UsageEstimated || got.TotalTokens == 0 {
+		t.Fatalf("partial response usage was treated as exact: %+v", got)
+	}
+}
 
 func TestRemoteAuthIsTheOnlyModuleReceivingBearerToken(t *testing.T) {
 	const token = "client-bearer-token"
@@ -230,6 +295,60 @@ func TestRemoteBillingLifecyclePhases(t *testing.T) {
 	}
 	if len(phases) != 3 || phases[0] != "reserve" || phases[1] != "commit" || phases[2] != "cancel" {
 		t.Fatalf("unexpected lifecycle phases: %v", phases)
+	}
+}
+
+func TestRemoteBillingCancelsReservationAfterClientCancellation(t *testing.T) {
+	phases := make(chan UsageRequest, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request UsageRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+			http.Error(w, "invalid request", http.StatusBadRequest)
+			return
+		}
+		phases <- request
+		_ = json.NewEncoder(w).Encode(UsageResponse{})
+	}))
+	t.Cleanup(server.Close)
+	module := NewRemoteBillingModule(true, server.URL)
+	req := RequestContext{RequestID: "execution-canceled", Request: openai.ChatCompletionRequest{Model: "model"}}
+	if err := module.Handle(t.Context(), &req); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := module.HandleFailure(ctx, &req, context.Canceled); err != nil {
+		t.Fatalf("billing reservation was not canceled: %v", err)
+	}
+	reserve, cancelRequest := <-phases, <-phases
+	if reserve.Phase != "reserve" || cancelRequest.Phase != "cancel" || reserve.RequestID != cancelRequest.RequestID {
+		t.Fatalf("unexpected billing phases: reserve=%+v cancel=%+v", reserve, cancelRequest)
+	}
+}
+
+func TestRemoteBillingFailureDoesNotTransmitRawProviderError(t *testing.T) {
+	const privateFragment = "private prompt and credential fragment"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Error(err)
+			http.Error(w, "invalid request", http.StatusBadRequest)
+			return
+		}
+		if strings.Contains(string(body), privateFragment) {
+			t.Error("billing request contained raw provider error")
+		}
+		var request UsageRequest
+		if err := json.Unmarshal(body, &request); err != nil || request.Phase != "cancel" || request.Status != "error" || request.FailureClass != "unavailable" || request.Error != "" {
+			t.Errorf("unsafe failure projection: phase=%q status=%q class=%q raw_error_present=%t decode_error=%v", request.Phase, request.Status, request.FailureClass, request.Error != "", err)
+		}
+		_ = json.NewEncoder(w).Encode(UsageResponse{})
+	}))
+	t.Cleanup(server.Close)
+	req := RequestContext{RequestID: "execution-private-error", Request: openai.ChatCompletionRequest{Model: "model"}, Metadata: map[string]string{"provider.failure_class": "unavailable"}}
+	if err := NewRemoteBillingModule(true, server.URL).HandleFailure(t.Context(), &req, errors.New(privateFragment)); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -606,6 +725,42 @@ func TestResponsesHostedToolBillingReserveAndSettlement(t *testing.T) {
 	}
 }
 
+func TestResponsesBillingUsesExactXAIHostedToolCount(t *testing.T) {
+	reportedTools := 5
+	providerCost := int64(37_756_000)
+	req := &RequestContext{
+		Request:         openai.ChatCompletionRequest{Model: "model"},
+		ResponseRequest: &openai.ResponseRequest{Model: "model", Input: "research"},
+		ResponsesResponse: &openai.ResponseResponse{
+			Model: "model", Status: "completed",
+			Output: []openai.ResponseOutputItem{{Type: "mcp_call", Status: "completed"}, {Type: "web_search_call", Status: "completed"}},
+			Usage:  openai.ResponseUsage{InputTokens: 2, OutputTokens: 1, TotalTokens: 3, NumServerSideToolsUsed: &reportedTools, ProviderCostUSDTicks: &providerCost},
+		},
+		Metadata: map[string]string{"provider.endpoint.type": "xai"},
+	}
+	settled := billingRequest(req)
+	if settled.ToolRequests != 5 || settled.SearchRequests != 1 || settled.ProviderCostUSDTicks == nil || *settled.ProviderCostUSDTicks != providerCost {
+		t.Fatalf("xAI settlement=%+v", settled)
+	}
+	req.Metadata["provider.endpoint.type"] = "openai-compatible"
+	settled = billingRequest(req)
+	if settled.ToolRequests != 1 || settled.SearchRequests != 1 || settled.ProviderCostUSDTicks != nil {
+		t.Fatalf("compatible settlement trusted xAI counters: %+v", settled)
+	}
+	req.Metadata["provider.endpoint.type"] = "xai"
+	req.ResponsesResponse.Usage.NumServerSideToolsUsed = nil
+	settled = billingRequest(req)
+	if settled.ToolRequests != 1 || settled.SearchRequests != 1 {
+		t.Fatalf("missing xAI counter failed to fall back to output items: %+v", settled)
+	}
+	reportedTools = 0
+	req.ResponsesResponse.Usage.NumServerSideToolsUsed = &reportedTools
+	settled = billingRequest(req)
+	if settled.ToolRequests != 1 || settled.SearchRequests != 1 {
+		t.Fatalf("reported xAI count hid visible tool execution: %+v", settled)
+	}
+}
+
 func TestResponsesComputerBillingAccountsForExecutedClientActions(t *testing.T) {
 	maxToolCalls := 5
 	req := &RequestContext{
@@ -690,20 +845,24 @@ func TestResponsesApplyPatchBillingAccountsForExecutedClientCalls(t *testing.T) 
 }
 
 func TestResponsesWebSearchBillingUsesConservativeDefaultReserve(t *testing.T) {
-	req := &RequestContext{
-		Request:         openai.ChatCompletionRequest{Model: "model"},
-		ResponseRequest: &openai.ResponseRequest{Model: "model", Input: "search", Tools: []openai.ResponseTool{{Type: "web_search_preview"}}},
-	}
-	reserved := billingRequest(req)
-	if reserved.ToolRequests != 0 || reserved.SearchRequests != openai.WebSearchMaxUses || !reserved.SearchRequestsEstimated {
-		t.Fatalf("Responses web search reserve=%+v", reserved)
-	}
+	for _, toolType := range []string{"web_search", "web_search_2025_08_26", "web_search_preview", "web_search_preview_2025_03_11"} {
+		t.Run(toolType, func(t *testing.T) {
+			req := &RequestContext{
+				Request:         openai.ChatCompletionRequest{Model: "model"},
+				ResponseRequest: &openai.ResponseRequest{Model: "model", Input: "search", Tools: []openai.ResponseTool{{Type: toolType}}},
+			}
+			reserved := billingRequest(req)
+			if reserved.ToolRequests != 0 || reserved.SearchRequests != openai.WebSearchMaxUses || !reserved.SearchRequestsEstimated {
+				t.Fatalf("Responses web search reserve=%+v", reserved)
+			}
 
-	zero := 0
-	req.ResponseRequest.MaxToolCalls = &zero
-	reserved = billingRequest(req)
-	if reserved.SearchRequests != 0 || !reserved.SearchRequestsEstimated {
-		t.Fatalf("Responses zero-call reserve=%+v", reserved)
+			zero := 0
+			req.ResponseRequest.MaxToolCalls = &zero
+			reserved = billingRequest(req)
+			if reserved.SearchRequests != 0 || !reserved.SearchRequestsEstimated {
+				t.Fatalf("Responses zero-call reserve=%+v", reserved)
+			}
+		})
 	}
 }
 

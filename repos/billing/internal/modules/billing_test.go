@@ -311,6 +311,33 @@ func TestBillingEstimatesMultipartMessageContent(t *testing.T) {
 	}
 }
 
+func TestBillingPreservesExplicitExactZeroUsage(t *testing.T) {
+	for _, source := range []string{"usage", "chat response", "responses response"} {
+		t.Run(source, func(t *testing.T) {
+			module := NewBillingModuleWithPricing(true, PricingConfig{Currency: "USD"})
+			req := RequestContext{
+				RequestID: "exact-zero", BillingPhase: "commit", PostResponse: true,
+				Request:  openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "count these tokens"}}},
+				Metadata: map[string]string{"usage.estimated": "false"},
+			}
+			switch source {
+			case "usage":
+				req.Usage = &openai.Usage{}
+			case "chat response":
+				req.Response = &openai.ChatCompletionResponse{}
+			case "responses response":
+				req.ResponsesResponse = &openai.ResponseResponse{}
+			}
+			if err := module.Handle(context.Background(), &req); err != nil {
+				t.Fatal(err)
+			}
+			if req.BillingEvent == nil || req.BillingEvent.InputTokens != 0 || req.BillingEvent.OutputTokens != 0 || req.BillingEvent.TotalTokens != 0 || req.BillingEvent.UsageEstimated {
+				t.Fatalf("exact zero was replaced by an estimate: %+v", req.BillingEvent)
+			}
+		})
+	}
+}
+
 func TestBillingPreservesUpstreamEstimatedUsageFlag(t *testing.T) {
 	module := NewBillingModuleWithPricing(true, PricingConfig{Currency: "USD"})
 	req := RequestContext{

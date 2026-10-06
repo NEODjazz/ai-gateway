@@ -21,33 +21,48 @@ func TestGroqChatMapsSupportedContract(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatal(err)
 		}
-		if body["model"] != "model" || body["max_completion_tokens"] != float64(32) || body["service_tier"] != "performance" || body["user"] != "tenant-user" || len(body["tools"].([]any)) != 1 || body["response_format"] == nil {
+		if body["model"] != "qwen/qwen3.8-27b" || body["max_completion_tokens"] != float64(32) || body["service_tier"] != "performance" || body["user"] != "tenant-user" || body["citation_options"] != "disabled" || body["reasoning_format"] != "parsed" || len(body["tools"].([]any)) != 1 || body["response_format"] == nil {
 			t.Fatalf("request=%#v", body)
 		}
-		_, _ = fmt.Fprint(w, `{"id":"chat","object":"chat.completion","model":"model","service_tier":"performance","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}`)
+		_, _ = fmt.Fprint(w, `{"id":"chat","object":"chat.completion","model":"model","service_tier":"performance","choices":[{"index":0,"message":{"role":"assistant","content":"ok","reasoning":"private plan"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}`)
 	}))
 	defer server.Close()
 	maxTokens := 32
 	client := NewGroq(server.URL+"/openai/v1", "groq-key", true)
 	response, err := client.ChatCompletions(t.Context(), openai.ChatCompletionRequest{
-		Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}}, MaxCompletionTokens: &maxTokens, ChatGenerationOptions: openai.ChatGenerationOptions{ServiceTier: "performance", User: "tenant-user"},
+		Model: "qwen/qwen3.8-27b", Messages: []openai.Message{{Role: "user", Content: "hello"}}, MaxCompletionTokens: &maxTokens, ChatGenerationOptions: openai.ChatGenerationOptions{ServiceTier: "performance", User: "tenant-user", CitationOptions: "disabled", ReasoningFormat: "parsed"},
 		Tools:          []openai.Tool{{Type: "function", Function: openai.FunctionDefinition{Name: "lookup", Parameters: map[string]any{"type": "object"}}}},
 		ResponseFormat: &openai.ResponseFormat{Type: "json_object"},
 	})
-	if err != nil || response.Usage.TotalTokens != 3 || response.ServiceTier != "performance" || openai.ContentText(response.Choices[0].Message.Content) != "ok" {
+	if err != nil || response.Usage.TotalTokens != 3 || response.ServiceTier != "performance" || openai.ContentText(response.Choices[0].Message.Content) != "ok" || response.Choices[0].Message.ReasoningContent != "private plan" {
 		t.Fatalf("response=%+v err=%v", response, err)
 	}
 }
 
 func TestGroqAcceptsDocumentedServiceTiers(t *testing.T) {
 	client := NewGroq("http://unused.invalid", "", false)
-	for _, tier := range []string{"auto", "default", "on_demand", "flex", "performance"} {
+	for _, tier := range []string{"auto", "on_demand", "flex", "performance"} {
 		t.Run(tier, func(t *testing.T) {
 			request := openai.ChatCompletionRequest{ChatGenerationOptions: openai.ChatGenerationOptions{ServiceTier: tier}}
 			if err := client.ValidateChatParameters(request); err != nil {
 				t.Fatalf("documented service tier rejected: %v", err)
 			}
 		})
+	}
+}
+
+func TestGroqRejectsResponseOnlyServiceTierBeforeHTTP(t *testing.T) {
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
+	defer server.Close()
+	client := NewGroq(server.URL, "key", true)
+	_, err := client.ChatCompletions(t.Context(), openai.ChatCompletionRequest{
+		Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}},
+		ChatGenerationOptions: openai.ChatGenerationOptions{ServiceTier: "default"},
+	})
+	var providerErr *Error
+	if !errors.As(err, &providerErr) || providerErr.Param != "service_tier" || providerErr.UpstreamCode != "unsupported_parameter" || called {
+		t.Fatalf("err=%v called=%v", err, called)
 	}
 }
 
@@ -65,17 +80,180 @@ func TestGroqRejectsUnsupportedParametersBeforeHTTP(t *testing.T) {
 
 func TestGroqStreamsWithUsage(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = fmt.Fprint(w, "data: {\"id\":\"chat\",\"model\":\"model\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"ok\"}}]}\n\ndata: {\"id\":\"chat\",\"model\":\"model\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":1,\"total_tokens\":3}}\n\ndata: [DONE]\n\n")
+		var body map[string]any
+		if json.NewDecoder(r.Body).Decode(&body) != nil || body["include_reasoning"] != true {
+			t.Fatalf("request=%#v", body)
+		}
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"chat\",\"model\":\"model\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"reasoning\":\"private \"}}]}\n\ndata: {\"id\":\"chat\",\"model\":\"model\",\"choices\":[{\"index\":0,\"delta\":{\"reasoning\":\"plan\",\"content\":\"ok\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":1,\"total_tokens\":3}}\n\ndata: [DONE]\n\n")
 	}))
 	defer server.Close()
 	client := NewGroq(server.URL, "key", true)
 	var payloads []string
-	response, err := client.StreamChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}}, Stream: true}, func(payload string) error {
+	includeReasoning := true
+	response, err := client.StreamChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "openai/gpt-oss-20b", Messages: []openai.Message{{Role: "user", Content: "hello"}}, Stream: true, ChatGenerationOptions: openai.ChatGenerationOptions{IncludeReasoning: &includeReasoning}}, func(payload string) error {
 		payloads = append(payloads, payload)
 		return nil
 	})
-	if err != nil || response.Usage.TotalTokens != 3 || len(payloads) != 2 {
+	if err != nil || response.Usage.TotalTokens != 3 || response.Choices[0].Message.ReasoningContent != "private plan" || len(payloads) != 2 || strings.Contains(strings.Join(payloads, "\n"), `"reasoning":`) || !strings.Contains(strings.Join(payloads, "\n"), `"reasoning_content":`) {
 		t.Fatalf("response=%+v payloads=%v err=%v", response, payloads, err)
+	}
+}
+
+func TestGroqRejectsInvalidReasoningControlsBeforeHTTP(t *testing.T) {
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
+	defer server.Close()
+	client := NewGroq(server.URL, "key", true)
+	include := true
+	tests := []openai.ChatGenerationOptions{
+		{ReasoningFormat: "invalid"},
+		{IncludeReasoning: &include, ReasoningFormat: "parsed"},
+	}
+	for _, options := range tests {
+		_, err := client.ChatCompletions(t.Context(), openai.ChatCompletionRequest{Model: "qwen/qwen3.8-27b", Messages: []openai.Message{{Role: "user", Content: "hello"}}, ChatGenerationOptions: options})
+		if err == nil || called {
+			t.Fatalf("options=%+v err=%v called=%v", options, err, called)
+		}
+	}
+}
+
+func TestGroqRejectsInvalidCitationOptionsBeforeHTTP(t *testing.T) {
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
+	defer server.Close()
+	_, err := NewGroq(server.URL, "key", false).ChatCompletions(t.Context(), openai.ChatCompletionRequest{
+		Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}},
+		ChatGenerationOptions: openai.ChatGenerationOptions{CitationOptions: "invalid"},
+	})
+	if err == nil || called {
+		t.Fatalf("err=%v called=%v", err, called)
+	}
+}
+
+func TestGroqPreservesExplicitFalseIncludeReasoning(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if json.NewDecoder(r.Body).Decode(&body) != nil {
+			t.Fatal("decode request")
+		}
+		value, found := body["include_reasoning"]
+		if !found || value != false {
+			t.Fatalf("include_reasoning=%#v found=%v", value, found)
+		}
+		_, _ = fmt.Fprint(w, `{"id":"chat","model":"model","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`)
+	}))
+	defer server.Close()
+
+	include := false
+	_, err := NewGroq(server.URL, "key", false).ChatCompletions(t.Context(), openai.ChatCompletionRequest{
+		Model: "openai/gpt-oss-20b", Messages: []openai.Message{{Role: "user", Content: "hello"}},
+		ChatGenerationOptions: openai.ChatGenerationOptions{IncludeReasoning: &include},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestGroqReasoningControlsAreModelScoped(t *testing.T) {
+	client := NewGroq("http://unused.invalid", "", false)
+	include := true
+	tools := []openai.Tool{{Type: "function", Function: openai.FunctionDefinition{Name: "lookup", Parameters: map[string]any{"type": "object"}}}}
+	tests := []struct {
+		name, model, parameter string
+		options                openai.ChatGenerationOptions
+		tools                  []openai.Tool
+		valid                  bool
+	}{
+		{name: "gpt low", model: "openai/gpt-oss-20b", options: openai.ChatGenerationOptions{ReasoningEffort: "low"}, valid: true},
+		{name: "gpt high", model: "openai/gpt-oss-120b", options: openai.ChatGenerationOptions{ReasoningEffort: "high"}, valid: true},
+		{name: "gpt none", model: "openai/gpt-oss-20b", parameter: "reasoning_effort", options: openai.ChatGenerationOptions{ReasoningEffort: "none"}},
+		{name: "gpt format", model: "openai/gpt-oss-20b", parameter: "reasoning_format", options: openai.ChatGenerationOptions{ReasoningFormat: "parsed"}},
+		{name: "gpt include", model: "openai/gpt-oss-20b", options: openai.ChatGenerationOptions{IncludeReasoning: &include}, valid: true},
+		{name: "qwen none", model: "qwen/qwen3.8-27b", options: openai.ChatGenerationOptions{ReasoningEffort: "none"}, valid: true},
+		{name: "qwen default", model: "qwen/qwen3.8-27b", options: openai.ChatGenerationOptions{ReasoningEffort: "default"}, valid: true},
+		{name: "qwen parsed", model: "qwen/qwen3.8-27b", options: openai.ChatGenerationOptions{ReasoningFormat: "parsed"}, valid: true},
+		{name: "qwen raw tools", model: "qwen/qwen3.8-27b", parameter: "reasoning_format", options: openai.ChatGenerationOptions{ReasoningFormat: "raw"}, tools: tools},
+		{name: "qwen include", model: "qwen/qwen3.8-27b", parameter: "include_reasoning", options: openai.ChatGenerationOptions{IncludeReasoning: &include}},
+		{name: "unknown effort", model: "other", parameter: "reasoning_effort", options: openai.ChatGenerationOptions{ReasoningEffort: "high"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := client.ValidateChatParameters(openai.ChatCompletionRequest{Model: test.model, Messages: []openai.Message{{Role: "user", Content: "hello"}}, Tools: test.tools, ChatGenerationOptions: test.options})
+			if test.valid {
+				if err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+			var failure *Error
+			if !errors.As(err, &failure) || failure.Param != test.parameter || failure.UpstreamCode != "invalid_request" {
+				t.Fatalf("failure=%+v err=%v", failure, err)
+			}
+		})
+	}
+}
+
+func TestGroqCapabilityProfilePublishesExactReasoningPolicies(t *testing.T) {
+	var policies []ProviderChatModelParameterPolicy
+	for _, profile := range ManagedProviderCapabilityProfiles() {
+		if profile.Type == "groq" {
+			if len(profile.ChatParameters.ReasoningEffort) != 0 || len(profile.ChatParameters.ReasoningFormat) != 0 || slicesContain(profile.ChatParameters.SupportedOptions, "include_reasoning") || slicesContain(profile.ChatParameters.SupportedOptions, "reasoning_format") {
+				t.Fatalf("provider-wide reasoning policy=%+v", profile.ChatParameters)
+			}
+			policies = profile.ChatModelParameters
+			break
+		}
+	}
+	want := []ProviderChatModelParameterPolicy{
+		{Model: "openai/gpt-oss-20b", SupportedOptions: []string{"include_reasoning", "reasoning_effort"}, ReasoningEffort: []string{"low", "medium", "high"}, ReasoningFormat: []string{}},
+		{Model: "openai/gpt-oss-120b", SupportedOptions: []string{"include_reasoning", "reasoning_effort"}, ReasoningEffort: []string{"low", "medium", "high"}, ReasoningFormat: []string{}},
+		{Model: "qwen/qwen3.8-27b", SupportedOptions: []string{"reasoning_effort", "reasoning_format"}, ReasoningEffort: []string{"none", "low", "medium", "high", "default"}, ReasoningFormat: []string{"hidden", "raw", "parsed"}},
+	}
+	if fmt.Sprint(policies) != fmt.Sprint(want) {
+		t.Fatalf("policies=%+v want=%+v", policies, want)
+	}
+}
+
+func TestGroqCapabilityProfilePublishesResponsesReasoningByModel(t *testing.T) {
+	for _, profile := range ManagedProviderCapabilityProfiles() {
+		if profile.Type != "groq" {
+			continue
+		}
+		if len(profile.ResponseParameters.ReasoningEffort) != 0 || slicesContain(profile.ResponseParameters.SupportedOptions, "reasoning") {
+			t.Fatalf("provider-wide Responses policy=%+v", profile.ResponseParameters)
+		}
+		want := []ProviderResponseModelParameterPolicy{
+			{Model: "openai/gpt-oss-20b", SupportedOptions: []string{"reasoning"}, ReasoningEffort: []string{"low", "medium", "high"}},
+			{Model: "openai/gpt-oss-120b", SupportedOptions: []string{"reasoning"}, ReasoningEffort: []string{"low", "medium", "high"}},
+			{Model: "qwen/qwen3.8-27b", SupportedOptions: []string{"reasoning"}, ReasoningEffort: []string{"none", "low", "medium", "high", "default"}},
+		}
+		if fmt.Sprint(profile.ResponseModelParameters) != fmt.Sprint(want) {
+			t.Fatalf("Responses model policies=%+v want=%+v", profile.ResponseModelParameters, want)
+		}
+		return
+	}
+	t.Fatal("Groq profile is missing")
+}
+
+func TestGroqReasoningControlsAreAdapterIsolated(t *testing.T) {
+	include := false
+	for name, validate := range map[string]func(openai.ChatCompletionRequest) error{
+		"compatible": NewOpenAICompatible("http://unused.invalid", "", false).ValidateChatParameters,
+		"cerebras":   NewCerebras("http://unused.invalid", "", false).ValidateChatParameters,
+	} {
+		t.Run(name, func(t *testing.T) {
+			for parameter, options := range map[string]openai.ChatGenerationOptions{
+				"citation_options":  {CitationOptions: "enabled"},
+				"include_reasoning": {IncludeReasoning: &include},
+				"reasoning_format":  {ReasoningFormat: "raw"},
+			} {
+				var failure *Error
+				err := validate(openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "hello"}}, ChatGenerationOptions: options})
+				if !errors.As(err, &failure) || failure.Param != parameter || failure.UpstreamCode != "unsupported_parameter" {
+					t.Fatalf("%s: %v", parameter, err)
+				}
+			}
+		})
 	}
 }
 
@@ -96,10 +274,10 @@ func TestGroqResponsesMapsSupportedContract(t *testing.T) {
 		if !ok || len(tools) != 2 || tools[1].(map[string]any)["type"] != "mcp" {
 			t.Fatalf("tools=%#v", body["tools"])
 		}
-		if body["model"] != "model" || body["input"] != "hello" || body["instructions"] != "be brief" || body["max_output_tokens"] != float64(64) || body["service_tier"] != "flex" || body["user"] != "tenant-user" || body["store"] != false || body["parallel_tool_calls"] != true || body["metadata"].(map[string]any)["ticket"] != "42" || body["text"] == nil {
+		if body["model"] != "openai/gpt-oss-20b" || body["input"] != "hello" || body["instructions"] != "be brief" || body["max_output_tokens"] != float64(64) || body["service_tier"] != "flex" || body["user"] != "tenant-user" || body["store"] != false || body["parallel_tool_calls"] != true || body["metadata"].(map[string]any)["ticket"] != "42" || body["text"] == nil {
 			t.Fatalf("request=%#v", body)
 		}
-		_, _ = fmt.Fprint(w, `{"id":"response","object":"response","status":"completed","model":"model","output":[{"id":"message","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"ok","annotations":[]}]}],"usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}`)
+		_, _ = fmt.Fprint(w, `{"id":"response","object":"response","status":"completed","model":"openai/gpt-oss-20b","service_tier":"flex","output":[{"id":"message","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"ok","annotations":[]}]}],"usage":{"input_tokens":2,"input_tokens_details":{"cached_tokens":1,"reasoning_tokens":1},"output_tokens":1,"output_tokens_details":{"cached_tokens":1,"reasoning_tokens":0},"total_tokens":3}}`)
 	}))
 	defer server.Close()
 
@@ -108,7 +286,7 @@ func TestGroqResponsesMapsSupportedContract(t *testing.T) {
 	effort := "low"
 	client := NewGroq(server.URL+"/openai/v1", "groq-key", true)
 	response, err := client.Responses(t.Context(), openai.ResponseRequest{
-		Model: "model", Input: "hello", Instructions: "be brief", MaxOutputTokens: &maxTokens,
+		Model: "openai/gpt-oss-20b", Input: "hello", Instructions: "be brief", MaxOutputTokens: &maxTokens,
 		Metadata: map[string]string{"ticket": "42"}, ParallelToolCalls: &parallel,
 		Reasoning: &openai.ResponseReasoning{Effort: &effort}, Store: &store, ServiceTier: "flex", User: "tenant-user",
 		Text: map[string]any{"format": map[string]any{"type": "json_object"}},
@@ -117,8 +295,88 @@ func TestGroqResponsesMapsSupportedContract(t *testing.T) {
 			{Type: "mcp", ServerLabel: "catalog", ServerURL: "https://mcp.example.test", RequireApproval: "never"},
 		},
 	})
-	if err != nil || response.Usage.TotalTokens != 3 || response.OutputText != "ok" {
+	if err != nil || response.ServiceTier != "flex" || response.Usage.TotalTokens != 3 || response.OutputText != "ok" || response.Usage.InputTokensDetails == nil || response.Usage.InputTokensDetails.ReasoningTokens != 1 || response.Usage.OutputTokensDetails == nil || response.Usage.OutputTokensDetails.CachedTokens != 1 {
 		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
+func TestGroqResponsesCodeInterpreterUsesSupportedWireContract(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		tools, ok := body["tools"].([]any)
+		if !ok || len(tools) != 1 || body["model"] != "openai/gpt-oss-20b" || tools[0].(map[string]any)["container"].(map[string]any)["type"] != "auto" {
+			t.Fatalf("request=%#v", body)
+		}
+		_, _ = fmt.Fprint(w, `{"id":"response","object":"response","model":"openai/gpt-oss-20b","status":"completed","output":[{"id":"ci_1","type":"code_interpreter_call","status":"completed","container_id":"cntr_1","code":"print(1)","outputs":[{"type":"logs","logs":"1"}]},{"id":"message","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"1","annotations":[]}]}],"usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}`)
+	}))
+	defer server.Close()
+	response, err := NewGroq(server.URL, "key", false).Responses(t.Context(), openai.ResponseRequest{
+		Model: "openai/gpt-oss-20b", Input: "calculate", Tools: []openai.ResponseTool{{Type: "code_interpreter", Container: map[string]any{"type": "auto"}}},
+	})
+	if err != nil || response.Usage.TotalTokens != 3 || len(response.Output) != 2 || response.OutputText != "1" {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
+func TestGroqResponsesRejectsUnsupportedToolsBeforeHTTP(t *testing.T) {
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
+	defer server.Close()
+	client := NewGroq(server.URL, "key", false)
+	tests := []struct {
+		name, model, param string
+		tool               openai.ResponseTool
+	}{
+		{name: "wrong model", model: "qwen/qwen3.8-27b", param: "tools.code_interpreter", tool: openai.ResponseTool{Type: "code_interpreter", Container: map[string]any{"type": "auto"}}},
+		{name: "reused container", model: "openai/gpt-oss-20b", param: "tools.code_interpreter.container", tool: openai.ResponseTool{Type: "code_interpreter", Container: "cntr_existing"}},
+		{name: "file references", model: "openai/gpt-oss-20b", param: "tools.code_interpreter.container", tool: openai.ResponseTool{Type: "code_interpreter", Container: map[string]any{"type": "auto", "file_ids": []string{"file_owned"}}}},
+		{name: "memory option", model: "openai/gpt-oss-20b", param: "tools.code_interpreter.container", tool: openai.ResponseTool{Type: "code_interpreter", Container: map[string]any{"type": "auto", "memory_limit": "4g"}}},
+		{name: "file search", model: "openai/gpt-oss-20b", param: "tools.type", tool: openai.ResponseTool{Type: "file_search", VectorStoreIDs: []string{"vs_owned"}}},
+		{name: "web search", model: "openai/gpt-oss-20b", param: "tools.type", tool: openai.ResponseTool{Type: "web_search"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := client.Responses(t.Context(), openai.ResponseRequest{Model: test.model, Input: "hello", Tools: []openai.ResponseTool{test.tool}})
+			var failure *Error
+			if !errors.As(err, &failure) || failure.Param != test.param || failure.UpstreamCode != "unsupported_parameter" || called {
+				t.Fatalf("err=%v called=%v", err, called)
+			}
+		})
+	}
+}
+
+func TestGroqResponsesReasoningEffortIsModelScoped(t *testing.T) {
+	client := NewGroq("http://unused.invalid", "", false)
+	tests := []struct {
+		model, effort string
+		valid         bool
+	}{
+		{model: "openai/gpt-oss-20b", effort: "low", valid: true},
+		{model: "openai/gpt-oss-120b", effort: "high", valid: true},
+		{model: "openai/gpt-oss-20b", effort: "none"},
+		{model: "qwen/qwen3.8-27b", effort: "default", valid: true},
+		{model: "qwen/qwen3.8-27b", effort: "none", valid: true},
+		{model: "qwen/qwen3.8-27b", effort: "max"},
+		{model: "unknown", effort: "low"},
+	}
+	for _, test := range tests {
+		t.Run(test.model+"/"+test.effort, func(t *testing.T) {
+			request := openai.ResponseRequest{Model: test.model, Input: "hello", Reasoning: &openai.ResponseReasoning{Effort: &test.effort}}
+			err := client.ValidateResponseParameters(request)
+			if test.valid {
+				if err != nil {
+					t.Fatalf("valid effort rejected: %v", err)
+				}
+				return
+			}
+			var failure *Error
+			if !errors.As(err, &failure) || failure.Param != "reasoning.effort" || failure.UpstreamCode != "invalid_request" {
+				t.Fatalf("unexpected failure: %v", err)
+			}
+		})
 	}
 }
 
@@ -131,7 +389,7 @@ func TestGroqStreamsResponsesWithUsage(t *testing.T) {
 		if body["stream"] != true || body["service_tier"] != "default" {
 			t.Fatalf("request=%#v", body)
 		}
-		_, _ = fmt.Fprint(w, "data: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"response\",\"object\":\"response\",\"model\":\"model\",\"status\":\"completed\",\"usage\":{\"input_tokens\":2,\"output_tokens\":1,\"total_tokens\":3}}}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"response\",\"object\":\"response\",\"model\":\"model\",\"service_tier\":\"default\",\"status\":\"completed\",\"usage\":{\"input_tokens\":2,\"output_tokens\":1,\"output_tokens_details\":{\"cached_tokens\":1},\"total_tokens\":3}}}\n\n")
 	}))
 	defer server.Close()
 
@@ -141,7 +399,7 @@ func TestGroqStreamsResponsesWithUsage(t *testing.T) {
 		events = append(events, payload)
 		return nil
 	})
-	if err != nil || response.Usage.TotalTokens != 3 || response.OutputText != "ok" || len(events) != 2 {
+	if err != nil || response.ServiceTier != "default" || response.Usage.TotalTokens != 3 || response.OutputText != "ok" || response.Usage.OutputTokensDetails == nil || response.Usage.OutputTokensDetails.CachedTokens != 1 || len(events) != 2 {
 		t.Fatalf("response=%+v events=%v err=%v", response, events, err)
 	}
 }

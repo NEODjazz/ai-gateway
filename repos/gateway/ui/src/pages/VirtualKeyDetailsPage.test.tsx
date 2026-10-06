@@ -16,7 +16,7 @@ describe("VirtualKeyDetailsPage", () => {
     let disabledAt = "";
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const path = String(input);
-      if (path.includes("/admin/v1/keys?key_id=vk_alpha")) return json({ data: [{ id: "vk_alpha", alias: "production", description: "Production automation", user_id: "user-1", roles: ["developer"], access_group_ids: ["platform"], allowed_models: ["gpt-5"], allowed_tools: ["mcp.search.*"], rate_limit_rpm: 60, rate_limit_tpm: 1200, tags: ["prod"], disabled_at: disabledAt || undefined, created_at: "2026-08-27T10:00:00Z" }], financials: { vk_alpha: { key_id: "vk_alpha", policies: [{ policy: { id: 7, scope_type: "key", scope_id: "vk_alpha", period: "month", currency: "USD", max_cost: 100, enabled: true }, window_start: "2026-09-01T00:00:00Z", window_end: "2026-10-01T00:00:00Z", used_cost: 12.5, remaining_cost: 87.5, used_tokens: 0 }] } } });
+      if (path.includes("/admin/v1/keys?key_id=vk_alpha")) return json({ data: [{ id: "vk_alpha", alias: "production", description: "Production automation", user_id: "user-1", organization_id: "org-1", team_id: "team-1", roles: ["developer"], access_group_ids: ["platform"], allowed_models: ["gpt-5"], allowed_tools: ["mcp.search.*"], rate_limit_rpm: 60, rate_limit_tpm: 1200, tags: ["prod"], disabled_at: disabledAt || undefined, created_at: "2026-08-27T10:00:00Z" }], financials: { vk_alpha: { key_id: "vk_alpha", policies: [{ policy: { id: 7, scope_type: "key", scope_id: "vk_alpha", period: "month", currency: "USD", max_cost: 100, enabled: true }, window_start: "2026-09-01T00:00:00Z", window_end: "2026-10-01T00:00:00Z", used_cost: 12.5, remaining_cost: 87.5, used_tokens: 0 }] } } });
       if (path === "/admin/v1/usage/report?days=30&scope_type=key&scope_id=vk_alpha") return json({ totals: [{ currency: "USD", requests: 10, errors: 1, input_tokens: 80, output_tokens: 20, total_tokens: 100, cache_hits: 2, cost: 1.25, avg_latency_ms: 120 }], daily: [{ date: "2026-09-01", currency: "USD", requests: 10, errors: 1, input_tokens: 80, output_tokens: 20, total_tokens: 100, cache_hits: 2, cost: 1.25, avg_latency_ms: 120 }] });
       if (path === "/admin/v1/users?limit=500") return json({ data: [{ id: "user-1", name: "Alice" }] });
       if (path === "/admin/v1/teams?limit=500" || path === "/admin/v1/organizations?limit=500") return json({ data: [] });
@@ -40,7 +40,7 @@ describe("VirtualKeyDetailsPage", () => {
     expect(policyResult).toHaveTextContent("prod-dlp");
     expect(policyResult).toHaveTextContent("Enforceable");
     const resolutionCall = fetchMock.mock.calls.find(([path, init]) => path === "/admin/v1/policy-attachments/resolve" && init?.method === "POST")!;
-    expect(JSON.parse(String(resolutionCall[1]?.body))).toEqual({ credential_id: "vk_alpha", credential_alias: "production", model: "gpt-5", tags: ["prod"] });
+    expect(JSON.parse(String(resolutionCall[1]?.body))).toEqual({ team_id: "team-1", credential_id: "vk_alpha", credential_alias: "production", model: "gpt-5", tags: ["prod"] });
 
     await userEvent.click(screen.getByRole("tab", { name: "Usage & budgets" }));
     expect(screen.getByText("key:vk_alpha")).toBeInTheDocument();
@@ -51,6 +51,8 @@ describe("VirtualKeyDetailsPage", () => {
     await userEvent.click(screen.getByRole("menuitem", { name: "Rotate" }));
     const rotated = await screen.findByRole("dialog", { name: "Virtual key rotated" });
     expect(within(rotated).getByDisplayValue("sk-rotated-once")).toBeInTheDocument();
+    const rotationCall = fetchMock.mock.calls.find(([path, init]) => String(path).endsWith("/rotate") && init?.method === "POST")!;
+    expect(JSON.parse(String(rotationCall[1]?.body))).toMatchObject({ organization_id: "org-1", team_id: "team-1", user_id: "user-1" });
     await userEvent.click(within(rotated).getByRole("button", { name: "Copy" }));
     expect(await within(rotated).findByText("Copied to clipboard")).toBeInTheDocument();
     await userEvent.click(within(rotated).getByRole("button", { name: "Close" }));

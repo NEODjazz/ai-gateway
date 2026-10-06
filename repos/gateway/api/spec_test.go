@@ -67,17 +67,91 @@ func TestOpenAPICachedContentLifecycleIsOwnerScopedAndBounded(t *testing.T) {
 
 func TestOpenAPIProviderProfilesExposeModelSpecificChatPolicy(t *testing.T) {
 	document := loadDocument(t)
+	chat := document.Components.Schemas["ChatCompletionRequest"].Value
+	if chat == nil || chat.Properties["clear_thinking"] == nil {
+		t.Fatal("ChatCompletionRequest is missing clear_thinking")
+	}
 	profile := document.Components.Schemas["ProviderCapabilityProfile"].Value
 	if profile == nil || profile.Properties["chat_model_parameters"] == nil {
 		t.Fatal("ProviderCapabilityProfile is missing chat_model_parameters")
 	}
 	policy := document.Components.Schemas["ProviderChatModelParameterPolicy"].Value
-	if policy == nil || policy.Properties["model"] == nil || policy.Properties["reasoning_effort"] == nil {
+	if policy == nil || policy.Properties["model"] == nil || policy.Properties["unsupported_options"] == nil || policy.Properties["reasoning_effort"] == nil || policy.Properties["reasoning_format"] == nil {
 		t.Fatal("ProviderChatModelParameterPolicy is incomplete")
 	}
-	models := policy.Properties["model"].Value.Enum
-	if len(models) != 3 || models[0] != "openai/gpt-oss-20b" || models[1] != "openai/gpt-oss-120b" || models[2] != "deepseek-ai/DeepSeek-V4-Pro-0813" {
-		t.Fatalf("model-specific chat policy models=%v", models)
+	model := policy.Properties["model"].Value
+	if len(model.Enum) != 0 || model.MinLength != 1 {
+		t.Fatalf("model-specific chat policy model schema=%+v", model)
+	}
+	options := policy.Properties["supported_options"].Value.Items.Value.Enum
+	found := false
+	for _, option := range options {
+		if option == "clear_thinking" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("model-specific supported options=%v", options)
+	}
+}
+
+func TestOpenAPIProviderProfilesExposeModelSpecificResponsePolicy(t *testing.T) {
+	document := loadDocument(t)
+	profile := document.Components.Schemas["ProviderCapabilityProfile"].Value
+	if profile == nil || profile.Properties["response_model_parameters"] == nil {
+		t.Fatal("ProviderCapabilityProfile is missing response_model_parameters")
+	}
+	policy := document.Components.Schemas["ProviderResponseModelParameterPolicy"].Value
+	if policy == nil || policy.Properties["model"] == nil || policy.Properties["supported_options"] == nil || policy.Properties["reasoning_effort"] == nil {
+		t.Fatal("ProviderResponseModelParameterPolicy is incomplete")
+	}
+}
+
+func TestOpenAPIGroqReasoningControlsAndCapabilityPolicy(t *testing.T) {
+	document := loadDocument(t)
+	chat := document.Components.Schemas["ChatCompletionRequest"].Value
+	if chat == nil || chat.Properties["include_reasoning"] == nil || chat.Properties["reasoning_format"] == nil {
+		t.Fatal("ChatCompletionRequest is missing Groq reasoning controls")
+	}
+	formats := chat.Properties["reasoning_format"].Value.Enum
+	if len(formats) != 3 || formats[0] != "hidden" || formats[1] != "raw" || formats[2] != "parsed" {
+		t.Fatalf("reasoning_format values=%v", formats)
+	}
+	policy := document.Components.Schemas["ProviderChatParameterPolicy"].Value
+	if policy == nil || policy.Properties["reasoning_format"] == nil {
+		t.Fatal("ProviderChatParameterPolicy is missing reasoning_format")
+	}
+}
+
+func TestOpenAPIGroqCitationOptionsAndCapabilityPolicy(t *testing.T) {
+	document := loadDocument(t)
+	chat := document.Components.Schemas["ChatCompletionRequest"].Value
+	if chat == nil || chat.Properties["citation_options"] == nil {
+		t.Fatal("ChatCompletionRequest is missing citation_options")
+	}
+	values := chat.Properties["citation_options"].Value.Enum
+	if len(values) != 2 || values[0] != "enabled" || values[1] != "disabled" {
+		t.Fatalf("citation_options values=%v", values)
+	}
+	policy := document.Components.Schemas["ProviderChatParameterPolicy"].Value
+	if policy == nil || policy.Properties["citation_options"] == nil {
+		t.Fatal("ProviderChatParameterPolicy is missing citation_options")
+	}
+}
+
+func TestOpenAPIDeepSeekThinkingAndCapabilityPolicy(t *testing.T) {
+	document := loadDocument(t)
+	chat := document.Components.Schemas["ChatCompletionRequest"].Value
+	if chat == nil || chat.Properties["thinking"] == nil {
+		t.Fatal("ChatCompletionRequest is missing thinking")
+	}
+	thinking := chat.Properties["thinking"].Value
+	if thinking == nil || thinking.Properties["type"] == nil || len(thinking.Properties["type"].Value.Enum) != 2 {
+		t.Fatalf("thinking schema=%+v", thinking)
+	}
+	policy := document.Components.Schemas["ProviderChatParameterPolicy"].Value
+	if policy == nil || policy.Properties["thinking"] == nil {
+		t.Fatal("ProviderChatParameterPolicy is missing thinking")
 	}
 }
 

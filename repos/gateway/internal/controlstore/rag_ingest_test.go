@@ -39,16 +39,18 @@ func TestPostgresRAGIngestIsAtomic(t *testing.T) {
 	vectorStore := vectorstate.VectorStore{ID: "vs_rag_atomic", OwnerKey: owner, Name: "guides", Metadata: map[string]string{"region": "eu"}}
 	result, err := store.IngestRAG(ctx, ragstate.IngestRequest{
 		OwnerKey: owner, File: &file, VectorStore: &vectorStore, Attributes: map[string]any{"kind": "guide"},
-		FileOwnerQuota: 100, VectorStoreQuota: 2, VectorStoreFiles: 1, VectorStoreBytes: 100,
+		ChunkingStrategy: vectorstate.ChunkingStrategy{Type: "static", MaxChunkSizeTokens: 800, ChunkOverlapTokens: 200},
+		FileOwnerQuota:   100, VectorStoreQuota: 2, VectorStoreFiles: 1, VectorStoreBytes: 100,
 	})
-	if err != nil || result.File.ID != file.ID || result.VectorStore.ID != vectorStore.ID || result.VectorStore.FileCount != 1 || result.Attachment.FileID != file.ID {
+	if err != nil || result.File.ID != file.ID || result.VectorStore.ID != vectorStore.ID || result.VectorStore.FileCount != 1 || result.Attachment.FileID != file.ID || result.Attachment.ChunkingStrategy.Type != "static" || result.Attachment.ChunkingStrategy.MaxChunkSizeTokens != 800 || result.Attachment.ChunkingStrategy.ChunkOverlapTokens != 200 {
 		t.Fatalf("result=%+v err=%v", result, err)
 	}
 
 	second := filestate.File{ID: "file_rag_rollback", OwnerKey: owner, Filename: "second.txt", Purpose: "assistants", ContentType: "text/plain", Bytes: 6, Content: []byte("second")}
 	_, err = store.IngestRAG(ctx, ragstate.IngestRequest{
 		OwnerKey: owner, File: &second, VectorStoreID: vectorStore.ID,
-		FileOwnerQuota: 100, VectorStoreQuota: 2, VectorStoreFiles: 1, VectorStoreBytes: 100,
+		ChunkingStrategy: vectorstate.AutoChunkingStrategy(),
+		FileOwnerQuota:   100, VectorStoreQuota: 2, VectorStoreFiles: 1, VectorStoreBytes: 100,
 	})
 	if !errors.Is(err, vectorstate.ErrFileQuotaExceeded) {
 		t.Fatalf("quota error=%v", err)
@@ -60,7 +62,8 @@ func TestPostgresRAGIngestIsAtomic(t *testing.T) {
 	secondStore := vectorstate.VectorStore{ID: "vs_rag_rollback", OwnerKey: owner, Name: "second", Metadata: map[string]string{}}
 	_, err = store.IngestRAG(ctx, ragstate.IngestRequest{
 		OwnerKey: owner, File: &third, VectorStore: &secondStore,
-		FileOwnerQuota: 100, VectorStoreQuota: 1, VectorStoreFiles: 2, VectorStoreBytes: 100,
+		ChunkingStrategy: vectorstate.AutoChunkingStrategy(),
+		FileOwnerQuota:   100, VectorStoreQuota: 1, VectorStoreFiles: 2, VectorStoreBytes: 100,
 	})
 	if !errors.Is(err, vectorstate.ErrQuotaExceeded) {
 		t.Fatalf("vector store quota error=%v", err)

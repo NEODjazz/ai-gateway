@@ -23,6 +23,7 @@ type ModelDeployment struct {
 	Capabilities          []string `json:"capabilities,omitempty"`
 	Priority              int      `json:"priority"`
 	Weight                int      `json:"weight"`
+	DocumentProcessing    string   `json:"document_processing,omitempty"`
 	GuardrailPolicy       string   `json:"guardrail_policy,omitempty"`
 	RequestTimeoutMS      int      `json:"request_timeout_ms,omitempty"`
 	MaxRetries            int      `json:"max_retries,omitempty"`
@@ -126,6 +127,9 @@ func (r *Router) UpdateModelDeployment(id string, deployment ModelDeployment) (M
 	}
 	if !deployment.CredentialSet {
 		deployment.CredentialID = existing.CredentialID
+	}
+	if deployment.DocumentProcessing == "" {
+		deployment.DocumentProcessing = existing.DocumentProcessing
 	}
 	if deployment.Capabilities == nil {
 		deployment.Capabilities = append([]string(nil), existing.Capabilities...)
@@ -245,6 +249,12 @@ func (r *Router) DeleteModelDeployment(id string) error {
 
 func (r Router) runtimeEndpoints() []Endpoint {
 	_ = (&r).refreshControlPlane(context.Background())
+	return r.activeEndpoints()
+}
+
+// activeEndpoints reads the current immutable registries without refreshing
+// persistent state. It is safe to use while a control-plane mutation holds its lock.
+func (r Router) activeEndpoints() []Endpoint {
 	configured := r.configuredEndpoints()
 	if r.deployments == nil {
 		return configured
@@ -329,6 +339,9 @@ func containsDeployment(values []string, expected string) bool {
 }
 
 func (r *Router) validateDeployment(deployment ModelDeployment) error {
+	if !config.ValidDocumentProcessing(deployment.DocumentProcessing) || deployment.DocumentProcessing == "docling" && !hasCapability(deployment.Capabilities, "chat") && !hasCapability(deployment.Capabilities, "responses") {
+		return ErrInvalidDeployment
+	}
 	if strings.TrimSpace(deployment.ID) == "" || len(deployment.ID) > 128 || strings.TrimSpace(deployment.ProviderID) == "" || len(deployment.ProviderID) > 128 || len(deployment.CredentialID) > 128 || len(deployment.UpstreamModel) > 256 || deployment.Priority < 0 || deployment.Weight < 0 || len(deployment.Models) == 0 || len(deployment.Models) > 128 || !validDeploymentStrings(deployment.Models) || !validDeploymentCapabilities(deployment.Capabilities) || len(deployment.GuardrailPolicy) > 128 || !validDeploymentOperations(deployment) {
 		return ErrInvalidDeployment
 	}
@@ -375,10 +388,31 @@ func validDeploymentCapabilities(capabilities []string) bool {
 	if seen["response_apply_patch"] && (!seen["responses"] || !seen["tools"]) {
 		return false
 	}
-	for _, capability := range []string{"web_fetch", "tool_search", "memory_tool", "bash_tool", "text_editor_tool", "computer_toolset", "browser_toolset", "thinking", "zero_output", "inference_geo", "context_management", "tool_result_error", "document_citations", "document_metadata", "document_text", "audio", "audio_input", "video_input", "prompt_cache", "assistant_prefill", "gemini_code_execution", "url_context", "google_maps"} {
+	for _, capability := range []string{"web_fetch", "tool_search", "memory_tool", "bash_tool", "text_editor_tool", "computer_toolset", "browser_toolset", "thinking", "zero_output", "inference_geo", "context_management", "tool_result_error", "document_citations", "document_metadata", "document_text", "audio", "audio_input", "video_input", "prompt_cache", "assistant_prefill", "gemini_code_execution", "gemini_audio_timestamp", "gemini_media_resolution", "gemini_media_processing", "gemini_search_time_range", "gemini_file_search", "gemini_computer_use", "gemini_mcp", "url_context", "google_maps"} {
 		if seen[capability] && !seen["chat"] {
 			return false
 		}
+	}
+	if seen["gemini_audio_timestamp"] && !seen["audio_input"] {
+		return false
+	}
+	if seen["gemini_media_resolution"] && !seen["vision"] && !seen["audio_input"] && !seen["video_input"] && !seen["file_input"] {
+		return false
+	}
+	if seen["gemini_media_processing"] && !seen["video_input"] {
+		return false
+	}
+	if seen["gemini_search_time_range"] && !seen["web_search"] {
+		return false
+	}
+	if seen["gemini_file_search"] && !seen["chat"] {
+		return false
+	}
+	if seen["gemini_computer_use"] && !seen["chat"] {
+		return false
+	}
+	if seen["gemini_mcp"] && !seen["chat"] {
+		return false
 	}
 	if seen["background_responses"] && !seen["responses"] {
 		return false
@@ -413,7 +447,7 @@ func ValidModelCapability(capability string) bool {
 		"image_generation", "image_edit", "image_variation",
 		"audio_transcription", "audio_translation", "audio_speech", "ocr", "search", "skills", "fine_tuning", "video", "video_remix", "video_extension", "container", "container_files", "container_network", "cached_content", "sandbox", "realtime",
 		"stream", "tools", "custom_tools", "response_image_generation", "response_computer", "response_shell", "response_apply_patch", "structured_output", "mcp", "vision",
-		"web_search", "web_fetch", "tool_search", "memory_tool", "bash_tool", "text_editor_tool", "computer_toolset", "browser_toolset", "thinking", "zero_output", "inference_geo", "context_management", "tool_result_error", "document_citations", "document_metadata", "document_text", "audio", "audio_input", "video_input", "prompt_cache", "assistant_prefill", "background_responses", "file_input", "bedrock_invoke", "gemini_code_execution", "url_context", "google_maps":
+		"web_search", "web_fetch", "tool_search", "memory_tool", "bash_tool", "text_editor_tool", "computer_toolset", "browser_toolset", "thinking", "zero_output", "inference_geo", "context_management", "tool_result_error", "document_citations", "document_metadata", "document_text", "audio", "audio_input", "video_input", "prompt_cache", "assistant_prefill", "background_responses", "file_input", "bedrock_invoke", "gemini_code_execution", "gemini_audio_timestamp", "gemini_media_resolution", "gemini_media_processing", "gemini_search_time_range", "gemini_file_search", "gemini_computer_use", "gemini_mcp", "url_context", "google_maps":
 		return true
 	default:
 		return false
@@ -466,10 +500,20 @@ func (r *Router) endpointForManagedDeployment(deployment ModelDeployment, manage
 }
 
 func (r *Router) endpointForManagedDeploymentWithSecret(deployment ModelDeployment, managed ManagedProvider, secret string) (Endpoint, error) {
+	if !config.ValidDocumentProcessing(deployment.DocumentProcessing) {
+		return Endpoint{}, ErrInvalidDeployment
+	}
 	if managed.Type == "vertex-gemini" && deployment.CredentialID != "" {
 		return Endpoint{}, ErrInvalidDeployment
 	}
-	providerConfig := config.ProviderEndpointConfig{Type: managed.Type, BaseURL: managed.BaseURL, APIKey: secret, Stream: hasCapability(deployment.Capabilities, "stream"), APIVersion: managed.APIVersion, AuthType: managed.AuthType, Region: managed.Region}
+	providerConfig := config.ProviderEndpointConfig{Type: managed.Type, BaseURL: managed.BaseURL, APIKey: secret, Stream: hasCapability(deployment.Capabilities, "stream"), APIVersion: managed.APIVersion, AuthType: managed.AuthType, AzureCloud: managed.AzureCloud, AzureAudience: managed.AzureAudience, Region: managed.Region}
+	if managed.Type == "azure-openai" {
+		baseURL, err := azureManagedDeploymentBaseURL(managed.BaseURL, managed.APIVersion, deployment)
+		if err != nil {
+			return Endpoint{}, err
+		}
+		providerConfig.BaseURL = baseURL
+	}
 	client := providerFor(providerConfig)
 	if managed.Type == "bedrock" && managed.AuthType == "aws_sigv4" {
 		bedrock := NewBedrockWithAuth(providerConfig.BaseURL, providerConfig.APIKey, providerConfig.AuthType, providerConfig.Region)
@@ -480,12 +524,27 @@ func (r *Router) endpointForManagedDeploymentWithSecret(deployment ModelDeployme
 		return Endpoint{}, ErrInvalidDeployment
 	}
 	aliases := map[string]string{}
-	if deployment.UpstreamModel != "" {
+	upstreamModel := deployment.UpstreamModel
+	if managed.Type == "azure-openai" && upstreamModel == "" {
+		upstreamModel = azureExplicitDeploymentModel(managed.BaseURL)
+	}
+	if upstreamModel != "" {
 		for _, model := range deployment.Models {
-			aliases[model] = deployment.UpstreamModel
+			aliases[model] = upstreamModel
 		}
 	}
-	endpoint := Endpoint{Name: deployment.ID, ProviderID: deployment.ProviderID, Type: managed.Type, Models: append([]string(nil), deployment.Models...), Capabilities: append([]string(nil), deployment.Capabilities...), Priority: deployment.Priority, Weight: deployment.Weight, GuardrailPolicy: deployment.GuardrailPolicy, GuardrailPolicyValid: true, ModelAliases: aliases, Provider: client, Admission: newAdmissionController(deployment.MaxParallelRequests, deployment.QueueCapacity, time.Duration(deployment.QueueTimeoutMS)*time.Millisecond), BaseURL: managed.BaseURL, CredentialID: deployment.CredentialID, RequestTimeout: time.Duration(deployment.RequestTimeoutMS) * time.Millisecond, MaxRetries: deployment.MaxRetries, CooldownAfterFailures: deployment.CooldownAfterFailures, Cooldown: time.Duration(deployment.CooldownSeconds) * time.Second, RateLimitRPM: deployment.RateLimitRPM, RateLimitTPM: deployment.RateLimitTPM, ProviderRateLimitRPM: managed.RateLimitRPM, ProviderRateLimitTPM: managed.RateLimitTPM}
+	endpoint := Endpoint{DocumentProcessing: deployment.DocumentProcessing, Name: deployment.ID, ProviderID: deployment.ProviderID, Type: managed.Type, Models: append([]string(nil), deployment.Models...), Capabilities: append([]string(nil), deployment.Capabilities...), Priority: deployment.Priority, Weight: deployment.Weight, GuardrailPolicy: deployment.GuardrailPolicy, GuardrailPolicyValid: true, ModelAliases: aliases, Provider: client, Admission: newAdmissionController(deployment.MaxParallelRequests, deployment.QueueCapacity, time.Duration(deployment.QueueTimeoutMS)*time.Millisecond), BaseURL: managed.BaseURL, CredentialID: deployment.CredentialID, RequestTimeout: time.Duration(deployment.RequestTimeoutMS) * time.Millisecond, MaxRetries: deployment.MaxRetries, CooldownAfterFailures: deployment.CooldownAfterFailures, Cooldown: time.Duration(deployment.CooldownSeconds) * time.Second, RateLimitRPM: deployment.RateLimitRPM, RateLimitTPM: deployment.RateLimitTPM, ProviderRateLimitRPM: managed.RateLimitRPM, ProviderRateLimitTPM: managed.RateLimitTPM}
+	if managed.Type == "ollama" && hasCapability(deployment.Capabilities, "structured_output") {
+		models := deployment.Models
+		if deployment.UpstreamModel != "" {
+			models = []string{deployment.UpstreamModel}
+		}
+		for _, model := range models {
+			if ollamaCloudModelName(model) {
+				return Endpoint{}, fmt.Errorf("%w: Ollama cloud model does not support structured_output", ErrUnsupportedProviderCapability)
+			}
+		}
+	}
 	if hasCapability(deployment.Capabilities, "responses") && hasCapability(deployment.Capabilities, "web_search") && !endpoint.supportsCapabilities("responses", "web_search") {
 		return Endpoint{}, fmt.Errorf("%w: %s does not support web_search for Responses", ErrUnsupportedProviderCapability, managed.Type)
 	}
@@ -498,6 +557,9 @@ func (r *Router) endpointForManagedDeploymentWithSecret(deployment ModelDeployme
 }
 
 func supportsManagedAdapterCapability(endpoint Endpoint, capability string) bool {
+	if capability == "web_search" && endpoint.Type == "azure-openai" && hasCapability(endpoint.Capabilities, "responses") {
+		return endpoint.supportsCapabilities("responses", "web_search")
+	}
 	if !endpoint.supportsCapabilities(capability) {
 		return false
 	}
@@ -590,7 +652,7 @@ func supportsManagedAdapterCapability(endpoint Endpoint, capability string) bool
 		return ok && endpoint.Type == "opensandbox"
 	case "realtime":
 		_, ok := endpoint.Provider.(RealtimeClient)
-		return ok && (endpoint.Type == "openai" || endpoint.Type == "openai-compatible")
+		return ok && (endpoint.Type == "openai" || endpoint.Type == "openai-compatible" || endpoint.Type == "azure-openai" && azureRealtimeSupportedBaseURL(endpoint.BaseURL))
 	case "background_responses":
 		if endpoint.Type != "openai" && endpoint.Type != "openai-compatible" && endpoint.Type != "azure-openai" {
 			return false
@@ -677,6 +739,27 @@ func supportsManagedAdapterCapability(endpoint Endpoint, capability string) bool
 	case "gemini_code_execution":
 		client, ok := endpoint.Provider.(interface{ SupportsCodeExecution() bool })
 		return (endpoint.Type == "gemini" || endpoint.Type == "vertex-gemini") && ok && client.SupportsCodeExecution()
+	case "gemini_audio_timestamp":
+		client, ok := endpoint.Provider.(interface{ SupportsAudioTimestamp() bool })
+		return endpoint.Type == "vertex-gemini" && ok && client.SupportsAudioTimestamp()
+	case "gemini_media_resolution":
+		client, ok := endpoint.Provider.(interface{ SupportsMediaResolution() bool })
+		return (endpoint.Type == "gemini" || endpoint.Type == "vertex-gemini") && ok && client.SupportsMediaResolution()
+	case "gemini_media_processing":
+		client, ok := endpoint.Provider.(interface{ SupportsMediaProcessing() bool })
+		return (endpoint.Type == "gemini" || endpoint.Type == "vertex-gemini") && ok && client.SupportsMediaProcessing()
+	case "gemini_search_time_range":
+		client, ok := endpoint.Provider.(interface{ SupportsSearchTimeRange() bool })
+		return (endpoint.Type == "gemini" || endpoint.Type == "vertex-gemini") && ok && client.SupportsSearchTimeRange()
+	case "gemini_file_search":
+		client, ok := endpoint.Provider.(interface{ SupportsGeminiFileSearch() bool })
+		return (endpoint.Type == "gemini" || endpoint.Type == "vertex-gemini") && ok && client.SupportsGeminiFileSearch()
+	case "gemini_computer_use":
+		client, ok := endpoint.Provider.(interface{ SupportsGeminiComputerUse() bool })
+		return (endpoint.Type == "gemini" || endpoint.Type == "vertex-gemini") && ok && client.SupportsGeminiComputerUse()
+	case "gemini_mcp":
+		client, ok := endpoint.Provider.(interface{ SupportsGeminiMCP() bool })
+		return (endpoint.Type == "gemini" || endpoint.Type == "vertex-gemini") && ok && client.SupportsGeminiMCP()
 	case "url_context":
 		client, ok := endpoint.Provider.(interface{ SupportsURLContext() bool })
 		return (endpoint.Type == "gemini" || endpoint.Type == "vertex-gemini") && ok && client.SupportsURLContext()

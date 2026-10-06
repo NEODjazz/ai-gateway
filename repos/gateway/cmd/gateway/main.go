@@ -11,10 +11,12 @@ import (
 
 	"ai-gateway-gateway/internal/config"
 	"ai-gateway-gateway/internal/controlstore"
+	"ai-gateway-gateway/internal/documentprocessing"
 	"ai-gateway-gateway/internal/gateway"
 	"ai-gateway-gateway/internal/modelcatalog"
 	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/provider"
+	"ai-gateway-gateway/internal/realtimestate"
 	"ai-gateway-gateway/internal/redisstore"
 	"ai-gateway-gateway/internal/telemetry"
 )
@@ -44,10 +46,13 @@ func main() {
 			log.Fatal(err)
 		}
 		defer providerControlStore.Close()
+		if err := providerControlStore.ResponseSessions().Ping(appCtx); err != nil {
+			log.Fatalf("response session schema is unavailable: %v", err)
+		}
 	}
 
 	gatewayPipeline := modules.NewPipelineWithObserver([]modules.Module{
-		modules.Auth(cfg.Modules.Auth.Required, cfg.Modules.Auth.URL),
+		modules.AuthWithJWTReauthorization(cfg.Modules.Auth.Required, cfg.Modules.Auth.URL, cfg.Management.Secret),
 	}, metrics)
 	guardrailMonitor := gateway.NewGuardrailMonitorWithStore(cfg.Guardrails.Capacity, gateway.NewRedisGuardrailEventStore(redisStore, cfg.Guardrails.TTL))
 	loggingRegistry := gateway.NewLoggingRegistry(nil)
@@ -67,6 +72,10 @@ func main() {
 
 	modelRegistry := modelcatalog.NewRegistry(cfg.Catalog, registryStoreFor(redisStore), time.Second)
 	providerConfig := provider.Config{
+		PromptInjectionObserver: func(ctx context.Context, req *modules.RequestContext, policy, outcome string, duration time.Duration) {
+			guardrailMonitor.RecordContext(ctx, gateway.GuardrailEvent{RequestID: req.RequestID, Policy: policy, Module: "prompt_injection", Source: req.Metadata["guardrail.monitor.source"], Outcome: outcome, DurationMS: duration.Milliseconds()})
+		},
+		BackgroundAuthorization: gatewayPipeline,
 		Default:                 cfg.Provider.Default,
 		Endpoints:               cfg.Provider.Endpoints,
 		GuardrailPolicies:       cfg.Provider.GuardrailPolicies,
@@ -93,12 +102,24 @@ func main() {
 	providerConfig.ControlPlaneStore = controlPlaneStoreFor(providerControlStore)
 	if providerControlStore != nil {
 		providerConfig.AsyncJobs = providerControlStore
+		providerConfig.Conversations = providerControlStore
+		providerConfig.ConversationItemQuota = cfg.Conversations.ItemQuota
 	}
 	if redisStore != nil {
 		providerConfig.CacheStore = redisStore
 		providerConfig.SessionStore = redisStore
 		providerConfig.CircuitStore = redisStore
 		providerConfig.DeploymentQuotaStore = redisStore
+	}
+	if providerControlStore != nil {
+		providerConfig.SessionStore = providerControlStore.ResponseSessions()
+	}
+	if cfg.Docling.URL != "" {
+		converter, err := documentprocessing.New(documentprocessing.Config{URL: cfg.Docling.URL, APIKey: cfg.Docling.APIKey, Timeout: cfg.Docling.Timeout, PollInterval: cfg.Docling.PollInterval, MaxTextBytes: cfg.Docling.MaxTextBytes})
+		if err != nil {
+			log.Fatal("invalid Docling configuration")
+		}
+		providerConfig.DocumentConverter = converter
 	}
 	llmProvider, err := provider.NewWithError(providerConfig)
 	if err != nil {
@@ -138,10 +159,23 @@ func main() {
 					return err
 				}
 			}
-			return providerControlStore.Ping(ctx)
+			if err := providerControlStore.Ping(ctx); err != nil {
+				return err
+			}
+			return providerControlStore.ResponseSessions().Ping(ctx)
 		}
 	}
 	handler := gateway.NewHandlerWithMetrics(gatewayPipeline, llmProvider, rateLimits, readiness, metrics).WithResourceBillingPipeline(providerPipeline).WithModelRegistry(modelRegistry).WithComplianceModules(dlpModule, avModule).WithAnonymizerModule(anonymizerModule).WithGuardrailMonitor(guardrailMonitor).WithCacheDiagnostics(gateway.CacheRuntimeConfig{ExactTTLSeconds: cfg.Cache.TTLSeconds, ExactMaxBytes: cfg.Cache.MaxBytes, SemanticTTLSeconds: cfg.Cache.Semantic.TTLSeconds, SemanticMaxEntries: cfg.Cache.Semantic.MaxEntries, SemanticMaxBytes: cfg.Cache.Semantic.MaxBytes}).WithLoggingRegistry(loggingRegistry).WithAgentRegistry(agentRegistry).WithMCPRegistry(mcpRegistry).WithAccessRegistry(accessRegistry).WithAdminState(adminState)
+	if len(cfg.Provider.CredentialKey) >= 16 {
+		var tickets realtimestate.Store = realtimestate.NewMemoryStore(realtimestate.MaxTickets, realtimestate.MaxOwnerTickets)
+		if providerControlStore != nil {
+			tickets = providerControlStore
+		}
+		handler, err = handler.WithRealtimeBrowserTickets(tickets, []byte(cfg.Provider.CredentialKey))
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
 	if providerControlStore != nil {
 		handler = handler.WithMCPCallStore(providerControlStore).
 			WithA2ATaskStore(providerControlStore, gateway.A2ATaskRuntimeConfig{
@@ -154,6 +188,7 @@ func main() {
 			WithVideoStore(providerControlStore).
 			WithContainerStore(providerControlStore).
 			WithCachedContentStore(providerControlStore).
+			WithConversationStore(providerControlStore, gateway.ConversationRuntimeConfig{OwnerQuota: cfg.Conversations.OwnerQuota, ItemQuota: cfg.Conversations.ItemQuota}).
 			WithSkillStore(providerControlStore).
 			WithRAGIngestStore(providerControlStore).
 			WithVectorStore(providerControlStore, gateway.VectorStoreRuntimeConfig{OwnerQuota: cfg.VectorStores.OwnerQuota, FileQuota: cfg.VectorStores.FileQuota, ByteQuota: cfg.VectorStores.ByteQuota})
@@ -167,12 +202,20 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
+		handler, err = handler.WithAgentMCPBackground(providerControlStore, []byte(cfg.Provider.CredentialKey))
+		if err != nil {
+			log.Fatal(err)
+		}
 	}
 	if cfg.APIDocs.Enabled {
 		handler = handler.WithAPIDocs(cfg.APIDocs.TryItOutEnabled)
 	}
 	if cfg.AdminUI.Enabled {
 		handler = handler.WithAdminUI()
+		handler, err = handler.WithPlaygroundOrigins(cfg.AdminUI.PlaygroundOrigins)
+		if err != nil {
+			log.Fatal(err)
+		}
 	}
 	if cfg.AdminUI.SSO.Enabled && !cfg.AdminUI.Enabled {
 		log.Fatal("browser SSO requires the admin UI")
@@ -190,17 +233,24 @@ func main() {
 	}
 	if cfg.Management.AuthURL != "" && cfg.Management.Secret != "" {
 		authManagement := gateway.NewRemoteManagementClient(cfg.Management.AuthURL, cfg.Management.Secret)
-		handler = handler.WithManagement(authManagement).WithIdentityDirectory(authManagement).WithOrganizations(authManagement)
+		handler = handler.WithManagement(authManagement).WithIdentityDirectory(authManagement).WithOrganizations(authManagement).WithSSOManagement(authManagement)
 	}
 	if cfg.Management.BillingURL != "" && cfg.Management.BillingSecret != "" {
 		billingManagement := gateway.NewRemoteBudgetManagementClient(cfg.Management.BillingURL, cfg.Management.BillingSecret)
 		handler = handler.WithBudgetManagement(billingManagement).WithUsageReporting(billingManagement).WithRequestLogs(billingManagement).WithAudit(billingManagement)
 	}
 	var a2aPushWorkerDone <-chan struct{}
+	var agentMCPWorkerDone <-chan struct{}
 	var batchWorkerDone <-chan struct{}
 	var fineTuningWorkerDone <-chan struct{}
 	var videoWorkerDone <-chan struct{}
 	if providerControlStore != nil {
+		agentDone := make(chan struct{})
+		agentMCPWorkerDone = agentDone
+		go func() {
+			defer close(agentDone)
+			gateway.RunAgentMCPBackgroundWorker(appCtx, handler)
+		}()
 		done := make(chan struct{})
 		a2aPushWorkerDone = done
 		go func() {
@@ -256,6 +306,13 @@ func main() {
 		case <-backgroundWorkerDone:
 		case <-shutdownCtx.Done():
 			log.Printf("background response worker shutdown timed out")
+		}
+	}
+	if agentMCPWorkerDone != nil {
+		select {
+		case <-agentMCPWorkerDone:
+		case <-shutdownCtx.Done():
+			log.Print("agent background worker shutdown timed out")
 		}
 	}
 	if a2aPushWorkerDone != nil {

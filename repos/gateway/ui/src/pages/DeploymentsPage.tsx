@@ -23,6 +23,7 @@ type Deployment = Row & {
   upstream_model?: string;
   models: string[];
   capabilities?: string[];
+  document_processing?: "native" | "docling";
   priority: number;
   weight: number;
   enabled: boolean;
@@ -41,6 +42,7 @@ function deploymentPayload(row: Deployment, enabled = row.enabled) {
   return {
     provider_id: row.provider_id, credential_id: row.credential_id || "", upstream_model: row.upstream_model || "",
     models: row.models || [], capabilities: row.capabilities || [], priority: Number(row.priority || 0), weight: Number(row.weight || 1),
+    document_processing: row.document_processing || "native",
     guardrail_policy: String(row.guardrail_policy || ""), request_timeout_ms: Number(row.request_timeout_ms || 0),
     max_retries: Number(row.max_retries || 0), cooldown_after_failures: Number(row.cooldown_after_failures || 0),
     cooldown_seconds: Number(row.cooldown_seconds || 0), max_parallel_requests: Number(row.max_parallel_requests || 0),
@@ -69,6 +71,7 @@ export function DeploymentsPage() {
   const [limit, setLimit] = useState(25);
   const [total, setTotal] = useState(0);
   const [providerCapabilities, setProviderCapabilities] = useState<Record<string, string[]>>({});
+  const [providerBaseURLs, setProviderBaseURLs] = useState<Record<string, string>>({});
   const [filtersOpen, setFiltersOpen] = useState(false);
   const loadOptions = useCallback((path: string) => client.request(path), [client]);
 
@@ -76,13 +79,15 @@ export function DeploymentsPage() {
     setLoading(true); setError("");
     try {
       const params = new URLSearchParams({ search, provider: providerFilter, state: stateFilter, sort, order, limit: String(limit), offset: String(offset) });
-      const [payload, capabilityPayload] = await Promise.all([
+      const [payload, capabilityPayload, providerPayload] = await Promise.all([
         client.request<{ data: Deployment[]; total?: number }>(`/admin/v1/model-deployments?${params}`),
-        client.request<{ data?: ProviderCapabilityProfile[] }>("/admin/v1/provider-capabilities").catch(() => ({ data: [] }))
+        client.request<{ data?: ProviderCapabilityProfile[] }>("/admin/v1/provider-capabilities").catch(() => ({ data: [] })),
+        client.request<{ data?: Array<{ id: string; base_url: string }> }>("/admin/v1/providers").catch(() => ({ data: [] }))
       ]);
       const rows = records<Deployment>(payload); setTotal(payload.total ?? rows.length);
       setDeployments(rows);
       setProviderCapabilities(Object.fromEntries((capabilityPayload.data || []).map((profile) => [profile.type, profile.capabilities || profile.operations || []])));
+      setProviderBaseURLs(Object.fromEntries((providerPayload.data || []).map((provider) => [provider.id, provider.base_url])));
       const checks = rows.length ? records<HealthCheck>(await client.request(`/admin/v1/model-deployments/health?ids=${encodeURIComponent(rows.map((row) => row.id).join(","))}`)) : [];
       setLatest(Object.fromEntries(checks.map((check) => [check.deployment_id, check])));
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not load deployments"); }
@@ -141,14 +146,14 @@ export function DeploymentsPage() {
   ], []);
   const deploymentSortKeys: Record<string, string> = { id: "id", provider_id: "provider", priority: "priority", weight: "weight", runtime_state: "state" };
   const editFields = useMemo(() => (resourceConfigs.deployments.fields || []).filter((field) => editing?.provider_type !== "vertex-gemini" || field.key !== "credential_id").map((field) => field.key === "capabilities" && editing
-    ? { ...field, chipOptions: providerModelCapabilityOptions(providerCapabilities[editing.provider_type]) }
-    : field), [editing, providerCapabilities]);
+    ? { ...field, chipOptions: providerModelCapabilityOptions(providerCapabilities[editing.provider_type], editing.provider_type, providerBaseURLs[editing.provider_id]) }
+    : field), [editing, providerCapabilities, providerBaseURLs]);
 
   return <><PageHeader eyebrow="Runtime routing" title="Deployments" description="Provider/model endpoints with live health, circuit state and operational controls." />
     {error && <ErrorState message={error} retry={() => void load()} />}
     {loading ? <LoadingState /> : <ManagedDataTable rows={tableRows} columns={tableColumns} rowKey="id" defaultHidden={["priority", "weight"]} selection={{ selectedIds: selectedIDs, onSelectionChange: (ids) => setSelected(new Set(ids)) }} primaryAction={<div className="inline-actions"><Link className="button-link" to="/model-onboarding">Onboard models</Link><GatewayButton size="l" disabled={busy || !deployments.length} onClick={() => void runChecks(selectedIDs.length ? selectedIDs : deployments.map((row) => row.id))}>{busy ? "Checking…" : selectedIDs.length ? `Check selected (${selectedIDs.length})` : "Check page"}</GatewayButton></div>} toolbarExtra={<ToolbarIconButton icon="filter" label="Filter" active={Boolean(providerFilter || stateFilter)} onClick={() => setFiltersOpen(true)} />} onRefresh={load} searchPlaceholder="Search deployments" server={{ search, onSearchChange: (value) => { setOffset(0); setSearch(value); }, total, offset, pageSize: limit, onPageSizeChange: (value) => { setOffset(0); setLimit(value); }, onOffsetChange: setOffset, sort: Object.keys(deploymentSortKeys).find((key) => deploymentSortKeys[key] === sort) || "priority", direction: order as "asc" | "desc", sortableKeys: Object.keys(deploymentSortKeys), onSortChange: (key, direction) => { setOffset(0); setSort(deploymentSortKeys[key]); setOrder(direction); } }} actions={(value) => { const row = value as Deployment; return <ActionsMenu label={`Actions for ${row.id}`} items={[{ label: "Details", onSelect: () => openDetails(row) }, { label: "Check", onSelect: () => runChecks([row.id]) }, { label: "Edit", onSelect: () => setEditing(row) }, { label: row.enabled ? "Pause" : "Resume", tone: row.enabled ? "danger" : "default", onSelect: () => toggle(row) }, { label: "Delete", tone: "danger", disabled: busy, onSelect: () => remove(row) }]} />; }} />}
     {filtersOpen && <ModalFrame label="Filter deployments" onClose={() => setFiltersOpen(false)}><form className="modal compact-modal"    onSubmit={(event) => { event.preventDefault(); setOffset(0); setFiltersOpen(false); void load(); }}><div className="modal-heading"><h2>Filter deployments</h2><ModalCloseButton label="Close filters" onClick={() => setFiltersOpen(false)} /></div><div className="form-grid"><label>Provider<input value={providerFilter} onChange={(event) => setProviderFilter(event.target.value)} /></label><label>Runtime<select value={stateFilter} onChange={(event) => setStateFilter(event.target.value)}><option value="">All</option><option value="available">Available</option><option value="cooling_down">Cooling down</option><option value="disabled">Disabled</option></select></label></div><div className="modal-actions"><GatewayButton type="button" view="outlined" onClick={() => { setOffset(0); setProviderFilter(""); setStateFilter(""); }}>Reset filters</GatewayButton><GatewayButton type="submit">Apply filters</GatewayButton></div></form></ModalFrame>}
-    {detail && <ModalFrame label="Deployment details" onClose={() => setDetail(undefined)}><section className="modal deployment-detail"><div className="modal-heading"><div><h2>{detail.id}</h2><span className={`status ${detail.enabled ? "enabled" : "disabled"}`}>{detail.enabled ? detail.runtime_state : "paused"}</span></div><ModalCloseButton label="Close" onClick={() => setDetail(undefined)} /></div><dl className="detail-grid"><div><dt>Provider</dt><dd>{detail.provider_id} · {detail.provider_type}</dd></div><div><dt>Credential</dt><dd>{detail.provider_type === "vertex-gemini" ? "GCP workload identity" : detail.credential_id || "None"}</dd></div><div><dt>Public models</dt><dd>{detail.models.join(", ")}</dd></div><div><dt>Upstream model</dt><dd>{detail.upstream_model || "—"}</dd></div><div><dt>Priority / weight</dt><dd>{detail.priority} / {detail.weight}</dd></div><div><dt>RPM / TPM</dt><dd>{Number(detail.rate_limit_rpm || 0) || "Unlimited"} / {Number(detail.rate_limit_tpm || 0) || "Unlimited"}</dd></div><div><dt>Adaptive EWMA</dt><dd>{Number(detail.latency_ewma_ms || 0).toFixed(1)} ms · {(Number(detail.failure_ewma || 0) * 100).toFixed(1)}% failures</dd></div></dl><div className="modal-actions"><GatewayButton disabled={busy} onClick={() => void runChecks([detail.id])}>Run health check</GatewayButton></div><h3>Health history</h3><DataTable rows={history} columns={[{ key: "checked_at", label: "Checked", render: formatTimestamp }, { key: "status", label: "Status" }, { key: "latency_ms", label: "Latency", render: (value) => `${String(value)} ms` }, { key: "failure_class", label: "Failure" }, { key: "http_status", label: "HTTP" }]} /></section></ModalFrame>}
+    {detail && <ModalFrame label="Deployment details" onClose={() => setDetail(undefined)}><section className="modal deployment-detail"><div className="modal-heading"><div><h2>{detail.id}</h2><span className={`status ${detail.enabled ? "enabled" : "disabled"}`}>{detail.enabled ? detail.runtime_state : "paused"}</span></div><ModalCloseButton label="Close" onClick={() => setDetail(undefined)} /></div><dl className="detail-grid"><div><dt>Provider</dt><dd>{detail.provider_id} · {detail.provider_type}</dd></div><div><dt>Credential</dt><dd>{detail.provider_type === "vertex-gemini" ? "GCP workload identity" : detail.credential_id || "None"}</dd></div><div><dt>Document processing</dt><dd>{detail.document_processing === "docling" ? "Docling · extracted text with local OCR" : "Native · provider file input"}</dd></div><div><dt>Public models</dt><dd>{detail.models.join(", ")}</dd></div><div><dt>Upstream model</dt><dd>{detail.upstream_model || "—"}</dd></div><div><dt>Priority / weight</dt><dd>{detail.priority} / {detail.weight}</dd></div><div><dt>RPM / TPM</dt><dd>{Number(detail.rate_limit_rpm || 0) || "Unlimited"} / {Number(detail.rate_limit_tpm || 0) || "Unlimited"}</dd></div><div><dt>Adaptive EWMA</dt><dd>{Number(detail.latency_ewma_ms || 0).toFixed(1)} ms · {(Number(detail.failure_ewma || 0) * 100).toFixed(1)}% failures</dd></div></dl><div className="modal-actions"><GatewayButton disabled={busy} onClick={() => void runChecks([detail.id])}>Run health check</GatewayButton></div><h3>Health history</h3><DataTable rows={history} columns={[{ key: "checked_at", label: "Checked", render: formatTimestamp }, { key: "status", label: "Status" }, { key: "latency_ms", label: "Latency", render: (value) => `${String(value)} ms` }, { key: "failure_class", label: "Failure" }, { key: "http_status", label: "HTTP" }]} /></section></ModalFrame>}
     {editing && <ResourceForm title={`Edit ${editing.id}`} fields={editFields} initial={editing} loadOptions={loadOptions} onClose={() => setEditing(undefined)} onSubmit={save} />}
   </>;
 }

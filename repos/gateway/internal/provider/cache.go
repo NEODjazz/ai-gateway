@@ -90,7 +90,7 @@ func (c distributedExactCache) set(ctx context.Context, key string, value []byte
 
 func providerCacheKey(kind string, req modules.RequestContext) string {
 	storedChat := req.Request.Store != nil && *req.Request.Store
-	if kind == "chat" && (storedChat || req.Request.GeminiCachedContent != "" || req.Request.WebSearchOptions != nil || req.Request.WebFetchOptions != nil || req.Request.GeminiCodeExecution || req.Request.GeminiURLContext || req.Request.GeminiGoogleMaps || req.Request.AnthropicCodeExecution || req.Request.AnthropicToolSearch != "" || len(req.Request.AnthropicClientTools) > 0 || len(req.Request.AnthropicClientToolsets) > 0 || req.Request.AnthropicThinking != nil || req.Request.AnthropicInferenceGeo != "" || len(req.Request.AnthropicContextManagement) > 0 || req.Request.AnthropicContainerID != "" || len(req.Request.AnthropicSkills) > 0 || openai.ChatRequestsAudio(req.Request) || openai.HasChatAudioInput(req.Request) || openai.HasChatFileInput(req.Request) || openai.HasChatTextDocuments(req.Request) || openai.HasChatVideoInput(req.Request) || len(req.Request.BedrockRequestMetadata) > 0 || req.Request.BedrockGuardrailConfig != nil || len(req.Request.GeminiSafetySettings) > 0) {
+	if kind == "chat" && (storedChat || req.Request.Moderation != nil || req.Request.GeminiCachedContent != "" || req.Request.WebSearchOptions != nil || req.Request.WebFetchOptions != nil || req.Request.GeminiCodeExecution || req.Request.GeminiURLContext || req.Request.GeminiGoogleMaps || req.Request.GeminiFileSearch != nil || req.Request.GeminiComputerUse != nil || len(req.Request.GeminiMCPServerIDs) > 0 || req.Request.AnthropicCodeExecution || req.Request.AnthropicToolSearch != "" || len(req.Request.AnthropicClientTools) > 0 || len(req.Request.AnthropicClientToolsets) > 0 || req.Request.AnthropicThinking != nil || req.Request.AnthropicInferenceGeo != "" || len(req.Request.AnthropicContextManagement) > 0 || req.Request.AnthropicContainerID != "" || len(req.Request.AnthropicSkills) > 0 || openai.ChatRequestsAudio(req.Request) || openai.HasChatAudioInput(req.Request) || openai.HasChatFileInput(req.Request) || openai.HasChatTextDocuments(req.Request) || openai.HasChatVideoInput(req.Request) || len(req.Request.BedrockRequestMetadata) > 0 || req.Request.BedrockGuardrailConfig != nil || len(req.Request.GeminiSafetySettings) > 0) {
 		return ""
 	}
 	tenant := cacheIsolationScope(req)
@@ -178,6 +178,7 @@ func chatCacheKeyValue(request openai.ChatCompletionRequest) any {
 		BedrockAdditionalModelRequestFields      json.RawMessage               `json:"bedrock_additional_model_request_fields,omitempty"`
 		BedrockAdditionalModelResponseFieldPaths []string                      `json:"bedrock_additional_model_response_field_paths,omitempty"`
 		AnthropicCacheControl                    *openai.PromptCacheBreakpoint `json:"anthropic_cache_control,omitempty"`
+		GeminiMediaResolution                    string                        `json:"gemini_media_resolution,omitempty"`
 	}{
 		Request:                                  request,
 		NativeContent:                            nativeContent,
@@ -190,6 +191,7 @@ func chatCacheKeyValue(request openai.ChatCompletionRequest) any {
 		BedrockAdditionalModelRequestFields:      append(json.RawMessage(nil), request.BedrockAdditionalModelRequestFields...),
 		BedrockAdditionalModelResponseFieldPaths: append([]string(nil), request.BedrockAdditionalModelResponseFieldPaths...),
 		AnthropicCacheControl:                    request.AnthropicCacheControl,
+		GeminiMediaResolution:                    request.GeminiMediaResolution,
 	}
 }
 
@@ -249,7 +251,7 @@ func cacheIsolationScope(req modules.RequestContext) string {
 	canonical := func(values []string) []string { v := append([]string{}, values...); sort.Strings(v); return v }
 	policy := map[string]string{}
 	for key, value := range req.Metadata {
-		if strings.HasPrefix(key, "policy.") || strings.HasPrefix(key, "provider.modules.") || strings.HasPrefix(key, "provider.guardrail.") {
+		if strings.HasPrefix(key, "policy.") || strings.HasPrefix(key, "provider.modules.") || strings.HasPrefix(key, "provider.guardrail.") || strings.HasPrefix(key, "gateway.document.") {
 			policy[key] = value
 		}
 	}
@@ -257,8 +259,10 @@ func cacheIsolationScope(req modules.RequestContext) string {
 		Credential, User, Team, Organization                string
 		Roles, Tags, Models, Tools, GroupModels, GroupTools []string
 		GroupsEvaluated                                     bool
+		ModelAccessRestricted                               bool
+		ToolAccessRestricted                                bool
 		Policy                                              map[string]string
-	}{req.CredentialID, req.UserID, req.TeamID, req.OrganizationID, canonical(req.Roles), canonical(req.Tags), canonical(req.AllowedModels), canonical(req.AllowedTools), canonical(req.AccessGroupModels), canonical(req.AccessGroupTools), req.AccessGroupsEvaluated, policy})
+	}{req.CredentialID, req.UserID, req.TeamID, req.OrganizationID, canonical(req.Roles), canonical(req.Tags), canonical(req.AllowedModels), canonical(req.AllowedTools), canonical(req.AccessGroupModels), canonical(req.AccessGroupTools), req.AccessGroupsEvaluated, req.ModelAccessRestricted, req.ToolAccessRestricted, policy})
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
 }
@@ -269,15 +273,24 @@ func cacheableResponsesResult(response openai.ResponseResponse) bool {
 	return response.Error == nil && response.IncompleteDetails == nil && (response.Status == "" || response.Status == "completed")
 }
 
-// responseToolsReplaySafe reports whether a Responses request can be served
-// from an exact cache or copied to a shadow deployment. Provider-managed tools
-// may read mutable state or perform external work, so their execution cannot be
-// safely replayed or replaced with an earlier result.
-func responseToolsReplaySafe(request openai.ResponseRequest) bool {
+// responseReplaySafe reports whether a Responses request can be served from an
+// exact cache or copied to a shadow deployment. Provider-managed state and
+// server-side tools may change independently or perform external work.
+func responseReplaySafe(request openai.ResponseRequest) bool {
+	if request.Conversation != nil || len(request.ContextManagement) > 0 || request.Moderation != nil || openai.ResponsePrewarmRequested(request) {
+		return false
+	}
 	for _, tool := range request.Tools {
 		if tool.Type != "function" {
 			return false
 		}
 	}
 	return true
+}
+
+// chatReplaySafe reports whether a Chat request can be served from a response
+// cache or copied to a shadow deployment. Provider-side moderation must run for
+// every request because the selected policy can change independently.
+func chatReplaySafe(request openai.ChatCompletionRequest) bool {
+	return request.Moderation == nil
 }

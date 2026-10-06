@@ -16,14 +16,15 @@ import (
 )
 
 type MCPServer struct {
-	ID                   string   `json:"id"`
-	Label                string   `json:"label"`
-	Description          string   `json:"description,omitempty"`
-	ServerURL            string   `json:"server_url"`
-	Transport            string   `json:"transport"`
-	Tools                []string `json:"tools,omitempty"`
-	Enabled              bool     `json:"enabled"`
-	CredentialConfigured bool     `json:"credential_configured"`
+	ID                     string   `json:"id"`
+	Label                  string   `json:"label"`
+	Description            string   `json:"description,omitempty"`
+	ServerURL              string   `json:"server_url"`
+	Transport              string   `json:"transport"`
+	Tools                  []string `json:"tools,omitempty"`
+	Enabled                bool     `json:"enabled"`
+	CredentialConfigured   bool     `json:"credential_configured"`
+	AllowProviderExecution bool     `json:"allow_provider_execution"`
 }
 type MCPToolset struct {
 	ID          string   `json:"id"`
@@ -385,13 +386,14 @@ func (h Handler) UpdateMCPServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var input struct {
-		Label       string   `json:"label"`
-		Description string   `json:"description,omitempty"`
-		ServerURL   string   `json:"server_url"`
-		Transport   string   `json:"transport"`
-		Tools       []string `json:"tools,omitempty"`
-		Enabled     bool     `json:"enabled"`
-		BearerToken *string  `json:"bearer_token,omitempty"`
+		Label                  string   `json:"label"`
+		Description            string   `json:"description,omitempty"`
+		ServerURL              string   `json:"server_url"`
+		Transport              string   `json:"transport"`
+		Tools                  []string `json:"tools,omitempty"`
+		Enabled                bool     `json:"enabled"`
+		BearerToken            *string  `json:"bearer_token,omitempty"`
+		AllowProviderExecution bool     `json:"allow_provider_execution"`
 	}
 	if !decodeMCPJSON(w, r, &input) {
 		return
@@ -403,7 +405,7 @@ func (h Handler) UpdateMCPServer(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "audit_unavailable", "audit service is unavailable")
 		return
 	}
-	server := MCPServer{Label: input.Label, Description: input.Description, ServerURL: input.ServerURL, Transport: input.Transport, Tools: input.Tools, Enabled: input.Enabled}
+	server := MCPServer{Label: input.Label, Description: input.Description, ServerURL: input.ServerURL, Transport: input.Transport, Tools: input.Tools, Enabled: input.Enabled, AllowProviderExecution: input.AllowProviderExecution}
 	var saved MCPServer
 	var err error
 	if input.BearerToken == nil {

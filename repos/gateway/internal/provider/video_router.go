@@ -24,7 +24,7 @@ func (r Router) CreateVideo(ctx context.Context, identity modules.RequestContext
 			release()
 			continue
 		}
-		attempt := providerAttemptContext(identity, endpoint)
+		attempt := r.providerAttemptContext(identity, endpoint)
 		attempt.Request.Model = input.Model
 		attempt.Metadata["gateway.api_type"] = "video"
 		r.applyCatalogPricing(ctx, &attempt, endpoint, input.Model)
@@ -100,7 +100,7 @@ func (r Router) RemixVideo(ctx context.Context, identity modules.RequestContext,
 	if err = r.health.permit(ctx, endpoint); err != nil {
 		return openai.Video{}, VideoBinding{}, err
 	}
-	attempt := providerAttemptContext(identity, endpoint)
+	attempt := r.providerAttemptContext(identity, endpoint)
 	attempt.Request.Model = binding.Model
 	attempt.Metadata["gateway.api_type"] = "video"
 	r.applyCatalogPricing(ctx, &attempt, endpoint, binding.Model)
@@ -141,7 +141,7 @@ func (r Router) ExtendVideo(ctx context.Context, identity modules.RequestContext
 	if err = r.health.permit(ctx, endpoint); err != nil {
 		return openai.Video{}, VideoBinding{}, err
 	}
-	attempt := providerAttemptContext(identity, endpoint)
+	attempt := r.providerAttemptContext(identity, endpoint)
 	attempt.Request.Model = binding.Model
 	attempt.Metadata["gateway.api_type"] = "video"
 	r.applyCatalogPricing(ctx, &attempt, endpoint, binding.Model)

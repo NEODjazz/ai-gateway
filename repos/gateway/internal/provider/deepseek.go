@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -20,12 +21,16 @@ func NewDeepSeek(baseURL, apiKey string, stream bool) DeepSeek {
 	return DeepSeek{compatible: compatible}
 }
 
-func (DeepSeek) SupportsResponses() bool        { return true }
-func (DeepSeek) SupportsTools() bool            { return true }
-func (DeepSeek) SupportsStructuredOutput() bool { return true }
-func (DeepSeek) SupportsVision() bool           { return true }
+func (DeepSeek) SupportsResponses() bool           { return true }
+func (DeepSeek) SupportsTools() bool               { return true }
+func (DeepSeek) SupportsResponseCustomTools() bool { return true }
+func (DeepSeek) SupportsStructuredOutput() bool    { return true }
+func (DeepSeek) SupportsVision() bool              { return true }
 
 func (d DeepSeek) ValidateChatParameters(request openai.ChatCompletionRequest) error {
+	if err := rejectChatModeration("deepseek", request); err != nil {
+		return err
+	}
 	if err := rejectLegacyFunctionCalling("deepseek", request); err != nil {
 		return err
 	}
@@ -44,6 +49,9 @@ func (d DeepSeek) ValidateChatParameters(request openai.ChatCompletionRequest) e
 	if err := rejectChatMessageAudio("deepseek", request.Messages); err != nil {
 		return err
 	}
+	if openai.HasChatImages(request) && !deepSeekVisionModel(request.Model) {
+		return unsupportedDeepSeekParameter("messages.content.image_url")
+	}
 	if err := validateDeepSeekUser(request.User); err != nil {
 		return err
 	}
@@ -61,7 +69,7 @@ func (d DeepSeek) ValidateChatParameters(request openai.ChatCompletionRequest) e
 	if err := rejectParameters("deepseek",
 		parameterCheck{"metadata", request.Metadata != nil}, parameterCheck{"store", request.Store != nil},
 		parameterCheck{"modalities", request.Modalities != nil}, parameterCheck{"audio", request.Audio != nil},
-		parameterCheck{"reasoning_effort", request.ReasoningEffort != ""}, parameterCheck{"safe_prompt", request.SafePrompt != nil},
+		parameterCheck{"safe_prompt", request.SafePrompt != nil},
 		parameterCheck{"n", request.N != nil && *request.N != 1}, parameterCheck{"safety_identifier", request.SafetyIdentifier != ""},
 		parameterCheck{"prompt_cache_key", request.PromptCacheKey != ""}, parameterCheck{"prompt_cache_options", request.PromptCacheOptions != nil},
 		parameterCheck{"prompt_cache_retention", request.PromptCacheRetention != ""}, parameterCheck{"prompt_mode", request.PromptMode != ""},
@@ -75,7 +83,50 @@ func (d DeepSeek) ValidateChatParameters(request openai.ChatCompletionRequest) e
 	); err != nil {
 		return err
 	}
+	if err := validateDeepSeekThinking(request); err != nil {
+		return err
+	}
 	return d.compatible.ValidateChatParameters(request)
+}
+
+func validateDeepSeekThinking(request openai.ChatCompletionRequest) error {
+	invalid := func(parameter, message string) error {
+		return &Error{Class: FailureClientRequest, Provider: "deepseek", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: parameter, Err: errors.New(message)}
+	}
+	switch request.ReasoningEffort {
+	case "", "none", "minimal", "low", "medium", "high", "xhigh", "max":
+	default:
+		return invalid("reasoning_effort", "reasoning_effort is not supported by DeepSeek")
+	}
+	thinkingEnabled := request.ReasoningEffort != "" && request.ReasoningEffort != "none"
+	if request.Thinking != nil {
+		thinkingEnabled = request.Thinking.Type == "enabled"
+		if !thinkingEnabled && request.ReasoningEffort != "" && request.ReasoningEffort != "none" {
+			return invalid("reasoning_effort", "enabled reasoning_effort conflicts with thinking.type=disabled")
+		}
+		if thinkingEnabled && request.ReasoningEffort == "none" {
+			return invalid("reasoning_effort", "reasoning_effort=none conflicts with thinking.type=enabled")
+		}
+	}
+	if !thinkingEnabled {
+		if request.TopP != nil {
+			return invalid("top_p", "top_p has no effect when DeepSeek thinking mode is disabled")
+		}
+		return nil
+	}
+	if request.Temperature != nil {
+		return invalid("temperature", "temperature is not supported in DeepSeek thinking mode")
+	}
+	if request.TopP != nil && (*request.TopP < 0.95 || *request.TopP > 1) {
+		return invalid("top_p", "top_p must be between 0.95 and 1 in DeepSeek thinking mode")
+	}
+	if request.ToolChoice != nil {
+		choice, ok := request.ToolChoice.(string)
+		if !ok || choice != "auto" && choice != "none" {
+			return invalid("tool_choice", "required and named tool choices are not supported in DeepSeek thinking mode")
+		}
+	}
+	return nil
 }
 
 func (d DeepSeek) ChatCompletions(ctx context.Context, request openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
@@ -102,6 +153,9 @@ func (d DeepSeek) ValidateResponseParameters(request openai.ResponseRequest) err
 	if message := request.Validate(); message != "" {
 		return &Error{Class: FailureClientRequest, Provider: "deepseek", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Err: errors.New(message)}
 	}
+	if err := validateDeepSeekResponseInput(request.Input, request.Model); err != nil {
+		return err
+	}
 	_, verbositySupplied := openai.ResponseTextVerbosity(request.Text)
 	if err := validateDeepSeekUser(request.User); err != nil {
 		return err
@@ -110,7 +164,11 @@ func (d DeepSeek) ValidateResponseParameters(request openai.ResponseRequest) err
 		return &Error{Class: FailureClientRequest, Provider: "deepseek", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "text", Err: errors.New("text must contain a supported output format")}
 	}
 	for _, tool := range request.Tools {
-		if tool.Type != "function" {
+		if tool.Type == "custom" {
+			if tool.Name != "apply_patch" || tool.Description != "" || tool.Format != nil {
+				return unsupportedDeepSeekParameter("tools.custom")
+			}
+		} else if tool.Type != "function" {
 			return unsupportedDeepSeekParameter("tools.type")
 		}
 	}
@@ -120,13 +178,18 @@ func (d DeepSeek) ValidateResponseParameters(request openai.ResponseRequest) err
 		}
 		if reasoning.Effort != nil {
 			switch *reasoning.Effort {
-			case "low", "medium", "high", "xhigh", "max":
+			case "none", "minimal", "low", "medium", "high", "xhigh", "max":
 			default:
-				return &Error{Class: FailureClientRequest, Provider: "deepseek", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "reasoning.effort", Err: errors.New("reasoning effort must be low, medium, high, xhigh, or max")}
+				return &Error{Class: FailureClientRequest, Provider: "deepseek", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "reasoning.effort", Err: errors.New("reasoning effort must be none, minimal, low, medium, high, xhigh, or max")}
 			}
 		}
 	}
+	if err := validateDeepSeekResponseSampling(request); err != nil {
+		return err
+	}
 	return rejectParameters("deepseek",
+		parameterCheck{"context_management", len(request.ContextManagement) > 0},
+		parameterCheck{"moderation", request.Moderation != nil},
 		parameterCheck{"metadata", request.Metadata != nil}, parameterCheck{"include", request.Include != nil},
 		parameterCheck{"store", request.Store != nil}, parameterCheck{"truncation", request.Truncation != nil},
 		parameterCheck{"safety_identifier", request.SafetyIdentifier != ""}, parameterCheck{"prompt_cache_key", request.PromptCacheKey != ""},
@@ -137,6 +200,149 @@ func (d DeepSeek) ValidateResponseParameters(request openai.ResponseRequest) err
 		parameterCheck{"frequency_penalty", request.FrequencyPenalty != nil}, parameterCheck{"presence_penalty", request.PresencePenalty != nil},
 		parameterCheck{"max_tool_calls", request.MaxToolCalls != nil},
 	)
+}
+
+func validateDeepSeekResponseSampling(request openai.ResponseRequest) error {
+	invalid := func(parameter, message string) error {
+		return &Error{Class: FailureClientRequest, Provider: "deepseek", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: parameter, Err: errors.New(message)}
+	}
+	thinkingEnabled := request.Reasoning == nil || request.Reasoning.Effort == nil || *request.Reasoning.Effort != "none"
+	if thinkingEnabled {
+		if request.Temperature != nil {
+			return invalid("temperature", "temperature has no effect in DeepSeek Responses thinking mode")
+		}
+		if request.TopP != nil && *request.TopP < 0.95 {
+			return invalid("top_p", "top_p must be between 0.95 and 1 in DeepSeek Responses thinking mode")
+		}
+	} else if request.TopP != nil {
+		return invalid("top_p", "top_p has no effect when DeepSeek Responses thinking mode is disabled")
+	}
+	return nil
+}
+
+func validateDeepSeekResponseInput(input any, model string) error {
+	if input == nil {
+		return nil
+	}
+	if _, ok := input.(string); ok {
+		return nil
+	}
+	invalid := func(message string) error {
+		return &Error{Class: FailureClientRequest, Provider: "deepseek", StatusCode: http.StatusBadRequest, UpstreamCode: "unsupported_parameter", Param: "input", Err: errors.New(message)}
+	}
+	payload, err := json.Marshal(input)
+	if err != nil {
+		return invalid("input must be a string or supported item array")
+	}
+	var items []map[string]json.RawMessage
+	if json.Unmarshal(payload, &items) != nil || len(items) == 0 {
+		return invalid("input must be a string or supported item array")
+	}
+	customCalls := make(map[string]bool)
+	for _, item := range items {
+		var itemType string
+		if len(item) == 0 || item["type"] != nil && json.Unmarshal(item["type"], &itemType) != nil {
+			return invalid("input item has an invalid type")
+		}
+		switch itemType {
+		case "":
+			if item["role"] == nil {
+				return invalid("input item without type must be a message")
+			}
+			if err := validateDeepSeekResponseMessage(item, model); err != nil {
+				return invalid(err.Error())
+			}
+		case "message":
+			if err := validateDeepSeekResponseMessage(item, model); err != nil {
+				return invalid(err.Error())
+			}
+		case "function_call_output", "custom_tool_call_output":
+			if itemType == "custom_tool_call_output" {
+				var callID string
+				if json.Unmarshal(item["call_id"], &callID) != nil || !customCalls[callID] {
+					return invalid("custom_tool_call_output requires a preceding apply_patch call with the same call_id")
+				}
+				delete(customCalls, callID)
+			}
+			if err := validateDeepSeekResponseParts(item["output"], false, true, model); err != nil {
+				return invalid(err.Error())
+			}
+		case "reasoning":
+			if item["summary"] != nil || item["encrypted_content"] != nil {
+				return invalid("reasoning summary and encrypted_content are not supported by DeepSeek")
+			}
+			if err := validateDeepSeekResponseParts(item["content"], true, false, model); err != nil {
+				return invalid(err.Error())
+			}
+		case "custom_tool_call":
+			var name, callID string
+			if json.Unmarshal(item["name"], &name) != nil || name != "apply_patch" || json.Unmarshal(item["call_id"], &callID) != nil || callID == "" || customCalls[callID] {
+				return invalid("custom_tool_call requires apply_patch and a unique call_id")
+			}
+			customCalls[callID] = true
+		case "function_call", "web_search_call":
+		default:
+			return invalid("input item type is not supported by DeepSeek")
+		}
+	}
+	return nil
+}
+
+func validateDeepSeekResponseMessage(item map[string]json.RawMessage, model string) error {
+	var role string
+	if json.Unmarshal(item["role"], &role) != nil {
+		return errors.New("input message requires a valid role")
+	}
+	switch role {
+	case "user", "developer", "system", "assistant":
+		return validateDeepSeekResponseParts(item["content"], false, role == "user" || role == "developer", model)
+	default:
+		return errors.New("input message role is not supported by DeepSeek")
+	}
+}
+
+func validateDeepSeekResponseParts(value json.RawMessage, reasoning, imageAllowed bool, model string) error {
+	if value == nil {
+		return nil
+	}
+	var content string
+	if json.Unmarshal(value, &content) == nil {
+		return nil
+	}
+	var parts []map[string]json.RawMessage
+	if json.Unmarshal(value, &parts) != nil || len(parts) == 0 {
+		return errors.New("input content must be text or supported content parts")
+	}
+	for _, part := range parts {
+		var partType string
+		if json.Unmarshal(part["type"], &partType) != nil {
+			return errors.New("input content part requires a valid type")
+		}
+		if reasoning {
+			if partType != "reasoning_text" {
+				return errors.New("reasoning content part is not supported by DeepSeek")
+			}
+		} else if partType != "input_text" && partType != "output_text" && partType != "input_image" {
+			return errors.New("input content part is not supported by DeepSeek")
+		} else if partType == "input_image" {
+			if !imageAllowed {
+				return errors.New("input_image is not supported in this DeepSeek message role")
+			}
+			if !deepSeekVisionModel(model) {
+				return errors.New("input_image is not supported by this DeepSeek model")
+			}
+		}
+	}
+	return nil
+}
+
+func deepSeekVisionModel(model string) bool {
+	switch model {
+	case "deepseek-flash", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp":
+		return true
+	default:
+		return false
+	}
 }
 
 func (d DeepSeek) Responses(ctx context.Context, request openai.ResponseRequest) (openai.ResponseResponse, error) {

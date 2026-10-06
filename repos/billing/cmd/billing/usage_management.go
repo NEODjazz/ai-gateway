@@ -11,15 +11,19 @@ import (
 )
 
 func registerUsageManagement(mux *http.ServeMux, reporter modules.UsageReporter, initErr error, secret string) {
+	secret = strings.TrimSpace(secret)
 	mux.HandleFunc("GET /internal/v1/usage/report", func(w http.ResponseWriter, r *http.Request) {
 		provided := r.Header.Get("X-Management-Token")
-		secret = strings.TrimSpace(secret)
 		if secret == "" || len(provided) != len(secret) || subtle.ConstantTimeCompare([]byte(provided), []byte(secret)) != 1 {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 		if reporter == nil || initErr != nil {
 			http.Error(w, "usage reporting unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		organization, ok := managementOrganization(w, r)
+		if !ok {
 			return
 		}
 		days := 30
@@ -33,6 +37,13 @@ func registerUsageManagement(mux *http.ServeMux, reporter modules.UsageReporter,
 		}
 		scopeType := strings.TrimSpace(r.URL.Query().Get("scope_type"))
 		scopeID := strings.TrimSpace(r.URL.Query().Get("scope_id"))
+		if organization != "" {
+			if (scopeType != "" || scopeID != "") && (scopeType != "organization" || scopeID != organization) {
+				http.Error(w, "report scope must match authenticated organization", http.StatusForbidden)
+				return
+			}
+			scopeType, scopeID = "organization", organization
+		}
 		var report modules.UsageReport
 		var err error
 		fromRaw, toRaw := strings.TrimSpace(r.URL.Query().Get("from")), strings.TrimSpace(r.URL.Query().Get("to"))

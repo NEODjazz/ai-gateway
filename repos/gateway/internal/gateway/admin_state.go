@@ -18,6 +18,8 @@ import (
 )
 
 const adminStateSchemaVersion = 1
+const agentConfigurationAdminStateSchemaVersion = 2
+const agentMCPAdminStateSchemaVersion = 3
 
 type AdminStateController interface {
 	AdminState(context.Context) (json.RawMessage, int64, error)
@@ -36,6 +38,12 @@ type encryptedMCPServerCredential struct {
 	Ciphertext []byte `json:"ciphertext"`
 }
 
+type encryptedAgentInstructions struct {
+	AgentID    string `json:"agent_id"`
+	Nonce      []byte `json:"nonce"`
+	Ciphertext []byte `json:"ciphertext"`
+}
+
 type adminStateSnapshot struct {
 	SchemaVersion        int                            `json:"schema_version"`
 	Projects             []Project                      `json:"projects,omitempty"`
@@ -47,6 +55,7 @@ type adminStateSnapshot struct {
 	MCPToolsets          []MCPToolset                   `json:"mcp_toolsets,omitempty"`
 	ToolPolicies         []ToolPolicy                   `json:"tool_policies,omitempty"`
 	AgentProfiles        []AgentProfile                 `json:"agent_profiles,omitempty"`
+	AgentInstructions    []encryptedAgentInstructions   `json:"agent_instructions,omitempty"`
 	LoggingDestinations  []encryptedLoggingDestination  `json:"logging_destinations,omitempty"`
 }
 
@@ -56,6 +65,7 @@ type AdminStateRuntime struct {
 	revision   int64
 	aead       cipher.AEAD
 	mcpAEAD    cipher.AEAD
+	agentAEAD  cipher.AEAD
 	access     *AccessRegistry
 	mcp        *MCPRegistry
 	agents     *AgentRegistry
@@ -84,7 +94,19 @@ func NewAdminStateRuntime(ctx context.Context, controller AdminStateController, 
 	if err != nil {
 		return nil, err
 	}
-	runtime := &AdminStateRuntime{controller: controller, aead: aead, mcpAEAD: mcpAEAD, access: access, mcp: mcp, agents: agents, logging: logging}
+	var agentAEAD cipher.AEAD
+	if len(encryptionKey) >= 16 {
+		agentKey := sha256.Sum256(append([]byte("ai-gateway/admin-state/agent-instructions/v1\x00"), encryptionKey...))
+		agentBlock, err := aes.NewCipher(agentKey[:])
+		if err != nil {
+			return nil, err
+		}
+		agentAEAD, err = cipher.NewGCM(agentBlock)
+		if err != nil {
+			return nil, err
+		}
+	}
+	runtime := &AdminStateRuntime{controller: controller, aead: aead, mcpAEAD: mcpAEAD, agentAEAD: agentAEAD, access: access, mcp: mcp, agents: agents, logging: logging}
 	if err := runtime.refreshLocked(ctx, true); err != nil {
 		return nil, err
 	}
@@ -149,13 +171,49 @@ func (r *AdminStateRuntime) refreshLocked(ctx context.Context, force bool) error
 	if !force && revision <= r.revision {
 		return nil
 	}
+	return r.applyPayload(payload, revision)
+}
+
+// Refresh reads the controller before taking the registry update lock. Public
+// inference must not hold this lock while contacting the control plane.
+func (r *AdminStateRuntime) Refresh(ctx context.Context) error {
+	payload, revision, err := r.controller.AdminState(ctx)
+	if err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if revision <= r.revision {
+		return nil
+	}
+	return r.applyPayload(payload, revision)
+}
+
+func (r *AdminStateRuntime) applyPayload(payload json.RawMessage, revision int64) error {
 	if len(payload) != 0 {
 		var snapshot adminStateSnapshot
 		if err := json.Unmarshal(payload, &snapshot); err != nil {
 			return err
 		}
-		if snapshot.SchemaVersion != adminStateSchemaVersion {
+		if snapshot.SchemaVersion != adminStateSchemaVersion && snapshot.SchemaVersion != agentConfigurationAdminStateSchemaVersion && snapshot.SchemaVersion != agentMCPAdminStateSchemaVersion {
 			return errors.New("unsupported admin state schema version")
+		}
+		if snapshot.SchemaVersion < agentMCPAdminStateSchemaVersion {
+			for _, profile := range snapshot.AgentProfiles {
+				if len(profile.MCPTools) > 0 {
+					return errors.New("agent MCP tools require admin state version 3")
+				}
+			}
+		}
+		if snapshot.SchemaVersion == adminStateSchemaVersion {
+			if len(snapshot.AgentInstructions) != 0 {
+				return errors.New("agent configuration requires admin state version 2")
+			}
+			for _, profile := range snapshot.AgentProfiles {
+				if profile.Generation != nil || profile.InstructionsConfigured {
+					return errors.New("agent configuration requires admin state version 2")
+				}
+			}
 		}
 		if err := r.apply(snapshot); err != nil {
 			return err
@@ -175,6 +233,27 @@ func (r *AdminStateRuntime) marshal() (json.RawMessage, error) {
 
 func (r *AdminStateRuntime) snapshot() (adminStateSnapshot, error) {
 	snapshot := adminStateSnapshot{SchemaVersion: adminStateSchemaVersion, Projects: r.access.Projects(), AccessGroups: r.access.Groups(), PolicyAttachments: r.access.PolicyAttachments(), Tags: r.access.Tags(), MCPServers: r.mcp.Servers(), MCPToolsets: r.mcp.Toolsets(), ToolPolicies: r.agents.ToolPolicies(), AgentProfiles: r.agents.AgentProfiles()}
+	for index, profile := range snapshot.AgentProfiles {
+		if profile.Generation != nil || profile.Instructions != "" {
+			snapshot.SchemaVersion = max(snapshot.SchemaVersion, agentConfigurationAdminStateSchemaVersion)
+		}
+		if len(profile.MCPTools) > 0 {
+			snapshot.SchemaVersion = agentMCPAdminStateSchemaVersion
+		}
+		if profile.Instructions == "" {
+			continue
+		}
+		if r.agentAEAD == nil {
+			return adminStateSnapshot{}, errors.New("agent instruction encryption is unavailable")
+		}
+		item := encryptedAgentInstructions{AgentID: profile.ID, Nonce: make([]byte, r.agentAEAD.NonceSize())}
+		if _, err := rand.Read(item.Nonce); err != nil {
+			return adminStateSnapshot{}, err
+		}
+		item.Ciphertext = r.agentAEAD.Seal(nil, item.Nonce, []byte(profile.Instructions), []byte(profile.ID))
+		snapshot.AgentInstructions = append(snapshot.AgentInstructions, item)
+		snapshot.AgentProfiles[index].Instructions = ""
+	}
 	for _, server := range snapshot.MCPServers {
 		_, secret, _ := r.mcp.ServerRuntime(server.ID)
 		if secret == "" {
@@ -259,16 +338,38 @@ func (r *AdminStateRuntime) apply(snapshot adminStateSnapshot) error {
 		}
 	}
 	agents := NewAgentRegistry()
+	instructions := make(map[string]string, len(snapshot.AgentInstructions))
+	for _, item := range snapshot.AgentInstructions {
+		if r.agentAEAD == nil || !validMCPID(item.AgentID) || len(item.Nonce) != r.agentAEAD.NonceSize() || len(item.Ciphertext) > (64<<10)+r.agentAEAD.Overhead() || instructions[item.AgentID] != "" {
+			return errInvalidAgentEntry
+		}
+		plaintext, err := r.agentAEAD.Open(nil, item.Nonce, item.Ciphertext, []byte(item.AgentID))
+		if err != nil {
+			return err
+		}
+		if len(plaintext) == 0 {
+			return errInvalidAgentEntry
+		}
+		instructions[item.AgentID] = string(plaintext)
+	}
 	for _, item := range snapshot.ToolPolicies {
 		if _, err := agents.PutToolPolicy(item.ID, item); err != nil {
 			return err
 		}
 	}
 	for _, item := range snapshot.AgentProfiles {
+		item.Instructions = instructions[item.ID]
+		if item.InstructionsConfigured != (item.Instructions != "") || item.ContentStored != (item.Instructions != "") {
+			return errInvalidAgentEntry
+		}
 		if _, err := agents.PutAgentProfile(item.ID, item); err != nil {
 			return err
 		}
-		agents.profiles[item.ID] = item
+		agents.profiles[item.ID] = cloneAgentProfile(item)
+		delete(instructions, item.ID)
+	}
+	if len(instructions) != 0 {
+		return errInvalidAgentEntry
 	}
 	loggingEntries := make(map[string]loggingDestinationEntry, len(snapshot.LoggingDestinations))
 	for _, item := range snapshot.LoggingDestinations {

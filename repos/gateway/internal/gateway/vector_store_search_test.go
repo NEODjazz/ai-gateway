@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"ai-gateway-gateway/internal/config"
 	"ai-gateway-gateway/internal/filestate"
@@ -184,6 +185,60 @@ func TestVectorStoreSearchUsesOwnedTextPolicyAndEmbeddingBilling(t *testing.T) {
 	}
 	if body.Object != "vector_store.search_results.page" || len(body.SearchQuery) != 1 || body.SearchQuery[0] != "alpha" || body.HasMore || len(body.Data) != 1 || body.Data[0].FileID != "file_alpha" || body.Data[0].Attributes["region"] != "eu" || body.Data[0].Attributes["priority"] != float64(2) || body.Data[0].Attributes["active"] != true || body.Data[0].Content[0].Text != "alpha text" {
 		t.Fatalf("response=%+v", body)
+	}
+}
+
+func TestVectorStoreSearchUsesPersistedStaticChunking(t *testing.T) {
+	owner := fileOwnerKey(modules.RequestContext{CredentialID: "credential", UserID: "user"})
+	content := strings.Repeat("alpha ", 180) + "данные"
+	vectors := &memoryVectorStore{
+		stores: map[string]vectorstate.VectorStore{"vs_owned": {ID: "vs_owned", OwnerKey: owner}},
+		files: map[string]vectorstate.File{"vs_owned/file_text": {
+			VectorStoreID: "vs_owned", FileID: "file_text", OwnerKey: owner, Status: "completed", Bytes: int64(len(content)),
+			ChunkingStrategy: vectorstate.ChunkingStrategy{Type: "static", MaxChunkSizeTokens: 100, ChunkOverlapTokens: 25},
+		}},
+	}
+	files := &memoryFileStore{files: map[string]filestate.File{
+		"file_text": {ID: "file_text", OwnerKey: owner, Filename: "text.txt", Purpose: "assistants", ContentType: "text/plain", Bytes: int64(len(content)), Content: []byte(content)},
+	}}
+	embedder := &vectorSearchProvider{}
+	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{&vectorSearchAuthModule{}}), embedder).
+		WithFileStore(files, FileRuntimeConfig{MaxBytes: 4096, OwnerQuotaBytes: 8192}).
+		WithVectorStore(vectors, VectorStoreRuntimeConfig{OwnerQuota: 10, FileQuota: 10, ByteQuota: 8192}))
+	request := httptest.NewRequest(http.MethodPost, "/v1/vector_stores/vs_owned/search", strings.NewReader(`{"query":"alpha","model":"embed-model"}`))
+	request.Header.Set("Authorization", "Bearer key")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || embedder.calls != 1 {
+		t.Fatalf("status=%d calls=%d body=%s", response.Code, embedder.calls, response.Body.String())
+	}
+	inputs, ok := embedder.request.EmbeddingRequest.Input.([]string)
+	if !ok || len(inputs) < 3 {
+		t.Fatalf("static strategy did not split embedding input: %#v", embedder.request.EmbeddingRequest.Input)
+	}
+	for index, chunk := range inputs[1:] {
+		if tokens := openai.EstimateContextTokens(chunk); tokens > 100 {
+			t.Fatalf("chunk %d has %d estimated tokens: %q", index, tokens, chunk)
+		}
+	}
+	if !strings.Contains(inputs[1], "alpha") || !strings.Contains(inputs[2], "alpha") {
+		t.Fatalf("expected bounded overlap between chunks: %#v", inputs[1:3])
+	}
+}
+
+func TestSplitVectorSearchTextStaticIsBoundedAndUnicodeSafe(t *testing.T) {
+	strategy := vectorstate.ChunkingStrategy{Type: "static", MaxChunkSizeTokens: 100, ChunkOverlapTokens: 20}
+	chunks := splitVectorSearchTextWithStrategy(strings.Repeat("данные alpha ", 220), strategy)
+	if len(chunks) < 2 || len(chunks) > maxVectorSearchChunks {
+		t.Fatalf("chunks=%d", len(chunks))
+	}
+	for index, chunk := range chunks {
+		if !utf8.ValidString(chunk) {
+			t.Fatalf("chunk %d is not valid UTF-8", index)
+		}
+		if tokens := openai.EstimateContextTokens(chunk); tokens > strategy.MaxChunkSizeTokens {
+			t.Fatalf("chunk %d has %d estimated tokens", index, tokens)
+		}
 	}
 }
 
