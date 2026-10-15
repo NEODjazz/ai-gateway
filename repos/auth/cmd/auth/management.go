@@ -253,12 +253,16 @@ func registerIdentityDirectoryRoutes(mux *http.ServeMux, module *modules.AuthMod
 			}
 			includeDeleted = parsed
 		}
-		users, total, err := module.ListDirectoryUsers(r.Context(), r.URL.Query().Get("team_id"), offset, limit, includeDeleted, r.URL.Query().Get("sort_by"), r.URL.Query().Get("sort_order"))
+		users, total, err := module.ListDirectoryUsers(r.Context(), r.URL.Query().Get("team_id"), offset, limit, includeDeleted, r.URL.Query().Get("sort_by"), r.URL.Query().Get("sort_order"), modules.DirectoryFilter{Search: r.URL.Query().Get("search"), Status: r.URL.Query().Get("status"), Role: r.URL.Query().Get("role")})
+		if errors.Is(err, modules.ErrInvalidDirectoryEntry) {
+			http.Error(w, "invalid directory filter", http.StatusBadRequest)
+			return
+		}
 		if err != nil {
 			http.Error(w, "identity directory unavailable", http.StatusServiceUnavailable)
 			return
 		}
-		writeManagementJSON(w, http.StatusOK, map[string]any{"data": users, "total": total})
+		writeManagementJSON(w, http.StatusOK, map[string]any{"data": users, "total": total, "filtering_version": 1})
 	}))
 	mux.HandleFunc("GET /internal/v1/users/{id}", managementAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
 		user, err := module.GetDirectoryUser(r.Context(), r.PathValue("id"))
@@ -370,12 +374,16 @@ func registerIdentityDirectoryRoutes(mux *http.ServeMux, module *modules.AuthMod
 			}
 			includeDeleted = parsed
 		}
-		teams, total, err := module.ListDirectoryTeams(r.Context(), r.URL.Query().Get("team_id"), offset, limit, includeDeleted, r.URL.Query().Get("sort_by"), r.URL.Query().Get("sort_order"))
+		teams, total, err := module.ListDirectoryTeams(r.Context(), r.URL.Query().Get("team_id"), offset, limit, includeDeleted, r.URL.Query().Get("sort_by"), r.URL.Query().Get("sort_order"), modules.DirectoryFilter{Search: r.URL.Query().Get("search"), Status: r.URL.Query().Get("status"), Role: r.URL.Query().Get("role")})
+		if errors.Is(err, modules.ErrInvalidDirectoryEntry) {
+			http.Error(w, "invalid directory filter", http.StatusBadRequest)
+			return
+		}
 		if err != nil {
 			http.Error(w, "identity directory unavailable", http.StatusServiceUnavailable)
 			return
 		}
-		writeManagementJSON(w, http.StatusOK, map[string]any{"data": teams, "total": total})
+		writeManagementJSON(w, http.StatusOK, map[string]any{"data": teams, "total": total, "filtering_version": 1})
 	}))
 	mux.HandleFunc("PUT /internal/v1/teams/{id}", managementAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
 		var team modules.DirectoryTeam

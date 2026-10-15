@@ -44,10 +44,7 @@ const EndpointPage = lazy(() => import("../pages/EndpointPage").then((module) =>
 const SSOSettingsPage = lazy(() => import("../pages/SSOSettingsPage").then((module) => ({ default: module.SSOSettingsPage })));
 
 const readOnly = (title: string, description: string, path: string, columns: ResourceConfig["columns"]): ReactNode => <ResourcePage config={{ eyebrow: "Operations", title, description, listPath: path, columns }} />;
-function UsersPage() {
-  const { hasCapability } = useAuth();
-  return <ResourcePage config={resourceConfigs.users} readOnly={!hasCapability("admin")} />;
-}
+const UsersPage = lazy(() => import("../pages/IdentityAssociationPages").then((module) => ({ default: module.UsersPage })));
 
 function ConsoleKeysPage() {
  const { hasCapability } = useAuth();

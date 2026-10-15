@@ -4120,6 +4120,12 @@ paths:
         - {name: team_id, in: query, schema: {type: string}}
         - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 500, default: 100}}
         - {name: offset, in: query, schema: {type: integer, minimum: 0, default: 0}}
+        - {name: search, in: query, description: Literal case-insensitive substring over directory identity fields, schema: {type: string, maxLength: 256}}
+        - {name: status, in: query, schema: {type: string, enum: [active, disabled]}}
+        - {name: include_deleted, in: query, schema: {type: boolean, default: true}}
+        - {name: sort_by, in: query, schema: {type: string, enum: [id, displayName, externalId, status, createdAt, updatedAt, userName]}}
+        - {name: sort_order, in: query, schema: {type: string, enum: [ascending, descending]}}
+        - {name: role, in: query, description: Exact approved directory role, schema: {type: string, maxLength: 128}}
       responses:
         '200':
           description: Directory users
@@ -4131,10 +4137,35 @@ paths:
                 properties:
                   data: {type: array, items: {$ref: '#/components/schemas/DirectoryUser'}}
                   total: {type: integer, minimum: 0}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/AdminRequired'}
         '503': {$ref: '#/components/responses/ManagementUnavailable'}
+    post:
+      operationId: createDirectoryUser
+      tags: [Identity]
+      summary: Create a directory user without replacing an existing identity
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/DirectoryUserCreateInput'}}}}
+      responses:
+        '201': {description: Identity created, content: {application/json: {schema: {$ref: '#/components/schemas/DirectoryUser'}}}}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
   /admin/v1/users/{id}:
+    get:
+      operationId: getDirectoryUser
+      tags: [Identity]
+      summary: Read a user within the verified administrator scope
+      parameters: [{$ref: '#/components/parameters/DirectoryUserPathID'}]
+      responses:
+        '200': {description: Directory user with visible memberships, content: {application/json: {schema: {$ref: '#/components/schemas/DirectoryUser'}}}}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
     put:
       operationId: putDirectoryUser
       tags: [Identity]
@@ -4156,6 +4187,11 @@ paths:
         - {name: team_id, in: query, schema: {type: string}}
         - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 500, default: 100}}
         - {name: offset, in: query, schema: {type: integer, minimum: 0, default: 0}}
+        - {name: search, in: query, description: Literal case-insensitive substring over directory identity fields, schema: {type: string, maxLength: 256}}
+        - {name: status, in: query, schema: {type: string, enum: [active, disabled]}}
+        - {name: include_deleted, in: query, schema: {type: boolean, default: true}}
+        - {name: sort_by, in: query, schema: {type: string, enum: [id, displayName, externalId, status, createdAt, updatedAt]}}
+        - {name: sort_order, in: query, schema: {type: string, enum: [ascending, descending]}}
       responses:
         '200':
           description: Directory teams
@@ -4167,8 +4203,21 @@ paths:
                 properties:
                   data: {type: array, items: {$ref: '#/components/schemas/DirectoryTeam'}}
                   total: {type: integer, minimum: 0}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/AdminRequired'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
+    post:
+      operationId: createDirectoryTeam
+      tags: [Identity]
+      summary: Create a directory team without replacing an existing identity
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/DirectoryTeamCreateInput'}}}}
+      responses:
+        '201': {description: Identity created, content: {application/json: {schema: {$ref: '#/components/schemas/DirectoryTeam'}}}}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '409': {$ref: '#/components/responses/Conflict'}
         '503': {$ref: '#/components/responses/ManagementUnavailable'}
   /admin/v1/teams/{id}:
     put:
@@ -12315,6 +12364,17 @@ components:
         total: {type: integer, minimum: 0}
         limit: {type: integer, minimum: 1, maximum: 500}
         offset: {type: integer, minimum: 0, maximum: 1000000}
+    DirectoryUserCreateInput:
+      type: object
+      additionalProperties: false
+      required: [id, status]
+      properties:
+        id: {type: string, minLength: 1, maxLength: 256}
+        external_id: {type: string, maxLength: 256}
+        email: {type: string, format: email, maxLength: 320}
+        name: {type: string, maxLength: 256}
+        status: {type: string, enum: [active, disabled]}
+        roles: {type: array, maxItems: 64, items: {type: string, minLength: 1, maxLength: 256}}
     DirectoryUserInput:
       type: object
       additionalProperties: false
@@ -12477,6 +12537,16 @@ components:
             created_at: {type: string, format: date-time}
             updated_at: {type: string, format: date-time}
             deleted_at: {type: string, format: date-time}
+    DirectoryTeamCreateInput:
+      type: object
+      additionalProperties: false
+      required: [id, name, status]
+      properties:
+        id: {type: string, minLength: 1, maxLength: 256}
+        external_id: {type: string, maxLength: 256}
+        name: {type: string, minLength: 1, maxLength: 256}
+        description: {type: string, maxLength: 1024}
+        status: {type: string, enum: [active, disabled]}
     DirectoryTeamInput:
       type: object
       additionalProperties: false
