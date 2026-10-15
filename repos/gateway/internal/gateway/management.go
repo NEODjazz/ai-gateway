@@ -180,6 +180,10 @@ func (c *RemoteManagementClient) SetVirtualKeyDisabled(ctx context.Context, audi
 }
 
 func managementCall[Request any, Response any](ctx context.Context, client *RemoteManagementClient, method, path string, audit ManagementAudit, request Request) (Response, error) {
+	return managementCallWithLimit[Request, Response](ctx, client, method, path, audit, request, 64<<10)
+}
+
+func managementCallWithLimit[Request any, Response any](ctx context.Context, client *RemoteManagementClient, method, path string, audit ManagementAudit, request Request, maximumBytes int64) (Response, error) {
 	var result Response
 	if client == nil || client.baseURL == "" || client.secret == "" {
 		return result, errors.New("management service is not configured")
@@ -219,7 +223,7 @@ func managementCall[Request any, Response any](ctx context.Context, client *Remo
 	if response.StatusCode == http.StatusNoContent {
 		return result, nil
 	}
-	if err := json.NewDecoder(io.LimitReader(response.Body, 64<<10)).Decode(&result); err != nil {
+	if err := json.NewDecoder(io.LimitReader(response.Body, maximumBytes)).Decode(&result); err != nil {
 		return result, err
 	}
 	return result, nil

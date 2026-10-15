@@ -6,7 +6,7 @@
 
 Defaults, диапазоны, required flags и взаимосвязи: [Конфигурация](configuration.md) и README сервиса. SSO compatibility: [SSO settings](admin-sso-settings.md); Python stack и Docling queue: [Document processing](document-processing.md). Это индекс Go-конфигурации, а не перечень всех container/Helm options. Динамически вычисляемые имена нужно проверять в соответствующем коде.
 
-## gateway (111 names)
+## gateway (113 names)
 
 [Component README](../repos/gateway/README.md).
 
@@ -87,6 +87,8 @@ Defaults, диапазоны, required flags и взаимосвязи: [Кон�
 | `EXACT_CACHE_TTL_SECONDS` | [config.go](../repos/gateway/internal/config/config.go) |
 | `FILE_MAX_BYTES` | [config.go](../repos/gateway/internal/config/config.go) |
 | `FILE_OWNER_QUOTA_BYTES` | [config.go](../repos/gateway/internal/config/config.go) |
+| `GLOBAL_RATE_LIMIT_RPM` | [config.go](../repos/gateway/internal/config/config.go) |
+| `GLOBAL_RATE_LIMIT_TPM` | [config.go](../repos/gateway/internal/config/config.go) |
 | `GUARDRAIL_MONITOR_CAPACITY` | [config.go](../repos/gateway/internal/config/config.go) |
 | `GUARDRAIL_MONITOR_TTL_SECONDS` | [config.go](../repos/gateway/internal/config/config.go) |
 | `GUARDRAIL_POLICIES_JSON` | [config.go](../repos/gateway/internal/config/config.go) |

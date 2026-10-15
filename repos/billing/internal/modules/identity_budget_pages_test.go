@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -112,5 +113,34 @@ func TestPostgresIdentityBudgetPagesIntegration(t *testing.T) {
 	user, err := checker.IdentityBudgetPage(ctx, q, now)
 	if err != nil || user.Total != 1 || len(user.Data) != 1 || user.Data[0].Policy.ScopeType != "user" || user.Data[0].UsedTokens != 30 {
 		t.Fatalf("user page=%+v err=%v", user, err)
+	}
+	batch, err := checker.IdentityBudgetSummaries(ctx, IdentityBudgetSummariesQuery{ScopeType: "team", IDs: []string{"platform", "no-budgets", "foreign"}}, now)
+	if err != nil || len(batch) != 3 || batch[0].ID != "platform" || batch[0].Total != 60 || len(batch[0].Data) != 2 || batch[1].Total != 0 || len(batch[1].Data) != 0 || batch[2].Total != 1 || batch[2].Data[0].UsedTokens != 90 {
+		t.Fatalf("incorrect batch counts or scope: %+v err=%v", batch, err)
+	}
+	for _, summary := range batch[0].Data {
+		if summary.UsedCost != 3 || summary.UsedTokens != 30 || summary.Policy.ScopeID != "platform" || summary.Policy.Currency != "USD" || !summary.Policy.Enabled || summary.WindowEnd != page.Data[0].WindowEnd {
+			t.Fatalf("incorrect preview usage: %+v", summary)
+		}
+	}
+	users, err := checker.IdentityBudgetSummaries(ctx, IdentityBudgetSummariesQuery{ScopeType: "user", IDs: []string{"platform", "foreign"}}, now)
+	if err != nil || len(users) != 2 || users[0].Total != 1 || users[0].Data[0].Policy.ScopeType != "user" || users[1].Total != 0 {
+		t.Fatalf("batch escaped scope type: %+v err=%v", users, err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO billing_budget_policies(scope_type,scope_id,period,max_tokens,enabled) VALUES('team','preview','day',100,false),('team','preview','week',100,false),('team','preview','month',100,true)`); err != nil {
+		t.Fatal(err)
+	}
+	previews, err := checker.IdentityBudgetSummaries(ctx, IdentityBudgetSummariesQuery{ScopeType: "team", IDs: []string{"preview"}}, now)
+	if err != nil || previews[0].Total != 3 || len(previews[0].Data) != 2 || !previews[0].Data[0].Policy.Enabled || previews[0].Data[1].Policy.Enabled {
+		t.Fatalf("enabled-first preview lost: %+v err=%v", previews, err)
+	}
+	ids := make([]string, 200)
+	for i := range 199 {
+		ids[i] = "no-budgets-" + strconv.Itoa(i)
+	}
+	ids[199] = "platform"
+	large, err := checker.IdentityBudgetSummaries(ctx, IdentityBudgetSummariesQuery{ScopeType: "team", IDs: ids}, now)
+	if err != nil || len(large) != 200 || large[199].Total != 60 || len(large[199].Data) != 2 {
+		t.Fatalf("large page truncated: count=%d err=%v", len(large), err)
 	}
 }

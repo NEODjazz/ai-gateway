@@ -29,11 +29,11 @@ type DirectoryPageReader interface {
 
 func directoryPage[T any](ctx context.Context, c *RemoteManagementClient, audit ManagementAudit, resource string, filter DirectoryPageFilter) ([]T, int, error) {
 	q := url.Values{"team_id": {filter.TeamID}, "search": {filter.Search}, "status": {filter.Status}, "role": {filter.Role}, "offset": {strconv.Itoa(filter.Offset)}, "limit": {strconv.Itoa(filter.Limit)}, "include_deleted": {strconv.FormatBool(filter.IncludeDeleted)}, "sort_by": {filter.SortBy}, "sort_order": {filter.SortOrder}}
-	result, err := managementCall[struct{}, struct {
+	result, err := managementCallWithLimit[struct{}, struct {
 		Data             []T `json:"data"`
 		Total            int `json:"total"`
 		FilteringVersion int `json:"filtering_version"`
-	}](ctx, c, http.MethodGet, "/internal/v1/"+resource+"?"+q.Encode(), audit, struct{}{})
+	}](ctx, c, http.MethodGet, "/internal/v1/"+resource+"?"+q.Encode(), audit, struct{}{}, 2<<20)
 	if err == nil && (filter.Search != "" || filter.Status != "" || filter.Role != "") && result.FilteringVersion != 1 {
 		return nil, 0, errors.New("directory backend does not support requested filters")
 	}

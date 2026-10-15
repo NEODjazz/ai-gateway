@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -88,7 +89,7 @@ func TestClickHouseOrganizationReportingIsolationIntegration(t *testing.T) {
 		cost    float64
 		tokens  int
 	}{{"shared-id", "org-a", 1, 10}, {"a-second", "org-a", 2, 20}, {"shared-id", "org-b", 100, 1000}, {"unassigned", "", 1000, 10000}} {
-		event := BillingEvent{Timestamp: now.Add(time.Duration(n-5) * time.Minute).Format(time.RFC3339), EventID: database + "-" + event.id + "-" + event.org, RequestID: event.id, OrganizationID: event.org, UserID: "shared-user", SessionID: "shared-session", Roles: []string{"org_admin"}, Tags: []string{"test"}, Provider: "fixture", ProviderID: "fixture", Model: "model", APIType: "chat.completions", Phase: "commit", Status: "success", InputTokens: event.tokens, TotalTokens: event.tokens, Cost: event.cost, Currency: "USD"}
+		event := BillingEvent{Timestamp: now.Add(time.Duration(n-5) * time.Minute).Format(time.RFC3339), EventID: database + "-" + event.id + "-" + event.org, RequestID: event.id, OrganizationID: event.org, TeamID: "team-" + event.org, UserID: "shared-user", SessionID: "shared-session", Roles: []string{"org_admin"}, Tags: []string{"test"}, Provider: "fixture", ProviderID: "fixture", Model: "model", APIType: "chat.completions", Phase: "commit", Status: "success", InputTokens: event.tokens, TotalTokens: event.tokens, Cost: event.cost, Currency: "USD"}
 		if err = writer.WriteUsageEvent(t.Context(), event); err != nil {
 			t.Fatal(err)
 		}
@@ -142,5 +143,53 @@ func TestClickHouseOrganizationReportingIsolationIntegration(t *testing.T) {
 	report, err = reporter.ReportScoped(t.Context(), 1, UsageScope{Type: "organization", ID: "org-a' OR 1=1"})
 	if err != nil || len(report.Totals) != 0 {
 		t.Fatal("usage scope was interpolated", err)
+	}
+	for _, extra := range []struct {
+		id, phase, currency string
+		cost                float64
+		age                 time.Duration
+	}{{"eur", "commit", "EUR", 4, time.Minute}, {"canceled", "cancel", "USD", 0, time.Minute}, {"reserve", "reserve", "USD", 999, time.Minute}, {"old", "commit", "USD", 999, 48 * time.Hour}} {
+		event := BillingEvent{Timestamp: now.Add(-extra.age).Format(time.RFC3339), EventID: database + extra.id, RequestID: extra.id, TeamID: "team-org-a", UserID: "other-user", Phase: extra.phase, Status: "ok", Cost: extra.cost, Currency: extra.currency}
+		if err := writer.WriteUsageEvent(t.Context(), event); err != nil {
+			t.Fatal(err)
+		}
+		if extra.id == "eur" {
+			if err := writer.WriteUsageEvent(t.Context(), event); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	ids := []string{"team-org-a"}
+	if err := writer.WriteUsageEvent(t.Context(), BillingEvent{Timestamp: now.Add(-time.Minute).Format(time.RFC3339), EventID: database + "-independent-execution", RequestID: "shared-id", OrganizationID: "org-a", TeamID: "team-org-a", UserID: "shared-user", Phase: "commit", Cost: 0.5, Currency: "USD"}); err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i < 200; i++ {
+		ids = append(ids, "absent-"+strconv.Itoa(i))
+	}
+	spend, err := reporter.IdentitySpend(t.Context(), IdentitySpendQuery{IdentityBudgetSummariesQuery: IdentityBudgetSummariesQuery{ScopeType: "team", IDs: ids}, From: now.Add(-24 * time.Hour), To: now})
+	if err != nil || len(spend) != 2 {
+		t.Fatalf("batch spend=%+v err=%v", spend, err)
+	}
+	for _, row := range spend {
+		if row.ID != "team-org-a" || row.Currency == "USD" && (row.Cost != 3.5 || row.Requests != 4) || row.Currency == "EUR" && (row.Cost != 4 || row.Requests != 1) {
+			t.Fatalf("incorrect finalized spend: %+v", row)
+		}
+	}
+	spend, err = reporter.IdentitySpend(t.Context(), IdentitySpendQuery{IdentityBudgetSummariesQuery: IdentityBudgetSummariesQuery{ScopeType: "user", IDs: []string{"other-user"}}, From: now.Add(-24 * time.Hour), To: now})
+	if err != nil || len(spend) != 2 || spend[0].ID != "other-user" {
+		t.Fatalf("user spend escaped scope: %+v err=%v", spend, err)
+	}
+	spend, err = reporter.IdentitySpend(t.Context(), IdentitySpendQuery{IdentityBudgetSummariesQuery: IdentityBudgetSummariesQuery{ScopeType: "user", IDs: []string{"shared-user"}}, From: now.Add(-24 * time.Hour), To: now})
+	if err != nil || len(spend) != 1 || spend[0].Cost != 1103.5 || spend[0].Requests != 5 {
+		t.Fatalf("independent execution events were collapsed by external request ID: %+v err=%v", spend, err)
+	}
+	for i := range 2 {
+		if err := writer.WriteUsageEvent(t.Context(), BillingEvent{Timestamp: now.Add(-time.Minute).Format(time.RFC3339), RequestID: "legacy-" + strconv.Itoa(i), UserID: "legacy-user", Phase: "commit", Cost: 0.5, Currency: "USD"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	spend, err = reporter.IdentitySpend(t.Context(), IdentitySpendQuery{IdentityBudgetSummariesQuery: IdentityBudgetSummariesQuery{ScopeType: "user", IDs: []string{"legacy-user"}}, From: now.Add(-24 * time.Hour), To: now})
+	if err != nil || len(spend) != 1 || spend[0].Cost != 1 || spend[0].Requests != 2 {
+		t.Fatalf("legacy events without IDs were collapsed: %+v err=%v", spend, err)
 	}
 }

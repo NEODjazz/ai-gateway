@@ -11,6 +11,7 @@ import (
 )
 
 func registerUsageManagement(mux *http.ServeMux, reporter modules.UsageReporter, initErr error, secret string) {
+	registerIdentitySpend(mux, reporter, initErr, secret)
 	secret = strings.TrimSpace(secret)
 	mux.HandleFunc("GET /internal/v1/usage/report", func(w http.ResponseWriter, r *http.Request) {
 		provided := r.Header.Get("X-Management-Token")

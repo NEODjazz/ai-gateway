@@ -552,3 +552,11 @@ textarea { resize: vertical; }
 .bulk-users-form { width: min(960px, 94vw); }
 .bulk-users-form > label { display: grid; gap: 6px; margin: 12px 0; }
 .bulk-users-results { max-height: 320px; overflow: auto; }
+.directory-summary-detail { display: block; margin-top: 3px; color: #687c88; font-size: 12px; }
+.directory-summary-status { margin-bottom: 16px; }
+.gateway-table .directory-summary-column { min-width: 120px; }
+.gateway-table .directory-summary-models { min-width: 180px; }
+.gateway-table .directory-summary-budgets { min-width: 210px; }
+.gateway-table .directory-summary-keys { min-width: 80px; }
+.gateway-table .directory-summary-resources { min-width: 160px; }
+.directory-resources { display: grid; gap: 6px; }

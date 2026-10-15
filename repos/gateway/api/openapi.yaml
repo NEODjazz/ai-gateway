@@ -5212,6 +5212,41 @@ paths:
         '404': {$ref: '#/components/responses/NotFound'}
         '409': {description: Access group is referenced by a non-revoked virtual key}
         '503': {$ref: '#/components/responses/ManagementUnavailable'}
+  /admin/v1/directory-summaries:
+    post:
+      operationId: getIdentityDirectorySummaries
+      tags: [Identity]
+      summary: Read bounded organization, key, model, spend and budget summaries for a directory page
+      description: Platform administrators only. Read-only batch for 1–200 unique team or user IDs. Organization and key counts come from Auth; keys include all statuses and member-owned keys for teams. Model previews describe additional identity restrictions, not effective grants. Finalized spend covers the last 30 days, separated by currency. Budget previews include live reservations and retain their own policy periods and currencies. At most two model patterns and two enabled-first budget policies are shown, with exact totals. A source failure returns null for its fields plus an errors entry without hiding other sources. Unknown identities have directory=null. Upgrade Auth and Billing before Gateway. No mutation or plaintext credential data is returned.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [scope_type, ids]
+              properties:
+                scope_type: {type: string, enum: [team, user]}
+                ids: {type: array, minItems: 1, maxItems: 200, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 256, pattern: '^[A-Za-z0-9._@:-]+$'}}
+      responses:
+        '200':
+          description: Page summaries with independent source availability
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [scope_type, from, to, data, errors]
+                properties:
+                  scope_type: {type: string, enum: [team, user]}
+                  from: {type: string, format: date-time}
+                  to: {type: string, format: date-time}
+                  data: {type: array, maxItems: 200, items: {$ref: '#/components/schemas/IdentityDirectorySummary'}}
+                  errors: {type: object, additionalProperties: {type: string}}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
   /admin/v1/organizations/page:
     get:
       operationId: listOrganizationMetadataPage
@@ -12827,6 +12862,55 @@ components:
         status: {type: string, enum: [active, disabled]}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
+    IdentityDirectorySummary:
+      type: object
+      required: [id, directory, policy, budgets, spend]
+      properties:
+        id: {type: string}
+        directory:
+          oneOf:
+            - {type: 'null'}
+            - type: object
+              required: [id, key_count, organization]
+              properties:
+                id: {type: string}
+                key_count: {type: integer, minimum: 0}
+                organization:
+                  oneOf:
+                    - {$ref: '#/components/schemas/OrganizationMetadata'}
+                    - {type: 'null'}
+        policy:
+          oneOf:
+            - {type: 'null'}
+            - type: object
+              required: [model_access, allowed_models, model_count, rpm, tpm]
+              properties:
+                model_access: {type: string, enum: [inherit, allowlist, deny]}
+                allowed_models: {type: array, maxItems: 2, items: {type: string}}
+                model_count: {type: integer, minimum: 0}
+                rpm: {type: integer, minimum: 0}
+                tpm: {type: integer, minimum: 0}
+        budgets:
+          oneOf:
+            - {type: 'null'}
+            - type: object
+              required: [id, total, data]
+              properties:
+                id: {type: string}
+                total: {type: integer, minimum: 0}
+                data: {type: array, maxItems: 2, items: {$ref: '#/components/schemas/BudgetSummary'}}
+        spend:
+          oneOf:
+            - {type: 'null'}
+            - type: array
+              items:
+                type: object
+                required: [id, currency, cost, requests]
+                properties:
+                  id: {type: string}
+                  currency: {type: string, pattern: '^[A-Z]{3}$'}
+                  cost: {type: number, minimum: 0}
+                  requests: {type: integer, minimum: 1}
     TeamOrganizationOwnership:
       type: object
       required: [team_id, organization]

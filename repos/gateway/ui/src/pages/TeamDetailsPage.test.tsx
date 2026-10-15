@@ -11,9 +11,9 @@ const json = (value: unknown, status = 200) => new Response(status === 204 ? nul
 const member = (user = "user-1", name = "Owner"): DirectoryMembership => ({ team_id: "platform", user_id: user, roles: ["member"], user_name: name, user_email: `${user}@example.test`, user_status: "active", team_name: "Platform", team_status: "active", created_at: time, updated_at: time });
 function Gate({ children }: { children: ReactNode }) { const { session, restoreSession } = useAuth(); useEffect(() => { if (!session) void restoreSession(); }, [session, restoreSession]); return session ? children : null; }
 function LocationProbe() { const location = useLocation(); return <div>Policy route {location.search}</div>; }
-function show(user = false) {
+function show(user = false, query = "") {
   sessionStorage.setItem("ai-gateway.admin-token", "fixture");
-  return render(<MemoryRouter initialEntries={[user ? "/users/user-1" : "/teams/platform"]}><AuthProvider><Gate><Routes><Route path="/teams/:id" element={<TeamDetailsPage />} /><Route path="/users/:id" element={<UserDetailsPage />} /><Route path="/policies" element={<LocationProbe />} /></Routes></Gate></AuthProvider></MemoryRouter>);
+  return render(<MemoryRouter initialEntries={[(user ? "/users/user-1" : "/teams/platform")+query]}><AuthProvider><Gate><Routes><Route path="/teams/:id" element={<TeamDetailsPage />} /><Route path="/users/:id" element={<UserDetailsPage />} /><Route path="/policies" element={<LocationProbe />} /></Routes></Gate></AuthProvider></MemoryRouter>);
 }
 function fixture({ scoped = false, keyFailure = false, deleteFailure = false, count = 1 } = {}) {
   const members = Array.from({ length: count }, (_, i) => member(`user-${i + 1}`, i === 0 ? "Owner" : i === count - 1 ? "Late user" : `Member ${i + 1}`));
@@ -60,6 +60,12 @@ function fixture({ scoped = false, keyFailure = false, deleteFailure = false, co
 }
 
 describe("Identity workspaces", () => {
+  it("opens the requested workspace tab from a directory link",async()=>{
+    const{requests}=fixture();show(false,"?tab=keys");
+    await screen.findByText("automation");
+    expect(screen.getByRole("tab",{name:"Virtual keys"})).toHaveAttribute("aria-selected","true");
+    expect(requests.some(row=>row.path.includes("team-memberships")||row.path.includes("budgets/page"))).toBe(false);
+  });
   it("shows independent team members and scoped keys and preserves policy actions", async () => {
     fixture(); show();
     expect(await screen.findByRole("heading", { name: "Platform" })).toBeInTheDocument();

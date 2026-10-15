@@ -66,8 +66,9 @@ export function ManagedDataTable({ rows, columns, actions, primaryAction, toolba
   const sortableColumns = shownColumns.map((column) => ({ ...column, label: column.label.replace(/ [↑↓↕]$/, ""), render: column.render }));
   const tableColumns: TableColumnConfig<Row>[] = shownColumns.map((column, index) => ({
     id: column.key,
-    name: () => <button className="sort-button" onClick={() => sortBy(column.key)}>{column.label}</button>,
+    name: () => server && !server.sortableKeys.includes(column.key) ? <span>{column.label.replace(/ [↑↓↕]$/, "")}</span> : <button className="sort-button" onClick={() => sortBy(column.key)}>{column.label}</button>,
     primary: index === 0,
+    className: column.className,
     template: (row) => {
       const rawColumn = sortableColumns[index];
       return rawColumn.render ? rawColumn.render(row[rawColumn.key], row) : displayValue(row[rawColumn.key]);

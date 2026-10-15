@@ -112,3 +112,16 @@ in API POST /v1/responses/{id}/cancel added the new `searching` enum value to th
 in API POST /v1/responses/{id}/cancel added the new `steered` enum value to the `incomplete_details/reason` response property for the response status `200`
 in API POST /v1/responses/{id}/cancel added the new `summary_text` enum value to the `output/items/content/items/type` response property for the response status `200`
 in API POST /v1/responses/{id}/cancel added the new `summary_text` enum value to the `output/items/summary/items/type` response property for the response status `200`
+in API GET /admin/v1/guardrails/monitor added the new `prompt_injection` enum value to the `filters/module` response property for the response status `200`
+in API GET /admin/v1/guardrails/monitor added the new `prompt_injection_judge` enum value to the `events/items/source` response property for the response status `200`
+in API GET /admin/v1/guardrails/monitor added the new `prompt_injection_judge` enum value to the `filters/source` response property for the response status `200`
+in API GET /admin/v1/provider-capabilities added the new `lemonade` enum value to the `data/items/type` response property for the response status `200`
+in API GET /admin/v1/providers added the new `lemonade` enum value to the `data/items/type` response property for the response status `200`
+in API POST /admin/v1/providers added the new `lemonade` enum value to the `type` response property for the response status `201`
+in API PUT /admin/v1/providers/{id} added the new `lemonade` enum value to the `type` response property for the response status `200`
+in API POST /v1/responses added the new `reasoning_text` enum value to the `output/items/content/items/type` response property for the response status `200`
+in API POST /v1/responses added the new `reasoning_text` enum value to the `output/items/summary/items/type` response property for the response status `200`
+in API GET /v1/responses/{id} added the new `reasoning_text` enum value to the `output/items/content/items/type` response property for the response status `200`
+in API GET /v1/responses/{id} added the new `reasoning_text` enum value to the `output/items/summary/items/type` response property for the response status `200`
+in API POST /v1/responses/{id}/cancel added the new `reasoning_text` enum value to the `output/items/content/items/type` response property for the response status `200`
+in API POST /v1/responses/{id}/cancel added the new `reasoning_text` enum value to the `output/items/summary/items/type` response property for the response status `200`

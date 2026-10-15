@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { ActionsMenu } from "../components/ActionsMenu";
 import { ErrorState, LoadingState } from "../components/AsyncState";
@@ -31,7 +31,10 @@ export function IdentityDetailsPage({ kind }: { kind: IdentityKind }) {
   const subject = data.value;
   const valid = subject?.id === id ? subject : undefined;
   const activeScope = useRef(data.scope); activeScope.current = data.scope;
-  const [tab, setTab] = useState("overview");
+  const [parameters, setParameters] = useSearchParams();
+  const requestedTab = parameters.get("tab") || "overview";
+  const tab = ["overview", "members", "keys", "policy", "budgets", "settings", ...(!user ? ["organization"] : [])].includes(requestedTab) ? requestedTab : "overview";
+  const setTab = (value: string) => setParameters((current) => { const next = new URLSearchParams(current); next.set("tab", value); return next; }, { replace: true });
   const [editor, setEditor] = useState<{ scope: string; value: DirectoryIdentity }>();
   const [notice, setNotice] = useState<{ scope: string; text: string }>();
   const canEdit = (admin || !user) && !valid?.deleted_at;

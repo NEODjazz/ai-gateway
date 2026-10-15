@@ -3,7 +3,8 @@
 The compatibility gate compares this branch with API version 0.1.416 at
 `c32f5652691ba11d8f8e63894e7fcb1be67f8c70`. Its threshold remains
 `WARN`. The adjacent files contain exact, endpoint-specific findings accepted
-for the 0.1.474 update. New findings still fail CI.
+for the 0.1.474 update and the provider/guardrail response extensions described
+below. New findings still fail CI.
 
 - A2A result schemas inherit optional media-resolution data on parts. Existing
   result shapes are retained.
@@ -40,3 +41,17 @@ parameters. Verification with oasdiff v1.26.1 accepted the reviewed contract and
 rejected three temporary unreviewed changes: deleting `/v1/models`, narrowing
 the agent iteration limit and changing the agent-list response status. No broad
 endpoint exclusions or severity overrides are configured.
+
+## Provider and guardrail response variants
+
+The requested local-provider and prompt-injection features add `lemonade` to
+provider types, `prompt_injection` to monitor modules, and
+`prompt_injection_judge` to monitor sources. Responses can also expose
+`reasoning_text` alongside the existing content variants. These values describe
+behavior already supported by the adapters and guardrail runtime; existing
+values and response shapes remain accepted. Clients that match response enums
+exhaustively must handle these additional values.
+
+The warning list records the 13 exact operation/property/value additions against
+the current comparison baseline. No unrelated finding is accepted. Remove these
+entries when the comparison baseline includes these features.

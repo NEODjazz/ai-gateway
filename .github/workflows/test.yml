@@ -189,7 +189,7 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: repos/billing/go.mod
-      - name: Verify tenant Usage, detail, groups and pagination on real ClickHouse
+      - name: Verify tenant Usage, directory spend, detail, groups and pagination on real ClickHouse
         working-directory: repos/billing
         run: go test -race -count=1 -run TestClickHouseOrganizationReportingIsolationIntegration ./internal/modules
 

@@ -242,6 +242,7 @@ var gatewayRoutes = []routeDefinition{
 	{RouteContract{http.MethodPut, "/admin/v1/identity-policies/{scope}/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.IdentityPolicySettings) }},
 	{RouteContract{http.MethodDelete, "/admin/v1/identity-policies/{scope}/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.IdentityPolicySettings) }},
 	{RouteContract{http.MethodGet, "/admin/v1/budgets/page"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListIdentityBudgets) }},
+	{RouteContract{http.MethodPost, "/admin/v1/directory-summaries"}, func(h Handler) http.Handler { return http.HandlerFunc(h.DirectorySummaries) }},
 	{RouteContract{http.MethodGet, "/admin/v1/budgets"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListBudgets) }},
 	{RouteContract{http.MethodPost, "/admin/v1/budgets"}, func(h Handler) http.Handler { return http.HandlerFunc(h.CreateBudget) }},
 	{RouteContract{http.MethodGet, "/admin/v1/budgets/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GetBudget) }},

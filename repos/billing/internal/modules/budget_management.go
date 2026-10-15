@@ -419,7 +419,9 @@ const budgetSummaryColumns = `
 		       COALESCE(SUM(CASE WHEN r.state='committed' THEN r.actual_cost ELSE r.reserved_cost END),0)::float8,
 		       COALESCE(SUM(CASE WHEN r.state='committed' THEN r.actual_tokens ELSE r.reserved_tokens END),0)`
 
-const budgetSummaryUsage = `
+const budgetSummaryUsage = budgetSummaryUsageGrouped + ` ORDER BY p.id`
+
+const budgetSummaryUsageGrouped = `
 		LEFT JOIN billing_budget_reservations r ON
 		     r.currency=p.currency
 		 AND r.created_at >= CASE p.period WHEN 'hour' THEN $1::timestamptz WHEN 'week' THEN $3::timestamptz WHEN 'month' THEN $4::timestamptz ELSE $2::timestamptz END
@@ -437,5 +439,4 @@ const budgetSummaryUsage = `
 		       ELSE false
 		     END
 		GROUP BY p.id,p.scope_type,p.scope_id,p.period,p.currency,p.max_cost,p.max_tokens,
-		         p.enabled,p.created_at,p.updated_at
-		ORDER BY p.id`
+		         p.enabled,p.created_at,p.updated_at`

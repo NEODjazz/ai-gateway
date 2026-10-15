@@ -171,6 +171,7 @@ func registerManagementRoutes(mux *http.ServeMux, module *modules.AuthModule, sh
 }
 
 func registerIdentityDirectoryRoutes(mux *http.ServeMux, module *modules.AuthModule, sharedSecret string) {
+	registerDirectorySummaryRoutes(mux, module, sharedSecret)
 	registerTeamOrganizationRoutes(mux, module, sharedSecret)
 	mux.HandleFunc("GET /internal/v1/organizations", managementAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
 		limit, ok := managementLimit(w, r)

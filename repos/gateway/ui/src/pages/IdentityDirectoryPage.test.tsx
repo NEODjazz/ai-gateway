@@ -8,13 +8,15 @@ import { IdentityDirectoryPage } from "./IdentityDirectoryPage";
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), {status,headers:{"Content-Type":"application/json"}});
 function Gate({children}:{children:ReactNode}) { const {session,restoreSession}=useAuth(); useEffect(()=>{void restoreSession();},[restoreSession]); return session ? children : null; }
 function show(kind:"users"|"teams"="users") { sessionStorage.setItem("ai-gateway.admin-token","fixture"); return render(<MemoryRouter><AuthProvider><Gate><IdentityDirectoryPage kind={kind}/></Gate></AuthProvider></MemoryRouter>); }
+function summaryJSON(body: unknown) { const q=JSON.parse(String(body)); return json({scope_type:q.scope_type,from:"2026-09-15T12:00:00Z",to:"2026-10-15T12:00:00Z",errors:{},data:q.ids.map((id:string)=>({id,directory:null,policy:null,budgets:null,spend:null}))}); }
 const session = {roles:["admin"],capabilities:["admin","team_directory"],user_id:"operator"};
 const record = {id:"u-1",name:"Alice",status:"active",roles:["user"],team_ids:["platform"]};
 
 describe("IdentityDirectoryPage",()=>{
   it("uses backend totals and searches/sorts beyond the first page",async()=>{
     const paths:string[]=[];
-    vi.spyOn(globalThis,"fetch").mockImplementation(async(input)=>{
+    vi.spyOn(globalThis,"fetch").mockImplementation(async(input,options)=>{
+      if(String(input).endsWith("/directory-summaries"))return summaryJSON(options?.body);
       const path=String(input); paths.push(path);
       if(path.endsWith("/session")) return json(session);
       const q=new URL(path,"http://example.test").searchParams;
@@ -37,7 +39,8 @@ describe("IdentityDirectoryPage",()=>{
 
   it("ignores late pages and preserves the committed page on failure",async()=>{
     let resolveOld!:(value:Response)=>void;
-    vi.spyOn(globalThis,"fetch").mockImplementation(async(input)=>{
+    vi.spyOn(globalThis,"fetch").mockImplementation(async(input,options)=>{
+      if(String(input).endsWith("/directory-summaries"))return summaryJSON(options?.body);
       const path=String(input);
       if(path.endsWith("/session"))return json(session);
       const q=new URL(path,"http://example.test").searchParams;
@@ -63,6 +66,7 @@ describe("IdentityDirectoryPage",()=>{
     const writes:{path:string;method?:string;body?:unknown}[]=[];
     let conflict=true;
     vi.spyOn(globalThis,"fetch").mockImplementation(async(input,options)=>{
+      if(String(input).endsWith("/directory-summaries"))return summaryJSON(options?.body);
       const path=String(input);
       if(path.endsWith("/session"))return json(session);
       if(options?.method==="POST") {
@@ -89,7 +93,8 @@ describe("IdentityDirectoryPage",()=>{
 
   it("limits a team administrator to team edits and read-only users",async()=>{
     const paths:string[]=[];
-    vi.spyOn(globalThis,"fetch").mockImplementation(async(input)=>{
+    vi.spyOn(globalThis,"fetch").mockImplementation(async(input,options)=>{
+      if(String(input).endsWith("/directory-summaries"))return summaryJSON(options?.body);
       const path=String(input);paths.push(path);
       if(path.endsWith("/session"))return json({roles:["team_admin"],capabilities:["team_directory"],team_id:"platform"});
       return json({data:[record],total:1});
@@ -107,6 +112,7 @@ describe("IdentityDirectoryPage",()=>{
   it("opens bulk onboarding for global administrators and refreshes after confirmed creates",async()=>{
     const writes:unknown[]=[]; let reads=0;
     vi.spyOn(globalThis,"fetch").mockImplementation(async(input,options)=>{
+      if(String(input).endsWith("/directory-summaries"))return summaryJSON(options?.body);
       if(String(input).endsWith("/session"))return json(session);
       if(options?.method==="POST") { const body=JSON.parse(String(options.body)); writes.push(body); return json(body,201); }
       reads++; return json({data:[record],total:1});
@@ -128,6 +134,7 @@ describe("IdentityDirectoryPage",()=>{
     let actor="first";
     let resolveSave!:(value:Response)=>void;
     vi.spyOn(globalThis,"fetch").mockImplementation(async(input,options)=>{
+      if(String(input).endsWith("/directory-summaries"))return summaryJSON(options?.body);
       if(String(input).endsWith("/session"))return json({...session,user_id:actor,credential_id:actor});
       if(options?.method==="POST")return new Promise(resolve=>{resolveSave=resolve;});
       return json({data:[{...record,name:actor}],total:1});

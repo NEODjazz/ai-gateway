@@ -242,8 +242,69 @@ returns a conflict and cannot overwrite an existing identity. A timeout or lost
 response may still have created the user: inspect the directory before retrying.
 Confirmed creations link to their workspace and refresh the current directory.
 The form prevents duplicate submissions and dismissal during active requests.
+Dialogs take focus as opening begins and preserve input focus as the animation
+finishes. Escape restores the opener, including a close during the transition.
 **Stop after current user** stops the queue without interrupting an in-flight
 write; the remaining users stay unattempted and can be resumed explicitly.
 Bulk creation sends no invitation email, sets no password and does not create
 principal bindings, memberships, keys or inference grants. Browser sign-in still
 requires the configured IdP and an approved exact subject binding.
+
+## Directory summary columns
+
+Team directories show organization ownership, additional model restrictions and
+aggregate identity quotas. Team and user directories show exact virtual-key
+counts, finalized spend for the last 30 days and directly assigned budget usage.
+Names include the ID underneath. The default **Resources** column groups member
+or team counts, additional model-policy status and key counts with workspace links.
+Individual ID, membership, model and key columns remain available in **Columns**.
+Key totals match the scoped key workspace: all statuses are included, and a team
+also includes keys owned by its members. This is an inventory count, not a count
+of currently usable credentials. No key material is returned.
+
+Spend comes from finalized ClickHouse usage events (`commit`/`cancel`), grouped by
+the exact selected team or user and currency. Empty successful results say
+**No finalized usage**; a failed source says **Unavailable**. Reporting follows
+the existing asynchronous usage pipeline and can lag newly finalized requests.
+Directory spend deduplicates nonempty internal event IDs, so retry delivery of
+an immutable outbox payload cannot double the displayed amount. Independent
+execution events sharing an external Request ID remain separate. Legacy events
+without an event ID are retained individually.
+Budget usage comes from PostgreSQL and includes committed usage and unexpired
+reservations. Each preview retains its currency, reset window and enabled status;
+different budgets or currencies are never summed into a misleading combined cap.
+The two enabled-first previews have an exact total and a workspace link for all
+policies. No direct budget does not imply an absence of global or inherited caps.
+
+Model previews show at most two configured patterns and the exact total. They
+are additional identity restrictions, not a complete effective access grant;
+credential, membership, global and deployment rules still apply. Zero RPM/TPM
+adds no identity-level quota. Workspace links use the validated `tab` URL
+parameter (`keys`, `policy`, `budgets` and other supported workspace tabs).
+
+`POST /admin/v1/directory-summaries` is a read-only global-admin batch accepting
+`scope_type: team|user` and 1–200 unique `ids`. It requests only the current page:
+one Auth batch, one Billing budget batch and one Billing usage batch, rather than
+global inventories or one HTTP call per identity. Auth reads counts/ownership in
+one statement. Budget page counts and bounded previews share a repeatable-read
+snapshot. Spend uses typed ClickHouse parameters in multipart fields to avoid
+large URLs. Responses validate scope/IDs and discard foreign or malformed sources.
+
+Source failures are independent: successful fields remain visible, failed fields
+are null and have a visible error. A failed refresh retains the explicitly marked
+previous read for the same page/session. Delayed results cannot replace another
+page or verified session. Scoped team sessions do not call this global summary
+API or financial/key inventories; their existing workspace permissions remain in
+force. Only supported directory fields expose server-side sort controls; computed
+summaries are not presented as sortable. Column visibility remains configurable.
+
+Upgrade **Auth and Billing before Gateway**. Older backends fail visibly rather
+than producing plausible zeros. No new migration or dependency is required.
+Filtered directory pages allow bounded RPC responses up to 2 MiB so valid large
+pages are not truncated by the former 64 KiB management default. Summary metadata
+allows 512 KiB; other legacy management calls keep their existing limit.
+PostgreSQL integration tests cover exact counts, late identities, scoped totals,
+enabled-first previews and 200-identity batches. The mandatory real ClickHouse CI
+test covers finalized phases, currencies, exact team/user filtering and 200 typed
+parameters. UI regressions cover partial failures, late pages, scoped sessions,
+deep links and previous-read warnings.
