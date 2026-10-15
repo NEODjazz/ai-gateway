@@ -218,3 +218,32 @@ atomic creation with an organization. An older backend fails visibly; the UI doe
 not fall back to loading a partial global inventory or creating an unowned team.
 No new migration or dependency is needed. PostgreSQL regression tests cover
 paging, exact ownership, rollback, concurrent assignment and unchanged key scopes.
+
+## Bulk user onboarding
+
+Global administrators can open **Access Control → Users → Bulk create users**.
+Paste or upload UTF-8 CSV, then inspect a preview before issuing any writes.
+Supported headers are `id`, `name`, `email`, `external_id`; headers must be unique,
+and every row needs an ID or email. Omitted IDs are generated once during preview.
+Quoted commas and escaped quotes are supported. Malformed CSV, invalid fields,
+duplicate IDs, more than 100 users or input over 256 KiB are rejected before
+creation. Password, role and other unknown columns are rejected.
+
+Select the approved global roles and active/disabled status in the preview.
+These choices apply to the whole batch and are fixed after the first attempt.
+Creation uses the existing audited `POST /admin/v1/users`, sequentially with a
+15-second timeout per user. This is not an atomic batch: results identify each
+created, failed or unattempted user. A failed response is never reported as a
+successful create. Authentication/authorization failures stop the remaining
+queue; switching verified sessions or leaving the page stops subsequent creates.
+
+Retries include only failed rows and retain their original IDs. An occupied ID
+returns a conflict and cannot overwrite an existing identity. A timeout or lost
+response may still have created the user: inspect the directory before retrying.
+Confirmed creations link to their workspace and refresh the current directory.
+The form prevents duplicate submissions and dismissal during active requests.
+**Stop after current user** stops the queue without interrupting an in-flight
+write; the remaining users stay unattempted and can be resumed explicitly.
+Bulk creation sends no invitation email, sets no password and does not create
+principal bindings, memberships, keys or inference grants. Browser sign-in still
+requires the configured IdP and an approved exact subject binding.

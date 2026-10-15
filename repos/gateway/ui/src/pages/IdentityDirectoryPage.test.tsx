@@ -96,11 +96,32 @@ describe("IdentityDirectoryPage",()=>{
     });
     show();await screen.findByText("Alice");
     expect(screen.queryByRole("button",{name:"Create User"})).not.toBeInTheDocument();
+    expect(screen.queryByRole("button",{name:"Bulk create users"})).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button",{name:"Actions for user u-1"}));
     expect(screen.getByRole("menuitem",{name:"Inspect"})).toHaveAttribute("href","/ui/users/u-1");
     expect(screen.queryByRole("menuitem",{name:"Edit"})).not.toBeInTheDocument();
     expect(screen.getByText("Directory scoped to team platform")).toBeInTheDocument();
     expect(paths.some(path=>/keys\?|financials|budgets/.test(path))).toBe(false);
+  });
+
+  it("opens bulk onboarding for global administrators and refreshes after confirmed creates",async()=>{
+    const writes:unknown[]=[]; let reads=0;
+    vi.spyOn(globalThis,"fetch").mockImplementation(async(input,options)=>{
+      if(String(input).endsWith("/session"))return json(session);
+      if(options?.method==="POST") { const body=JSON.parse(String(options.body)); writes.push(body); return json(body,201); }
+      reads++; return json({data:[record],total:1});
+    });
+    show(); await screen.findByText("Alice");
+    await userEvent.click(screen.getByRole("button",{name:"Bulk create users"}));
+    const dialog=screen.getByRole("dialog",{name:"Bulk create users"});
+    await userEvent.type(within(dialog).getByLabelText("CSV users"),"id,name\nnew-user,New user");
+    await userEvent.click(within(dialog).getByRole("button",{name:"Preview users"}));
+    expect(writes).toHaveLength(0);
+    await userEvent.click(within(dialog).getByRole("button",{name:"Create 1 users"}));
+    await screen.findByText("1 created · 0 failed · 0 not attempted");
+    await waitFor(()=>expect(reads).toBeGreaterThan(1));
+    expect(writes).toEqual([{id:"new-user",name:"New user",email:"",external_id:"",status:"active",roles:["user"]}]);
+    expect(within(dialog).getByRole("link",{name:"new-user"})).toHaveAttribute("href","/users/new-user");
   });
 
   it("does not let an old identity mutation close a new session's form",async()=>{

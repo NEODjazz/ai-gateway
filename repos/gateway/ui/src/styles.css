@@ -549,3 +549,6 @@ textarea { resize: vertical; }
 @media (max-width: 600px) { .budget-form-fields > .checkbox-line { margin-left: 0; } }
 
 .directory-form .form-grid > .organization-assignment-toggle { display: flex; align-items: center; gap: 8px; }
+.bulk-users-form { width: min(960px, 94vw); }
+.bulk-users-form > label { display: grid; gap: 6px; margin: 12px 0; }
+.bulk-users-results { max-height: 320px; overflow: auto; }

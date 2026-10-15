@@ -9,6 +9,7 @@ import { GatewayButton } from "../components/GatewayButton";
 import type { Column } from "../components/DataTable";
 import { formatTimestamp } from "../format";
 import { directoryRoles, IdentityForm, type DirectoryIdentity, type IdentityKind } from "./directory/IdentityForm";
+import { BulkUsersForm } from "./directory/BulkUsersForm";
 
 type Page = { data: DirectoryIdentity[]; total: number; offset: number; limit: number; scope: string };
 const sorts: Record<string, string> = { id: "id", name: "displayName", email: "userName", external_id: "externalId", status: "status", created_at: "createdAt", updated_at: "updatedAt" };
@@ -29,6 +30,7 @@ export function IdentityDirectoryPage({ kind }: { kind: IdentityKind }) {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState<{ scope: string; text: string; identityID?: string }>();
   const [editing, setEditing] = useState<{ scope: string; value: DirectoryIdentity | null }>();
+  const [bulk, setBulk] = useState<{ scope: string }>();
   const activeScope = useRef(scope); activeScope.current = scope;
   const generation = useRef(0);
   const pending = useRef<AbortController | undefined>(undefined);
@@ -76,6 +78,7 @@ export function IdentityDirectoryPage({ kind }: { kind: IdentityKind }) {
       {loading && <p role="status">Refreshing directory… Showing the previous page until the new request completes.</p>}
       {!loading && error && validPage && <p className="muted">Showing the previous successful page. The requested changes could not be loaded.</p>}
       <ManagedDataTable rows={validPage?.data || []} columns={columns} defaultHidden={["external_id", "updated_at"]} searchPlaceholder={`Search ${kind} by name${kind === "users" ? ", email" : ""} or ID`} onRefresh={load}
+        toolbarExtra={admin && kind === "users" ? <GatewayButton view="normal" onClick={() => setBulk({ scope })}>Bulk create users</GatewayButton> : undefined}
         primaryAction={admin ? <GatewayButton size="l" onClick={() => setEditing({ scope, value: null })}>Create {kind === "users" ? "User" : "Team"}</GatewayButton> : undefined}
         server={{ search, onSearchChange: (value) => resetPage(() => setSearch(value)), total: validPage?.total || 0, offset: validPage?.offset ?? 0, pageSize: validPage?.limit ?? limit, onOffsetChange: setOffset, onPageSizeChange: (value) => resetPage(() => setLimit(value)), sort, direction, sortableKeys: Object.keys(sorts).filter((key) => kind === "users" || key !== "email"), onSortChange: (key, next) => resetPage(() => { setSort(key); setDirection(next); }) }}
         actions={(row) => {
@@ -85,5 +88,6 @@ export function IdentityDirectoryPage({ kind }: { kind: IdentityKind }) {
         }} />
     </div>}
     {editing?.scope === scope && <IdentityForm kind={kind} initial={editing.value || undefined} onClose={() => setEditing((current) => current === editing ? undefined : current)} onSave={save} />}
+    {admin && kind === "users" && bulk?.scope === scope && <BulkUsersForm onClose={() => setBulk((current) => current === bulk ? undefined : current)} onCreated={() => void load()} />}
   </>;
 }
