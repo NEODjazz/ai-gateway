@@ -1,5 +1,9 @@
 # Keycloak и пользовательский OpenWebUI
 
+Основной chat UI теперь LibreChat; его отдельный профиль и статус приёмки
+описаны в [интеграции пользовательских UI](chat-ui-integration.md).
+Этот Open WebUI профиль и его сквозные проверки сохраняются.
+
 Этот профиль использует предварительное provisioning, отдельные OIDC clients
 и исходный OAuth access token. Gateway самостоятельно назначает права directory.
 Не включайте `directory` для рабочего Auth до provisioning и обновления Gateway.
@@ -11,7 +15,8 @@
 и `gateway.example.com` на согласованные HTTPS endpoints. После импорта создайте
 секреты confidential clients в Keycloak и передайте их через используемый secret
 store. Для browser clients включён Authorization Code + PKCE; password grant и
-service accounts отключены. `openwebui` и `gateway-console` — разные clients.
+service accounts отключены. `librechat`, `openwebui` и `gateway-console` — разные
+clients с отдельными secrets; добавление LibreChat не меняет прежние callbacks.
 
 Audience mapper добавляет `gateway` только в access token. Gateway проверяет
 issuer realm, `aud=gateway`, подпись и expiry. Не используйте ID token или

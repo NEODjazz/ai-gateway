@@ -19,6 +19,11 @@
 - exact/semantic cache, usage, request/audit logs, Prometheus и OTLP traces;
 - встроенные React UI и Swagger UI без внешнего CDN.
 
+Основной внешний пользовательский интерфейс — LibreChat; Open WebUI остаётся
+поддерживаемым вариантом. Оба приложения обращаются к Gateway с пользовательской
+identity; маршрутизация, права, квоты, billing и DLP остаются в Gateway.
+[Профиль интеграции и статус проверки](docs/chat-ui-integration.md).
+
 ## Документация
 
 Начните с [индекса документации](docs/README.md). Документы разделены по

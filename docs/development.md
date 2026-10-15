@@ -65,7 +65,8 @@ audit, восемь Helm charts и сборку шести Go images. OpenAPI PR
 
 Обязательные отдельные jobs используют реальные PostgreSQL databases для
 control plane, identities и billing, ClickHouse для organization reporting,
-Keycloak/OpenWebUI для identity integration и Docling/Redis/workers для
+Keycloak/LibreChat и сохранённый Open WebUI профиль для identity integration,
+Docling/Redis/workers для
 conversion/OCR, admission и owner isolation. Локальный `go test ./...` без DSN
 не заменяет эти сценарии: opt-in integration tests могут быть skipped.
 [Проверка Lemonade](lemonade-validation.md) остаётся opt-in с реальным сервером;

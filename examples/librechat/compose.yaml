@@ -1,0 +1,29 @@
+# Separate application profile. Supply authenticated MongoDB and HTTPS ingress.
+# Does not create or change Gateway, Keycloak, provider credentials, or policies.
+services:
+  librechat:
+    image: ghcr.io/librechat-ai/librechat:v0.8.8@sha256:5b706bcee1ca154a1e2987303aaeca0eb27f97919cccee4bb604226c2f8abf61
+    restart: unless-stopped
+    user: "1000:1000"
+    env_file:
+      - ${LIBRECHAT_ENV_FILE:?Set LIBRECHAT_ENV_FILE to a protected configuration file}
+    ports:
+      - "127.0.0.1:${LIBRECHAT_PORT:-3080}:3080"
+    volumes:
+      - ./librechat.yaml:/app/librechat.yaml:ro
+      - librechat-data:/app/data
+      - librechat-uploads:/app/uploads
+      - librechat-images:/app/client/public/images
+      - librechat-logs:/app/logs
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 2g
+    cpus: 2
+
+volumes:
+  librechat-data:
+  librechat-uploads:
+  librechat-images:
+  librechat-logs:

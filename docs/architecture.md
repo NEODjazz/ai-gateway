@@ -8,9 +8,20 @@
 
 AI Gateway — набор Go-сервисов с единой OpenAI-compatible точкой входа. Gateway аутентифицирует запрос, выбирает совместимые provider endpoints, выполняет отдельный provider-level pipeline для каждой попытки и возвращает обычный JSON или SSE stream.
 
+Основной внешний chat UI — LibreChat, дополнительный — Open WebUI. Оба имеют
+собственный backend, пользовательские sessions, историю, agents и файлы;
+они обращаются к Gateway с проверяемой пользовательской identity. Провайдеры,
+model grants, квоты, billing и маскирование исходящего контекста остаются в
+Gateway. Профиль и незакрытые проверки описаны в
+[интеграции chat UI](chat-ui-integration.md).
+
 ```mermaid
 flowchart LR
     Client["Client / OpenAI SDK"]
+    LibreChat["LibreChat<br/>primary chat UI + backend"]
+    OpenWebUI["Open WebUI<br/>alternative chat UI + backend"]
+    ChatStorage[("UI-owned chat history + uploads")]
+    Identity["Keycloak / OIDC<br/>separate browser clients"]
 
     subgraph Platform["AI Gateway platform"]
         Gateway["Gateway :8080<br/>API, routing, failover"]
@@ -46,6 +57,12 @@ flowchart LR
     Gateway -->|"POST /scan, per enabled endpoint"| AV
     Gateway -->|"POST /anonymize"| Anonymizer
     Gateway -->|"POST /usage, before and after provider"| Billing
+    LibreChat -->|"OpenAI-compatible API + caller access token"| Gateway
+    OpenWebUI -->|"OpenAI-compatible API + caller access token"| Gateway
+    LibreChat --> ChatStorage
+    OpenWebUI --> ChatStorage
+    LibreChat -->|"OIDC code + PKCE"| Identity
+    OpenWebUI -->|"OIDC code + PKCE"| Identity
     Gateway --> OpenAI
     Gateway --> Anthropic
     Gateway --> Ollama

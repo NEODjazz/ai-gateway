@@ -168,3 +168,9 @@ Gateway отвечает только на `ping`; необъявленные pr
 
 Порядок provisioning, scope, отзыва и безопасного legacy cutover описан в
 [Keycloak/OpenWebUI profile](identity-keycloak-openwebui.md).
+
+Основной внешний UI — LibreChat; [общая policy boundary](chat-ui-integration.md)
+использует исходный пользовательский OIDC access token. Shared application key
+и пользовательские заголовки не заменяют эту identity. Gateway masking не
+маскирует историю и uploads в стороннем UI: его storage/retention/ACL и egress
+исполняемых agent tools требуют отдельной защиты.

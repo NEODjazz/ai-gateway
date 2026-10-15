@@ -16,7 +16,7 @@ class ProfileTests(unittest.TestCase):
         self.assertNotIn("users", realm)
         clients = {c["clientId"]: c for c in realm["clients"]}
         self.assertTrue(clients["gateway"]["bearerOnly"])
-        for name in ("openwebui", "gateway-console"):
+        for name in ("openwebui", "gateway-console", "librechat"):
             client = clients[name]
             self.assertNotIn("secret", client)
             self.assertIn("basic", client["defaultClientScopes"])
@@ -45,6 +45,49 @@ class ProfileTests(unittest.TestCase):
             clients["openwebui"]["redirectUris"],
             clients["gateway-console"]["redirectUris"],
         )
+        self.assertEqual(
+            clients["librechat"]["redirectUris"],
+            ["https://librechat.example.com/oauth/openid/callback"],
+        )
+        self.assertEqual(len({tuple(c["redirectUris"]) for c in clients.values() if "redirectUris" in c}), 3)
+        scopes = realm["clientScopeMappings"]["gateway"]
+        self.assertEqual({entry["client"] for entry in scopes}, {"openwebui", "librechat", "gateway-console"})
+
+    def test_librechat_uses_gateway_authority_and_user_access_token(self):
+        # JSON is a YAML 1.2 subset; keep this profile readable without adding a
+        # Python dependency to CI's offline configuration contract tests.
+        config = json.loads((ROOT / "examples/librechat/librechat.yaml").read_text())
+        self.assertFalse(config["balance"]["enabled"])
+        self.assertFalse(config["transactions"]["enabled"])
+        self.assertEqual(set(config["endpoints"]), {"custom"})
+        endpoint, = config["endpoints"]["custom"]
+        self.assertEqual(endpoint["baseURL"], "${AI_GATEWAY_BASE_URL}")
+        self.assertEqual(endpoint["headers"], {"Authorization": "Bearer {{LIBRECHAT_OPENID_ACCESS_TOKEN}}"})
+        self.assertEqual(endpoint["apiKey"], "disabled-no-shared-gateway-key")
+        self.assertEqual(endpoint["models"], {"default": [], "fetch": True})
+        self.assertEqual(endpoint["titleModel"], "current_model")
+        self.assertNotIn("titleEndpoint", endpoint)
+        self.assertNotIn("tokenConfig", endpoint)
+        self.assertEqual(config["registration"]["socialLogins"], ["openid"])
+        self.assertEqual(config["fileConfig"]["endpoints"]["AI Gateway"]["totalSizeLimit"], 8)
+
+    def test_librechat_environment_has_no_provider_or_shared_gateway_key(self):
+        text = (ROOT / "examples/librechat/.env.example").read_text()
+        env = dict(line.split("=", 1) for line in text.splitlines() if line and not line.startswith("#"))
+        for name in ("OPENID_USE_PKCE", "OPENID_GENERATE_NONCE", "OPENID_REUSE_TOKENS", "SESSION_COOKIE_SECURE"):
+            self.assertEqual(env[name], "true")
+        self.assertEqual(env["OPENID_CLIENT_ID"], "librechat")
+        self.assertEqual(env["OPENID_AUDIENCE"], "gateway")
+        self.assertEqual(env["ENDPOINTS"], "custom,agents")
+        self.assertEqual(env["ALLOW_EMAIL_LOGIN"], "false")
+        for name in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "AZURE_API_KEY", "AI_GATEWAY_API_KEY"):
+            self.assertNotIn(name, env)
+        self.assertTrue(env["OPENID_CLIENT_SECRET"].startswith("REQUIRED_"))
+        self.assertTrue(env["MONGO_URI"].startswith("REQUIRED_"))
+        compose = (ROOT / "examples/librechat/compose.yaml").read_text()
+        self.assertIn("@sha256:5b706bcee1ca154a1e2987303aaeca0eb27f97919cccee4bb604226c2f8abf61", compose)
+        self.assertNotIn(":latest", compose)
+        self.assertIn('user: "1000:1000"', compose)
 
 
 class HarnessTests(unittest.TestCase):

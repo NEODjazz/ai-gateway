@@ -131,6 +131,57 @@
           }
         }
       ]
+    },
+    {
+      "clientId": "librechat",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "https://librechat.example.com/oauth/openid/callback"
+      ],
+      "webOrigins": [
+        "https://librechat.example.com"
+      ],
+      "fullScopeAllowed": false,
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      },
+      "defaultClientScopes": [
+        "basic",
+        "profile",
+        "email"
+      ],
+      "protocolMappers": [
+        {
+          "name": "gateway audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "gateway",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        },
+        {
+          "name": "gateway roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-client-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "usermodel.clientRoleMapping.clientId": "gateway",
+            "claim.name": "resource_access.gateway.roles",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        }
+      ]
     }
   ],
   "clientScopeMappings": {
@@ -145,6 +196,14 @@
       },
       {
         "client": "gateway-console",
+        "roles": [
+          "gateway-user",
+          "gateway-admin",
+          "gateway-team-admin"
+        ]
+      },
+      {
+        "client": "librechat",
         "roles": [
           "gateway-user",
           "gateway-admin",

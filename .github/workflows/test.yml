@@ -72,7 +72,7 @@ jobs:
       - name: Test embedding smoke routing and credential handling
         run: python3 -B -m unittest scripts/test_smoke_ollama_embeddings.py
       - name: Validate secret-free OIDC realm profile
-        run: python3 -B -m unittest scripts/test_identity_profile.py
+        run: python3 -B -m unittest scripts/test_identity_profile.py scripts/test_librechat_profile.py
 
   go:
     name: Go / ${{ matrix.service }}
@@ -192,9 +192,13 @@ jobs:
         run: go test -race -count=1 -run TestClickHouseOrganizationReportingIsolationIntegration ./internal/modules
 
   identity-integration:
-    name: Keycloak and OpenWebUI identity integration
+    name: Keycloak and ${{ matrix.chat_ui }} identity integration
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        chat_ui: [librechat, openwebui]
     services:
       postgres:
         image: postgres:16-alpine
@@ -226,9 +230,21 @@ jobs:
       - name: Pull pinned real identity services
         run: |
           docker pull quay.io/keycloak/keycloak:26.3.3@sha256:6a7217a100bd3e5de4063a27a538ef999a3c5a88c4b4ec0ffc0a642aee7b2597
+      - name: Pull pinned Open WebUI
+        if: matrix.chat_ui == 'openwebui'
+        run: |
           docker pull ghcr.io/open-webui/open-webui:v0.11.4-slim@sha256:0487ad4a5a4b986062dedace806c3ef1e88fec38c10d1e64d6a5501c66671e5e
+      - name: Pull pinned LibreChat and MongoDB
+        if: matrix.chat_ui == 'librechat'
+        run: |
+          docker pull ghcr.io/librechat-ai/librechat:v0.8.8@sha256:5b706bcee1ca154a1e2987303aaeca0eb27f97919cccee4bb604226c2f8abf61
+          docker pull mongo:8.0.20@sha256:098862b1339f031900ca66cf8fef799e616d6324fa41b9a263f2ec899552c1ef
       - name: Verify user OAuth, refresh, grants, resources and billing
+        if: matrix.chat_ui == 'openwebui'
         run: python3 -B scripts/test-identity-integration.py
+      - name: Verify LibreChat identity, catalog, SSE, history, quotas and billing
+        if: matrix.chat_ui == 'librechat'
+        run: python3 -B scripts/test-librechat-integration.py
       # Never upload raw OAuth/service logs: they may contain runtime test tokens.
 
   admin-ui:

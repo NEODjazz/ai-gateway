@@ -20,6 +20,8 @@ package и Helm template.
   encrypted configuration, test/activate/rollback и recovery.
 - [Organization identity](organization-identity.md) — tenant boundary, directory
   bindings, `org_admin` и изоляция ресурсов.
+- [LibreChat / Open WebUI](chat-ui-integration.md) — основной и дополнительный
+  chat UI, границы ответственности, конфигурация и критерии приёмки.
 - [Keycloak/OpenWebUI](identity-keycloak-openwebui.md) — provisioning, OAuth,
   refresh и проверка реальными сервисами.
 - [PDF / Docling](document-processing.md) — native или preprocessing,
