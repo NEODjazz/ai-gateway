@@ -24,6 +24,7 @@ const ModelGroupsPage = lazy(() => import("../pages/ModelGroupsPage").then((modu
 const OrganizationsPage = lazy(() => import("../pages/IdentityAssociationPages").then((module) => ({ default: module.OrganizationsPage })));
 const TeamsPage = lazy(() => import("../pages/IdentityAssociationPages").then((module) => ({ default: module.TeamsPage })));
 const OrganizationDetailsPage = lazy(() => import("../pages/OrganizationDetailsPage").then((module) => ({ default: module.OrganizationDetailsPage })));
+const UserDetailsPage = lazy(() => import("../pages/TeamDetailsPage").then((module) => ({ default: module.UserDetailsPage })));
 const TeamDetailsPage = lazy(() => import("../pages/TeamDetailsPage").then((module) => ({ default: module.TeamDetailsPage })));
 const AccessGroupsPage = lazy(() => import("../pages/AccessGroupsPage").then((module) => ({ default: module.AccessGroupsPage })));
 const ProjectsPage = lazy(() => import("../pages/ProjectsPage").then((module) => ({ default: module.ProjectsPage })));
@@ -80,6 +81,7 @@ export const appRoutes: AppRoute[] = [
   { path: "/organizations/:id", title: "Organization details", group: "Access Control", element: <OrganizationDetailsPage />, available: true, navigation: false },
   { path: "/teams", title: "Teams", group: "Access Control", element: <TeamsPage />, available: true, capability: "team_directory" },
   { path: "/teams/:id", title: "Team details", group: "Access Control", element: <TeamDetailsPage />, available: true, capability: "team_directory", navigation: false },
+  { path: "/users/:id", title: "User details", group: "Access Control", element: <UserDetailsPage />, available: true, capability: "team_directory", navigation: false },
   { path: "/users", title: "Users", group: "Access Control", element: <UsersPage />, available: true, capability: "team_directory" },
   { path: "/access-groups", title: "Access groups", group: "Access Control", element: <AccessGroupsPage />, available: true },
   { path: "/access-groups/:id", title: "Access group details", group: "Access Control", element: <AccessGroupsPage />, available: true, navigation: false },

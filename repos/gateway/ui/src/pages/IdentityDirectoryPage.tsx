@@ -52,7 +52,7 @@ export function IdentityDirectoryPage({ kind }: { kind: IdentityKind }) {
   }, [client, direction, kind, limit, offset, role, scope, search, sort, status]);
   useEffect(() => { void load(); return () => { ++generation.current; pending.current?.abort(); }; }, [load]);
   const columns = useMemo<Column[]>(() => [
-    { key: "name", label: kind === "users" ? "User" : "Team", render: (value, row) => kind === "teams" ? <Link to={`/teams/${encodeURIComponent(String(row.id))}`}>{String(value || row.id)}</Link> : String(value || row.id) },
+    { key: "name", label: kind === "users" ? "User" : "Team", render: (value, row) => <Link to={`/${kind}/${encodeURIComponent(String(row.id))}`}>{String(value || row.email || row.id)}</Link> },
     { key: "id", label: "ID" },
     ...(kind === "users" ? [{ key: "email", label: "Email" }, { key: "roles", label: "Approved roles" }, { key: "team_ids", label: "Teams" }] : [{ key: "description", label: "Description" }, { key: "member_count", label: "Members" }]),
     { key: "status", label: "Status" }, { key: "external_id", label: "External identity" },
@@ -79,7 +79,7 @@ export function IdentityDirectoryPage({ kind }: { kind: IdentityKind }) {
         primaryAction={admin ? <GatewayButton size="l" onClick={() => setEditing({ scope, value: null })}>Create {kind === "users" ? "User" : "Team"}</GatewayButton> : undefined}
         server={{ search, onSearchChange: (value) => resetPage(() => setSearch(value)), total: validPage?.total || 0, offset: validPage?.offset ?? 0, pageSize: validPage?.limit ?? limit, onOffsetChange: setOffset, onPageSizeChange: (value) => resetPage(() => setLimit(value)), sort, direction, sortableKeys: Object.keys(sorts).filter((key) => kind === "users" || key !== "email"), onSortChange: (key, next) => resetPage(() => { setSort(key); setDirection(next); }) }}
         actions={(row) => {
-          const items: ActionMenuItem[] = kind === "teams" ? [{ label: "Inspect", href: `/teams/${encodeURIComponent(String(row.id))}` }] : [];
+          const items: ActionMenuItem[] = [{ label: "Inspect", href: `/${kind}/${encodeURIComponent(String(row.id))}` }];
           if (admin || kind === "teams") items.push({ label: "Edit", disabled: loading, onSelect: () => setEditing({ scope, value: row as DirectoryIdentity }) });
           return items.length ? <ActionsMenu label={`Actions for ${kind === "users" ? "user" : "team"} ${row.id}`} items={items} /> : null;
         }} />

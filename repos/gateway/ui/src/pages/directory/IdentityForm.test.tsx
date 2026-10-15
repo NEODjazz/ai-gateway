@@ -4,6 +4,13 @@ import userEvent from "@testing-library/user-event";
 import { IdentityForm } from "./IdentityForm";
 
 describe("IdentityForm keyboard and mutation lifecycle",()=>{
+  it("does not add default approvals when editing a user with no approved roles",async()=>{
+    const save=vi.fn().mockResolvedValue(undefined);
+    render(<IdentityForm kind="users" initial={{id:"one",name:"Original",status:"active"}} onSave={save} onClose={()=>{}}/>);
+    await userEvent.type(screen.getByLabelText("Name")," updated");
+    await userEvent.click(screen.getByRole("button",{name:"Save changes"}));
+    await waitFor(()=>expect(save).toHaveBeenCalledWith(expect.objectContaining({name:"Original updated",roles:[]})));
+  });
   it("contains focus, restores it on Escape and blocks cancellation during a save",async()=>{
     let resolveSave!:()=>void;
     const save=vi.fn(()=>new Promise<void>(resolve=>{resolveSave=resolve;}));

@@ -426,6 +426,65 @@ func registerIdentityDirectoryRoutes(mux *http.ServeMux, module *modules.AuthMod
 		logManagementAction(r, "team.membership.upsert", saved.TeamID+":"+saved.UserID)
 		writeManagementJSON(w, http.StatusOK, saved)
 	}))
+	mux.HandleFunc("GET /internal/v1/teams/{id}/metadata", managementAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
+		team, err := module.GetDirectoryTeamMetadata(r.Context(), r.PathValue("id"))
+		if errors.Is(err, modules.ErrInvalidDirectoryEntry) {
+			http.Error(w, "invalid team", http.StatusBadRequest)
+			return
+		}
+		if errors.Is(err, modules.ErrDirectoryNotFound) {
+			http.Error(w, "team not found", http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			http.Error(w, "team metadata unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		writeManagementJSON(w, http.StatusOK, team)
+	}))
+	mux.HandleFunc("GET /internal/v1/team-memberships", managementAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
+		limit, ok := managementLimit(w, r)
+		if !ok {
+			return
+		}
+		offset, ok := managementOffset(w, r)
+		if !ok {
+			return
+		}
+		q := r.URL.Query()
+		rows, total, err := module.ListDirectoryMemberships(r.Context(), modules.MembershipQuery{TeamID: q.Get("team_id"), UserID: q.Get("user_id"), Search: q.Get("search"), SortBy: q.Get("sort_by"), SortOrder: q.Get("sort_order"), Offset: offset, Limit: limit})
+		if errors.Is(err, modules.ErrInvalidDirectoryEntry) {
+			http.Error(w, "invalid membership query", http.StatusBadRequest)
+			return
+		}
+		if err != nil {
+			http.Error(w, "membership directory unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		writeManagementJSON(w, http.StatusOK, map[string]any{"data": rows, "total": total, "offset": offset, "limit": limit})
+	}))
+	mux.HandleFunc("POST /internal/v1/teams/{id}/members", managementAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
+		var member modules.TeamMembership
+		if !decodeManagementJSON(w, r, &member) {
+			return
+		}
+		member.TeamID = r.PathValue("id")
+		saved, err := module.CreateTeamMembership(r.Context(), member)
+		if errors.Is(err, modules.ErrInvalidDirectoryEntry) {
+			http.Error(w, "invalid or inactive membership identity", http.StatusBadRequest)
+			return
+		}
+		if errors.Is(err, modules.ErrDirectoryConflict) {
+			http.Error(w, "membership already exists", http.StatusConflict)
+			return
+		}
+		if err != nil {
+			http.Error(w, "membership directory unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		logManagementAction(r, "team.membership.create", saved.TeamID+":"+saved.UserID)
+		writeManagementJSON(w, http.StatusCreated, saved)
+	}))
 	mux.HandleFunc("GET /internal/v1/teams/{id}/members", managementAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
 		limit, ok := managementLimit(w, r)
 		if !ok {

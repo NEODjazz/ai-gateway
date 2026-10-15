@@ -4220,6 +4220,18 @@ paths:
         '409': {$ref: '#/components/responses/Conflict'}
         '503': {$ref: '#/components/responses/ManagementUnavailable'}
   /admin/v1/teams/{id}:
+    get:
+      operationId: getDirectoryTeamMetadata
+      tags: [Identity]
+      summary: Read team metadata and member count without loading member IDs
+      parameters: [{$ref: '#/components/parameters/DirectoryTeamID'}]
+      responses:
+        '200': {description: Team metadata without member IDs, content: {application/json: {schema: {$ref: '#/components/schemas/DirectoryTeam'}}}}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
     put:
       operationId: putDirectoryTeam
       tags: [Identity]
@@ -4261,7 +4273,61 @@ paths:
         '403': {$ref: '#/components/responses/AdminRequired'}
         '404': {$ref: '#/components/responses/NotFound'}
         '503': {$ref: '#/components/responses/ManagementUnavailable'}
+  /admin/v1/team-memberships:
+    get:
+      operationId: listDirectoryMembershipPages
+      tags: [Identity]
+      summary: Search and paginate visible memberships by team or user
+      description: At least one identity filter is required for platform administrators. A matching team administrator is always pinned to the verified team, including reverse user lookups. Page and total share a database snapshot.
+      parameters:
+        - {name: team_id, in: query, schema: {type: string, maxLength: 256}}
+        - {name: user_id, in: query, schema: {type: string, maxLength: 256}}
+        - {name: search, in: query, schema: {type: string, maxLength: 256}}
+        - {name: offset, in: query, schema: {type: integer, minimum: 0, default: 0}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 500, default: 100}}
+        - {name: sort_by, in: query, schema: {type: string, enum: [user, team, joined], default: joined}}
+        - {name: sort_order, in: query, schema: {type: string, enum: [asc, desc], default: desc}}
+      responses:
+        '200':
+          description: Membership page with bounded display metadata
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, total, offset, limit]
+                properties:
+                  data: {type: array, maxItems: 500, items: {$ref: '#/components/schemas/DirectoryMembership'}}
+                  total: {type: integer, minimum: 0}
+                  offset: {type: integer, minimum: 0}
+                  limit: {type: integer, minimum: 1, maximum: 500}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
   /admin/v1/teams/{id}/members:
+    post:
+      operationId: createTeamMembership
+      tags: [Identity]
+      summary: Add an active user to an active team without replacing a membership
+      parameters: [{$ref: '#/components/parameters/DirectoryTeamID'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [user_id]
+              properties:
+                user_id: {type: string, minLength: 1, maxLength: 256}
+                roles: {type: array, maxItems: 64, items: {type: string, minLength: 1, maxLength: 256}}
+      responses:
+        '201': {description: Membership created, content: {application/json: {schema: {$ref: '#/components/schemas/TeamMembership'}}}}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
     get:
       operationId: listTeamMemberships
       tags: [Identity]
@@ -12568,6 +12634,20 @@ components:
             created_at: {type: string, format: date-time}
             updated_at: {type: string, format: date-time}
             deleted_at: {type: string, format: date-time}
+    DirectoryMembership:
+      type: object
+      required: [team_id, user_id, created_at, updated_at, user_name, user_email, user_status, team_name, team_status]
+      properties:
+        team_id: {type: string, maxLength: 256}
+        user_id: {type: string, maxLength: 256}
+        roles: {type: array, maxItems: 64, items: {type: string, maxLength: 256}}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        user_name: {type: string, maxLength: 256}
+        user_email: {type: string, maxLength: 320}
+        user_status: {type: string, enum: [active, disabled]}
+        team_name: {type: string, maxLength: 256}
+        team_status: {type: string, enum: [active, disabled]}
     TeamMembershipInput:
       type: object
       additionalProperties: false

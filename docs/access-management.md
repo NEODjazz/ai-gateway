@@ -48,3 +48,32 @@ Upgrade **Auth before Gateway**. Filtered list responses from Auth advertise
 an older backend rather than displaying an unfiltered page as filtered data.
 Unfiltered legacy calls retain their existing behavior. No migration or new
 dependency is needed for these directory controls.
+
+## Identity workspaces
+
+Open a user or team name to inspect its workspace. Overview combines identity
+metadata, memberships and scoped virtual keys; Members/Teams, Virtual keys and
+Settings tabs provide focused views. Each section loads independently, so a key
+inventory failure does not hide the profile or memberships. Late responses and
+completed mutations from a previous identity are discarded. Team metadata uses
+`GET /admin/v1/teams/{id}` and a count query rather than loading every member ID.
+
+Membership search and pagination use `GET /admin/v1/team-memberships`, bounded to
+1–500 records per page and requiring a team or user filter for platform admins.
+Team administrators are pinned to their verified team, including reverse user
+lookups. Display names, email, statuses and membership roles come from the same
+PostgreSQL snapshot as the count. Legacy membership list routes remain available.
+
+Adding a member uses `POST /admin/v1/teams/{id}/members`. An existing membership
+returns 409 and preserves its roles. Creation checks that both identities are
+active and not deleted. Role edits and removal retain the existing PUT/DELETE
+routes. User and team workspaces use the same membership operations. Selection
+forms search and paginate the authorized directory; they do not require a raw ID
+and do not preload the first 500 identities. Missing directory access is not
+replaced with global discovery. Scoped sessions do not load global key inventory.
+
+Settings retain immutable IDs, external identity metadata and global approvals.
+Membership roles are edited separately. Key tables show declared model patterns
+and per-key RPM/TPM; they do not present those as aggregate team quotas or claim
+that key patterns override other effective policy. Budget management and IdP
+binding links lead to their existing administrative workspaces.

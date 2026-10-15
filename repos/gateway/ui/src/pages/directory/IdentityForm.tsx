@@ -13,7 +13,7 @@ export function IdentityForm({ kind, initial, onClose, onSave }: { kind: Identit
   const [description, setDescription] = useState(initial?.description || "");
   const [externalID, setExternalID] = useState(initial?.external_id || "");
   const [status, setStatus] = useState(initial?.status || "active");
-  const [roles, setRoles] = useState(initial?.roles || ["user"]);
+  const [roles, setRoles] = useState(initial ? initial.roles || [] : ["user"]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const title = `${initial ? "Edit" : "Create"} ${kind === "users" ? "user" : "team"}`;

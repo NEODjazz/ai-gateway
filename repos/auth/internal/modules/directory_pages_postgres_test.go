@@ -7,7 +7,8 @@ import (
 	"testing"
 )
 
-func TestPostgresDirectorySearchPagingSortAndScopeIntegration(t *testing.T) {
+func directoryPostgresTestStore(t *testing.T) *PostgresVirtualKeyStore {
+	t.Helper()
 	store := ssoSessionPostgresStore(t)
 	for _, name := range []string{"003_virtual_keys.sql", "006_identity_directory.sql", "010_scim_users.sql", "011_scim_user_deletions.sql", "012_scim_groups.sql"} {
 		migration, err := os.ReadFile(filepath.Join("..", "..", "migrations", "postgres", name))
@@ -18,6 +19,11 @@ func TestPostgresDirectorySearchPagingSortAndScopeIntegration(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	return store
+}
+
+func TestPostgresDirectorySearchPagingSortAndScopeIntegration(t *testing.T) {
+	store := directoryPostgresTestStore(t)
 	if _, err := store.pool.Exec(t.Context(), `INSERT INTO users(id,name,email,status,roles)
 		SELECT 'user-'||lpad(i::text,3,'0'),'Engineer '||i,'u'||i||'@example.test','active',ARRAY['user'] FROM generate_series(1,130) i`); err != nil {
 		t.Fatal(err)

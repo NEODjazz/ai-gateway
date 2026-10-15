@@ -541,3 +541,5 @@ textarea { resize: vertical; }
 .directory-filters { display: flex; gap: 16px; flex-wrap: wrap; align-items: end; margin: 18px 0; }
 .directory-filters label { min-width: 160px; }
 .directory-form fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+
+.directory-picker { display: grid; gap: 12px; margin-bottom: 18px; }

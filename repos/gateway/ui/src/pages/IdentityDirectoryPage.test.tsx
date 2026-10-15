@@ -96,7 +96,9 @@ describe("IdentityDirectoryPage",()=>{
     });
     show();await screen.findByText("Alice");
     expect(screen.queryByRole("button",{name:"Create User"})).not.toBeInTheDocument();
-    expect(screen.queryByRole("button",{name:"Actions for user u-1"})).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button",{name:"Actions for user u-1"}));
+    expect(screen.getByRole("menuitem",{name:"Inspect"})).toHaveAttribute("href","/ui/users/u-1");
+    expect(screen.queryByRole("menuitem",{name:"Edit"})).not.toBeInTheDocument();
     expect(screen.getByText("Directory scoped to team platform")).toBeInTheDocument();
     expect(paths.some(path=>/keys\?|financials|budgets/.test(path))).toBe(false);
   });
