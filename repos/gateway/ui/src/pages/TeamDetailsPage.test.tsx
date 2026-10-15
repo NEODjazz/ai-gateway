@@ -32,6 +32,7 @@ function fixture({ scoped = false, keyFailure = false, deleteFailure = false, co
       const offset = Number(q.get("offset")), limit = Number(q.get("limit"));
       return json({ data: filtered.slice(offset, offset + limit), total: filtered.length, offset, limit });
     }
+    if (url.pathname === "/admin/v1/budgets/page") return json({data:[],total:0,offset:0,limit:25});
     if (url.pathname === "/admin/v1/keys") {
       if (keyFailure) return json({ error: { message: "Key inventory unavailable" } }, 503);
       return json({ data: [{ id: "vk_platform", alias: "automation", user_id: "user-1", team_id: "platform", status: "active", allowed_models: ["gpt-5"], created_at: time }], total: 71, offset: Number(q.get("offset")), limit: Number(q.get("limit")) });

@@ -77,3 +77,33 @@ Membership roles are edited separately. Key tables show declared model patterns
 and per-key RPM/TPM; they do not present those as aggregate team quotas or claim
 that key patterns override other effective policy. Budget management and IdP
 binding links lead to their existing administrative workspaces.
+
+## Identity budgets
+
+User and team workspaces include a Budgets tab and a scoped overview section.
+Only global administrators can read or mutate financial controls. Scoped sessions
+render an access explanation without requesting global or identity budget data.
+Creating a policy pins its user/team scope to the current workspace; no directory
+lookup or editable scope field is needed. Editing and disabling use the existing
+audited budget management routes and preserve the billing enforcement path.
+A failed save retains the draft. The dialog cannot be dismissed or resubmitted
+while saving. Navigation/session changes discard stale data and mutation results.
+
+`GET /admin/v1/budgets/page` adds a bounded list of policies assigned directly to
+one identity, with current usage and exact totals. It requires `scope_type=team`
+or `user` and an exact `scope_id`, and accepts `offset` (default 0) and `limit`
+(default 25, maximum 100). Policies are ordered by ID; the count, page and usage
+share one PostgreSQL repeatable-read snapshot. Amounts include committed usage
+and live reservations, isolated by currency and reset window. Canceled, expired
+and older-window reservations do not inflate current spend. Disabled policies
+remain visible. Each row shows its actual caps, remaining amounts and UTC reset.
+Missing or invalid summaries produce an error rather than zero spend.
+
+These direct policies do not describe every applicable cap: global, organization,
+key, model, provider, deployment and request-tag policies remain independent.
+No aggregate financial total mixes different currencies or overlapping windows.
+Upgrade **Billing before Gateway** to enable the new `/internal/v1/budgets/page`
+route. An older backend fails visibly; Gateway does not fall back to loading or
+filtering the global budget inventory. Existing list/mutation APIs are unchanged;
+no database migration or new dependency is needed. Required PostgreSQL CI tests
+include identity budget paging and usage correctness on the real test database.

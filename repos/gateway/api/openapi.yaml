@@ -5211,6 +5211,43 @@ paths:
         '404': {$ref: '#/components/responses/NotFound'}
         '409': {description: Access group is referenced by a non-revoked virtual key}
         '503': {$ref: '#/components/responses/ManagementUnavailable'}
+  /admin/v1/budgets/page:
+    get:
+      operationId: listIdentityBudgetPage
+      summary: List budgets directly assigned to a team or user
+      description: Global administrators only. Policies, current usage and exact total share a repeatable-read snapshot. Other applicable policies remain independent. Upgrade Billing before Gateway.
+      parameters:
+        - in: query
+          name: scope_type
+          required: true
+          schema: {type: string, enum: [team, user]}
+        - in: query
+          name: scope_id
+          required: true
+          schema: {type: string, minLength: 1, maxLength: 256}
+        - in: query
+          name: offset
+          schema: {type: integer, minimum: 0, default: 0}
+        - in: query
+          name: limit
+          schema: {type: integer, minimum: 1, maximum: 100, default: 25}
+      responses:
+        '200':
+          description: Bounded identity budget page, ordered by policy ID
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, total, offset, limit]
+                properties:
+                  data: {type: array, items: {$ref: '#/components/schemas/BudgetSummary'}}
+                  total: {type: integer, minimum: 0}
+                  offset: {type: integer, minimum: 0}
+                  limit: {type: integer, minimum: 1, maximum: 100}
+        '400': {description: Invalid identity budget query}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '503': {description: Budget management unavailable}
   /admin/v1/budgets:
     get:
       operationId: listBudgets
