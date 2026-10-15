@@ -18,6 +18,7 @@ from pathlib import Path
 import re
 import secrets
 import socket
+import ssl
 import subprocess
 import sys
 import tempfile
@@ -54,7 +55,11 @@ def request_http(url, body=None, headers=None, method=None, opener=None):
         response = (
             opener.open(request, timeout=10)
             if opener
-            else urllib.request.urlopen(request, timeout=10)
+            else urllib.request.urlopen(
+                request, timeout=10,
+                context=ssl.create_default_context(cafile=os.environ["SSL_CERT_FILE"])
+                if os.environ.get("SSL_CERT_FILE") else None,
+            )
         )
     except urllib.error.HTTPError as response:
         with response:

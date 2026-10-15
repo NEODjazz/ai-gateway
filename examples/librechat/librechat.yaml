@@ -32,7 +32,9 @@
           "Authorization": "Bearer {{LIBRECHAT_OPENID_ACCESS_TOKEN}}"
         },
         "models": {
-          "default": [],
+          "default": [
+            "approved-model"
+          ],
           "fetch": true
         },
         "titleConvo": true,
@@ -42,7 +44,10 @@
         "modelDisplayLabel": "AI Gateway",
         "dropParams": [
           "user"
-        ]
+        ],
+        "addParams": {
+          "maxRetries": 0
+        }
       }
     ]
   },

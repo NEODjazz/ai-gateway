@@ -53,6 +53,10 @@ Gateway. Аналогично Gateway не может авторизовать �
    identity. Вход в LibreChat сам по себе не создаёт inference grant.
 4. LibreChat передаёт `Authorization: Bearer {{LIBRECHAT_OPENID_ACCESS_TOKEN}}`.
    `OPENID_REUSE_TOKENS=true` включает необходимый session/refresh flow.
+   Профиль Keycloak использует `openid profile email`: обычный code flow
+   возвращает refresh token без отдельного offline session grant. Для другого
+   IdP необходимые scopes и consent проверяются отдельно; добавление
+   `offline_access` требует согласованной политики IdP, а не расширения Gateway roles.
    Gateway принимает исходный access token, а не локальный LibreChat JWT или
    OIDC ID token. `X-User-ID`, request `user`, email и metadata не дают полномочий.
 5. Ошибка refresh требует повторного входа; shared privileged key для fallback
@@ -77,12 +81,22 @@ summary, agent steps и embeddings — отдельные executions того ж
 `librechat.yaml` записан в JSON-синтаксисе — допустимом подмножестве YAML 1.2;
 это позволяет проверять contract без дополнительной Python зависимости.
 
+Перед запуском замените `models.default: ["approved-model"]` на реальный
+operator-approved model ID Gateway, разрешённый целевым пользователям. Upstream
+schema требует непустой default; при отказе model fetch UI может показать этот
+fallback. Он не выдаёт доступ: Gateway всё равно проверяет текущие grants.
+Не добавляйте в общий fallback приватные model IDs; полную изоляцию каталога
+нужно подтвердить тестом двух пользователей.
+
 Профиль включает:
 
 - один custom endpoint `AI Gateway`; backend provider credentials отсутствуют;
-- `models.fetch=true`, пустой fallback catalog, исходный access token для
+- `models.fetch=true`, исходный access token для
   `/v1/models` и inference; user-aware cache в закреплённом upstream исходнике;
 - title через текущую разрешённую модель, тот же endpoint и пользователя;
+- SDK `maxRetries=0`, чтобы 429/ошибки Gateway не скрывались за дополнительными
+  клиентскими повторами; retry/failover policy остаётся на стороне Gateway.
+  Валидатор профиля проверяет, что опция не передаётся как поле inference API;
 - отключённые balance/transactions LibreChat, чтобы они не становились вторым
   финансовым ledger; локальные request/upload safety limits не заменяют Gateway quotas;
 - пользовательские agents без public sharing по умолчанию;
@@ -94,6 +108,10 @@ summary, agent steps и embeddings — отдельные executions того ж
 reverse proxy. LibreChat использует собственные `CREDS_KEY`, `CREDS_IV`, session
 и OAuth secrets: не переиспользуйте межсервисные секреты Gateway. Все replica
 LibreChat должны получать согласованные secrets и общее session/storage состояние.
+Сначала создайте отдельного UI operator, затем допускайте обычных пользователей:
+первый пользователь новой БД может получить роль администратора LibreChat.
+Эта роль не назначает Gateway role/grants; UI operator без Gateway binding
+не должен получать inference-доступ. Сквозной тест проверяет это разделение.
 
 После согласования установки образов:
 
@@ -130,10 +148,19 @@ jobs и conversations имеют самостоятельную owner boundary. 
 
 ## Совместимость и критерии приёмки
 
-Состояние на 2026-10-15: изучен закреплённый upstream, подготовлены профиль и
-offline contracts. **Сквозной тест реального LibreChat ещё не выполнен**;
-скачивание необходимых образов в Rancher Desktop требует согласования по
-`AGENTS.md`. До успешного запуска профиль не считается production-validated.
+Состояние на 2026-10-15: профиль проверен настоящей configuration schema и SDK
+закреплённого LibreChat. В изолированном Rancher Desktop стеке успешно выполнены
+real-service сценарии **LibreChat v0.8.8 + MongoDB 8.0.20 + Keycloak 26.3.3**
+и сохранённый сценарий **Open WebUI v0.11.4** с реальной тестовой PostgreSQL.
+Рабочий deployment не менялся. Upstream model responses в тестах детерминированные:
+облачные credentials, реальные модели и GPU deployments этим запуском не проверены.
+
+Проверены browser OAuth/PKCE, ID-token rejection, раздельный каталог двух пользователей,
+чередующиеся/параллельные запросы, полный SSE и история, текстовые upload/download
+ACL, ownership сохранённых agents и отзыв model grants. Подтверждены PII masking
+до модельного провайдера, DLP deny и fail-closed при недоступном обязательном DLP,
+раздельный PostgreSQL billing, отсутствие prompt/document content в billing outbox,
+видимые ошибки квот, refresh и deprovision активной UI session без shared-key fallback.
 
 Перед переводом основной ссылки пользователей на LibreChat требуется:
 
@@ -153,12 +180,16 @@ offline contracts. **Сквозной тест реального LibreChat ещ
    Runtime tokens, passwords и raw OAuth logs не публикуются как artifacts.
 
 Offline проверка: `python3 -B scripts/test_identity_profile.py`.
-Подготовлен отдельный real-service сценарий:
+Воспроизводимый real-service сценарий:
 `IDENTITY_INTEGRATION_TESTS=true python3 -B scripts/test-librechat-integration.py`.
 Он использует те же три выделенные тестовые PostgreSQL DSN, проверяет наличие
 закреплённых образов до изменения БД и не скачивает их автоматически. Keycloak
 работает через disposable HTTPS proxy с временным доверенным CA; проверка
-сертификатов и hostname остаётся включённой. Этот сценарий пока не запускался.
+сертификатов и hostname остаётся включённой в browser OAuth и Node/Python clients.
+Linux Go проверяет JWKS по HTTPS с тем же CA. На macOS Go использует Keychain,
+поэтому только публичные тестовые JWKS доступны Auth через loopback HTTP;
+issuer остаётся HTTPS, проверяются подпись/audience/expiry. Тест не меняет Keychain
+и не отключает TLS verification. Этот локальный обход не является production настройкой.
 Test client учитывает resumable protocol закреплённого LibreChat: POST запускает
 generation, затем отдельный GET читает SSE с `generationCreatedAt` fence.
 Успех требует terminal response message без error/unfinished, а не только
@@ -167,8 +198,8 @@ HTTP 200 или текстового delta. Негативные запросы 
 Сам HTTPS fixture независимо проверен без Docker:
 `python3 -B -m unittest scripts/test_identity_tls_proxy.py` покрывает доверенный CA,
 отказ недоверенного CA, hostname mismatch и завершение процесса по SIGTERM.
-CI matrix содержит отдельные `librechat` и `openwebui` проверки; наличие job
-не означает успешного прохождения ещё не выполненного запуска.
+CI matrix содержит отдельные `librechat` и `openwebui` проверки. Успешный локальный
+запуск не заменяет результат CI и приёмку с реальным IdP/моделями целевой среды.
 Существующий Open WebUI сценарий:
 `IDENTITY_INTEGRATION_TESTS=true python3 -B scripts/test-identity-integration.py`
 с тремя выделенными тестовыми PostgreSQL DSN из

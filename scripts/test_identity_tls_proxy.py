@@ -1,6 +1,7 @@
 """Exercise the real Node HTTPS fixture without Docker or external services."""
 
 import http.server
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -14,9 +15,13 @@ import threading
 import unittest
 import urllib.error
 import urllib.request
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parent.parent
+spec = importlib.util.spec_from_file_location("identity_https_integration", Path(__file__).with_name("test-identity-integration.py"))
+identity = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(identity)
 
 
 class Upstream(http.server.BaseHTTPRequestHandler):
@@ -122,6 +127,12 @@ class TLSProxyTests(unittest.TestCase):
                 context=ssl.create_default_context(), timeout=5,
             )
         self.assertIsInstance(raised.exception.reason, ssl.SSLCertVerificationError)
+
+    def test_identity_http_client_explicitly_loads_fixture_ca(self):
+        with patch.dict(os.environ, {"SSL_CERT_FILE": str(self.directory / "ca.crt")}):
+            status, body, _ = identity.request_http("https://127.0.0.1:" + str(self.port) + "/fixture")
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body), {"path": "/fixture", "proto": "https"})
 
     def test_wrong_hostname_is_rejected_even_with_trusted_ca(self):
         with self.assertRaises(urllib.error.URLError) as raised:

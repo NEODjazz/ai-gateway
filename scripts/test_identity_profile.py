@@ -64,8 +64,9 @@ class ProfileTests(unittest.TestCase):
         self.assertEqual(endpoint["baseURL"], "${AI_GATEWAY_BASE_URL}")
         self.assertEqual(endpoint["headers"], {"Authorization": "Bearer {{LIBRECHAT_OPENID_ACCESS_TOKEN}}"})
         self.assertEqual(endpoint["apiKey"], "disabled-no-shared-gateway-key")
-        self.assertEqual(endpoint["models"], {"default": [], "fetch": True})
+        self.assertEqual(endpoint["models"], {"default": ["approved-model"], "fetch": True})
         self.assertEqual(endpoint["titleModel"], "current_model")
+        self.assertEqual(endpoint["addParams"], {"maxRetries": 0})
         self.assertNotIn("titleEndpoint", endpoint)
         self.assertNotIn("tokenConfig", endpoint)
         self.assertEqual(config["registration"]["socialLogins"], ["openid"])
@@ -78,6 +79,7 @@ class ProfileTests(unittest.TestCase):
             self.assertEqual(env[name], "true")
         self.assertEqual(env["OPENID_CLIENT_ID"], "librechat")
         self.assertEqual(env["OPENID_AUDIENCE"], "gateway")
+        self.assertEqual(env["OPENID_SCOPE"], "openid profile email")
         self.assertEqual(env["ENDPOINTS"], "custom,agents")
         self.assertEqual(env["ALLOW_EMAIL_LOGIN"], "false")
         for name in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "AZURE_API_KEY", "AI_GATEWAY_API_KEY"):

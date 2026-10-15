@@ -1,5 +1,6 @@
 """Offline acceptance-harness contracts; no Docker, network, or real credentials."""
 import importlib.util
+import io
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,6 +13,41 @@ spec.loader.exec_module(integration)
 
 
 class HarnessTests(unittest.TestCase):
+    def observe_provider_request(self, body):
+        handler = object.__new__(integration.ObservedProvider)
+        handler.rfile = io.BytesIO(body)
+        handler.headers = {"Content-Length": str(len(body))}
+        handler.path = "/v1/chat/completions"
+        # Only exercise recording; response generation is independently tested
+        # through the full real-service scenario.
+        with patch.object(integration.ObservedProvider.__bases__[0], "do_POST"):
+            handler.do_POST()
+
+    def test_title_request_cannot_erase_document_delivery_evidence(self):
+        marker = "LC_DOC_REQUEST_" + "a" * 32
+        document = "LC_DOCUMENT_" + "b" * 32
+        with patch.object(integration.ObservedProvider, "document_deliveries", {}):
+            self.observe_provider_request((marker + " " + document).encode())
+            self.observe_provider_request(marker.encode())
+            self.assertEqual(integration.ObservedProvider.document_deliveries[marker], {document})
+
+    def test_privacy_evidence_distinguishes_indexed_mask_from_raw_email(self):
+        marker = "LC_PRIVACY_" + "c" * 32
+        with patch.object(integration.ObservedProvider, "privacy_deliveries", {}):
+            self.observe_provider_request((marker + " {{EMAIL_1}}").encode())
+            self.assertEqual(integration.ObservedProvider.privacy_deliveries[marker], {"masked_email"})
+            self.observe_provider_request((marker + " qa@example.test").encode())
+            self.assertEqual(integration.ObservedProvider.privacy_deliveries[marker], {"masked_email", "raw_email"})
+
+    def test_ui_requests_use_the_browser_route_contract(self):
+        runner = object.__new__(integration.Run)
+        runner.ui = "http://127.0.0.1:3080"
+        session = {"token": "fixture-token", "opener": object()}
+        with patch.object(integration, "request_http", return_value=(200, b"{}", {})) as request:
+            runner.ui_api(session, "/api/models")
+        self.assertEqual(request.call_args.args[2]["User-Agent"], integration.BROWSER_USER_AGENT)
+        self.assertEqual(request.call_args.args[2]["Authorization"], "Bearer fixture-token")
+
     def test_partial_or_failed_stream_is_not_success(self):
         for event in (
             {"delta": "test response"},
@@ -33,13 +69,14 @@ class HarnessTests(unittest.TestCase):
 
     def test_chat_subscribes_to_the_exact_started_generation(self):
         runner = self.runner([
-            (200, json.dumps({"status": "started", "streamId": "fixture-stream", "generationCreatedAt": 123}).encode(), {"Content-Type": "application/json"}),
+            (200, json.dumps({"status": "started", "streamId": "fixture-stream", "conversationId": "fixture-conversation", "generationCreatedAt": 123}).encode(), {"Content-Type": "application/json"}),
             (200, b'data: {"final": true}\n\n', {"Content-Type": "text/event-stream"}),
         ])
         status, data, headers, _ = runner.chat({}, "model-a", "fixture")
         self.assertEqual(status, 200)
         self.assertIn(b'"final": true', data)
         self.assertEqual(headers["Content-Type"], "text/event-stream")
+        self.assertEqual(runner.ui_api.call_args_list[0].args[2]["conversationId"], "new")
         self.assertEqual(runner.ui_api.call_args_list[1].args[1], "/api/agents/chat/stream/fixture-stream?generationCreatedAt=123")
 
     def test_failed_start_does_not_subscribe(self):
@@ -50,7 +87,7 @@ class HarnessTests(unittest.TestCase):
     def test_malformed_generation_identity_is_rejected(self):
         for generation in (None, True, -1, "123", 9007199254740992):
             with self.subTest(generation=generation):
-                runner = self.runner([(200, json.dumps({"status": "started", "streamId": "fixture", "generationCreatedAt": generation}).encode(), {"Content-Type": "application/json"})])
+                runner = self.runner([(200, json.dumps({"status": "started", "streamId": "fixture", "conversationId": "fixture", "generationCreatedAt": generation}).encode(), {"Content-Type": "application/json"})])
                 with self.assertRaisesRegex(RuntimeError, "generation identity"):
                     runner.chat({}, "model-a", "fixture")
                 self.assertEqual(runner.ui_api.call_count, 1)
