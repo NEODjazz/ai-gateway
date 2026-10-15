@@ -323,6 +323,10 @@ jobs:
         if: matrix.chart == 'ai-gateway'
         run: python3 scripts/test-credential-encryption-charts.py
 
+      - name: Verify global rate-limit defaults and explicit zero
+        if: matrix.chart == 'ai-gateway'
+        run: python3 scripts/test-global-rate-limit-charts.py
+
       - name: Verify gateway integer environment rendering
         if: matrix.chart == 'ai-gateway'
         shell: bash

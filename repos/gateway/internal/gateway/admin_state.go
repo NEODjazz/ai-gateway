@@ -45,6 +45,7 @@ type encryptedAgentInstructions struct {
 }
 
 type adminStateSnapshot struct {
+	GlobalRateLimits     *GlobalRateLimitSettings       `json:"global_rate_limits,omitempty"`
 	SchemaVersion        int                            `json:"schema_version"`
 	Projects             []Project                      `json:"projects,omitempty"`
 	AccessGroups         []AccessGroup                  `json:"access_groups,omitempty"`
@@ -60,19 +61,20 @@ type adminStateSnapshot struct {
 }
 
 type AdminStateRuntime struct {
-	mu         sync.Mutex
-	controller AdminStateController
-	revision   int64
-	aead       cipher.AEAD
-	mcpAEAD    cipher.AEAD
-	agentAEAD  cipher.AEAD
-	access     *AccessRegistry
-	mcp        *MCPRegistry
-	agents     *AgentRegistry
-	logging    *LoggingRegistry
+	globalRateLimits *GlobalRateLimits
+	mu               sync.Mutex
+	controller       AdminStateController
+	revision         int64
+	aead             cipher.AEAD
+	mcpAEAD          cipher.AEAD
+	agentAEAD        cipher.AEAD
+	access           *AccessRegistry
+	mcp              *MCPRegistry
+	agents           *AgentRegistry
+	logging          *LoggingRegistry
 }
 
-func NewAdminStateRuntime(ctx context.Context, controller AdminStateController, encryptionKey []byte, access *AccessRegistry, mcp *MCPRegistry, agents *AgentRegistry, logging *LoggingRegistry) (*AdminStateRuntime, error) {
+func NewAdminStateRuntime(ctx context.Context, controller AdminStateController, encryptionKey []byte, access *AccessRegistry, mcp *MCPRegistry, agents *AgentRegistry, logging *LoggingRegistry, globalLimits ...*GlobalRateLimits) (*AdminStateRuntime, error) {
 	if controller == nil {
 		return nil, errors.New("admin state controller is unavailable")
 	}
@@ -107,6 +109,9 @@ func NewAdminStateRuntime(ctx context.Context, controller AdminStateController, 
 		}
 	}
 	runtime := &AdminStateRuntime{controller: controller, aead: aead, mcpAEAD: mcpAEAD, agentAEAD: agentAEAD, access: access, mcp: mcp, agents: agents, logging: logging}
+	if len(globalLimits) > 0 {
+		runtime.globalRateLimits = globalLimits[0]
+	}
 	if err := runtime.refreshLocked(ctx, true); err != nil {
 		return nil, err
 	}
@@ -233,6 +238,9 @@ func (r *AdminStateRuntime) marshal() (json.RawMessage, error) {
 
 func (r *AdminStateRuntime) snapshot() (adminStateSnapshot, error) {
 	snapshot := adminStateSnapshot{SchemaVersion: adminStateSchemaVersion, Projects: r.access.Projects(), AccessGroups: r.access.Groups(), PolicyAttachments: r.access.PolicyAttachments(), Tags: r.access.Tags(), MCPServers: r.mcp.Servers(), MCPToolsets: r.mcp.Toolsets(), ToolPolicies: r.agents.ToolPolicies(), AgentProfiles: r.agents.AgentProfiles()}
+	if r.globalRateLimits != nil {
+		snapshot.GlobalRateLimits = r.globalRateLimits.snapshot()
+	}
 	for index, profile := range snapshot.AgentProfiles {
 		if profile.Generation != nil || profile.Instructions != "" {
 			snapshot.SchemaVersion = max(snapshot.SchemaVersion, agentConfigurationAdminStateSchemaVersion)
@@ -283,6 +291,9 @@ func (r *AdminStateRuntime) snapshot() (adminStateSnapshot, error) {
 }
 
 func (r *AdminStateRuntime) apply(snapshot adminStateSnapshot) error {
+	if snapshot.GlobalRateLimits != nil && !snapshot.GlobalRateLimits.valid() {
+		return errors.New("invalid persisted global rate limits")
+	}
 	access := NewAccessRegistry()
 	for _, item := range snapshot.Projects {
 		if _, err := access.PutProject(item.ID, item); err != nil {
@@ -391,6 +402,9 @@ func (r *AdminStateRuntime) apply(snapshot adminStateSnapshot) error {
 		}
 		loggingEntries[validated.ID] = loggingDestinationEntry{destination: validated, secret: secret}
 	}
+	if r.globalRateLimits != nil {
+		r.globalRateLimits.apply(snapshot.GlobalRateLimits)
+	}
 	r.access.mu.Lock()
 	r.access.projects, r.access.groups, r.access.attachments, r.access.tags = access.projects, access.groups, access.attachments, access.tags
 	r.access.mu.Unlock()
@@ -407,7 +421,7 @@ func (r *AdminStateRuntime) apply(snapshot adminStateSnapshot) error {
 }
 
 func isDurableAdminStateRoute(path string) bool {
-	prefixes := []string{"/admin/v1/guardrail-policies", "/admin/v1/policy-attachments", "/admin/v1/tags", "/admin/v1/logging/destinations", "/admin/v1/tool-policies", "/admin/v1/agent-profiles", "/admin/v1/mcp/servers", "/admin/v1/mcp/toolsets", "/admin/v1/projects", "/admin/v1/access-groups"}
+	prefixes := []string{"/admin/v1/settings/global-rate-limits", "/admin/v1/guardrail-policies", "/admin/v1/policy-attachments", "/admin/v1/tags", "/admin/v1/logging/destinations", "/admin/v1/tool-policies", "/admin/v1/agent-profiles", "/admin/v1/mcp/servers", "/admin/v1/mcp/toolsets", "/admin/v1/projects", "/admin/v1/access-groups"}
 	for _, prefix := range prefixes {
 		if path == prefix || strings.HasPrefix(path, prefix+"/") {
 			return true

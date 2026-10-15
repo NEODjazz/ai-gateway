@@ -130,6 +130,8 @@ td code { font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .form-card, .output-card, .json-card { padding: 22px; }
 .filter-card { background: white; border: 1px solid #e0e5e9; border-radius: 12px; padding: 18px; margin-bottom: 18px; display: grid; grid-template-columns: 150px minmax(220px, 1fr) 130px auto; gap: 14px; align-items: end; }
 .form-card { display: grid; gap: 16px; }
+.global-rate-limits > h2, .global-rate-limits > p { margin: 0; }
+.global-rate-limits fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 label { display: grid; gap: 7px; color: #435361; font-size: 13px; font-weight: 650; }
 input, select, textarea { width: 100%; border: 1px solid #cad4da; border-radius: 7px; background: white; color: #172733; padding: 9px 10px; outline: none; }
 input:focus, select:focus, textarea:focus { border-color: #0f9f83; box-shadow: 0 0 0 3px rgba(15, 159, 131, .12); }

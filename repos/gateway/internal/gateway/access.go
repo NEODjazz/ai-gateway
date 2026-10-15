@@ -424,7 +424,7 @@ func (h Handler) authorizeModel(w http.ResponseWriter, req modules.RequestContex
 func (h Handler) authorizeRateLimit(w http.ResponseWriter, ctx context.Context, req modules.RequestContext, tokens int) bool {
 	allowed, retryAfter, err := h.checkRateLimit(ctx, req, tokens)
 	if err != nil {
-		writeError(w, 503, "rate_limit_unavailable", err.Error())
+		writeError(w, 503, "rate_limit_unavailable", "rate limit service is unavailable")
 		return false
 	}
 	if !allowed {
@@ -433,18 +433,30 @@ func (h Handler) authorizeRateLimit(w http.ResponseWriter, ctx context.Context, 
 			seconds = 1
 		}
 		w.Header().Set("Retry-After", strconv.Itoa(seconds))
-		writeError(w, 429, "rate_limit_exceeded", "credential rate limit exceeded")
+		writeError(w, 429, "rate_limit_exceeded", "request rate limit exceeded")
 		return false
 	}
 	return true
 }
 
 func (h Handler) checkRateLimit(ctx context.Context, req modules.RequestContext, tokens int) (bool, time.Duration, error) {
+	// Consult shared configuration before admission using the control plane's
+	// refresh cadence. Observed failures are closed before consuming any quota.
+	if h.globalRateLimits != nil && h.adminState != nil {
+		if err := h.adminState.Refresh(ctx); err != nil {
+			return false, 0, err
+		}
+	}
 	key := req.CredentialID
 	if req.TeamID != "" {
 		key = "team:" + req.TeamID + ":credential:" + req.CredentialID
 	}
-	return h.rateLimits.Allow(ctx, key, RateLimit{Requests: req.RateLimitRPM, Tokens: req.RateLimitTPM}, tokens)
+	allowed, retry, err := h.rateLimits.Allow(ctx, key, RateLimit{Requests: req.RateLimitRPM, Tokens: req.RateLimitTPM}, tokens)
+	if err != nil || !allowed || h.globalRateLimits == nil {
+		return allowed, retry, err
+	}
+	limits := h.globalRateLimits.effective()
+	return h.rateLimits.Allow(ctx, "\x00gateway:global", RateLimit{Requests: limits.RPM, Tokens: limits.TPM}, tokens)
 }
 
 func (h Handler) prepareAccessGroups(w http.ResponseWriter, req *modules.RequestContext) bool {

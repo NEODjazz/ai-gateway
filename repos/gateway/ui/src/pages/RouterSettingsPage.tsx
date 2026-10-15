@@ -1,3 +1,4 @@
+import { GlobalRateLimitsForm } from "./GlobalRateLimitsForm";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
@@ -150,6 +151,7 @@ export function RouterSettingsPage() {
   }
 
   return <><PageHeader eyebrow="Traffic management" title="Router settings" description="Manage fallback membership, weighted or adaptive routing, safe retry classes, timeouts and circuit cooldowns as one atomic routing plan." actions={<><Link className="button-link secondary" to="/model-groups">Model groups</Link><button className="secondary" onClick={() => void load()}>Refresh</button><button disabled={busy || !draft} onClick={() => void save()}>{busy ? "Saving…" : "Save and simulate"}</button></>} />
+    <GlobalRateLimitsForm />
     {error && <ErrorState message={error} retry={() => void load()} />}{notice && <div className="operation-result" role="status">{notice}</div>}
     {loading ? <LoadingState /> : !groups.length ? <div className="state-card">Create a model group before configuring routing.</div> : draft && <>
       <section className="form-card router-summary">

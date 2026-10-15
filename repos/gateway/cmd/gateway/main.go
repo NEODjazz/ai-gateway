@@ -138,7 +138,11 @@ func main() {
 	if !ok {
 		log.Fatal("provider does not support durable admin state")
 	}
-	adminState, err := gateway.NewAdminStateRuntime(appCtx, adminController, []byte(cfg.Provider.CredentialKey), accessRegistry, mcpRegistry, agentRegistry, loggingRegistry)
+	globalLimits, err := gateway.NewGlobalRateLimits(gateway.GlobalRateLimitSettings{RPM: cfg.GlobalRateLimitRPM, TPM: cfg.GlobalRateLimitTPM})
+	if err != nil {
+		log.Fatal(err)
+	}
+	adminState, err := gateway.NewAdminStateRuntime(appCtx, adminController, []byte(cfg.Provider.CredentialKey), accessRegistry, mcpRegistry, agentRegistry, loggingRegistry, globalLimits)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -165,7 +169,7 @@ func main() {
 			return providerControlStore.ResponseSessions().Ping(ctx)
 		}
 	}
-	handler := gateway.NewHandlerWithMetrics(gatewayPipeline, llmProvider, rateLimits, readiness, metrics).WithResourceBillingPipeline(providerPipeline).WithModelRegistry(modelRegistry).WithComplianceModules(dlpModule, avModule).WithAnonymizerModule(anonymizerModule).WithGuardrailMonitor(guardrailMonitor).WithCacheDiagnostics(gateway.CacheRuntimeConfig{ExactTTLSeconds: cfg.Cache.TTLSeconds, ExactMaxBytes: cfg.Cache.MaxBytes, SemanticTTLSeconds: cfg.Cache.Semantic.TTLSeconds, SemanticMaxEntries: cfg.Cache.Semantic.MaxEntries, SemanticMaxBytes: cfg.Cache.Semantic.MaxBytes}).WithLoggingRegistry(loggingRegistry).WithAgentRegistry(agentRegistry).WithMCPRegistry(mcpRegistry).WithAccessRegistry(accessRegistry).WithAdminState(adminState)
+	handler := gateway.NewHandlerWithMetrics(gatewayPipeline, llmProvider, rateLimits, readiness, metrics).WithGlobalRateLimits(globalLimits).WithResourceBillingPipeline(providerPipeline).WithModelRegistry(modelRegistry).WithComplianceModules(dlpModule, avModule).WithAnonymizerModule(anonymizerModule).WithGuardrailMonitor(guardrailMonitor).WithCacheDiagnostics(gateway.CacheRuntimeConfig{ExactTTLSeconds: cfg.Cache.TTLSeconds, ExactMaxBytes: cfg.Cache.MaxBytes, SemanticTTLSeconds: cfg.Cache.Semantic.TTLSeconds, SemanticMaxEntries: cfg.Cache.Semantic.MaxEntries, SemanticMaxBytes: cfg.Cache.Semantic.MaxBytes}).WithLoggingRegistry(loggingRegistry).WithAgentRegistry(agentRegistry).WithMCPRegistry(mcpRegistry).WithAccessRegistry(accessRegistry).WithAdminState(adminState)
 	if len(cfg.Provider.CredentialKey) >= 16 {
 		var tickets realtimestate.Store = realtimestate.NewMemoryStore(realtimestate.MaxTickets, realtimestate.MaxOwnerTickets)
 		if providerControlStore != nil {

@@ -1109,11 +1109,7 @@ func (h Handler) callBatchProvider(ctx context.Context, req *modules.RequestCont
 var errBatchRateLimited = errors.New("batch item rate limited")
 
 func (h Handler) allowBatchRate(ctx context.Context, req modules.RequestContext, tokens int) bool {
-	key := req.CredentialID
-	if req.TeamID != "" {
-		key = "team:" + req.TeamID + ":credential:" + req.CredentialID
-	}
-	allowed, _, err := h.rateLimits.Allow(ctx, key, RateLimit{Requests: req.RateLimitRPM, Tokens: req.RateLimitTPM}, tokens)
+	allowed, _, err := h.checkRateLimit(ctx, req, tokens)
 	return err == nil && allowed
 }
 func batchErrorResult(item batchstate.Item, code, message string) []byte {

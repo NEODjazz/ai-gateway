@@ -41,6 +41,7 @@ type Handler struct {
 	resourceBilling    modules.Pipeline
 	provider           provider.Provider
 	rateLimits         RateLimitStore
+	globalRateLimits   *GlobalRateLimits
 	metrics            *Metrics
 	ready              func(context.Context) error
 	management         ManagementClient

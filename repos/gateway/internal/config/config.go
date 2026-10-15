@@ -19,24 +19,26 @@ import (
 )
 
 type Config struct {
-	Docling       DoclingConfig
-	HTTP          HTTPConfig
-	Cache         CacheConfig
-	Redis         RedisConfig
-	Modules       ModuleConfig
-	Provider      ProviderConfig
-	Catalog       modelcatalog.Catalog
-	Telemetry     TelemetryConfig
-	Management    ManagementConfig
-	APIDocs       APIDocsConfig
-	AdminUI       AdminUIConfig
-	Guardrails    GuardrailMonitorConfig
-	Files         FileConfig
-	VectorStores  VectorStoreConfig
-	Assistants    AssistantConfig
-	Conversations ConversationConfig
-	A2ATasks      A2ATaskConfig
-	InitErr       error
+	GlobalRateLimitRPM int
+	GlobalRateLimitTPM int
+	Docling            DoclingConfig
+	HTTP               HTTPConfig
+	Cache              CacheConfig
+	Redis              RedisConfig
+	Modules            ModuleConfig
+	Provider           ProviderConfig
+	Catalog            modelcatalog.Catalog
+	Telemetry          TelemetryConfig
+	Management         ManagementConfig
+	APIDocs            APIDocsConfig
+	AdminUI            AdminUIConfig
+	Guardrails         GuardrailMonitorConfig
+	Files              FileConfig
+	VectorStores       VectorStoreConfig
+	Assistants         AssistantConfig
+	Conversations      ConversationConfig
+	A2ATasks           A2ATaskConfig
+	InitErr            error
 }
 
 type FileConfig struct {
@@ -318,7 +320,10 @@ func Load() Config {
 	if a2aSubscriptionPollMilliseconds < 100 || a2aSubscriptionPollMilliseconds > 10000 {
 		a2aTaskErr = errors.Join(a2aTaskErr, errors.New("A2A subscription poll interval must be between 100 and 10000 milliseconds"))
 	}
+	globalRPM, globalRPMErr := globalRateLimitEnv("GLOBAL_RATE_LIMIT_RPM", 60, 10_000_000)
+	globalTPM, globalTPMErr := globalRateLimitEnv("GLOBAL_RATE_LIMIT_TPM", 100_000, 1_000_000_000)
 	return Config{
+		GlobalRateLimitRPM: globalRPM, GlobalRateLimitTPM: globalTPM,
 		Docling: DoclingConfig{URL: strings.TrimSpace(os.Getenv("DOCLING_URL")), APIKey: os.Getenv("DOCLING_API_KEY"), Timeout: time.Duration(envInt("DOCLING_TIMEOUT_SECONDS", 240)) * time.Second, PollInterval: time.Duration(envInt("DOCLING_POLL_MILLISECONDS", 500)) * time.Millisecond, MaxTextBytes: envInt("DOCLING_MAX_TEXT_BYTES", 4<<20)},
 		HTTP: HTTPConfig{
 			Addr: env("HTTP_ADDR", ":8080"),
@@ -394,7 +399,7 @@ func Load() Config {
 			SubscriptionLimit: a2aSubscriptionLimit, SubscriptionDuration: time.Duration(a2aSubscriptionDurationSeconds) * time.Second,
 			SubscriptionPoll: time.Duration(a2aSubscriptionPollMilliseconds) * time.Millisecond,
 		},
-		InitErr: errors.Join(catalogErr, semanticErr, providerAdmissionErr, controlPlaneErr, guardrailMonitorErr, fileErr, vectorStoreErr, assistantErr, conversationErr, a2aTaskErr),
+		InitErr: errors.Join(globalRPMErr, globalTPMErr, catalogErr, semanticErr, providerAdmissionErr, controlPlaneErr, guardrailMonitorErr, fileErr, vectorStoreErr, assistantErr, conversationErr, a2aTaskErr),
 		Modules: ModuleConfig{
 			Auth: FeatureConfig{
 				Required: envBool("AUTH_REQUIRED", true),
@@ -763,4 +768,16 @@ func credentialEncryptionKeyFromEnv() (string, error) {
 		return "", errors.New("CREDENTIAL_ENCRYPTION_KEY conflicts with deprecated PROVIDER_CREDENTIAL_ENCRYPTION_KEY")
 	}
 	return key, nil
+}
+
+func globalRateLimitEnv(key string, fallback, maximum int) (int, error) {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback, nil
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed < 0 || parsed > maximum {
+		return 0, fmt.Errorf("%s must be an integer between 0 and %d", key, maximum)
+	}
+	return parsed, nil
 }

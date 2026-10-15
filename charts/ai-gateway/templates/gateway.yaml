@@ -1,4 +1,5 @@
 {{- $adminSSO := default (dict) .Values.gateway.adminUI.sso -}}
+{{- $globalLimits := default (dict) .Values.gateway.globalRateLimits -}}
 {{- $azureIdentity := default (dict) .Values.gateway.azureIdentity -}}
 apiVersion: apps/v1
 kind: Deployment
@@ -63,6 +64,10 @@ spec:
             - name: DOCLING_MAX_TEXT_BYTES
               value: "4194304"
             {{- end }}
+            - name: GLOBAL_RATE_LIMIT_RPM
+              value: {{ include "ai-gateway.integerString" (ternary $globalLimits.rpm 60 (hasKey $globalLimits "rpm")) | quote }}
+            - name: GLOBAL_RATE_LIMIT_TPM
+              value: {{ include "ai-gateway.integerString" (ternary $globalLimits.tpm 100000 (hasKey $globalLimits "tpm")) | quote }}
             - name: HTTP_ADDR
               value: ":8080"
             - name: ADMIN_UI_ENABLED

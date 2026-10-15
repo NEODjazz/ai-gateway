@@ -123,6 +123,10 @@ gateway:
     embeddingUrl: ""
     embeddingModel: ""
     embeddingApiKey: ""
+  # Aggregate inference quota; UI overrides persist independently of Helm.
+  globalRateLimits:
+    rpm: 60
+    tpm: 100000
   routing:
     strategy: weighted
     adaptiveEwmaAlpha: "0.2"
