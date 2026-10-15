@@ -168,3 +168,53 @@ required. Regression coverage includes API scope, key-independent counters on
 memory/Redis, concurrent admission, cache isolation, and real PostgreSQL restore,
 replica refresh and quota enforcement. Existing financial and membership APIs
 retain their compatibility requirements described above.
+
+## Team organization ownership
+
+Team workspaces expose an **Organization** tab and ownership controls in Overview
+and Settings. Global administrators can assign an unowned team or explicitly
+unassign its current organization. Matching team administrators can inspect only
+their team's owner; they cannot transfer it or load global organization choices.
+An unknown or failed ownership read is never presented as an unassigned team.
+The previous successful read is identified after refresh failures, and changing
+identity/session invalidates pending reads, forms and mutation results.
+
+New team forms optionally select an organization. A nonempty `organization_id`
+in `POST /admin/v1/teams` creates the team and its binding in one PostgreSQL
+transaction. A missing/disabled organization, occupied ID or other failure rolls
+back the entire creation. Without this field, the existing creation path remains
+unchanged. The success notice links to the identity workspace for memberships,
+models, quotas and budgets. Existing team settings edit directory metadata;
+ownership changes use the separate confirmed operation.
+
+`GET /admin/v1/teams/{id}/organization` returns one `team_id` and either bounded
+organization metadata or explicit `organization: null`. It does not load the
+organization inventory or unrelated team IDs. `PUT` and `DELETE` on that route
+require an exact `organization_id` body and global administrator authorization.
+Assignment requires a nondeleted team and active organization. The unique team
+ownership constraint prevents implicit re-parenting, including concurrent
+requests. DELETE is conditional on the supplied previous owner; a stale owner ID
+cannot remove another organization's binding. The UI offers assignment only for
+an unassigned team and confirms unassignment before allowing a different owner.
+
+Ownership does **not** rewrite virtual keys, directory approvals, principal
+bindings or their explicit organization scopes. A key pinned to the old
+organization and this team fails authentication after their relationship is
+removed. A team-only key does not automatically acquire an organization ID.
+Operators must configure request scopes explicitly through the existing key and
+principal management controls. Budgets retain their existing scope semantics.
+
+`GET /admin/v1/organizations/page` provides global-admin organization choices,
+ordered by case-insensitive name then ID, with `search`, `status`, `offset` and
+`limit` (default 25, maximum 100). Search is a literal case-insensitive substring;
+rows and exact count share one repeatable-read snapshot. The picker requests
+active organizations, searches the complete directory, pages beyond 500 and
+retains an explicit choice across queries. Legacy organization list routes and
+response shapes remain available. Their assignment return lookup now addresses
+the exact organization instead of scanning the first 500 rows.
+
+Upgrade **Auth before Gateway** for organization choices, ownership controls and
+atomic creation with an organization. An older backend fails visibly; the UI does
+not fall back to loading a partial global inventory or creating an unowned team.
+No new migration or dependency is needed. PostgreSQL regression tests cover
+paging, exact ownership, rollback, concurrent assignment and unchanged key scopes.

@@ -4211,6 +4211,7 @@ paths:
       operationId: createDirectoryTeam
       tags: [Identity]
       summary: Create a directory team without replacing an existing identity
+      description: Optional organization_id creates directory ownership atomically with the team. Missing or disabled organizations and identity conflicts leave no partial team. No keys or principal bindings are created or migrated.
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/DirectoryTeamCreateInput'}}}}
       responses:
         '201': {description: Identity created, content: {application/json: {schema: {$ref: '#/components/schemas/DirectoryTeam'}}}}
@@ -5210,6 +5211,93 @@ paths:
         '403': {$ref: '#/components/responses/AdminRequired'}
         '404': {$ref: '#/components/responses/NotFound'}
         '409': {description: Access group is referenced by a non-revoked virtual key}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
+  /admin/v1/organizations/page:
+    get:
+      operationId: listOrganizationMetadataPage
+      tags: [Identity]
+      summary: Search and page organization choices without loading team ID arrays
+      description: Global administrators only. Rows and exact total share a PostgreSQL repeatable-read snapshot. Ordering is lower(name) then ID. Search is a literal case-insensitive substring over ID/name/description. Upgrade Auth before Gateway.
+      parameters:
+        - in: query
+          name: search
+          schema: {type: string, maxLength: 256}
+        - in: query
+          name: status
+          schema: {type: string, enum: [active, disabled]}
+        - in: query
+          name: offset
+          schema: {type: integer, minimum: 0, default: 0}
+        - in: query
+          name: limit
+          schema: {type: integer, minimum: 1, maximum: 100, default: 25}
+      responses:
+        '200':
+          description: Bounded metadata page
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, total, offset, limit]
+                properties:
+                  data: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/OrganizationMetadata'}}
+                  total: {type: integer, minimum: 0}
+                  offset: {type: integer, minimum: 0}
+                  limit: {type: integer, minimum: 1, maximum: 100}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
+  /admin/v1/teams/{id}/organization:
+    parameters: [{$ref: '#/components/parameters/DirectoryTeamID'}]
+    get:
+      operationId: getTeamOrganizationOwnership
+      tags: [Identity]
+      summary: Read the exact organization owner of one team
+      description: Global or matching team administrator. An existing unassigned team returns organization=null. Other teams and global organization inventories are not included.
+      responses:
+        '200':
+          description: Current directory ownership
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/TeamOrganizationOwnership'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
+    put:
+      operationId: assignTeamOrganizationOwnership
+      tags: [Identity]
+      summary: Assign an unowned team to an active organization
+      description: Global administrators only. Requires a nondeleted team and active organization. Repeating the same assignment is idempotent; another existing owner returns 409. Credentials and principal bindings keep their existing explicit scopes.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/TeamOrganizationAssignmentInput'}}}}
+      responses:
+        '200':
+          description: Assigned directory owner
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/TeamOrganizationOwnership'}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '503': {$ref: '#/components/responses/ManagementUnavailable'}
+    delete:
+      operationId: unassignTeamOrganizationOwnership
+      tags: [Identity]
+      summary: Remove an exact expected organization assignment
+      description: Global administrators only. organization_id is a precondition; a stale owner ID returns 404 and cannot remove another owner's binding. Credentials and principal bindings are not rewritten. A subsequent assignment requires a separate explicit operation.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/TeamOrganizationAssignmentInput'}}}}
+      responses:
+        '200':
+          description: Directory ownership after removal
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/TeamOrganizationOwnership'}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/AdminRequired'}
+        '404': {$ref: '#/components/responses/NotFound'}
         '503': {$ref: '#/components/responses/ManagementUnavailable'}
   /admin/v1/identity-policies/{scope}/{id}:
     parameters:
@@ -12729,12 +12817,41 @@ components:
             created_at: {type: string, format: date-time}
             updated_at: {type: string, format: date-time}
             deleted_at: {type: string, format: date-time}
+    OrganizationMetadata:
+      type: object
+      required: [id, name, status, created_at, updated_at]
+      properties:
+        id: {type: string}
+        name: {type: string}
+        description: {type: string}
+        status: {type: string, enum: [active, disabled]}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    TeamOrganizationOwnership:
+      type: object
+      required: [team_id, organization]
+      properties:
+        team_id: {type: string}
+        organization:
+          oneOf:
+            - {$ref: '#/components/schemas/OrganizationMetadata'}
+            - {type: 'null'}
+    TeamOrganizationAssignmentInput:
+      type: object
+      additionalProperties: false
+      required: [organization_id]
+      properties:
+        organization_id: {type: string, minLength: 1, maxLength: 256}
     DirectoryTeamCreateInput:
       type: object
       additionalProperties: false
       required: [id, name, status]
       properties:
         id: {type: string, minLength: 1, maxLength: 256}
+        organization_id:
+          type: string
+          maxLength: 256
+          description: Optional. A nonempty value creates the team and its organization assignment in one transaction. Failure rolls back both. Empty leaves the team unassigned. Requires the current Auth backend.
         external_id: {type: string, maxLength: 256}
         name: {type: string, minLength: 1, maxLength: 256}
         description: {type: string, maxLength: 1024}

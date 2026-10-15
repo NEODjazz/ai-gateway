@@ -27,7 +27,7 @@ export function IdentityDirectoryPage({ kind }: { kind: IdentityKind }) {
   const [direction, setDirection] = useState<"asc" | "desc">("asc");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState<{ scope: string; text: string }>();
+  const [notice, setNotice] = useState<{ scope: string; text: string; identityID?: string }>();
   const [editing, setEditing] = useState<{ scope: string; value: DirectoryIdentity | null }>();
   const activeScope = useRef(scope); activeScope.current = scope;
   const generation = useRef(0);
@@ -64,12 +64,12 @@ export function IdentityDirectoryPage({ kind }: { kind: IdentityKind }) {
     const { id, ...payload } = value;
     await client.request(`/admin/v1/${kind}${creating ? "" : `/${encodeURIComponent(id)}`}`, { method: creating ? "POST" : "PUT", body: creating ? value : payload });
     if (activeScope.current !== scope) return;
-    setNotice({ scope, text: `${kind === "users" ? "User" : "Team"} ${id} ${creating ? "created" : "updated"}.` });
+    setNotice({ scope, text: `${kind === "users" ? "User" : "Team"} ${id} ${creating ? "created" : "updated"}.`, identityID:creating?id:undefined });
     await load();
   }
   const resetPage = (update: () => void) => { setOffset(0); setNotice(undefined); update(); };
   return <><PageHeader eyebrow="Access control" title={title} description={kind === "users" ? "Manage directory identities, approved roles and team memberships." : "Manage teams, membership roles and team-owned resources."} />
-    {notice?.scope === scope && <div className="operation-result" role="status">{notice.text}</div>}
+    {notice?.scope === scope && <div className="operation-result" role="status">{notice.text}{notice.identityID && <> <Link to={`/${kind}/${encodeURIComponent(notice.identityID)}`}>Open workspace</Link></>}</div>}
     {error && <ErrorState message={error} retry={() => void load()} />}
     <div className="directory-filters"><label>Status<select value={status} onChange={(event) => resetPage(() => setStatus(event.target.value))}><option value="">All statuses</option><option value="active">Active</option><option value="disabled">Disabled</option></select></label>{kind === "users" && <label>Approved role<select value={role} onChange={(event) => resetPage(() => setRole(event.target.value))}><option value="">All roles</option>{directoryRoles.map((value) => <option key={value}>{value}</option>)}</select></label>}<p className="muted">{admin ? "Platform directory" : `Directory scoped to team ${session?.team_id || "—"}`}</p></div>
     {loading && !validPage ? <LoadingState /> : <div aria-busy={loading}>

@@ -185,7 +185,11 @@ func managementCall[Request any, Response any](ctx context.Context, client *Remo
 		return result, errors.New("management service is not configured")
 	}
 	var body io.Reader
-	if method == http.MethodPost || method == http.MethodPut || method == http.MethodPatch {
+	// Empty structs keep legacy DELETE calls bodyless. Explicit payloads carry
+	// preconditions such as the expected organization owner.
+	_, emptyRequest := any(request).(struct{})
+	deleteBody := method == http.MethodDelete && !emptyRequest && any(request) != nil
+	if method == http.MethodPost || method == http.MethodPut || method == http.MethodPatch || deleteBody {
 		payload, err := json.Marshal(request)
 		if err != nil {
 			return result, err

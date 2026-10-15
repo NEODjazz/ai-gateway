@@ -135,23 +135,46 @@ func (h Handler) CreateDirectoryTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var input struct {
-		ID          string `json:"id"`
-		ExternalID  string `json:"external_id"`
-		Name        string `json:"name"`
-		Description string `json:"description"`
-		Status      string `json:"status"`
+		OrganizationID string `json:"organization_id"`
+		ID             string `json:"id"`
+		ExternalID     string `json:"external_id"`
+		Name           string `json:"name"`
+		Description    string `json:"description"`
+		Status         string `json:"status"`
 	}
 	if !decodeDirectoryJSON(w, r, &input) {
 		return
 	}
 	team := DirectoryTeam{ID: input.ID, ExternalID: input.ExternalID, Name: input.Name, Description: input.Description, Status: input.Status}
+	var organizationClient TeamOrganizationClient
+	if input.OrganizationID != "" {
+		if len(input.OrganizationID) > 256 || strings.ContainsAny(input.OrganizationID, "\x00\r\n") {
+			writeError(w, 400, "invalid_request", "invalid organization_id")
+			return
+		}
+		var supported bool
+		organizationClient, supported = h.organizations.(TeamOrganizationClient)
+		if !supported {
+			writeError(w, 503, "management_unavailable", "atomic team creation with organization is unavailable")
+			return
+		}
+	}
 	event := AuditEvent{Action: "team.create", TargetType: "team", TargetID: team.ID}
+	if input.OrganizationID != "" {
+		event.Details = map[string]any{"organization_id": input.OrganizationID}
+	}
 	audit := managementAudit(req)
 	if !h.auditMutation(r.Context(), audit, event) {
 		writeError(w, http.StatusServiceUnavailable, "audit_unavailable", "audit service is unavailable")
 		return
 	}
-	saved, err := h.directory.SaveGroup(r.Context(), audit, DirectoryGroup{Team: team, Members: []string{}}, true)
+	var saved DirectoryGroup
+	var err error
+	if input.OrganizationID != "" {
+		saved.Team, err = organizationClient.CreateTeamInOrganization(r.Context(), audit, team, input.OrganizationID)
+	} else {
+		saved, err = h.directory.SaveGroup(r.Context(), audit, DirectoryGroup{Team: team, Members: []string{}}, true)
+	}
 	if err != nil {
 		h.auditOutcome(r.Context(), audit, event, "failed")
 		writeDirectoryFailure(w, err)

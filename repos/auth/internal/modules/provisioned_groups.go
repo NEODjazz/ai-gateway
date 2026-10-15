@@ -54,8 +54,8 @@ func (m AuthModule) SaveDirectoryTeamMembers(ctx context.Context, team Directory
 	if err != nil {
 		return DirectoryTeam{}, nil, err
 	}
-	team.ID, team.ExternalID, team.Name, team.Description = strings.TrimSpace(team.ID), strings.TrimSpace(team.ExternalID), strings.TrimSpace(team.Name), strings.TrimSpace(team.Description)
-	if !validDirectoryID(team.ID) || len(team.ExternalID) > 256 || team.Name == "" || len(team.Name) > 256 || len(team.Description) > 1024 || !validDirectoryStatus(team.Status) || len(userIDs) > 500 {
+	team, err = normalizeDirectoryTeam(team)
+	if err != nil || len(userIDs) > 500 {
 		return DirectoryTeam{}, nil, ErrInvalidDirectoryEntry
 	}
 	seen := make(map[string]struct{}, len(userIDs))
@@ -76,6 +76,14 @@ func (m AuthModule) SaveDirectoryTeamMembers(ctx context.Context, team Directory
 		return DirectoryTeam{}, nil, ErrDirectoryConflict
 	}
 	return team, clean, err
+}
+
+func normalizeDirectoryTeam(team DirectoryTeam) (DirectoryTeam, error) {
+	team.ID, team.ExternalID, team.Name, team.Description = strings.TrimSpace(team.ID), strings.TrimSpace(team.ExternalID), strings.TrimSpace(team.Name), strings.TrimSpace(team.Description)
+	if !validDirectoryID(team.ID) || len(team.ExternalID) > 256 || team.Name == "" || len(team.Name) > 256 || len(team.Description) > 1024 || !validDirectoryStatus(team.Status) {
+		return DirectoryTeam{}, ErrInvalidDirectoryEntry
+	}
+	return team, nil
 }
 
 func (s *PostgresVirtualKeyStore) GetTeamWithMembers(ctx context.Context, id string) (DirectoryTeam, []string, error) {
@@ -114,6 +122,10 @@ func (s *PostgresVirtualKeyStore) FindTeam(ctx context.Context, attribute, value
 }
 
 func (s *PostgresVirtualKeyStore) SaveTeamWithMembers(ctx context.Context, team DirectoryTeam, userIDs []string, create bool) (DirectoryTeam, []string, error) {
+	return s.saveTeamWithMembers(ctx, team, userIDs, create, "")
+}
+
+func (s *PostgresVirtualKeyStore) saveTeamWithMembers(ctx context.Context, team DirectoryTeam, userIDs []string, create bool, orgID string) (DirectoryTeam, []string, error) {
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return DirectoryTeam{}, nil, err
@@ -136,6 +148,15 @@ func (s *PostgresVirtualKeyStore) SaveTeamWithMembers(ctx context.Context, team 
 	}
 	if err != nil {
 		return DirectoryTeam{}, nil, err
+	}
+	if orgID != "" {
+		result, err := tx.Exec(ctx, `INSERT INTO auth_organization_teams(organization_id,team_id) SELECT id,$2 FROM auth_organizations WHERE id=$1 AND status='active'`, orgID, team.ID)
+		if err != nil {
+			return DirectoryTeam{}, nil, err
+		}
+		if result.RowsAffected() != 1 {
+			return DirectoryTeam{}, nil, ErrInvalidDirectoryEntry
+		}
 	}
 	if _, err = tx.Exec(ctx, `DELETE FROM auth_team_memberships WHERE team_id=$1 AND NOT (user_id=ANY($2))`, team.ID, userIDs); err != nil {
 		return DirectoryTeam{}, nil, err

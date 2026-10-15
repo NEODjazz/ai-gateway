@@ -22,6 +22,7 @@ function fixture({ scoped = false, keyFailure = false, deleteFailure = false, co
     const path = String(input); const url = new URL(path, "http://example.test"); const q = url.searchParams;
     requests.push({ path, method: options?.method, body: options?.body ? JSON.parse(String(options.body)) : undefined });
     if (url.pathname === "/admin/v1/session") return json({ user_id: "operator", team_id: scoped ? "platform" : undefined, roles: [scoped ? "team_admin" : "admin"], capabilities: scoped ? ["team_directory"] : ["admin", "team_directory"] });
+    if (url.pathname.endsWith("/organization")) return json({team_id:url.pathname.split("/")[4],organization:null});
     if (url.pathname === "/admin/v1/teams/platform") return json({id:"platform",name:"Platform",description:"Core team",status:"active",member_count:members.length,external_id:"external-team",created_at:time,updated_at:time});
     if (url.pathname === "/admin/v1/teams" && q.get("team_id")) return json({ data: [{ id: "platform", name: "Platform", description: "Core team", status: "active", member_count: members.length, external_id: "external-team", created_at: time, updated_at: time }], total: 1, offset: 0, limit: 1 });
     if (url.pathname === "/admin/v1/teams") return json({ data: [{id:"platform",name:"Platform",status:"active"},{id:"research",name:"Research",status:"active"}],total:2,offset:0,limit:25 });
@@ -132,6 +133,7 @@ describe("Identity workspaces", () => {
     vi.spyOn(globalThis,"fetch").mockImplementation(async input=>{
       const path=String(input),q=new URL(path,"http://example.test").searchParams;
       if(path.endsWith("/session"))return json({roles:["admin"],capabilities:["admin","team_directory"]});
+      if(path.endsWith("/organization"))return json({team_id:"platform",organization:null});
       if(path.endsWith("/teams/platform"))return json({id:"platform",name:"Platform",status:"active",member_count:1,created_at:time,updated_at:time});
       if(path.includes("/identity-policies/"))return json({policy:{scope_type:"team",scope_id:"platform",model_access:"inherit",allowed_models:[],rpm:0,tpm:0},configured:false,durable:true});
       if(path.includes("team-memberships?"))return json({data:[{...member("foreign","Private user"),team_id:"foreign-team"}],total:1,offset:0,limit:25});
