@@ -31,6 +31,20 @@ func TestOpenAPIDocumentIsValid(t *testing.T) {
 	loadDocument(t)
 }
 
+func TestOpenAPIInlineChatPDFAffectsOnlyRequestMessages(t *testing.T) {
+	document := loadDocument(t)
+	file := map[string]any{"type": "file", "file": map[string]any{"filename": "test.pdf", "file_data": "data:application/pdf;base64,JVBERi0xLjcK"}}
+	request := map[string]any{"role": "user", "content": []any{file}}
+	input := document.Components.Schemas["ChatCompletionRequest"].Value.Properties["messages"].Value.Items.Value
+	if err := input.VisitJSON(request, openapi3.EnableJSONSchema2020()); err != nil {
+		t.Fatalf("standard Chat PDF request is not documented: %v", err)
+	}
+	response := map[string]any{"role": "assistant", "content": []any{file}}
+	if err := document.Components.Schemas["Message"].Value.VisitJSON(response, openapi3.EnableJSONSchema2020()); err == nil {
+		t.Fatal("input file support broadened the response content contract")
+	}
+}
+
 func TestOpenAPIGenerateContentServiceControls(t *testing.T) {
 	document := loadDocument(t)
 	request := document.Components.Schemas["GenerateContentRequest"].Value

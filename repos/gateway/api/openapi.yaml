@@ -9705,7 +9705,7 @@ components:
           properties:
             filename: {type: string, minLength: 1, maxLength: 256, description: PDF basename without directory components.}
             file_data: {type: string, maxLength: 22369652, pattern: '^data:application/pdf;base64,[A-Za-z0-9+/]+={0,2}$'}
-    MessageContent:
+    ChatInputMessageContent:
       oneOf:
         - type: string
         - type: 'null'
@@ -9716,6 +9716,16 @@ components:
               - $ref: '#/components/schemas/TextContentPart'
               - $ref: '#/components/schemas/ImageContentPart'
               - $ref: '#/components/schemas/ChatFileContentPart'
+    MessageContent:
+      oneOf:
+        - type: string
+        - type: 'null'
+        - type: array
+          minItems: 1
+          items:
+            oneOf:
+              - $ref: '#/components/schemas/TextContentPart'
+              - $ref: '#/components/schemas/ImageContentPart'
     FunctionCall:
       type: object
       required: [name, arguments]
@@ -9747,6 +9757,22 @@ components:
         type: {type: string, const: function}
         function: {$ref: '#/components/schemas/FunctionCall'}
         extra_content: {$ref: '#/components/schemas/ToolCallExtraContent'}
+    ChatInputMessage:
+      type: object
+      required: [role]
+      properties:
+        role: {$ref: '#/components/schemas/Message/properties/role'}
+        content: {$ref: '#/components/schemas/ChatInputMessageContent'}
+        prefix: {$ref: '#/components/schemas/Message/properties/prefix'}
+        refusal: {$ref: '#/components/schemas/Message/properties/refusal'}
+        annotations: {$ref: '#/components/schemas/Message/properties/annotations'}
+        audio: {$ref: '#/components/schemas/Message/properties/audio'}
+        name: {$ref: '#/components/schemas/Message/properties/name'}
+        tool_call_id: {$ref: '#/components/schemas/Message/properties/tool_call_id'}
+        tool_calls: {$ref: '#/components/schemas/Message/properties/tool_calls'}
+        function_call: {$ref: '#/components/schemas/Message/properties/function_call'}
+        reasoning: {$ref: '#/components/schemas/Message/properties/reasoning'}
+        reasoning_content: {$ref: '#/components/schemas/Message/properties/reasoning_content'}
     Message:
       type: object
       required: [role]
@@ -9936,7 +9962,7 @@ components:
         messages:
           type: array
           minItems: 1
-          items: {$ref: '#/components/schemas/Message'}
+          items: {$ref: '#/components/schemas/ChatInputMessage'}
         tools:
           type: array
           items: {$ref: '#/components/schemas/ChatTool'}
