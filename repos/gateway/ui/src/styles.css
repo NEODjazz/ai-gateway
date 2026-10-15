@@ -554,6 +554,7 @@ textarea { resize: vertical; }
 .bulk-users-results { max-height: 320px; overflow: auto; }
 .directory-summary-detail { display: block; margin-top: 3px; color: #687c88; font-size: 12px; }
 .directory-summary-status { margin-bottom: 16px; }
+.gateway-table .directory-identity-column { min-width: 160px; }
 .gateway-table .directory-summary-column { min-width: 120px; }
 .gateway-table .directory-summary-models { min-width: 180px; }
 .gateway-table .directory-summary-budgets { min-width: 210px; }

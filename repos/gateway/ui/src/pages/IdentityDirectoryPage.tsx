@@ -57,7 +57,7 @@ export function IdentityDirectoryPage({ kind }: { kind: IdentityKind }) {
   }, [client, direction, kind, limit, offset, role, scope, search, sort, status]);
   useEffect(() => { void load(); return () => { ++generation.current; pending.current?.abort(); }; }, [load]);
   const columns = useMemo<Column[]>(() => [
-    { key: "name", label: kind === "users" ? "User" : "Team", render: (value, row) => <div><Link to={`/${kind}/${encodeURIComponent(String(row.id))}`}>{String(value || row.email || row.id)}</Link>{String(value || row.email || row.id)!==row.id&&<small className="directory-summary-detail">{String(row.id)}</small>}</div> },
+    { key: "name", label: kind === "users" ? "User" : "Team", className: "directory-identity-column", render: (value, row) => <div><Link to={`/${kind}/${encodeURIComponent(String(row.id))}`}>{String(value || row.email || row.id)}</Link>{String(value || row.email || row.id)!==row.id&&<small className="directory-summary-detail">{String(row.id)}</small>}</div> },
     { key: "id", label: "ID" },
     ...(kind === "users" ? [{ key: "email", label: "Email" }, { key: "roles", label: "Approved roles" }, { key: "team_ids", label: "Teams" }] : [{ key: "description", label: "Description" }, { key: "member_count", label: "Members" }]),
     ...(kind === "teams" ? [{ key: "organization", label: "Organization" }, { key: "models", label: "Models & limits" }] : []),
