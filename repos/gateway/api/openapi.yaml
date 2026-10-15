@@ -9691,6 +9691,20 @@ components:
         image_url:
           type: string
           pattern: '^data:image/(jpeg|png|gif|webp);base64,[A-Za-z0-9+/]+={0,2}$'
+    ChatFileContentPart:
+      type: object
+      additionalProperties: false
+      required: [type, file]
+      description: Inline PDF in a user message. Requires native file_input capability or Docling processing on the selected deployment. Docling replaces the file with extracted text before TPM and budget admission.
+      properties:
+        type: {type: string, const: file}
+        file:
+          type: object
+          additionalProperties: false
+          required: [filename, file_data]
+          properties:
+            filename: {type: string, minLength: 1, maxLength: 256, description: PDF basename without directory components.}
+            file_data: {type: string, maxLength: 22369652, pattern: '^data:application/pdf;base64,[A-Za-z0-9+/]+={0,2}$'}
     MessageContent:
       oneOf:
         - type: string
@@ -9701,6 +9715,7 @@ components:
             oneOf:
               - $ref: '#/components/schemas/TextContentPart'
               - $ref: '#/components/schemas/ImageContentPart'
+              - $ref: '#/components/schemas/ChatFileContentPart'
     FunctionCall:
       type: object
       required: [name, arguments]

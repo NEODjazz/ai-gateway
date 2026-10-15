@@ -21,7 +21,15 @@ worker lifecycle remain upstream implementations. Upgrade these together and run
 the real integration suite before changing the pin.
 
 Only inline PDF attachments in Chat Completions and Responses are accepted in
-this version. Extracted Markdown includes table text and OCR output. Images and
+this version. Chat Completions accepts the standard
+`{"type":"file","file":{"filename":"document.pdf","file_data":"data:application/pdf;base64,..."}}`
+content part, as used by LibreChat, as well as the existing flat `input_file`
+form. Responses keeps its flat `input_file` contract. Both Chat forms use the
+same PDF signature, filename, attachment-count and aggregate-byte validation;
+remote URLs and provider file IDs are not introduced. With a Docling deployment,
+conversion occurs before TPM and budget admission so the Base64 transport is
+not mistaken for model context. Native deployments retain the original payload.
+Extracted Markdown includes table text and OCR output. Images and
 charts are not passed as interpreted visual content. Other document formats and
 OCR language profiles need their own validated API contracts and fixtures.
 

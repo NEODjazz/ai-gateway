@@ -23,6 +23,10 @@ type ResponseFileAttachment struct {
 }
 
 func ResponseFileAttachments(input any) ([]ResponseFileAttachment, error) {
+	return inlineFileAttachments(input, false)
+}
+
+func inlineFileAttachments(input any, allowChatFiles bool) ([]ResponseFileAttachment, error) {
 	attachments := make([]ResponseFileAttachment, 0)
 	total := 0
 	var walk func(any) error
@@ -36,8 +40,17 @@ func ResponseFileAttachments(input any) ([]ResponseFileAttachment, error) {
 			}
 		case map[string]any:
 			typeName, _ := typed["type"].(string)
+			file := typed
+			if allowChatFiles && typeName == "file" {
+				nested, ok := typed["file"].(map[string]any)
+				if !ok || len(typed) != 2 || len(nested) != 2 {
+					return ErrInvalidFileInput
+				}
+				file = map[string]any{"type": "input_file", "filename": nested["filename"], "file_data": nested["file_data"]}
+				typeName = "input_file"
+			}
 			if typeName == "input_file" {
-				attachment, data, err := parseResponseFile(typed)
+				attachment, data, err := parseResponseFile(file)
 				if err != nil || len(attachments) >= MaxResponseFileAttachments || total > MaxResponseFileBytes-len(data) {
 					return ErrInvalidFileInput
 				}
@@ -101,7 +114,7 @@ func ChatFileAttachments(messages []Message) ([]ResponseFileAttachment, error) {
 	attachments := make([]ResponseFileAttachment, 0)
 	total := 0
 	for _, message := range messages {
-		found, err := ResponseFileAttachments(message.Content)
+		found, err := inlineFileAttachments(message.Content, true)
 		if err != nil {
 			return nil, err
 		}

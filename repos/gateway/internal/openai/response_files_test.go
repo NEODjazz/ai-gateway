@@ -66,3 +66,41 @@ func TestChatFileAttachmentsRequireUserRoleAndGlobalLimits(t *testing.T) {
 		t.Fatal("global chat file limit was not enforced")
 	}
 }
+
+func TestChatFileAttachmentsOpenAIInlinePDF(t *testing.T) {
+	data := "data:application/pdf;base64," + base64.StdEncoding.EncodeToString([]byte("%PDF-1.7\ncontent"))
+	file := map[string]any{"type": "file", "file": map[string]any{"filename": "report.pdf", "file_data": data}}
+	messages := []Message{{Role: "user", Content: []any{file}}}
+	attachments, err := ChatFileAttachments(messages)
+	if err != nil || len(attachments) != 1 || attachments[0].Filename != "report.pdf" || !HasChatFileInput(ChatCompletionRequest{Messages: messages}) {
+		t.Fatalf("standard Chat PDF was not recognized: files=%d err=%v", len(attachments), err)
+	}
+	if file["type"] != "file" {
+		t.Fatal("native Chat payload was mutated")
+	}
+	for _, role := range []string{"assistant", "system", "tool"} {
+		if _, err := ChatFileAttachments([]Message{{Role: role, Content: []any{file}}}); err == nil {
+			t.Fatalf("accepted PDF in %s message", role)
+		}
+	}
+	invalid := []any{
+		map[string]any{"type": "file", "file": "invalid"},
+		map[string]any{"type": "file", "file": map[string]any{"filename": "report.pdf", "file_id": "external"}},
+		map[string]any{"type": "file", "file": map[string]any{"filename": "../report.pdf", "file_data": data}},
+		map[string]any{"type": "file", "file": map[string]any{"filename": "report.pdf", "file_data": "data:application/pdf;base64,bm90LXBkZg=="}},
+		map[string]any{"type": "file", "file": map[string]any{"filename": "report.pdf", "file_data": data, "extra": true}},
+		map[string]any{"type": "file", "file": file["file"], "extra": true},
+	}
+	for index, part := range invalid {
+		if _, err := ChatFileAttachments([]Message{{Role: "user", Content: []any{part}}}); err == nil {
+			t.Errorf("accepted malformed Chat file %d", index)
+		}
+	}
+	parts := make([]any, MaxResponseFileAttachments+1)
+	for i := range parts {
+		parts[i] = file
+	}
+	if _, err := ChatFileAttachments([]Message{{Role: "user", Content: parts}}); err == nil {
+		t.Fatal("standard Chat files bypassed the attachment limit")
+	}
+}
