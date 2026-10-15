@@ -53,7 +53,7 @@ func (h Handler) Realtime(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "admin_state_unavailable", "Realtime configuration is unavailable")
 		return
 	}
-	if !h.prepareAccessGroups(w, &identity) || !h.authorizeModel(w, identity, model) || !h.prepareModelFallbacks(w, r.Context(), &identity, model) {
+	if !h.prepareAccessGroups(r.Context(), w, &identity) || !h.authorizeModel(w, identity, model) || !h.prepareModelFallbacks(w, r.Context(), &identity, model) {
 		return
 	}
 	runtime, ok := h.provider.(provider.RealtimeProvider)
@@ -71,9 +71,9 @@ func (h Handler) Realtime(w http.ResponseWriter, r *http.Request) {
 	}
 	defer upstream.Close()
 	tracker := newRealtimeBillingTracker(h.pipeline, selected, model, func(ctx context.Context, tokens int) error {
-		allowed, retryAfter, err := h.checkRateLimit(ctx, identity, tokens)
+		allowed, retryAfter, err := h.checkRealtimeAdmission(ctx, identity, model, tokens)
 		if err != nil {
-			return fmt.Errorf("realtime rate limit unavailable: %w", err)
+			return fmt.Errorf("realtime admission failed: %w", err)
 		}
 		if !allowed {
 			return &realtimeRateLimitError{retryAfter: retryAfter}
@@ -171,6 +171,8 @@ func sendRealtimeGatewayError(client *websocket.Conn, cause error) error {
 		code, message = "billing_conflict", "billing lifecycle conflict"
 	} else if errors.Is(cause, errRealtimeInputTranscriptionUnsupported) {
 		code, message = "unsupported_feature", errRealtimeInputTranscriptionUnsupported.Error()
+	} else if errors.Is(cause, errRealtimeModelNotAllowed) {
+		code, message = "model_not_allowed", "model access was revoked"
 	} else {
 		var credentialLimit *realtimeRateLimitError
 		var providerLimit *provider.ProviderQuotaError
@@ -184,6 +186,20 @@ func sendRealtimeGatewayError(client *websocket.Conn, cause error) error {
 }
 
 type realtimeRateLimitError struct{ retryAfter time.Duration }
+
+var errRealtimeModelNotAllowed = errors.New("realtime model access was revoked")
+
+func (h Handler) checkRealtimeAdmission(ctx context.Context, identity modules.RequestContext, model string, tokens int) (bool, time.Duration, error) {
+	if h.adminState != nil {
+		if err := h.adminState.Refresh(ctx); err != nil {
+			return false, 0, err
+		}
+	}
+	if !h.requestModelAllowed(identity, model) {
+		return false, 0, errRealtimeModelNotAllowed
+	}
+	return h.checkRateLimit(ctx, identity, tokens)
+}
 
 func (e *realtimeRateLimitError) Error() string {
 	return fmt.Sprintf("realtime rate limit exceeded; retry after %s", e.retryAfter)

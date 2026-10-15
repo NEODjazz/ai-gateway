@@ -212,7 +212,7 @@ func (h Handler) processAgentMCPJob(ctx context.Context, job asyncstate.Job) err
 		return retry(errors.New("agent background authorization is unavailable"))
 	}
 	check := newA2AResponseCapture()
-	if !h.prepareAccessGroups(check, &identity) || !h.authorizeA2ATaskModel(check, nil, identity, stored.Model) {
+	if !h.prepareAccessGroups(requestCtx, check, &identity) || !h.authorizeA2ATaskModel(check, nil, identity, stored.Model) {
 		if check.status >= 500 {
 			return retry(errors.New("agent background policy is unavailable"))
 		}

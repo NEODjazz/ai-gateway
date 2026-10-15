@@ -79,7 +79,7 @@ func (h Handler) RAGQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	identity.APIKey = ""
-	if !h.prepareAccessGroups(w, &identity) || !h.authorizeModel(w, identity, retrieval.Model) {
+	if !h.prepareAccessGroups(r.Context(), w, &identity) || !h.authorizeModel(w, identity, retrieval.Model) {
 		return
 	}
 	search := vectorStoreSearchRequest{Query: query, Model: retrieval.Model, Provider: retrieval.Provider, MaxNumResults: retrieval.TopK, Filters: retrieval.Filters}

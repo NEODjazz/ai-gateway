@@ -51,7 +51,7 @@ func (h Handler) ListMCPServerTools(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "admin_state_unavailable", "MCP configuration is unavailable")
 		return
 	}
-	if !h.prepareAccessGroups(w, &req) {
+	if !h.prepareAccessGroups(r.Context(), w, &req) {
 		return
 	}
 	if h.mcp == nil || h.mcpRuntime == nil {
@@ -156,7 +156,7 @@ func (h Handler) CallMCPServerTool(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "admin_state_unavailable", "MCP configuration is unavailable")
 		return
 	}
-	if !h.prepareAccessGroups(w, &req) {
+	if !h.prepareAccessGroups(r.Context(), w, &req) {
 		return
 	}
 	if h.mcp == nil || h.mcpRuntime == nil || h.mcpCalls == nil {

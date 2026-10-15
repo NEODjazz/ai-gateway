@@ -100,7 +100,7 @@ func (h Handler) SearchVectorStore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	reqCtx.APIKey = ""
-	if !h.prepareAccessGroups(w, &reqCtx) || !h.authorizeModel(w, reqCtx, input.Model) {
+	if !h.prepareAccessGroups(r.Context(), w, &reqCtx) || !h.authorizeModel(w, reqCtx, input.Model) {
 		return
 	}
 	owner := fileOwnerKey(reqCtx)

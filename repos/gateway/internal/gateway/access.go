@@ -125,8 +125,16 @@ func modelAllowed(model string, grants []string) bool {
 	return false
 }
 
-func requestModelAllowed(req modules.RequestContext, model string) bool {
-	return (!req.ModelAccessRestricted || len(req.AllowedModels) > 0) && modelAllowed(model, req.AllowedModels)
+func (h Handler) requestModelAllowed(req modules.RequestContext, model string) bool {
+	if (req.ModelAccessRestricted && len(req.AllowedModels) == 0) || !modelAllowed(model, req.AllowedModels) {
+		return false
+	}
+	for _, policy := range h.identityPolicies(req) {
+		if !policy.modelAllowed(model) {
+			return false
+		}
+	}
+	return true
 }
 
 func toolAllowed(tool string, grants []string) bool {
@@ -404,7 +412,7 @@ func (h Handler) authorizeAccess(w http.ResponseWriter, ctx context.Context, req
 }
 
 func (h Handler) authorizeModel(w http.ResponseWriter, req modules.RequestContext, model string) bool {
-	if !requestModelAllowed(req, model) {
+	if !h.requestModelAllowed(req, model) {
 		writeError(w, 403, "model_not_allowed", "credential is not allowed to use model "+strconv.Quote(model))
 		return false
 	}
@@ -442,7 +450,7 @@ func (h Handler) authorizeRateLimit(w http.ResponseWriter, ctx context.Context, 
 func (h Handler) checkRateLimit(ctx context.Context, req modules.RequestContext, tokens int) (bool, time.Duration, error) {
 	// Consult shared configuration before admission using the control plane's
 	// refresh cadence. Observed failures are closed before consuming any quota.
-	if h.globalRateLimits != nil && h.adminState != nil {
+	if h.adminState != nil {
 		if err := h.adminState.Refresh(ctx); err != nil {
 			return false, 0, err
 		}
@@ -452,14 +460,26 @@ func (h Handler) checkRateLimit(ctx context.Context, req modules.RequestContext,
 		key = "team:" + req.TeamID + ":credential:" + req.CredentialID
 	}
 	allowed, retry, err := h.rateLimits.Allow(ctx, key, RateLimit{Requests: req.RateLimitRPM, Tokens: req.RateLimitTPM}, tokens)
-	if err != nil || !allowed || h.globalRateLimits == nil {
+	if err != nil || !allowed {
 		return allowed, retry, err
+	}
+	for _, policy := range h.identityPolicies(req) {
+		allowed, retry, err = h.rateLimits.Allow(ctx, "\x00gateway:identity:"+policy.ScopeType+":"+policy.ScopeID, RateLimit{Requests: policy.RPM, Tokens: policy.TPM}, tokens)
+		if err != nil || !allowed {
+			return allowed, retry, err
+		}
+	}
+	if h.globalRateLimits == nil {
+		return true, 0, nil
 	}
 	limits := h.globalRateLimits.effective()
 	return h.rateLimits.Allow(ctx, "\x00gateway:global", RateLimit{Requests: limits.RPM, Tokens: limits.TPM}, tokens)
 }
 
-func (h Handler) prepareAccessGroups(w http.ResponseWriter, req *modules.RequestContext) bool {
+func (h Handler) prepareAccessGroups(ctx context.Context, w http.ResponseWriter, req *modules.RequestContext) bool {
+	if !h.prepareIdentityPolicies(ctx, w, req) {
+		return false
+	}
 	if len(req.AccessGroupIDs) == 0 {
 		return true
 	}

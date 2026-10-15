@@ -238,7 +238,7 @@ func (h Handler) authorizeSkillOperation(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadGateway, "provider_failed", "Skills are not supported by the configured provider")
 		return modules.RequestContext{}, nil, false
 	}
-	if !h.prepareAccessGroups(w, &req) || !h.authorizeRateLimit(w, r.Context(), req, 0) {
+	if !h.prepareAccessGroups(r.Context(), w, &req) || !h.authorizeRateLimit(w, r.Context(), req, 0) {
 		return modules.RequestContext{}, nil, false
 	}
 	return req, skills, true

@@ -196,7 +196,7 @@ func (h Handler) ApplyGuardrail(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "module_failed", "authentication failed")
 		return
 	}
-	if !h.prepareAccessGroups(w, &req) {
+	if !h.prepareAccessGroups(r.Context(), w, &req) {
 		return
 	}
 	tokens := openai.EstimateContextTokens(input.Text)

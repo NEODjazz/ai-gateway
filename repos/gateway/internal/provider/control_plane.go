@@ -280,6 +280,12 @@ func sameCredentialMaterial(id string, previous, next map[string]encryptedCreden
 	return firstFound && secondFound && bytes.Equal(first.Nonce, second.Nonce) && bytes.Equal(first.Ciphertext, second.Ciphertext)
 }
 
+// AdminStateDurable distinguishes a configured state store from the router's
+// process-local admin registry. The runtime exists in both configurations.
+func (r *Router) AdminStateDurable() bool {
+	return r.controlPlane != nil && r.controlPlane.store != nil
+}
+
 // AdminState returns the opaque durable state used by gateway management
 // registries. Refreshing here makes reads on one replica observe writes made by
 // another replica through the existing control-plane revision mechanism.

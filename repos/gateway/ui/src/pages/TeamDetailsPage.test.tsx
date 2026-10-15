@@ -32,6 +32,7 @@ function fixture({ scoped = false, keyFailure = false, deleteFailure = false, co
       const offset = Number(q.get("offset")), limit = Number(q.get("limit"));
       return json({ data: filtered.slice(offset, offset + limit), total: filtered.length, offset, limit });
     }
+    if (url.pathname.startsWith("/admin/v1/identity-policies/")) {const parts=url.pathname.split("/");return json({policy:{scope_type:parts[4],scope_id:parts[5],model_access:"inherit",allowed_models:[],rpm:0,tpm:0},configured:false,durable:true});}
     if (url.pathname === "/admin/v1/budgets/page") return json({data:[],total:0,offset:0,limit:25});
     if (url.pathname === "/admin/v1/keys") {
       if (keyFailure) return json({ error: { message: "Key inventory unavailable" } }, 503);
@@ -132,6 +133,7 @@ describe("Identity workspaces", () => {
       const path=String(input),q=new URL(path,"http://example.test").searchParams;
       if(path.endsWith("/session"))return json({roles:["admin"],capabilities:["admin","team_directory"]});
       if(path.endsWith("/teams/platform"))return json({id:"platform",name:"Platform",status:"active",member_count:1,created_at:time,updated_at:time});
+      if(path.includes("/identity-policies/"))return json({policy:{scope_type:"team",scope_id:"platform",model_access:"inherit",allowed_models:[],rpm:0,tpm:0},configured:false,durable:true});
       if(path.includes("team-memberships?"))return json({data:[{...member("foreign","Private user"),team_id:"foreign-team"}],total:1,offset:0,limit:25});
       return json({data:[],total:0,offset:Number(q.get("offset")),limit:Number(q.get("limit"))});
     });

@@ -112,7 +112,7 @@ func (h Handler) countContextTokens(w http.ResponseWriter, r *http.Request, requ
 		writeError(w, http.StatusBadGateway, "module_failed", "module produced invalid "+kind+" input: "+err.Error())
 		return provider.TokenCountResult{}, false
 	}
-	if !h.prepareAccessGroups(w, &req) {
+	if !h.prepareAccessGroups(r.Context(), w, &req) {
 		return provider.TokenCountResult{}, false
 	}
 	if err := h.bindSkillExecution(r.Context(), &req); err != nil {

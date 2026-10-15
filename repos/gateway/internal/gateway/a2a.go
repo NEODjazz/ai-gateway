@@ -590,7 +590,7 @@ func (h Handler) authenticateA2AContinuation(w http.ResponseWriter, r *http.Requ
 	}
 	req.APIKey = ""
 	capture := newA2AResponseCapture()
-	if !h.prepareAccessGroups(capture, &req) {
+	if !h.prepareAccessGroups(r.Context(), capture, &req) {
 		copyA2AResponse(w, capture, rpcID)
 		return modules.RequestContext{}, false
 	}
@@ -932,7 +932,7 @@ func (h Handler) authorizeA2ATaskOperation(w http.ResponseWriter, r *http.Reques
 }
 
 func (h Handler) authorizeA2ATaskModel(w http.ResponseWriter, rpcID json.RawMessage, reqCtx modules.RequestContext, model string) bool {
-	if !requestModelAllowed(reqCtx, model) || reqCtx.AccessGroupsEvaluated && !modelAllowed(model, reqCtx.AccessGroupModels) {
+	if !h.requestModelAllowed(reqCtx, model) || reqCtx.AccessGroupsEvaluated && !modelAllowed(model, reqCtx.AccessGroupModels) {
 		h.writeA2AError(w, rpcID, http.StatusForbidden, -32603, "Task access is not allowed")
 		return false
 	}

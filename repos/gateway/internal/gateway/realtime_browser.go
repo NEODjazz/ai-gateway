@@ -123,7 +123,7 @@ func (h Handler) CreateRealtimeBrowserTicket(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusServiceUnavailable, "admin_state_unavailable", "Realtime configuration is unavailable")
 		return
 	}
-	if !h.prepareAccessGroups(w, &identity) || !h.authorizeModel(w, identity, input.Model) {
+	if !h.prepareAccessGroups(r.Context(), w, &identity) || !h.authorizeModel(w, identity, input.Model) {
 		return
 	}
 	if apiKey == "" {

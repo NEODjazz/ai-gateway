@@ -61,7 +61,7 @@ func (h Handler) CountResponseInputTokens(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadGateway, "module_failed", "module produced invalid "+kind+" input: "+err.Error())
 		return
 	}
-	if !h.prepareAccessGroups(w, &reqCtx) {
+	if !h.prepareAccessGroups(r.Context(), w, &reqCtx) {
 		return
 	}
 	toolIdentifiers, validTools := responseRequestToolIdentifiers(responseRequest)

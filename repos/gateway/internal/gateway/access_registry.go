@@ -66,11 +66,12 @@ type PolicyMatchContext struct {
 }
 
 type AccessRegistry struct {
-	mu          sync.RWMutex
-	projects    map[string]Project
-	groups      map[string]AccessGroup
-	attachments map[string]PolicyAttachment
-	tags        map[string]TagDefinition
+	identityPolicies map[identityPolicyKey]IdentityInferencePolicy
+	mu               sync.RWMutex
+	projects         map[string]Project
+	groups           map[string]AccessGroup
+	attachments      map[string]PolicyAttachment
+	tags             map[string]TagDefinition
 }
 
 var errInvalidAccessEntry = errors.New("invalid access registry entry")
@@ -78,7 +79,7 @@ var errAccessEntryInUse = errors.New("access registry entry is in use")
 var errAccessResponseWritten = errors.New("access registry response already written")
 
 func NewAccessRegistry() *AccessRegistry {
-	return &AccessRegistry{projects: map[string]Project{}, groups: map[string]AccessGroup{}, attachments: map[string]PolicyAttachment{}, tags: map[string]TagDefinition{}}
+	return &AccessRegistry{identityPolicies: map[identityPolicyKey]IdentityInferencePolicy{}, projects: map[string]Project{}, groups: map[string]AccessGroup{}, attachments: map[string]PolicyAttachment{}, tags: map[string]TagDefinition{}}
 }
 func (h Handler) WithAccessRegistry(registry *AccessRegistry) Handler { h.access = registry; return h }
 func (r *AccessRegistry) Projects() []Project {

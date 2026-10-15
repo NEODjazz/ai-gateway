@@ -539,7 +539,7 @@ func validateBatchBody(endpoint string, body []byte) ([]byte, string, []string, 
 }
 
 func (h Handler) authorizeBatchModel(w http.ResponseWriter, req modules.RequestContext, model string) bool {
-	if !requestModelAllowed(req, model) {
+	if !h.requestModelAllowed(req, model) {
 		writeError(w, http.StatusForbidden, "model_not_allowed", "credential is not allowed to use model "+strconv.Quote(model))
 		return false
 	}
@@ -782,7 +782,7 @@ func (h Handler) executeBatchItem(ctx context.Context, batch batchstate.Batch, i
 			}
 		}
 		check := &discardBatchAuthorizationResponse{}
-		if !h.prepareAccessGroups(check, &identity) || !h.authorizeBatchModel(check, identity, model) || !h.prepareModelFallbacks(check, ctx, &identity, model) || (len(tools) > 0 && !h.authorizeTools(check, identity, tools, true)) {
+		if !h.prepareAccessGroups(ctx, check, &identity) || !h.authorizeBatchModel(check, identity, model) || !h.prepareModelFallbacks(check, ctx, &identity, model) || (len(tools) > 0 && !h.authorizeTools(check, identity, tools, true)) {
 			if check.status >= 500 {
 				return nil, false, true
 			}

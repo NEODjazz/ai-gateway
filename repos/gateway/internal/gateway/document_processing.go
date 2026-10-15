@@ -19,7 +19,7 @@ func (h Handler) prepareDocuments(w http.ResponseWriter, r *http.Request, req *m
 	if !h.documentProcessingEnabled() {
 		return true
 	}
-	if !h.prepareAccessGroups(w, req) || !h.authorizeModel(w, *req, req.Request.Model) {
+	if !h.prepareAccessGroups(r.Context(), w, req) || !h.authorizeModel(w, *req, req.Request.Model) {
 		return false
 	}
 	prepared, err := h.provider.(provider.DocumentInputPreparer).PrepareDocumentInput(r.Context(), *req)

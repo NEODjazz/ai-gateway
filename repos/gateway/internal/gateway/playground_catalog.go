@@ -65,7 +65,7 @@ func (h Handler) PlaygroundCatalog(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "admin_state_unavailable", "resource configuration is unavailable")
 		return
 	}
-	if !h.prepareAccessGroups(w, &req) || model != "" && !h.authorizeModel(w, req, model) || !h.authorizeRateLimit(w, r.Context(), req, 0) {
+	if !h.prepareAccessGroups(r.Context(), w, &req) || model != "" && !h.authorizeModel(w, req, model) || !h.authorizeRateLimit(w, r.Context(), req, 0) {
 		return
 	}
 	result := playgroundCatalog{MCPServers: []playgroundResource{}, MCPToolsets: []playgroundToolset{}, Policies: []string{}, Tags: uniqueStrings(req.Tags), Agents: []playgroundAgent{}}
@@ -134,7 +134,7 @@ func (h Handler) PlaygroundCatalog(w http.ResponseWriter, r *http.Request) {
 	slices.Sort(result.Policies)
 	if h.agents != nil {
 		for _, profile := range h.agents.AgentProfiles() {
-			if !profile.Enabled || !requestModelAllowed(req, profile.Model) || req.AccessGroupsEvaluated && (len(req.AccessGroupModels) == 0 || !modelAllowed(profile.Model, req.AccessGroupModels)) {
+			if !profile.Enabled || !h.requestModelAllowed(req, profile.Model) || req.AccessGroupsEvaluated && (len(req.AccessGroupModels) == 0 || !modelAllowed(profile.Model, req.AccessGroupModels)) {
 				continue
 			}
 			if h.access != nil {

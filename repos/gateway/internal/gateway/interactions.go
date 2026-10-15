@@ -75,7 +75,7 @@ func (h Handler) serveNativeInteraction(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	reqCtx.ResponseRequest = &shared
-	if !h.prepareAccessGroups(w, &reqCtx) {
+	if !h.prepareAccessGroups(r.Context(), w, &reqCtx) {
 		return
 	}
 	toolIdentifiers, validTools := responseToolIdentifiers(shared.Tools)
@@ -236,7 +236,7 @@ func (h Handler) authorizeInteractionResource(w http.ResponseWriter, r *http.Req
 		writeProviderFailure(w, err)
 		return modules.RequestContext{}, false
 	}
-	if !h.prepareAccessGroups(w, &reqCtx) || !h.authorizeAccess(w, r.Context(), reqCtx, model, 0) {
+	if !h.prepareAccessGroups(r.Context(), w, &reqCtx) || !h.authorizeAccess(w, r.Context(), reqCtx, model, 0) {
 		return modules.RequestContext{}, false
 	}
 	reqCtx.Request.Model = model

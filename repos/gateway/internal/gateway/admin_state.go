@@ -20,6 +20,7 @@ import (
 const adminStateSchemaVersion = 1
 const agentConfigurationAdminStateSchemaVersion = 2
 const agentMCPAdminStateSchemaVersion = 3
+const identityPolicyAdminStateSchemaVersion = 4
 
 type AdminStateController interface {
 	AdminState(context.Context) (json.RawMessage, int64, error)
@@ -45,6 +46,7 @@ type encryptedAgentInstructions struct {
 }
 
 type adminStateSnapshot struct {
+	IdentityPolicies     []IdentityInferencePolicy      `json:"identity_policies,omitempty"`
 	GlobalRateLimits     *GlobalRateLimitSettings       `json:"global_rate_limits,omitempty"`
 	SchemaVersion        int                            `json:"schema_version"`
 	Projects             []Project                      `json:"projects,omitempty"`
@@ -200,8 +202,11 @@ func (r *AdminStateRuntime) applyPayload(payload json.RawMessage, revision int64
 		if err := json.Unmarshal(payload, &snapshot); err != nil {
 			return err
 		}
-		if snapshot.SchemaVersion != adminStateSchemaVersion && snapshot.SchemaVersion != agentConfigurationAdminStateSchemaVersion && snapshot.SchemaVersion != agentMCPAdminStateSchemaVersion {
+		if snapshot.SchemaVersion != adminStateSchemaVersion && snapshot.SchemaVersion != agentConfigurationAdminStateSchemaVersion && snapshot.SchemaVersion != agentMCPAdminStateSchemaVersion && snapshot.SchemaVersion != identityPolicyAdminStateSchemaVersion {
 			return errors.New("unsupported admin state schema version")
+		}
+		if snapshot.SchemaVersion < identityPolicyAdminStateSchemaVersion && len(snapshot.IdentityPolicies) > 0 {
+			return errors.New("identity inference policies require admin state version 4")
 		}
 		if snapshot.SchemaVersion < agentMCPAdminStateSchemaVersion {
 			for _, profile := range snapshot.AgentProfiles {
@@ -237,7 +242,7 @@ func (r *AdminStateRuntime) marshal() (json.RawMessage, error) {
 }
 
 func (r *AdminStateRuntime) snapshot() (adminStateSnapshot, error) {
-	snapshot := adminStateSnapshot{SchemaVersion: adminStateSchemaVersion, Projects: r.access.Projects(), AccessGroups: r.access.Groups(), PolicyAttachments: r.access.PolicyAttachments(), Tags: r.access.Tags(), MCPServers: r.mcp.Servers(), MCPToolsets: r.mcp.Toolsets(), ToolPolicies: r.agents.ToolPolicies(), AgentProfiles: r.agents.AgentProfiles()}
+	snapshot := adminStateSnapshot{SchemaVersion: adminStateSchemaVersion, IdentityPolicies: r.access.IdentityPolicies(), Projects: r.access.Projects(), AccessGroups: r.access.Groups(), PolicyAttachments: r.access.PolicyAttachments(), Tags: r.access.Tags(), MCPServers: r.mcp.Servers(), MCPToolsets: r.mcp.Toolsets(), ToolPolicies: r.agents.ToolPolicies(), AgentProfiles: r.agents.AgentProfiles()}
 	if r.globalRateLimits != nil {
 		snapshot.GlobalRateLimits = r.globalRateLimits.snapshot()
 	}
@@ -287,6 +292,9 @@ func (r *AdminStateRuntime) snapshot() (adminStateSnapshot, error) {
 		}
 		snapshot.LoggingDestinations = append(snapshot.LoggingDestinations, item)
 	}
+	if len(snapshot.IdentityPolicies) > 0 {
+		snapshot.SchemaVersion = identityPolicyAdminStateSchemaVersion
+	}
 	return snapshot, nil
 }
 
@@ -295,6 +303,14 @@ func (r *AdminStateRuntime) apply(snapshot adminStateSnapshot) error {
 		return errors.New("invalid persisted global rate limits")
 	}
 	access := NewAccessRegistry()
+	for _, item := range snapshot.IdentityPolicies {
+		if _, exists := access.IdentityPolicy(item.ScopeType, item.ScopeID); exists {
+			return errInvalidAccessEntry
+		}
+		if err := access.PutIdentityPolicy(item); err != nil {
+			return err
+		}
+	}
 	for _, item := range snapshot.Projects {
 		if _, err := access.PutProject(item.ID, item); err != nil {
 			return err
@@ -406,6 +422,7 @@ func (r *AdminStateRuntime) apply(snapshot adminStateSnapshot) error {
 		r.globalRateLimits.apply(snapshot.GlobalRateLimits)
 	}
 	r.access.mu.Lock()
+	r.access.identityPolicies = access.identityPolicies
 	r.access.projects, r.access.groups, r.access.attachments, r.access.tags = access.projects, access.groups, access.attachments, access.tags
 	r.access.mu.Unlock()
 	r.mcp.mu.Lock()
@@ -421,7 +438,7 @@ func (r *AdminStateRuntime) apply(snapshot adminStateSnapshot) error {
 }
 
 func isDurableAdminStateRoute(path string) bool {
-	prefixes := []string{"/admin/v1/settings/global-rate-limits", "/admin/v1/guardrail-policies", "/admin/v1/policy-attachments", "/admin/v1/tags", "/admin/v1/logging/destinations", "/admin/v1/tool-policies", "/admin/v1/agent-profiles", "/admin/v1/mcp/servers", "/admin/v1/mcp/toolsets", "/admin/v1/projects", "/admin/v1/access-groups"}
+	prefixes := []string{"/admin/v1/identity-policies", "/admin/v1/settings/global-rate-limits", "/admin/v1/guardrail-policies", "/admin/v1/policy-attachments", "/admin/v1/tags", "/admin/v1/logging/destinations", "/admin/v1/tool-policies", "/admin/v1/agent-profiles", "/admin/v1/mcp/servers", "/admin/v1/mcp/toolsets", "/admin/v1/projects", "/admin/v1/access-groups"}
 	for _, prefix := range prefixes {
 		if path == prefix || strings.HasPrefix(path, prefix+"/") {
 			return true

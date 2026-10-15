@@ -16,6 +16,9 @@ func TestCacheIsolationIncludesIdentityAndEffectivePolicy(t *testing.T) {
 		name   string
 		change func(*modules.RequestContext)
 	}{
+		{"identity policy", func(r *modules.RequestContext) {
+			r.Metadata = map[string]string{"policy.modules.dlp.enabled": "true", "policy.identity": `[{"scope_type":"user","scope_id":"user","model_access":"allowlist","allowed_models":["model"],"rpm":60,"tpm":100000}]`}
+		}},
 		{"credential", func(r *modules.RequestContext) { r.CredentialID = "other" }},
 		{"user", func(r *modules.RequestContext) { r.UserID = "other" }},
 		{"team", func(r *modules.RequestContext) { r.TeamID = "other" }},

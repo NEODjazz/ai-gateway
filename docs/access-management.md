@@ -107,3 +107,64 @@ route. An older backend fails visibly; Gateway does not fall back to loading or
 filtering the global budget inventory. Existing list/mutation APIs are unchanged;
 no database migration or new dependency is needed. Required PostgreSQL CI tests
 include identity budget paging and usage correctness on the real test database.
+
+## Identity models and aggregate quotas
+
+The **Models & limits** tab in a user/team workspace manages additional inference
+restrictions. A global administrator can save or reset them. A matching team
+administrator can inspect their team's policy but cannot raise its limits or
+change its models. Scoped sessions never load another user's global policy.
+Existing directory names, roles, memberships, principal bindings, virtual keys
+and budget policies are unchanged by these settings.
+
+`GET`, `PUT` and `DELETE /admin/v1/identity-policies/{scope}/{id}` use `team` or
+`user` scope. GET/PUT require an existing directory identity without a deletion
+tombstone. DELETE can clean up an orphaned policy. PUT is a complete replacement,
+requires `model_access`, `rpm` and `tpm`, and accepts `allowed_models`:
+
+- `inherit`: no additional model restriction; other grants remain authoritative.
+- `allowlist`: 1–100 exact model IDs or trailing-wildcard patterns, at most 512
+  bytes each. A selected empty list is rejected, never interpreted as all models.
+- `deny`: block every model. Model restrictions intersect the credential,
+  selected-team, user, access-group and tag grants; no policy grants new access.
+
+The UI uses configured model choices, retains existing explicit patterns if the
+catalog fails, and distinguishes unrestricted extra policy from an explicit deny.
+Only actual scope policy is displayed, not a fabricated union of all keys' grants.
+Model discovery and fallback selection apply the same restrictions as inference;
+queued work refreshes the current policy before execution. An open Realtime
+session rechecks model access before admitting each new response. The effective policy
+also participates in exact and semantic cache isolation. Failed reads are closed
+before model discovery or quota admission. Forms retain failed drafts and reject
+stale loads/mutations after navigation or verified-session changes.
+
+RPM/TPM are aggregate quotas per exact verified user ID and per selected team ID,
+shared across credentials. Team membership alone does not select a team: the
+verified key, principal binding or browser session must bind the request to it.
+User caps apply across team contexts. Zero adds no quota for that dimension;
+credential, global, provider/deployment and budget limits remain independent.
+Accepted ranges are RPM 0–10000000 and TPM 0–1000000000. TPM uses the existing
+conservative input-plus-maximum-output reservation, including tool context and
+preprocessed documents. Fixed one-minute windows are shared through Redis;
+memory counters apply per process. Changes do not reset an existing window.
+Admission checks credential, user, selected-team, then global quotas. A rejection
+by a later quota may retain earlier reservations; failures are not refunded.
+HTTP 429 includes Retry-After; observed storage failures return 503.
+
+Policies persist in the existing PostgreSQL admin-state snapshot, with optimistic
+revision checks and rollback on a failed save. The registry is bounded to 10000
+identity policies; existing policies remain editable at capacity. Without the
+control plane, configuration is process-local and is lost on restart. All
+replicas need shared Redis and the same control-plane configuration. Replica
+updates follow the existing control-plane refresh cadence. In-flight requests
+retain their already performed authorization checks.
+
+**Upgrade all Gateway replicas before activating identity policies.** A snapshot
+containing these policies uses admin-state schema version 4; older supported
+snapshots remain readable. Version 4 prevents older Gateway runtimes from silently
+ignoring new restrictions. Activating a policy during a mixed-version rollout can
+make older replicas reject requests. No new dependency or database migration is
+required. Regression coverage includes API scope, key-independent counters on
+memory/Redis, concurrent admission, cache isolation, and real PostgreSQL restore,
+replica refresh and quota enforcement. Existing financial and membership APIs
+retain their compatibility requirements described above.

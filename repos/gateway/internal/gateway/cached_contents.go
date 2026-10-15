@@ -157,7 +157,7 @@ func (h Handler) CreateCachedContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	identity.Request = chat
-	if !h.prepareAccessGroups(w, &identity) {
+	if !h.prepareAccessGroups(r.Context(), w, &identity) {
 		return
 	}
 	if err := h.resolveGeminiMCPServers(&identity); err != nil {

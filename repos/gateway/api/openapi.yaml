@@ -5211,6 +5211,65 @@ paths:
         '404': {$ref: '#/components/responses/NotFound'}
         '409': {description: Access group is referenced by a non-revoked virtual key}
         '503': {$ref: '#/components/responses/ManagementUnavailable'}
+  /admin/v1/identity-policies/{scope}/{id}:
+    parameters:
+      - in: path
+        name: scope
+        required: true
+        schema: {type: string, enum: [team, user]}
+      - in: path
+        name: id
+        required: true
+        schema: {type: string, minLength: 1, maxLength: 256}
+    get:
+      operationId: getIdentityInferencePolicy
+      summary: Inspect additional model restrictions and aggregate identity quotas
+      description: Global administrators read user or team policies. Matching team administrators may read their team's policy. The target identity must exist and not be deleted.
+      responses:
+        '200':
+          description: Additional identity policy, its source and persistence status
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/IdentityInferencePolicySettings'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: Identity not found}
+        '503': {description: Directory or policy storage unavailable}
+    put:
+      operationId: putIdentityInferencePolicy
+      summary: Set additional model restrictions and shared user or team quotas
+      description: Global administrators only. Changes narrow credential and other grants. Rates sum across credentials of this user or the verified selected team. Zero adds no quota for that dimension. The full configuration is required; empty allowlists are rejected. Shared Redis counters and persistent control plane are required for consistent multi-replica limits. Activate only after all Gateway replicas support admin state version 4.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/IdentityInferencePolicyInput'}
+      responses:
+        '200':
+          description: Saved policy
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/IdentityInferencePolicySettings'}
+        '400': {description: Invalid policy or identity scope}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: Identity not found}
+        '409': {description: Control-plane revision conflict; reload before retrying}
+        '503': {description: 'Directory, audit or policy storage unavailable'}
+    delete:
+      operationId: resetIdentityInferencePolicy
+      summary: Remove this identity's additional restrictions and aggregate quota
+      description: Global administrators only. Other applicable policies remain enforced. Does not remove the directory identity, keys, memberships or budgets. Allows cleanup of a deleted identity's policy.
+      responses:
+        '200':
+          description: Default policy after removal
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/IdentityInferencePolicySettings'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {description: Control-plane revision conflict}
+        '503': {description: Audit or policy storage unavailable}
   /admin/v1/budgets/page:
     get:
       operationId: listIdentityBudgetPage
@@ -9550,6 +9609,36 @@ components:
         deployments: {type: array, items: {$ref: '#/components/schemas/ModelDeployment'}}
         model_groups: {type: array, items: {$ref: '#/components/schemas/ModelGroup'}}
         changes: {type: array, items: {type: string, maxLength: 512}}
+    IdentityInferencePolicyInput:
+      type: object
+      additionalProperties: false
+      required: [model_access, rpm, tpm]
+      properties:
+        model_access: {type: string, enum: [inherit, allowlist, deny]}
+        allowed_models:
+          type: array
+          maxItems: 100
+          items: {type: string, minLength: 1, maxLength: 512}
+          description: Required and nonempty for allowlist; otherwise must be empty. Exact model IDs or a single trailing wildcard. Restrictions intersect credential, group, tag and other policies.
+        rpm: {type: integer, minimum: 0, maximum: 10000000}
+        tpm: {type: integer, minimum: 0, maximum: 1000000000}
+    IdentityInferencePolicy:
+      type: object
+      required: [scope_type, scope_id, model_access, allowed_models, rpm, tpm]
+      properties:
+        scope_type: {type: string, enum: [team, user]}
+        scope_id: {type: string, minLength: 1, maxLength: 256}
+        model_access: {type: string, enum: [inherit, allowlist, deny]}
+        allowed_models: {type: array, maxItems: 100, items: {type: string, minLength: 1, maxLength: 512}}
+        rpm: {type: integer, minimum: 0, maximum: 10000000}
+        tpm: {type: integer, minimum: 0, maximum: 1000000000}
+    IdentityInferencePolicySettings:
+      type: object
+      required: [policy, configured, durable]
+      properties:
+        policy: {$ref: '#/components/schemas/IdentityInferencePolicy'}
+        configured: {type: boolean}
+        durable: {type: boolean, description: Whether the existing PostgreSQL admin-state control plane persists configuration. Redis is separately required for quota counters shared across replicas.}
     BudgetPolicyInput:
       type: object
       additionalProperties: false

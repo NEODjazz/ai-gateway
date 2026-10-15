@@ -228,7 +228,7 @@ func (h Handler) authorizedModels(w http.ResponseWriter, r *http.Request) ([]ope
 		return nil, false
 	}
 	reqCtx.APIKey = ""
-	if !h.prepareAccessGroups(w, &reqCtx) {
+	if !h.prepareAccessGroups(r.Context(), w, &reqCtx) {
 		return nil, false
 	}
 
@@ -246,7 +246,7 @@ func (h Handler) authorizedModels(w http.ResponseWriter, r *http.Request) ([]ope
 	if h.access != nil {
 		filtered := models[:0]
 		for _, model := range models {
-			if allowed, _ := h.access.TagModelAllowed(reqCtx.Tags, model.ID); allowed {
+			if allowed, _ := h.access.TagModelAllowed(reqCtx.Tags, model.ID); allowed && h.requestModelAllowed(reqCtx, model.ID) {
 				filtered = append(filtered, model)
 			}
 		}
@@ -415,7 +415,7 @@ func (h Handler) serveChatWithAdapter(w http.ResponseWriter, r *http.Request, re
 		writeError(w, http.StatusBadGateway, "module_failed", "module produced invalid "+kind+" input: "+err.Error())
 		return
 	}
-	if !h.prepareAccessGroups(w, &reqCtx) {
+	if !h.prepareAccessGroups(r.Context(), w, &reqCtx) {
 		return
 	}
 	request = reqCtx.Request
@@ -603,7 +603,7 @@ func (h Handler) Completions(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "module_failed", "module produced an invalid completion request: "+message)
 		return
 	}
-	if !h.prepareAccessGroups(w, &reqCtx) || !h.authorizeAccess(w, r.Context(), reqCtx, request.Model, estimateCompletionTokens(request)) {
+	if !h.prepareAccessGroups(r.Context(), w, &reqCtx) || !h.authorizeAccess(w, r.Context(), reqCtx, request.Model, estimateCompletionTokens(request)) {
 		return
 	}
 	if !h.prepareModelFallbacks(w, r.Context(), &reqCtx, request.Model) {
@@ -829,7 +829,7 @@ func (h Handler) serveResponsesAs(w http.ResponseWriter, r *http.Request, reques
 		writeError(w, http.StatusBadGateway, "module_failed", "module produced invalid "+kind+" input: "+err.Error())
 		return
 	}
-	if !h.prepareAccessGroups(w, &reqCtx) {
+	if !h.prepareAccessGroups(r.Context(), w, &reqCtx) {
 		return
 	}
 	toolIdentifiers, validTools := responseRequestToolIdentifiers(request)
@@ -1054,7 +1054,7 @@ func (h Handler) CompactResponse(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "module_failed", "module produced invalid "+kind+" input: "+err.Error())
 		return
 	}
-	if !h.prepareAccessGroups(w, &reqCtx) {
+	if !h.prepareAccessGroups(r.Context(), w, &reqCtx) {
 		return
 	}
 	toolIdentifiers, validTools := responseRequestToolIdentifiers(*reqCtx.ResponseRequest)
@@ -1265,7 +1265,7 @@ func (h Handler) authorizeResponseResource(w http.ResponseWriter, r *http.Reques
 		writeProviderFailure(w, err)
 		return modules.RequestContext{}, false
 	}
-	if !h.prepareAccessGroups(w, &reqCtx) || !h.authorizeAccess(w, r.Context(), reqCtx, model, 0) {
+	if !h.prepareAccessGroups(r.Context(), w, &reqCtx) || !h.authorizeAccess(w, r.Context(), reqCtx, model, 0) {
 		return modules.RequestContext{}, false
 	}
 	reqCtx.Request.Model = model
@@ -1310,7 +1310,7 @@ func (h Handler) Embeddings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "module_failed", "module produced an invalid embedding request: "+message)
 		return
 	}
-	if !h.prepareAccessGroups(w, &reqCtx) {
+	if !h.prepareAccessGroups(r.Context(), w, &reqCtx) {
 		return
 	}
 	if !h.authorizeAccess(w, r.Context(), reqCtx, request.Model, estimateEmbeddingTokens(request)) {
@@ -1388,7 +1388,7 @@ func (h Handler) Rerank(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "module_failed", "module produced an invalid rerank request: "+message)
 		return
 	}
-	if !h.prepareAccessGroups(w, &reqCtx) {
+	if !h.prepareAccessGroups(r.Context(), w, &reqCtx) {
 		return
 	}
 	if !h.authorizeAccess(w, r.Context(), reqCtx, request.Model, estimateRerankTokens(request)) {
@@ -1444,7 +1444,7 @@ func (h Handler) Moderations(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "module_failed", "module produced an invalid moderation request: "+message)
 		return
 	}
-	if !h.prepareAccessGroups(w, &reqCtx) {
+	if !h.prepareAccessGroups(r.Context(), w, &reqCtx) {
 		return
 	}
 	if !h.authorizeAccess(w, r.Context(), reqCtx, request.Model, openai.ModerationInputTokenCount(request.Input)) {
@@ -1509,7 +1509,7 @@ func (h Handler) GenerateImage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "module_failed", "module returned an invalid image request")
 		return
 	}
-	if !h.prepareAccessGroups(w, &reqCtx) || !h.authorizeAccess(w, r.Context(), reqCtx, request.Model, estimateImageGenerationTokens(request)) || !h.prepareModelFallbacks(w, r.Context(), &reqCtx, request.Model) {
+	if !h.prepareAccessGroups(r.Context(), w, &reqCtx) || !h.authorizeAccess(w, r.Context(), reqCtx, request.Model, estimateImageGenerationTokens(request)) || !h.prepareModelFallbacks(w, r.Context(), &reqCtx, request.Model) {
 		return
 	}
 	imageProvider, ok := h.provider.(provider.ImageGenerationProvider)
@@ -1620,7 +1620,7 @@ func (h Handler) EditImage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "module_failed", "module returned an invalid image edit request")
 		return
 	}
-	if !h.prepareAccessGroups(w, &reqCtx) || !h.authorizeAccess(w, r.Context(), reqCtx, request.Model, estimateImageEditTokens(request)) || !h.prepareModelFallbacks(w, r.Context(), &reqCtx, request.Model) {
+	if !h.prepareAccessGroups(r.Context(), w, &reqCtx) || !h.authorizeAccess(w, r.Context(), reqCtx, request.Model, estimateImageEditTokens(request)) || !h.prepareModelFallbacks(w, r.Context(), &reqCtx, request.Model) {
 		return
 	}
 	imageProvider, ok := h.provider.(provider.ImageEditProvider)
@@ -1716,7 +1716,7 @@ func (h Handler) CreateImageVariation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "module_failed", "module returned an invalid image variation request")
 		return
 	}
-	if !h.prepareAccessGroups(w, &reqCtx) || !h.authorizeAccess(w, r.Context(), reqCtx, request.Model, estimateImageVariationTokens(request)) || !h.prepareModelFallbacks(w, r.Context(), &reqCtx, request.Model) {
+	if !h.prepareAccessGroups(r.Context(), w, &reqCtx) || !h.authorizeAccess(w, r.Context(), reqCtx, request.Model, estimateImageVariationTokens(request)) || !h.prepareModelFallbacks(w, r.Context(), &reqCtx, request.Model) {
 		return
 	}
 	imageProvider, ok := h.provider.(provider.ImageVariationProvider)
@@ -1777,7 +1777,7 @@ func (h Handler) handleAudio(w http.ResponseWriter, r *http.Request, translation
 		writeError(w, http.StatusBadGateway, "module_failed", "module returned an invalid audio transcription request")
 		return
 	}
-	if !h.prepareAccessGroups(w, &reqCtx) || !h.authorizeAccess(w, r.Context(), reqCtx, request.Model, estimateAudioTranscriptionTokens(request)) || !h.prepareModelFallbacks(w, r.Context(), &reqCtx, request.Model) {
+	if !h.prepareAccessGroups(r.Context(), w, &reqCtx) || !h.authorizeAccess(w, r.Context(), reqCtx, request.Model, estimateAudioTranscriptionTokens(request)) || !h.prepareModelFallbacks(w, r.Context(), &reqCtx, request.Model) {
 		return
 	}
 	var response openai.AudioTranscriptionResponse
@@ -1901,7 +1901,7 @@ func (h Handler) GenerateSpeech(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "module_failed", "module returned an invalid audio speech request")
 		return
 	}
-	if !h.prepareAccessGroups(w, &reqCtx) || !h.authorizeAccess(w, r.Context(), reqCtx, request.Model, estimateAudioSpeechTokens(request)) || !h.prepareModelFallbacks(w, r.Context(), &reqCtx, request.Model) {
+	if !h.prepareAccessGroups(r.Context(), w, &reqCtx) || !h.authorizeAccess(w, r.Context(), reqCtx, request.Model, estimateAudioSpeechTokens(request)) || !h.prepareModelFallbacks(w, r.Context(), &reqCtx, request.Model) {
 		return
 	}
 	audioProvider, ok := h.provider.(provider.AudioSpeechProvider)
@@ -2005,7 +2005,7 @@ func (h Handler) Search(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	model, _ = request.RoutingModel()
-	if !h.prepareAccessGroups(w, &reqCtx) || !h.authorizeAccess(w, r.Context(), reqCtx, model, openai.SearchReserveTokens(request)) || !h.prepareModelFallbacks(w, r.Context(), &reqCtx, model) {
+	if !h.prepareAccessGroups(r.Context(), w, &reqCtx) || !h.authorizeAccess(w, r.Context(), reqCtx, model, openai.SearchReserveTokens(request)) || !h.prepareModelFallbacks(w, r.Context(), &reqCtx, model) {
 		return
 	}
 	searchProvider, ok := h.provider.(provider.SearchProvider)
@@ -2079,7 +2079,7 @@ func (h Handler) OCR(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "module_failed", "module returned an invalid OCR request")
 		return
 	}
-	if !h.prepareAccessGroups(w, &reqCtx) || !h.authorizeAccess(w, r.Context(), reqCtx, request.Model, request.InputTokens()) || !h.prepareModelFallbacks(w, r.Context(), &reqCtx, request.Model) {
+	if !h.prepareAccessGroups(r.Context(), w, &reqCtx) || !h.authorizeAccess(w, r.Context(), reqCtx, request.Model, request.InputTokens()) || !h.prepareModelFallbacks(w, r.Context(), &reqCtx, request.Model) {
 		return
 	}
 	ocrProvider, ok := h.provider.(provider.OCRProvider)
