@@ -1,9 +1,10 @@
 """Offline acceptance-harness contracts; no Docker, network, or real credentials."""
 import importlib.util
+import json
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 spec = importlib.util.spec_from_file_location("librechat_integration", Path(__file__).with_name("test-librechat-integration.py"))
 integration = importlib.util.module_from_spec(spec)
@@ -11,6 +12,55 @@ spec.loader.exec_module(integration)
 
 
 class HarnessTests(unittest.TestCase):
+    def test_partial_or_failed_stream_is_not_success(self):
+        for event in (
+            {"delta": "test response"},
+            {"final": True},
+            {"final": True, "reconcile": True, "responseMessage": {"text": "test response"}},
+            {"final": True, "responseMessage": {"text": "test response", "unfinished": True}},
+            {"final": True, "error": "provider failed", "responseMessage": {"text": "test response"}},
+        ):
+            with self.subTest(event=event):
+                self.assertFalse(integration.completed_chat(("data: " + json.dumps(event) + "\n\n").encode()))
+        terminal = {"final": True, "responseMessage": {"content": [{"type": "text", "text": "test response"}]}}
+        self.assertTrue(integration.completed_chat(("event: message\ndata: " + json.dumps(terminal) + "\n\n").encode()))
+
+    def runner(self, responses):
+        # Avoid constructing databases, listeners, or containers in unit tests.
+        runner = object.__new__(integration.Run)
+        runner.ui_api = Mock(side_effect=responses)
+        return runner
+
+    def test_chat_subscribes_to_the_exact_started_generation(self):
+        runner = self.runner([
+            (200, json.dumps({"status": "started", "streamId": "fixture-stream", "generationCreatedAt": 123}).encode(), {"Content-Type": "application/json"}),
+            (200, b'data: {"final": true}\n\n', {"Content-Type": "text/event-stream"}),
+        ])
+        status, data, headers, _ = runner.chat({}, "model-a", "fixture")
+        self.assertEqual(status, 200)
+        self.assertIn(b'"final": true', data)
+        self.assertEqual(headers["Content-Type"], "text/event-stream")
+        self.assertEqual(runner.ui_api.call_args_list[1].args[1], "/api/agents/chat/stream/fixture-stream?generationCreatedAt=123")
+
+    def test_failed_start_does_not_subscribe(self):
+        runner = self.runner([(403, b'{"error":"forbidden"}', {"Content-Type": "application/json"})])
+        self.assertEqual(runner.chat({}, "hidden-model", "fixture")[0], 403)
+        self.assertEqual(runner.ui_api.call_count, 1)
+
+    def test_malformed_generation_identity_is_rejected(self):
+        for generation in (None, True, -1, "123", 9007199254740992):
+            with self.subTest(generation=generation):
+                runner = self.runner([(200, json.dumps({"status": "started", "streamId": "fixture", "generationCreatedAt": generation}).encode(), {"Content-Type": "application/json"})])
+                with self.assertRaisesRegex(RuntimeError, "generation identity"):
+                    runner.chat({}, "model-a", "fixture")
+                self.assertEqual(runner.ui_api.call_count, 1)
+
+    def test_negative_case_requires_an_actual_failure_response(self):
+        runner = self.runner([])
+        runner.chat = Mock(return_value=(200, b'data: {"final":true}', {}, "fixture"))
+        with self.assertRaisesRegex(RuntimeError, "UI did not report failure"):
+            runner.assert_rejected({}, "model-a", "expected denial")
+
     def test_missing_image_fails_before_implicit_download(self):
         with patch.object(integration.subprocess, "run", return_value=SimpleNamespace(returncode=1)) as command:
             with self.assertRaisesRegex(RuntimeError, "image is missing"):

@@ -73,6 +73,8 @@ jobs:
         run: python3 -B -m unittest scripts/test_smoke_ollama_embeddings.py
       - name: Validate secret-free OIDC realm profile
         run: python3 -B -m unittest scripts/test_identity_profile.py scripts/test_librechat_profile.py
+      - name: Verify real HTTPS identity fixture and certificate validation
+        run: python3 -B -m unittest scripts/test_identity_tls_proxy.py
 
   go:
     name: Go / ${{ matrix.service }}

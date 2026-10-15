@@ -11,6 +11,7 @@ import copy
 import html
 import http.cookiejar
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -34,6 +35,27 @@ check = identity.check
 request_http = identity.request_http
 
 
+class ObservedProvider(identity.Provider):
+    rejected_markers = set()
+
+    def do_POST(self):
+        # Record only non-sensitive synthetic test markers, never prompts or
+        # tokens. Per-request markers avoid races with background title calls.
+        body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
+        markers = re.findall(r"LC_REJECT_[0-9a-f]{32}", body.decode())
+        with self.lock:
+            self.rejected_markers.update(markers)
+        original = self.rfile
+        try:
+            self.rfile = io.BytesIO(body)
+            super().do_POST()
+        finally:
+            self.rfile = original
+
+
+identity.Provider = ObservedProvider
+
+
 def profile():
     return json.loads((ROOT / "examples/librechat/librechat.yaml").read_text())
 
@@ -47,6 +69,24 @@ def existing_images(docker):
     for image in (identity.KEYCLOAK_IMAGE, LIBRECHAT_IMAGE, MONGO_IMAGE):
         result = subprocess.run(docker + ["image", "inspect", image], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         check(result.returncode == 0, "required test image is missing; obtain permission and pull the pinned images explicitly")
+
+
+def completed_chat(data):
+    """Require a successful terminal message, not just a partial text delta."""
+    for line in data.decode().splitlines():
+        if not line.startswith("data: "):
+            continue
+        event = json.loads(line[6:])
+        if not isinstance(event, dict) or event.get("final") is not True:
+            continue
+        response = event.get("responseMessage")
+        if not isinstance(response, dict):
+            continue
+        if event.get("error") or event.get("reconcile") or response.get("error") or response.get("unfinished"):
+            continue
+        if "test response" in json.dumps(response):
+            return True
+    return False
 
 
 class Run(identity.Run):
@@ -155,7 +195,7 @@ class Run(identity.Run):
         return {"opener": opener, "token": json.loads(data)["token"], "user": json.loads(data).get("user", {})}
 
     def ui_api(self, session, path, body=None, method=None):
-        return request_http(self.ui + path, body, {"Authorization": "Bearer " + session["token"], "Origin": self.ui}, method, opener=session["opener"])
+        return request_http(self.ui + path, body, {"Authorization": "Bearer " + session["token"], "Origin": self.ui, "X-LibreChat-Generation-Protocol": "2"}, method, opener=session["opener"])
 
     def chat(self, session, model, text, files=None):
         conversation = str(uuid.uuid4())
@@ -168,7 +208,30 @@ class Run(identity.Run):
         if files:
             body["files"] = files
         status, data, headers = self.ui_api(session, "/api/agents/chat/AI%20Gateway", body)
+        if status != 200:
+            return status, data, headers, conversation
+        # v0.8.8 starts a resumable job, then the browser subscribes separately.
+        # An accepted job is not proof of a successful upstream execution.
+        check("application/json" in headers.get("Content-Type", ""), "LibreChat did not return a generation start response")
+        started = json.loads(data)
+        if started.get("error"):
+            return status, data, headers, conversation
+        check(started.get("status") == "started", "LibreChat did not start a fresh generation")
+        stream = started.get("streamId")
+        generation = started.get("generationCreatedAt")
+        check(isinstance(stream, str) and 0 < len(stream) <= 512, "invalid LibreChat stream identity")
+        check(type(generation) is int and 0 <= generation <= 9007199254740991, "invalid LibreChat generation identity")
+        path = "/api/agents/chat/stream/" + urllib.parse.quote(stream, safe="")
+        path += "?" + urllib.parse.urlencode({"generationCreatedAt": generation})
+        status, data, headers = self.ui_api(session, path)
         return status, data, headers, conversation
+
+    def assert_rejected(self, session, model, reason):
+        marker = "LC_REJECT_" + uuid.uuid4().hex
+        status, data, _, _ = self.chat(session, model, marker)
+        check(status in (400, 401, 403, 429) or b"error" in data.lower(), reason + ": UI did not report failure")
+        with identity.Provider.lock:
+            check(marker not in identity.Provider.rejected_markers, reason + ": provider executed a rejected request")
 
     def checks(self):
         self.launch_librechat()
@@ -191,15 +254,13 @@ class Run(identity.Run):
         for name, model, hidden in (("alice", "model-a", "model-b"), ("bob", "model-b", "model-a")):
             session = sessions[name]
             status, data, headers, conversation = self.chat(session, model, "LibreChat fixture " + name)
-            check(status == 200 and "text/event-stream" in headers.get("Content-Type", "") and b"test response" in data, "full LibreChat SSE chat failed")
+            check(status == 200 and "text/event-stream" in headers.get("Content-Type", "") and completed_chat(data), "full LibreChat SSE chat did not complete successfully")
             status, history, _ = self.ui_api(session, "/api/messages/" + conversation)
             check(status == 200 and b"test response" in history, "LibreChat history was not persisted")
             other = sessions["bob" if name == "alice" else "alice"]
             status, history, _ = self.ui_api(other, "/api/messages/" + conversation)
             check(status in (200, 403, 404) and b"test response" not in history, "LibreChat leaked another user's history")
-            before = identity.Provider.calls
-            self.chat(session, hidden, "forbidden model fixture " + name)
-            check(identity.Provider.calls == before, "saved UI model selection bypassed Gateway grants")
+            self.assert_rejected(session, hidden, "saved UI model selection bypassed Gateway grants")
             status, refreshed, _ = self.ui_api(session, "/api/auth/refresh", {})
             check(status == 200 and json.loads(refreshed).get("token"), "LibreChat server refresh failed")
             session["token"] = json.loads(refreshed)["token"]
@@ -210,9 +271,7 @@ class Run(identity.Run):
 
         # No valid shared credential exists. Even a real authenticated UI user
         # without a Gateway binding cannot cause upstream execution.
-        before = identity.Provider.calls
-        self.chat(sessions["operator"], "model-common", "unprovisioned fixture")
-        check(identity.Provider.calls == before, "missing binding fell back to a shared key")
+        self.assert_rejected(sessions["operator"], "model-common", "missing binding fell back to a shared key")
         for name in ("alice", "bob"):
             user = self.policies[name]["user_id"]
             # IDs are fixture-generated; never interpolate user-provided SQL.
@@ -222,14 +281,10 @@ class Run(identity.Run):
         limited = copy.deepcopy(self.policies["bob"])
         limited["rate_limit_rpm"] = 1
         self.internal("PUT", "/jwt-principals", limited)
-        before = identity.Provider.calls
-        _, data, _, _ = self.chat(sessions["bob"], "model-b", "quota fixture")
-        check(identity.Provider.calls == before and (b"error" in data.lower() or b"429" in data), "Gateway quota failure was hidden or bypassed")
+        self.assert_rejected(sessions["bob"], "model-b", "Gateway quota failure was hidden or bypassed")
         self.internal("PUT", "/jwt-principals", self.policies["bob"])
         self.internal("PUT", "/users/" + self.policies["alice"]["user_id"], {"status": "disabled", "roles": ["user"]})
-        before = identity.Provider.calls
-        self.chat(sessions["alice"], "model-a", "disabled user fixture")
-        check(identity.Provider.calls == before, "live UI session bypassed deprovisioning")
+        self.assert_rejected(sessions["alice"], "model-a", "live UI session bypassed deprovisioning")
         self.internal("PUT", "/users/" + self.policies["alice"]["user_id"], {"status": "active", "roles": ["user"]})
         print("PASS PostgreSQL per-user attribution, Gateway quotas, no shared fallback and live-session deprovisioning", flush=True)
 

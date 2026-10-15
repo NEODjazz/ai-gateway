@@ -159,6 +159,14 @@ Offline проверка: `python3 -B scripts/test_identity_profile.py`.
 закреплённых образов до изменения БД и не скачивает их автоматически. Keycloak
 работает через disposable HTTPS proxy с временным доверенным CA; проверка
 сертификатов и hostname остаётся включённой. Этот сценарий пока не запускался.
+Test client учитывает resumable protocol закреплённого LibreChat: POST запускает
+generation, затем отдельный GET читает SSE с `generationCreatedAt` fence.
+Успех требует terminal response message без error/unfinished, а не только
+HTTP 200 или текстового delta. Негативные запросы проверяются по уникальным
+синтетическим markers, чтобы фоновые title executions не искажали результат.
+Сам HTTPS fixture независимо проверен без Docker:
+`python3 -B -m unittest scripts/test_identity_tls_proxy.py` покрывает доверенный CA,
+отказ недоверенного CA, hostname mismatch и завершение процесса по SIGTERM.
 CI matrix содержит отдельные `librechat` и `openwebui` проверки; наличие job
 не означает успешного прохождения ещё не выполненного запуска.
 Существующий Open WebUI сценарий:
