@@ -166,6 +166,7 @@ describe("Ollama deployment context", () => {
     const dialog = await screen.findByRole("dialog", { name: "Edit qwen-deployment" });
     const input = within(dialog).getByLabelText("Ollama context window (num_ctx)");
     expect(input).toHaveValue(32768);
+    expect(input).toHaveAccessibleDescription(/1024 tokens if no output cap is supplied/);
     expect(within(dialog).getByText(/conservative UTF-8 byte budget/)).toBeInTheDocument();
     await userEvent.clear(input); await userEvent.type(input, "65536");
     await userEvent.click(within(dialog).getByRole("button", { name: "Save" }));

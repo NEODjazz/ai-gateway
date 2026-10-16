@@ -147,6 +147,7 @@ textarea { resize: vertical; }
 .form-grid > label { grid-column: 1 / -1; display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 18px; align-items: center; }
 .form-grid > label > input[type="checkbox"] { justify-self: start; }
 .resource-form-row { grid-column: 1 / -1; display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 18px; align-items: center; }
+.resource-form-row > .resource-field-help { grid-column: 1 / -1; margin: 0; }
 .resource-form-row > label { color: #435361; font-size: 13px; font-weight: 650; }
 .gravity-form-control, .gravity-form-control > span { width: 100%; }
 .resource-form-row .g-checkbox { justify-self: start; }
