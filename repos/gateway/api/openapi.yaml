@@ -2418,6 +2418,31 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /v1/vector_stores/page:
+    get:
+      operationId: listVectorStorePage
+      tags: [Vector stores]
+      summary: Search the authenticated owner's vector stores with exact pagination
+      description: Gateway directory extension. Search, expiry status, sorting, row counts and file summaries are evaluated within one PostgreSQL repeatable-read snapshot. Ownership is the authenticated credential and user; administrator roles do not broaden it. The existing cursor list remains unchanged.
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: offset, in: query, schema: {type: integer, minimum: 0, maximum: 1000000, default: 0}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 25}}
+        - {name: search, in: query, schema: {type: string, maxLength: 256}, description: 'Case-insensitive literal substring of ID, name or description metadata.'}
+        - {name: status, in: query, schema: {type: string, enum: [completed, expired]}}
+        - {name: sort_by, in: query, schema: {type: string, enum: [id, name, created_at, last_active_at], default: created_at}}
+        - {name: sort_order, in: query, schema: {type: string, enum: [asc, desc], default: desc}}
+      responses:
+        '200':
+          description: Owned directory page and exact filtered count
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/VectorStoreDirectoryPage'}
+        default:
+          description: Authentication, validation, quota or unavailable directory backend
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
   /v1/vector_stores/{id}:
     parameters:
       - {name: id, in: path, required: true, schema: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$'}}
@@ -7637,6 +7662,16 @@ components:
         first_id: {type: string}
         last_id: {type: string}
         has_more: {type: boolean}
+    VectorStoreDirectoryPage:
+      type: object
+      additionalProperties: false
+      required: [object, data, total, offset, limit]
+      properties:
+        object: {type: string, const: list}
+        data: {type: array, maxItems: 200, items: {$ref: '#/components/schemas/VectorStore'}}
+        total: {type: integer, minimum: 0}
+        offset: {type: integer, minimum: 0, maximum: 1000000}
+        limit: {type: integer, minimum: 1, maximum: 200}
     VectorStoreDeletion:
       type: object
       additionalProperties: false

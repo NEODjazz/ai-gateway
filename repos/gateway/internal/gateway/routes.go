@@ -170,6 +170,7 @@ var gatewayRoutes = []routeDefinition{
 	{RouteContract{http.MethodGet, "/v1/fine_tuning/jobs/{id}/checkpoints"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListFineTuningCheckpoints) }},
 	{RouteContract{http.MethodPost, "/v1/vector_stores"}, func(h Handler) http.Handler { return http.HandlerFunc(h.CreateVectorStore) }},
 	{RouteContract{http.MethodGet, "/v1/vector_stores"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListVectorStores) }},
+	{RouteContract{http.MethodGet, "/v1/vector_stores/page"}, func(h Handler) http.Handler { return http.HandlerFunc(h.ListVectorStorePage) }},
 	{RouteContract{http.MethodGet, "/v1/vector_stores/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.GetVectorStore) }},
 	{RouteContract{http.MethodPost, "/v1/vector_stores/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.UpdateVectorStore) }},
 	{RouteContract{http.MethodDelete, "/v1/vector_stores/{id}"}, func(h Handler) http.Handler { return http.HandlerFunc(h.DeleteVectorStore) }},
