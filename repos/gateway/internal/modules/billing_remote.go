@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"time"
 
 	"ai-gateway-gateway/internal/openai"
 	"go.opentelemetry.io/otel/trace"
@@ -101,13 +102,15 @@ func (m RemoteBillingModule) Handle(ctx context.Context, req *RequestContext) er
 	return m.send(ctx, req, "reserve")
 }
 
-func (m RemoteBillingModule) HandleFailure(ctx context.Context, req *RequestContext, cause error) error {
+func (m RemoteBillingModule) HandleFailure(ctx context.Context, req *RequestContext, _ error) error {
 	if req.Metadata == nil {
 		req.Metadata = map[string]string{}
 	}
 	req.Metadata["provider.status"] = "error"
-	req.Metadata["provider.error"] = cause.Error()
-	return m.send(ctx, req, "cancel")
+	// Releasing a budget reservation must survive cancellation of the client request.
+	cancelCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+	defer cancel()
+	return m.send(cancelCtx, req, "cancel")
 }
 
 func (m RemoteBillingModule) send(ctx context.Context, req *RequestContext, phase string) error {
@@ -133,6 +136,7 @@ func (m RemoteBillingModule) send(ctx context.Context, req *RequestContext, phas
 }
 
 func billingRequest(req *RequestContext) UsageRequest {
+	reportedUsage := false
 	request := UsageRequest{
 		RequestID:              req.RequestID,
 		SessionID:              req.SessionID,
@@ -150,7 +154,6 @@ func billingRequest(req *RequestContext) UsageRequest {
 		ProviderEndpointName:   metadataValue(req.Metadata, "provider.endpoint.name"),
 		ProviderEndpointType:   metadataValue(req.Metadata, "provider.endpoint.type"),
 		Status:                 metadataValue(req.Metadata, "provider.status"),
-		Error:                  metadataValue(req.Metadata, "provider.error"),
 		FailureClass:           metadataValue(req.Metadata, "provider.failure_class"),
 		LatencyMS:              metadataValue(req.Metadata, "provider.latency_ms"),
 		FirstTokenLatencyMS:    metadataValue(req.Metadata, "provider.first_token_latency_ms"),
@@ -183,6 +186,7 @@ func billingRequest(req *RequestContext) UsageRequest {
 	request.InputTokens = request.PromptTokensEstimated
 	request.OutputTokens = requestedOutputTokens(req)
 	explicitZeroOutput := req.Request.AllowZeroMaxTokens && req.Request.MaxTokens != nil && *req.Request.MaxTokens == 0
+	responsePrewarm := req.ResponseRequest != nil && openai.ResponsePrewarmRequested(*req.ResponseRequest)
 	switch metadataValue(req.Metadata, "gateway.api_type") {
 	case "messages":
 		request.APIType = "messages"
@@ -238,14 +242,14 @@ func billingRequest(req *RequestContext) UsageRequest {
 		}
 	} else if request.APIType == "realtime" && req.Usage != nil {
 		// Realtime supplies an explicit reserve or provider-reported usage.
-	} else if request.OutputTokens == 0 && req.CompletionRequest == nil && !explicitZeroOutput && request.APIType != "cached_content" {
+	} else if request.OutputTokens == 0 && req.CompletionRequest == nil && !explicitZeroOutput && !responsePrewarm && request.APIType != "cached_content" {
 		request.OutputTokens = openai.DefaultOutputTokenReserve
 	}
 	if request.APIType == "fine_tuning" || request.APIType == "video" {
 		request.TotalTokens = 0
 	} else if request.APIType == "realtime" && req.Usage != nil {
 		// Preserve exact zero usage and the explicit per-response reserve.
-	} else if explicitZeroOutput || request.APIType == "cached_content" {
+	} else if explicitZeroOutput || responsePrewarm || request.APIType == "cached_content" {
 		request.TotalTokens = request.InputTokens
 	} else {
 		request.TotalTokens = openai.ReserveTokens(request.InputTokens, request.OutputTokens)
@@ -378,7 +382,8 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.OutputTokens = req.Response.Usage.CompletionTokens
 		request.TotalTokens = req.Response.Usage.TotalTokens
 		request.UpstreamModel = req.Response.Model
-		request.UsageEstimated = request.TotalTokens == 0
+		reportedUsage = req.Response.UsageReported || request.TotalTokens > 0
+		request.UsageEstimated = !reportedUsage
 		request.SearchRequests = req.Response.Usage.SearchRequests
 		if req.Response.Usage.ToolRequestsReported {
 			request.ToolRequests = req.Response.Usage.ToolRequests
@@ -408,7 +413,8 @@ func billingRequest(req *RequestContext) UsageRequest {
 		if req.CompletionResponse.Usage.ToolRequestsReported {
 			request.ToolRequests = req.CompletionResponse.Usage.ToolRequests
 		}
-		request.UsageEstimated = request.TotalTokens == 0
+		reportedUsage = req.CompletionResponse.UsageReported || request.TotalTokens > 0
+		request.UsageEstimated = !reportedUsage
 		if details := req.CompletionResponse.Usage.PromptTokensDetails; details != nil {
 			request.CacheReadInputTokens = nonNegative(details.CachedTokens)
 			request.CacheWriteInputTokens = nonNegative(firstNonZero(details.CacheWriteTokens, details.CacheCreationTokens))
@@ -423,6 +429,9 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.ProviderCostUSDTicks = trustedProviderCost(req, req.ResponsesResponse.Usage.ProviderCostUSDTicks)
 		request.OutputImages = responseOutputImageCount(*req.ResponsesResponse)
 		request.ToolRequests, request.SearchRequests = responseOutputToolUsage(*req.ResponsesResponse)
+		if metadataValue(req.Metadata, "provider.endpoint.type") == "xai" && req.ResponsesResponse.Usage.NumServerSideToolsUsed != nil {
+			request.ToolRequests = max(request.ToolRequests, *req.ResponsesResponse.Usage.NumServerSideToolsUsed)
+		}
 		if req.ResponseRequest != nil {
 			outputs, _ := openai.InspectResponseComputerCallOutputs(req.ResponseRequest.Input)
 			request.ToolRequests += len(outputs)
@@ -432,7 +441,8 @@ func billingRequest(req *RequestContext) UsageRequest {
 			request.ToolRequests += len(patchOutputs)
 		}
 		request.SearchRequestsEstimated = false
-		request.UsageEstimated = request.TotalTokens == 0
+		reportedUsage = req.ResponsesResponse.InputTokensReported && req.ResponsesResponse.OutputTokensReported && req.ResponsesResponse.TotalTokensReported || request.TotalTokens > 0
+		request.UsageEstimated = !reportedUsage
 		if details := req.ResponsesResponse.Usage.InputTokensDetails; details != nil {
 			request.CacheReadInputTokens = nonNegative(details.CachedTokens)
 			request.CacheWriteInputTokens = nonNegative(firstNonZero(details.CacheWriteTokens, details.CacheCreationTokens))
@@ -444,7 +454,8 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.OutputTokens = req.CompactedResponse.Usage.OutputTokens
 		request.TotalTokens = req.CompactedResponse.Usage.TotalTokens
 		request.UpstreamModel = request.Model
-		request.UsageEstimated = request.TotalTokens == 0
+		reportedUsage = true
+		request.UsageEstimated = false
 		request.ProviderCostUSDTicks = trustedProviderCost(req, req.CompactedResponse.Usage.ProviderCostUSDTicks)
 		if details := req.CompactedResponse.Usage.InputTokensDetails; details != nil {
 			request.CacheReadInputTokens = nonNegative(details.CachedTokens)
@@ -457,10 +468,12 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.OutputTokens = 0
 		request.TotalTokens = req.EmbeddingResponse.Usage.TotalTokens
 		request.UpstreamModel = req.EmbeddingResponse.Model
-		request.UsageEstimated = request.TotalTokens == 0
+		reportedUsage = req.EmbeddingResponse.UsageReported || request.TotalTokens > 0
+		request.UsageEstimated = !reportedUsage
 	}
 	if req.RerankResponse != nil {
 		request.Phase = "commit"
+		request.InputTokens, request.OutputTokens, request.TotalTokens = 0, 0, 0
 		if req.RerankResponse.Meta != nil {
 			if req.RerankResponse.Meta.Tokens != nil {
 				request.InputTokens = req.RerankResponse.Meta.Tokens.InputTokens
@@ -472,7 +485,8 @@ func billingRequest(req *RequestContext) UsageRequest {
 				request.InputTokens = request.TotalTokens
 			}
 		}
-		request.UsageEstimated = request.TotalTokens == 0
+		reportedUsage = req.RerankResponse.UsageReported || request.TotalTokens > 0
+		request.UsageEstimated = !reportedUsage
 	}
 	if req.ModerationResponse != nil {
 		request.Phase = "commit"
@@ -527,6 +541,7 @@ func billingRequest(req *RequestContext) UsageRequest {
 		request.SearchRequests = req.SearchResponse.Usage.SearchRequests
 		request.SearchRequestsEstimated = false
 		request.UsageEstimated = false
+		reportedUsage = true
 	}
 	if req.OCRResponse != nil {
 		request.Phase = "commit"
@@ -540,8 +555,8 @@ func billingRequest(req *RequestContext) UsageRequest {
 	if request.CacheStatus == "hit" {
 		request.UsageEstimated = false
 	}
-	providerReportedUsage := (req.ImageGenerationResponse != nil && req.ImageGenerationResponse.Usage != nil) || (req.AudioTranscriptionResponse != nil && req.AudioTranscriptionResponse.Usage != nil)
-	if request.TotalTokens == 0 && request.APIType != "fine_tuning" && request.APIType != "video" && !(request.APIType == "realtime" && metadataValue(req.Metadata, "gateway.realtime_usage_exact") == "true") && request.CacheStatus != "hit" && !providerReportedUsage {
+	reportedUsage = reportedUsage || (req.ImageGenerationResponse != nil && req.ImageGenerationResponse.Usage != nil) || (req.AudioTranscriptionResponse != nil && req.AudioTranscriptionResponse.Usage != nil) || (req.AudioSpeechResponse != nil && req.AudioSpeechResponse.Usage != nil)
+	if request.TotalTokens == 0 && request.APIType != "fine_tuning" && request.APIType != "video" && !(request.APIType == "realtime" && metadataValue(req.Metadata, "gateway.realtime_usage_exact") == "true") && request.CacheStatus != "hit" && !reportedUsage {
 		if req.CompletionRequest != nil {
 			request.InputTokens = openai.CompletionInputTokens(*req.CompletionRequest)
 			request.TotalTokens = openai.CompletionReserveTokens(*req.CompletionRequest)
@@ -589,11 +604,13 @@ func responseRequestsImageGeneration(request openai.ResponseRequest) bool {
 func responseToolUsageReserve(request openai.ResponseRequest) (toolRequests, searchRequests int, searchEstimated bool) {
 	var hosted, search bool
 	for _, tool := range request.Tools {
+		if openai.IsResponseWebSearchTool(tool.Type) {
+			search = true
+			continue
+		}
 		switch tool.Type {
 		case "code_interpreter", "file_search", "mcp", "computer", "shell", "apply_patch":
 			hosted = true
-		case "web_search", "web_search_preview":
-			search = true
 		}
 	}
 	if hosted {

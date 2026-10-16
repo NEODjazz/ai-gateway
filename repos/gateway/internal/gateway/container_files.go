@@ -101,7 +101,7 @@ func (h Handler) GetContainerFileContent(w http.ResponseWriter, r *http.Request)
 	}
 	w.WriteHeader(http.StatusOK)
 	if _, err = io.Copy(w, &boundedContainerFileReader{reader: content.Body, remaining: maxGatewayContainerFileContentBytes}); err != nil {
-		log.Printf("container file content stream failed for %s: %v", fileID, err)
+		log.Print("container file content stream failed")
 	}
 }
 

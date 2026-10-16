@@ -122,16 +122,10 @@ func (s *PostgresVirtualKeyStore) PutOrganizationTeam(ctx context.Context, organ
 	if ownerID != organizationID {
 		return Organization{}, ErrOrganizationTeamConflict
 	}
-	rows, err := s.ListOrganizations(ctx, 500)
-	if err != nil {
-		return Organization{}, err
-	}
-	for _, organization := range rows {
-		if organization.ID == organizationID {
-			return organization, nil
-		}
-	}
-	return Organization{}, errors.New("organization not found")
+	var organization Organization
+	err := s.pool.QueryRow(ctx, `SELECT o.id,o.name,o.description,o.status,COALESCE(array_agg(ot.team_id ORDER BY ot.team_id) FILTER (WHERE ot.team_id IS NOT NULL),'{}'),o.created_at,o.updated_at
+    FROM auth_organizations o LEFT JOIN auth_organization_teams ot ON ot.organization_id=o.id WHERE o.id=$1 GROUP BY o.id`, organizationID).Scan(&organization.ID, &organization.Name, &organization.Description, &organization.Status, &organization.TeamIDs, &organization.CreatedAt, &organization.UpdatedAt)
+	return organization, err
 }
 
 func (s *PostgresVirtualKeyStore) DeleteOrganizationTeam(ctx context.Context, organizationID, teamID string) (bool, error) {

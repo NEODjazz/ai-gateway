@@ -9,6 +9,7 @@ export type PolicyResolutionAttachment = {
   dlp: boolean;
   output_dlp: boolean;
   av: boolean;
+  prompt_injection?: boolean;
   anonymization?: string;
   anonymization_rules?: string[];
 };
@@ -21,6 +22,7 @@ export type PolicyResolution = {
   dlp: boolean;
   output_dlp: boolean;
   av: boolean;
+  prompt_injection?: boolean;
   anonymization?: string;
   anonymization_rules?: string[];
   anonymization_profiles?: string[];
@@ -34,7 +36,7 @@ export function PolicyResolutionResult({ result }: { result: PolicyResolution })
       <StatCard label="Decision" value={result.enforceable ? "Enforceable" : "Fail closed"} />
       <StatCard label="Matched attachments" value={result.matched_attachments.length.toLocaleString()} />
       <StatCard label="Effective policies" value={result.effective_policies.length.toLocaleString()} />
-      <StatCard label="Controls" value={[result.dlp && "Input DLP", result.output_dlp && "Output DLP", result.av && "AV", result.anonymization && `Anonymizer: ${result.anonymization}`].filter(Boolean).join(" + ") || "None"} />
+      <StatCard label="Controls" value={[result.prompt_injection && "Prompt injection", result.dlp && "Input DLP", result.output_dlp && "Output DLP", result.av && "AV", result.anonymization && `Anonymizer: ${result.anonymization}`].filter(Boolean).join(" + ") || "None"} />
     </div>
     <section className="notice-card">
       <h3>Effective policy set</h3>
@@ -53,7 +55,7 @@ export function PolicyResolutionResult({ result }: { result: PolicyResolution })
             <td>{attachment.id}</td><td>{attachment.policy_name}</td>
             <td><div className="tag-list">{attachment.matched_via.map((item) => <span className="tag" key={item}>{item}</span>)}</div></td>
             <td><span className={`status ${attachment.policy_status === "enabled" ? "enabled" : "error"}`}>{attachment.policy_status}</span></td>
-            <td>{[attachment.dlp && "Input DLP", attachment.output_dlp && "Output DLP", attachment.av && "AV", attachment.anonymization && `Anonymizer: ${attachment.anonymization}`].filter(Boolean).join(" + ") || "—"}</td>
+            <td>{[attachment.prompt_injection && "Prompt injection", attachment.dlp && "Input DLP", attachment.output_dlp && "Output DLP", attachment.av && "AV", attachment.anonymization && `Anonymizer: ${attachment.anonymization}`].filter(Boolean).join(" + ") || "—"}</td>
           </tr>)}</tbody>
         </table>
         {!result.matched_attachments.length && <div className="empty-state"><strong>No attachments matched</strong></div>}

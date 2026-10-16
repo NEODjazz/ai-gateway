@@ -18,6 +18,7 @@ type Credential struct {
 	ID          string    `json:"id"`
 	ProviderID  string    `json:"provider_id,omitempty"`
 	Description string    `json:"description,omitempty"`
+	Kind        string    `json:"kind,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }
@@ -142,6 +143,25 @@ func (r *Router) storeCredential(id string, input CredentialInput, preserveMetad
 		input.ProviderID = existing.ProviderID
 		input.Description = existing.Description
 	}
+	effectiveSecret := input.Secret
+	if effectiveSecret == "" && found {
+		plaintext, openErr := r.credentials.aead.Open(nil, existing.Nonce, existing.Ciphertext, []byte(input.ID))
+		if openErr != nil {
+			return Credential{}, ErrInvalidCredential
+		}
+		effectiveSecret = string(plaintext)
+	}
+	kind := ""
+	if _, matched, parseErr := parseAzureServicePrincipal(effectiveSecret); matched {
+		if parseErr != nil || input.ProviderID == "" || r.providers == nil || r.providers.current.Load() == nil {
+			return Credential{}, ErrInvalidCredential
+		}
+		managed, found := (*r.providers.current.Load())[input.ProviderID]
+		if !found || managed.Type != "azure-openai" || managed.AuthType != "entra" {
+			return Credential{}, ErrInvalidCredential
+		}
+		kind = "azure_service_principal"
+	}
 	if input.Secret != "" && input.ProviderID != "" && r.providers != nil && r.providers.current.Load() != nil {
 		if managed, found := (*r.providers.current.Load())[input.ProviderID]; found && managed.Type == "bedrock" && managed.AuthType == "aws_sigv4" {
 			if _, err := parseAWSCredential(input.Secret); err != nil {
@@ -172,7 +192,7 @@ func (r *Router) storeCredential(id string, input CredentialInput, preserveMetad
 	if found {
 		created = existing.CreatedAt
 	}
-	credential := Credential{ID: input.ID, ProviderID: input.ProviderID, Description: input.Description, CreatedAt: created, UpdatedAt: now}
+	credential := Credential{ID: input.ID, ProviderID: input.ProviderID, Description: input.Description, Kind: kind, CreatedAt: created, UpdatedAt: now}
 	r.credentials.mu.Lock()
 	r.credentials.current[input.ID] = encryptedCredential{Credential: credential, Nonce: nonce, Ciphertext: ciphertext}
 	r.credentials.mu.Unlock()
@@ -262,9 +282,6 @@ func (r *Router) providerCredentialSecret(providerID, credentialID string) (stri
 }
 
 func (r *Router) validateCredentialsForProvider(provider ManagedProvider) error {
-	if provider.Type != "bedrock" || provider.AuthType != "aws_sigv4" {
-		return nil
-	}
 	r.credentials.mu.RLock()
 	defer r.credentials.mu.RUnlock()
 	for id, item := range r.credentials.current {
@@ -275,8 +292,14 @@ func (r *Router) validateCredentialsForProvider(provider ManagedProvider) error 
 		if err != nil {
 			return ErrInvalidCredential
 		}
-		if _, err := parseAWSCredential(string(plaintext)); err != nil {
-			return ErrInvalidCredential
+		if _, matched, parseErr := parseAzureServicePrincipal(string(plaintext)); matched {
+			if parseErr != nil || provider.Type != "azure-openai" || provider.AuthType != "entra" {
+				return ErrInvalidCredential
+			}
+		} else if provider.Type == "bedrock" && provider.AuthType == "aws_sigv4" {
+			if _, err := parseAWSCredential(string(plaintext)); err != nil {
+				return ErrInvalidCredential
+			}
 		}
 	}
 	return nil

@@ -32,3 +32,14 @@ func TestPrepareModelFallbacksIntersectsKeyAccessGroupAndTagModelGrants(t *testi
 		t.Fatalf("fallback grants were not intersected: %+v", req.AllowedFallbackModels)
 	}
 }
+
+func TestPrepareModelFallbacksDoesNotExpandEmptyJWTGrants(t *testing.T) {
+	handler := NewHandler(modules.NewPipeline(nil), fallbackResolverProvider{targets: []string{"fallback"}})
+	req := modules.RequestContext{ModelAccessRestricted: true}
+	if !handler.prepareModelFallbacks(httptest.NewRecorder(), t.Context(), &req, "primary") {
+		t.Fatal("fallback policy preparation failed")
+	}
+	if len(req.AllowedFallbackModels) != 0 {
+		t.Fatal("fallback expanded an explicitly empty model grant")
+	}
+}

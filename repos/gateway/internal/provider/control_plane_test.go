@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -15,7 +16,9 @@ import (
 
 	"ai-gateway-gateway/internal/config"
 	"ai-gateway-gateway/internal/modelcatalog"
+	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/openai"
+	"ai-gateway-gateway/internal/promptinjection"
 )
 
 type memoryControlPlaneStore struct {
@@ -227,6 +230,66 @@ func TestControlPlaneRollsBackMutationWhenPersistenceFails(t *testing.T) {
 	}
 }
 
+func TestControlPlaneRestoresPreviousDeploymentSnapshot(t *testing.T) {
+	store := &memoryControlPlaneStore{}
+	config := Config{CredentialEncryptionKey: []byte("rollback-snapshot-key"), ControlPlaneStore: store, ControlPlaneRefresh: time.Nanosecond}
+	runtime, err := NewWithError(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := runtime.(*Router)
+	if _, err := router.CreateProvider(ManagedProvider{ID: "provider", Type: "openai-compatible", BaseURL: "https://provider.example/v1", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	original := ModelDeployment{ID: "deployment", ProviderID: "provider", Models: []string{"public"}, UpstreamModel: "upstream-v1", Capabilities: []string{"chat"}, Weight: 1, Enabled: true}
+	if _, err := router.CreateModelDeployment(original); err != nil {
+		t.Fatal(err)
+	}
+	store.mu.Lock()
+	previous := cloneControlPlaneSnapshot(store.snapshot)
+	store.mu.Unlock()
+
+	changed := original
+	changed.UpstreamModel = "upstream-v2"
+	changed.Capabilities = []string{"chat", "tools"}
+	if _, err := router.UpdateModelDeployment(original.ID, changed); err != nil {
+		t.Fatal(err)
+	}
+	findDeployment := func() (Endpoint, bool) {
+		for _, endpoint := range router.configuredEndpoints() {
+			if endpoint.Name == original.ID {
+				return endpoint, true
+			}
+		}
+		return Endpoint{}, false
+	}
+	updated, found := findDeployment()
+	if !found || updated.ModelAliases["public"] != "upstream-v2" || !slices.Contains(updated.Capabilities, "tools") {
+		t.Fatalf("updated deployment was not active: found=%t alias=%q capabilities=%v", found, updated.ModelAliases["public"], updated.Capabilities)
+	}
+	store.mu.Lock()
+	currentRevision := store.snapshot.Revision
+	store.mu.Unlock()
+	if _, err := store.Save(t.Context(), currentRevision, previous); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := router.AdminState(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	restored, found := findDeployment()
+	if !found || restored.ModelAliases["public"] != "upstream-v1" || slices.Contains(restored.Capabilities, "tools") {
+		t.Fatalf("previous deployment was not restored: found=%t alias=%q capabilities=%v", found, restored.ModelAliases["public"], restored.Capabilities)
+	}
+	reloaded, err := NewWithError(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deployments := reloaded.(*Router).ListModelDeployments(t.Context())
+	if len(deployments) != 1 || deployments[0].UpstreamModel != "upstream-v1" || slices.Contains(deployments[0].Capabilities, "tools") {
+		t.Fatalf("restored snapshot was not durable: %+v", deployments)
+	}
+}
+
 func TestControlPlaneRejectsDeploymentCredentialFromAnotherProvider(t *testing.T) {
 	store := &memoryControlPlaneStore{}
 	key := []byte("stable-provider-boundary-key")
@@ -434,5 +497,126 @@ func TestModelOnboardingRejectsStalePlanAndRollsBackFailedPersistence(t *testing
 	}
 	if groups := router.ListModelGroups(context.Background()); len(groups) != 1 || groups[0].ID != "existing" {
 		t.Fatalf("failed apply corrupted existing groups: %+v", groups)
+	}
+}
+
+func TestModelOnboardingAtomicallyUpdatesExistingDeployment(t *testing.T) {
+	store := &memoryControlPlaneStore{}
+	var upstreamCalls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		upstreamCalls.Add(1)
+		http.Error(w, "unexpected upstream call", http.StatusInternalServerError)
+	}))
+	t.Cleanup(upstream.Close)
+	runtime, err := NewWithError(Config{CredentialEncryptionKey: []byte("stable-key"), ControlPlaneStore: store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := runtime.(*Router)
+	if _, err := router.CreateProvider(ManagedProvider{ID: "ollama", Type: "ollama", BaseURL: upstream.URL, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := modelcatalog.Parse(`{"version":"before","models":[{"provider":"ollama","model":"m","capabilities":["chat","embeddings"]}]}`)
+	if _, err := router.UpdateModelCatalog(t.Context(), before); err != nil {
+		t.Fatal(err)
+	}
+	deployment := ModelDeployment{ID: "ollama-m", ProviderID: "ollama", Models: []string{"m"}, Capabilities: []string{"chat", "embeddings"}, Weight: 1, Enabled: true}
+	if _, err := router.CreateModelDeployment(deployment); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := modelcatalog.Parse(`{"version":"after","models":[{"provider":"ollama","model":"m","capabilities":["embeddings"]}]}`)
+	deployment.Capabilities = []string{"embeddings"}
+	input := ModelOnboardingInput{Catalog: after, Deployments: []ModelDeployment{deployment}}
+	if _, err := router.PlanModelOnboarding(t.Context(), input); !errors.Is(err, ErrDeploymentExists) {
+		t.Fatalf("create-only plan accepted an existing deployment: %v", err)
+	}
+	input.UpdateExistingDeployments = true
+	plan, err := router.PlanModelOnboarding(t.Context(), input)
+	if err != nil || !slices.Contains(plan.Changes, "update deployment ollama-m") {
+		t.Fatalf("update plan=%+v err=%v", plan, err)
+	}
+	if current := router.catalog.Current(t.Context()); current.Version != "before" {
+		t.Fatalf("plan changed catalog: %+v", current)
+	}
+	duplicate := input
+	duplicate.Deployments = append(append([]ModelDeployment(nil), input.Deployments...), deployment)
+	if _, err := router.PlanModelOnboarding(t.Context(), duplicate); !errors.Is(err, ErrInvalidModelOnboarding) {
+		t.Fatalf("duplicate deployment plan error = %v", err)
+	}
+	store.mu.Lock()
+	store.saveErr = errors.New("database unavailable")
+	store.mu.Unlock()
+	if _, err := router.ApplyModelOnboarding(t.Context(), plan.Revision, input); err == nil {
+		t.Fatal("expected persistence failure")
+	}
+	if current := router.catalog.Current(t.Context()); current.Version != "before" {
+		t.Fatalf("failed apply leaked catalog: %+v", current)
+	}
+	if deployments := router.ListModelDeployments(t.Context()); len(deployments) != 1 || !slices.Equal(deployments[0].Capabilities, []string{"chat", "embeddings"}) {
+		t.Fatalf("failed apply leaked deployment: %+v", deployments)
+	}
+	store.mu.Lock()
+	store.saveErr = nil
+	store.mu.Unlock()
+	result, err := router.ApplyModelOnboarding(t.Context(), plan.Revision, input)
+	if err != nil || result.Revision != plan.Revision+1 {
+		t.Fatalf("apply result=%+v err=%v", result, err)
+	}
+	if current := router.catalog.Current(t.Context()); current.Version != "after" {
+		t.Fatalf("catalog was not updated: %+v", current)
+	}
+	if deployments := router.ListModelDeployments(t.Context()); len(deployments) != 1 || !slices.Equal(deployments[0].Capabilities, []string{"embeddings"}) {
+		t.Fatalf("deployment was not replaced: %+v", deployments)
+	}
+	request := openai.ChatCompletionRequest{Model: "m", Messages: []openai.Message{{Role: "user", Content: "hello"}}}
+	if _, err := router.ChatCompletions(t.Context(), modules.RequestContext{Request: request}); err == nil || upstreamCalls.Load() != 0 {
+		t.Fatalf("unsupported chat reached upstream: err=%v calls=%d", err, upstreamCalls.Load())
+	}
+	if _, err := router.ApplyModelOnboarding(t.Context(), plan.Revision, input); !errors.Is(err, ErrControlPlaneConflict) {
+		t.Fatalf("stale plan error = %v", err)
+	}
+	replicaRuntime, err := NewWithError(Config{CredentialEncryptionKey: []byte("stable-key"), ControlPlaneStore: store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	replica := replicaRuntime.(*Router)
+	if current := replica.catalog.Current(t.Context()); current.Version != "after" {
+		t.Fatalf("replica catalog=%+v", current)
+	}
+	if deployments := replica.ListModelDeployments(t.Context()); len(deployments) != 1 || !slices.Equal(deployments[0].Capabilities, []string{"embeddings"}) {
+		t.Fatalf("replica deployments=%+v", deployments)
+	}
+}
+
+func TestControlPlanePromptInjectionClassifierPolicyDurableSave(t *testing.T) {
+	store := &memoryControlPlaneStore{}
+	runtime, err := NewWithError(Config{ControlPlaneStore: store, ControlPlaneRefresh: time.Nanosecond, Endpoints: []config.ProviderEndpointConfig{{Name: "judge", Type: "demo", Models: []string{"judge-model"}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	saved, err := runtime.(*Router).UpdateGuardrailPolicyDurable(ctx, "protect", GuardrailPolicy{Enabled: true, PromptInjection: &promptinjection.Config{LLMAPICheck: true, JudgeDeploymentID: "judge"}})
+	if err != nil || saved.PromptInjection == nil || saved.PromptInjection.JudgeDeploymentID != "judge" {
+		t.Fatalf("durable classifier policy: %v", err)
+	}
+	restored, err := NewWithError(Config{ControlPlaneStore: store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy, found := restored.(*Router).GetGuardrailPolicy("protect")
+	if !found || policy.PromptInjection == nil || !policy.PromptInjection.LLMAPICheck {
+		t.Fatal("classifier policy lost during restoration")
+	}
+	store.mu.Lock()
+	store.saveErr = errors.New("database unavailable")
+	store.mu.Unlock()
+	_, err = runtime.(*Router).UpdateGuardrailPolicyDurable(ctx, "protect", injectionPolicy(promptinjection.Config{HeuristicsCheck: true}))
+	if err == nil {
+		t.Fatal("expected durable save failure")
+	}
+	previous, _ := runtime.(*Router).GetGuardrailPolicy("protect")
+	if previous.PromptInjection == nil || !previous.PromptInjection.LLMAPICheck {
+		t.Fatal("failed persistence changed active detector configuration")
 	}
 }

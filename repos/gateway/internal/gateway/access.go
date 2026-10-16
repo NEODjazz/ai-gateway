@@ -8,6 +8,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -124,6 +125,18 @@ func modelAllowed(model string, grants []string) bool {
 	return false
 }
 
+func (h Handler) requestModelAllowed(req modules.RequestContext, model string) bool {
+	if (req.ModelAccessRestricted && len(req.AllowedModels) == 0) || !modelAllowed(model, req.AllowedModels) {
+		return false
+	}
+	for _, policy := range h.identityPolicies(req) {
+		if !policy.modelAllowed(model) {
+			return false
+		}
+	}
+	return true
+}
+
 func toolAllowed(tool string, grants []string) bool {
 	return modelAllowed(tool, grants)
 }
@@ -201,6 +214,52 @@ func responseRequestToolIdentifiers(request openai.ResponseRequest) ([]string, b
 	if !valid {
 		return nil, false
 	}
+	customNames, hasCustom, message := openai.InspectResponseCustomToolHistory(request.Input)
+	if message != "" {
+		return nil, false
+	}
+	functionNames, hasFunction, message := openai.InspectResponseFunctionToolHistory(request.Input)
+	if message != "" {
+		return nil, false
+	}
+	for _, history := range []struct {
+		names   []string
+		hasTool bool
+		kind    string
+	}{{customNames, hasCustom, "custom"}, {functionNames, hasFunction, "function"}} {
+		for _, name := range history.names {
+			if !slices.Contains(identifiers, name) {
+				identifiers = append(identifiers, name)
+			}
+		}
+		if history.kind == "function" && history.hasTool {
+			for _, name := range request.RunToolNames {
+				if !validFileToken(name, 64) {
+					return nil, false
+				}
+				if !slices.Contains(identifiers, name) {
+					identifiers = append(identifiers, name)
+				}
+			}
+		}
+		if history.hasTool && len(history.names) == 0 {
+			declared := history.kind == "function" && len(request.RunToolNames) > 0
+			for _, tool := range request.Tools {
+				if tool.Type == history.kind {
+					declared = true
+					break
+				}
+			}
+			if !declared {
+				if request.PreviousResponse == "" {
+					return nil, false
+				}
+				if !slices.Contains(identifiers, "*") {
+					identifiers = append(identifiers, "*")
+				}
+			}
+		}
+	}
 	computerOutputs, message := openai.InspectResponseComputerCallOutputs(request.Input)
 	if message != "" {
 		return nil, false
@@ -258,7 +317,7 @@ func (h Handler) authorizeTools(w http.ResponseWriter, req modules.RequestContex
 		return false
 	}
 	for _, identifier := range identifiers {
-		if !h.toolAllowed(identifier, req.AllowedTools) {
+		if (req.ToolAccessRestricted && len(req.AllowedTools) == 0) || !h.toolAllowed(identifier, req.AllowedTools) {
 			writeError(w, http.StatusForbidden, "tool_not_allowed", "credential is not allowed to use tool "+strconv.Quote(identifier))
 			return false
 		}
@@ -353,7 +412,7 @@ func (h Handler) authorizeAccess(w http.ResponseWriter, ctx context.Context, req
 }
 
 func (h Handler) authorizeModel(w http.ResponseWriter, req modules.RequestContext, model string) bool {
-	if !modelAllowed(model, req.AllowedModels) {
+	if !h.requestModelAllowed(req, model) {
 		writeError(w, 403, "model_not_allowed", "credential is not allowed to use model "+strconv.Quote(model))
 		return false
 	}
@@ -373,7 +432,7 @@ func (h Handler) authorizeModel(w http.ResponseWriter, req modules.RequestContex
 func (h Handler) authorizeRateLimit(w http.ResponseWriter, ctx context.Context, req modules.RequestContext, tokens int) bool {
 	allowed, retryAfter, err := h.checkRateLimit(ctx, req, tokens)
 	if err != nil {
-		writeError(w, 503, "rate_limit_unavailable", err.Error())
+		writeError(w, 503, "rate_limit_unavailable", "rate limit service is unavailable")
 		return false
 	}
 	if !allowed {
@@ -382,21 +441,45 @@ func (h Handler) authorizeRateLimit(w http.ResponseWriter, ctx context.Context, 
 			seconds = 1
 		}
 		w.Header().Set("Retry-After", strconv.Itoa(seconds))
-		writeError(w, 429, "rate_limit_exceeded", "credential rate limit exceeded")
+		writeError(w, 429, "rate_limit_exceeded", "request rate limit exceeded")
 		return false
 	}
 	return true
 }
 
 func (h Handler) checkRateLimit(ctx context.Context, req modules.RequestContext, tokens int) (bool, time.Duration, error) {
+	// Consult shared configuration before admission using the control plane's
+	// refresh cadence. Observed failures are closed before consuming any quota.
+	if h.adminState != nil {
+		if err := h.adminState.Refresh(ctx); err != nil {
+			return false, 0, err
+		}
+	}
 	key := req.CredentialID
 	if req.TeamID != "" {
 		key = "team:" + req.TeamID + ":credential:" + req.CredentialID
 	}
-	return h.rateLimits.Allow(ctx, key, RateLimit{Requests: req.RateLimitRPM, Tokens: req.RateLimitTPM}, tokens)
+	allowed, retry, err := h.rateLimits.Allow(ctx, key, RateLimit{Requests: req.RateLimitRPM, Tokens: req.RateLimitTPM}, tokens)
+	if err != nil || !allowed {
+		return allowed, retry, err
+	}
+	for _, policy := range h.identityPolicies(req) {
+		allowed, retry, err = h.rateLimits.Allow(ctx, "\x00gateway:identity:"+policy.ScopeType+":"+policy.ScopeID, RateLimit{Requests: policy.RPM, Tokens: policy.TPM}, tokens)
+		if err != nil || !allowed {
+			return allowed, retry, err
+		}
+	}
+	if h.globalRateLimits == nil {
+		return true, 0, nil
+	}
+	limits := h.globalRateLimits.effective()
+	return h.rateLimits.Allow(ctx, "\x00gateway:global", RateLimit{Requests: limits.RPM, Tokens: limits.TPM}, tokens)
 }
 
-func (h Handler) prepareAccessGroups(w http.ResponseWriter, req *modules.RequestContext) bool {
+func (h Handler) prepareAccessGroups(ctx context.Context, w http.ResponseWriter, req *modules.RequestContext) bool {
+	if !h.prepareIdentityPolicies(ctx, w, req) {
+		return false
+	}
 	if len(req.AccessGroupIDs) == 0 {
 		return true
 	}

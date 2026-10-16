@@ -185,7 +185,12 @@ func decodeBoundedJSON(body io.Reader, target any, limit int64, label string) er
 	if int64(len(payload)) > limit {
 		return fmt.Errorf("%s response exceeds %d bytes", label, limit)
 	}
-	if err := json.Unmarshal(payload, target); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.UseNumber()
+	if !json.Valid(payload) {
+		return errors.New("invalid interaction JSON response")
+	}
+	if err := decoder.Decode(target); err != nil {
 		return err
 	}
 	return nil
@@ -202,7 +207,9 @@ func readGeminiInteractionStream(body io.Reader, write ResponseStreamWriter) (op
 			EventType   string                     `json:"event_type"`
 			Interaction openai.InteractionResponse `json:"interaction"`
 		}
-		if err := json.Unmarshal([]byte(payload), &envelope); err != nil || strings.TrimSpace(envelope.EventType) == "" {
+		decoder := json.NewDecoder(strings.NewReader(payload))
+		decoder.UseNumber()
+		if !json.Valid([]byte(payload)) || decoder.Decode(&envelope) != nil || strings.TrimSpace(envelope.EventType) == "" {
 			return errors.New("invalid Gemini interaction stream event")
 		}
 		if envelope.EventType == "interaction.completed" {

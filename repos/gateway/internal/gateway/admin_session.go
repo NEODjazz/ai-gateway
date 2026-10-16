@@ -16,15 +16,16 @@ const (
 )
 
 type AdminSession struct {
-	UserID          string   `json:"user_id,omitempty"`
-	TeamID          string   `json:"team_id,omitempty"`
-	OrganizationID  string   `json:"organization_id,omitempty"`
-	CredentialID    string   `json:"credential_id,omitempty"`
-	CredentialAlias string   `json:"credential_alias,omitempty"`
-	Roles           []string `json:"roles"`
-	AllowedModels   []string `json:"allowed_models"`
-	AllowedTools    []string `json:"allowed_tools"`
-	Capabilities    []string `json:"capabilities"`
+	UserID                   string   `json:"user_id,omitempty"`
+	TeamID                   string   `json:"team_id,omitempty"`
+	OrganizationID           string   `json:"organization_id,omitempty"`
+	CredentialID             string   `json:"credential_id,omitempty"`
+	CredentialAlias          string   `json:"credential_alias,omitempty"`
+	Roles                    []string `json:"roles"`
+	AllowedModels            []string `json:"allowed_models"`
+	AllowedTools             []string `json:"allowed_tools"`
+	Capabilities             []string `json:"capabilities"`
+	OrganizationCapabilities []string `json:"organization_capabilities,omitempty"`
 }
 
 // GetAdminSession validates the presented gateway credential and exposes only
@@ -41,15 +42,16 @@ func (h Handler) GetAdminSession(w http.ResponseWriter, r *http.Request) {
 	}
 	req.APIKey = ""
 	writeJSON(w, http.StatusOK, AdminSession{
-		UserID:          req.UserID,
-		TeamID:          req.TeamID,
-		OrganizationID:  req.OrganizationID,
-		CredentialID:    req.CredentialID,
-		CredentialAlias: req.CredentialAlias,
-		Roles:           uniqueSorted(req.Roles),
-		AllowedModels:   uniqueSorted(req.AllowedModels),
-		AllowedTools:    uniqueSorted(req.AllowedTools),
-		Capabilities:    consoleCapabilities(req.Roles),
+		UserID:                   req.UserID,
+		TeamID:                   req.TeamID,
+		OrganizationID:           req.OrganizationID,
+		CredentialID:             req.CredentialID,
+		CredentialAlias:          req.CredentialAlias,
+		Roles:                    uniqueSorted(req.Roles),
+		AllowedModels:            uniqueSorted(req.AllowedModels),
+		AllowedTools:             uniqueSorted(req.AllowedTools),
+		Capabilities:             consoleCapabilities(req.Roles),
+		OrganizationCapabilities: organizationConsoleCapabilities(req.Roles, req.OrganizationID),
 	})
 }
 
@@ -60,6 +62,7 @@ func consoleCapabilities(roles []string) []string {
 	} else if hasRole(roles, "team_admin") {
 		capabilities = append(capabilities, consoleCapabilityTeamDirectory)
 	}
+
 	return uniqueSorted(capabilities)
 }
 
@@ -78,4 +81,11 @@ func uniqueSorted(values []string) []string {
 	}
 	sort.Strings(result)
 	return result
+}
+
+func organizationConsoleCapabilities(roles []string, organizationID string) []string {
+	if hasRole(roles, "org_admin") && organizationID != "" {
+		return []string{"organization_keys", "organization_reports"}
+	}
+	return nil
 }

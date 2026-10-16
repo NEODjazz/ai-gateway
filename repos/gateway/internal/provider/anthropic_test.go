@@ -604,6 +604,24 @@ func TestAnthropicRejectsUsageAboveRequestedServerToolLimit(t *testing.T) {
 	}
 }
 
+func TestAnthropicRejectsUnrequestedServerToolUsage(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		usage anthropicServerToolUsage
+	}{
+		{name: "web search", usage: anthropicServerToolUsage{WebSearchRequests: 1}},
+		{name: "web fetch", usage: anthropicServerToolUsage{WebFetchRequests: 1}},
+		{name: "code execution", usage: anthropicServerToolUsage{CodeExecutionRequests: 1}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			usage := anthropicUsage{ServerToolUse: &tc.usage}
+			if err := validateAnthropicRequestedToolUsage(usage, nil, nil, false); err == nil {
+				t.Fatalf("unrequested usage accepted: %+v", tc.usage)
+			}
+		})
+	}
+}
+
 func TestAnthropicRejectsUnsafeNativeContent(t *testing.T) {
 	for _, content := range [][]anthropicContent{
 		{{Type: "server_tool_use"}, {Type: "unknown"}},
@@ -1008,6 +1026,49 @@ func TestAnthropicRejectsUnsupportedResponsesToolsBeforeUpstream(t *testing.T) {
 	}
 	if err := client.ValidateResponseParameters(openai.ResponseRequest{Tools: []openai.ResponseTool{{Type: "function", Name: "lookup"}}}); err != nil {
 		t.Fatalf("function tool rejected: %v", err)
+	}
+}
+
+func TestAnthropicFunctionToolsPreserveStrictControl(t *testing.T) {
+	for _, strict := range []bool{false, true} {
+		t.Run(fmt.Sprintf("strict=%v", strict), func(t *testing.T) {
+			chat := anthropicChatRequest(openai.ChatCompletionRequest{
+				Model: "claude", Messages: []openai.Message{{Role: "user", Content: "hello"}},
+				Tools: []openai.Tool{{Type: "function", Function: openai.FunctionDefinition{Name: "lookup", Parameters: map[string]any{"type": "object"}, Strict: &strict}}},
+			}, false)
+			responses, err := anthropicResponsesRequest(openai.ResponseRequest{
+				Model: "claude", Input: "hello", Tools: []openai.ResponseTool{{Type: "function", Name: "lookup", Parameters: map[string]any{"type": "object"}, Strict: &strict}},
+			}, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for name, request := range map[string]anthropicRequest{"chat": chat, "responses": responses} {
+				encoded, err := json.Marshal(request)
+				if err != nil || !strings.Contains(string(encoded), fmt.Sprintf(`"strict":%v`, strict)) {
+					t.Fatalf("%s strict control lost: %s, err=%v", name, encoded, err)
+				}
+			}
+		})
+	}
+}
+
+func TestAnthropicResponsesRejectFunctionOutputSchemaBeforeUpstream(t *testing.T) {
+	var calls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
+	t.Cleanup(server.Close)
+	client := NewAnthropic(server.URL, "", true)
+	request := openai.ResponseRequest{Model: "claude", Input: "hello", Tools: []openai.ResponseTool{{Type: "function", Name: "lookup", OutputSchema: map[string]any{"type": "object"}}}}
+	for _, call := range []func() error{
+		func() error { _, err := client.Responses(t.Context(), request); return err },
+		func() error { _, err := client.StreamResponses(t.Context(), request, nil); return err },
+	} {
+		var failure *Error
+		if err := call(); !errors.As(err, &failure) || failure.Param != "tools.output_schema" || failure.UpstreamCode != "unsupported_parameter" {
+			t.Fatalf("unsupported output schema was not rejected explicitly: %v", err)
+		}
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("unsupported output schema reached upstream %d times", calls.Load())
 	}
 }
 

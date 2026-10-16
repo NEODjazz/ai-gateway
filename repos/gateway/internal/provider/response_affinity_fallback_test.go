@@ -98,3 +98,61 @@ func TestResponsesPromptCacheComparisonRejectsConflictingReferences(t *testing.T
 		t.Fatalf("conflicting response references were not rejected: %v", err)
 	}
 }
+
+func TestResponsesContinuationUsesOwnershipAfterAffinityMiss(t *testing.T) {
+	for _, withAffinity := range []bool{false, true} {
+		t.Run(fmt.Sprintf("affinity=%v", withAffinity), func(t *testing.T) {
+			clients := []*affinityFallbackClient{{}, {}, {}, {}}
+			router := fallbackTestRouter(clients[0], clients[1], clients[2], clients[3])
+			if withAffinity {
+				router.affinity = newAffinityStore(time.Hour, nil)
+			}
+			backend := &ownershipTestStore{data: map[string][]byte{}}
+			router.ownership = responseOwnershipStore{store: backend, ttl: 24 * time.Hour}
+			request := openai.ResponseRequest{Model: "primary", PreviousResponse: "resp_owned"}
+			owner := modules.RequestContext{CredentialID: "tenant", UserID: "user-a"}
+			binding := responseOwnership{Endpoint: router.endpoints[1].Name, Model: request.Model, Deployment: responseDeploymentIdentity(router.endpoints[1]), Resource: "response"}
+			if err := router.ownership.put(t.Context(), owner, request.PreviousResponse, binding); err != nil {
+				t.Fatal(err)
+			}
+			candidates, err := router.responseCandidates(t.Context(), owner, request, "responses")
+			if err != nil || len(candidates) != 1 || candidates[0].Name != binding.Endpoint {
+				t.Fatalf("candidates=%+v err=%v", candidates, err)
+			}
+			other := owner
+			other.UserID = "user-b"
+			candidates, err = router.responseCandidates(t.Context(), other, request, "responses")
+			if err != nil || len(candidates) <= 1 {
+				t.Fatalf("cross-user ownership affected route: candidates=%+v err=%v", candidates, err)
+			}
+			router.endpoints[1].BaseURL = "https://replacement.example"
+			_, err = router.responseCandidates(t.Context(), owner, request, "responses")
+			if !errors.Is(err, ErrResponseDeploymentChanged) {
+				t.Fatalf("deployment replacement was not rejected: %v", err)
+			}
+		})
+	}
+}
+
+func TestResponsesComparisonUsesOwnershipAfterAffinityMiss(t *testing.T) {
+	clients := []*affinityFallbackClient{{}, {}, {}, {}}
+	router := fallbackTestRouter(clients[0], clients[1], clients[2], clients[3])
+	router.affinity = newAffinityStore(time.Hour, nil)
+	backend := &ownershipTestStore{data: map[string][]byte{}}
+	router.ownership = responseOwnershipStore{store: backend, ttl: 24 * time.Hour}
+	request := openai.ResponseRequest{Model: "primary", PromptCacheOptions: &openai.PromptCacheOptions{ComparisonResponseID: "resp_owned"}}
+	owner := modules.RequestContext{CredentialID: "tenant", UserID: "user-a"}
+	binding := responseOwnership{Endpoint: router.endpoints[1].Name, Model: request.Model, Deployment: responseDeploymentIdentity(router.endpoints[1]), Resource: "response"}
+	if err := router.ownership.put(t.Context(), owner, "resp_owned", binding); err != nil {
+		t.Fatal(err)
+	}
+	candidates, err := router.responseCandidates(t.Context(), owner, request, "responses")
+	if err != nil || len(candidates) != 1 || candidates[0].Name != binding.Endpoint {
+		t.Fatalf("candidates=%+v err=%v", candidates, err)
+	}
+	backend.err = errors.New("private backend details")
+	_, err = router.responseCandidates(t.Context(), owner, request, "responses")
+	if !errors.Is(err, ErrResponseAffinityUnavailable) || !errors.Is(err, ErrResponseOwnershipUnavailable) {
+		t.Fatalf("ownership failure did not fail closed: %v", err)
+	}
+}

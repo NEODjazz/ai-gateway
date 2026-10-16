@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"ai-gateway-gateway/internal/asyncstate"
+	"ai-gateway-gateway/internal/conversationstate"
 	"ai-gateway-gateway/internal/modules"
 	"ai-gateway-gateway/internal/openai"
 )
@@ -126,6 +127,8 @@ type backgroundLifecycleRecorder struct {
 	totalTokens        int
 	anonymizationMode  string
 	anonymizationRules string
+	providerStatus     string
+	rawProviderError   string
 }
 
 func (*backgroundLifecycleRecorder) Name() string   { return "billing" }
@@ -141,6 +144,8 @@ func (r *backgroundLifecycleRecorder) HandlePostResponse(_ context.Context, req 
 	r.totalTokens = req.ResponsesResponse.Usage.TotalTokens
 	r.anonymizationMode = req.Metadata["provider.modules.anonymizer.mode"]
 	r.anonymizationRules = req.Metadata["provider.modules.anonymizer.rules"]
+	r.providerStatus = req.Metadata["provider.status"]
+	r.rawProviderError = req.Metadata["provider.error"]
 	return nil
 }
 func (r *backgroundLifecycleRecorder) HandleFailure(context.Context, *modules.RequestContext, error) error {
@@ -186,6 +191,89 @@ func TestBackgroundResponseDefersSettlementAndSurvivesRouterRestart(t *testing.T
 	}
 	if settled, err := restarted.BackgroundResponseSettled(t.Context(), req, response.ID); err != nil || !settled {
 		t.Fatalf("completed settled=%t err=%v", settled, err)
+	}
+}
+
+func TestBackgroundResponseConversationStagesAndCommitsWithoutPersistingPromptInJob(t *testing.T) {
+	storeResponse := true
+	request := openai.ResponseRequest{Model: "public-model", Input: "conversation-secret", Store: &storeResponse, Background: true}
+	owner := conversationstate.OwnerKey("credential", "user")
+	conversationStore := &memoryConversationStore{turn: conversationstate.Turn{
+		Conversation: conversationstate.Conversation{ID: "conv_background", OwnerKey: owner},
+		ExecutionID:  "execution-conversation",
+	}}
+	input, err := conversationInputItems(request.Input, owner, "conv_background")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := modules.RequestContext{
+		RequestID: "execution-conversation", CredentialID: "credential", UserID: "user",
+		Request: openai.ChatCompletionRequest{Model: request.Model}, ResponseRequest: &request,
+		ConversationTurn: &conversationStore.turn, ConversationInputItems: input,
+	}
+	jobs := &backgroundJobStore{}
+	client := &backgroundResponseClient{retrieve: openai.ResponseResponse{
+		ID: "resp_background", Model: request.Model, Status: "completed",
+		Output: []openai.ResponseOutputItem{{ID: "item_answer", Type: "message", Role: "assistant", Content: []openai.ResponseOutputContent{{Type: "output_text", Text: "answer"}}}},
+		Usage:  openai.ResponseUsage{InputTokens: 2, OutputTokens: 1, TotalTokens: 3},
+	}}
+	endpoint := Endpoint{Name: "deployment", ProviderID: "provider", Type: "openai-compatible", Models: []string{request.Model}, Capabilities: []string{"responses", "background_responses"}, Provider: client, Admission: newAdmissionController(0, 0, 0)}
+	router := Router{endpoints: []Endpoint{endpoint}, endpointState: &endpointRegistry{}, modules: modules.NewPipeline(nil), health: newEndpointHealthTracker(), routeCounter: &atomic.Uint64{}, ownership: newResponseOwnershipStore(time.Hour, &ownershipTestStore{data: map[string][]byte{}}), asyncJobs: jobs, conversations: conversationStore}
+	router.endpointState.current.Store(&router.endpoints)
+
+	response, err := router.Responses(t.Context(), req)
+	if err != nil || response.Status != "queued" || jobs.job == nil || !req.ConversationTurn.Durable {
+		t.Fatalf("response=%+v job=%+v turn=%+v err=%v", response, jobs.job, req.ConversationTurn, err)
+	}
+	if bytes.Contains(jobs.job.Payload, []byte("conversation-secret")) || !bytes.Contains(jobs.job.Payload, []byte("conv_background")) {
+		t.Fatalf("unsafe background job payload: %s", jobs.job.Payload)
+	}
+	if len(conversationStore.staged) != 1 || len(conversationStore.completed) != 0 {
+		t.Fatalf("staged=%+v completed=%+v", conversationStore.staged, conversationStore.completed)
+	}
+	if processed, err := router.ProcessBackgroundResponses(t.Context()); err != nil || processed != 1 {
+		t.Fatalf("processed=%d err=%v", processed, err)
+	}
+	if len(conversationStore.staged) != 0 || len(conversationStore.completed) != 2 || conversationStore.completed[1].ID != "item_answer" || conversationStore.turn.ExecutionID != "" {
+		t.Fatalf("staged=%+v completed=%+v turn=%+v", conversationStore.staged, conversationStore.completed, conversationStore.turn)
+	}
+}
+
+func TestFailedBackgroundResponseReleasesConversationAndDiscardsPendingInput(t *testing.T) {
+	storeResponse := true
+	request := openai.ResponseRequest{Model: "public-model", Input: "discard-me", Store: &storeResponse, Background: true}
+	owner := conversationstate.OwnerKey("credential", "user")
+	conversationStore := &memoryConversationStore{turn: conversationstate.Turn{
+		Conversation: conversationstate.Conversation{ID: "conv_failed", OwnerKey: owner},
+		ExecutionID:  "execution-failed",
+	}}
+	input, err := conversationInputItems(request.Input, owner, "conv_failed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := modules.RequestContext{
+		RequestID: "execution-failed", CredentialID: "credential", UserID: "user",
+		Request: openai.ChatCompletionRequest{Model: request.Model}, ResponseRequest: &request,
+		ConversationTurn: &conversationStore.turn, ConversationInputItems: input,
+	}
+	jobs := &backgroundJobStore{}
+	client := &backgroundResponseClient{retrieve: openai.ResponseResponse{ID: "resp_background", Model: request.Model, Status: "failed", Error: &openai.ResponseError{Message: "private prompt and credential"}}}
+	recorder := &backgroundLifecycleRecorder{}
+	endpoint := Endpoint{Name: "deployment", ProviderID: "provider", Type: "openai-compatible", Models: []string{request.Model}, Capabilities: []string{"responses", "background_responses"}, Provider: client, Admission: newAdmissionController(0, 0, 0)}
+	router := Router{endpoints: []Endpoint{endpoint}, endpointState: &endpointRegistry{}, modules: modules.NewPipeline([]modules.Module{recorder}), health: newEndpointHealthTracker(), routeCounter: &atomic.Uint64{}, ownership: newResponseOwnershipStore(time.Hour, &ownershipTestStore{data: map[string][]byte{}}), asyncJobs: jobs, conversations: conversationStore}
+	router.endpointState.current.Store(&router.endpoints)
+
+	if _, err := router.Responses(t.Context(), req); err != nil {
+		t.Fatal(err)
+	}
+	if processed, err := router.ProcessBackgroundResponses(t.Context()); err != nil || processed != 1 {
+		t.Fatalf("processed=%d err=%v", processed, err)
+	}
+	if !conversationStore.released || len(conversationStore.staged) != 0 || len(conversationStore.completed) != 0 || conversationStore.turn.ExecutionID != "" {
+		t.Fatalf("released=%t staged=%+v completed=%+v turn=%+v", conversationStore.released, conversationStore.staged, conversationStore.completed, conversationStore.turn)
+	}
+	if recorder.post != 1 || recorder.providerStatus != "error" || recorder.rawProviderError != "" {
+		t.Fatalf("unsafe failed response metadata: %+v", recorder)
 	}
 }
 
@@ -240,5 +328,77 @@ func TestBackgroundResponseRequiresExplicitDeploymentCapability(t *testing.T) {
 	}
 	if client.responseCalls != 0 || recorder.pre != 0 {
 		t.Fatalf("provider=%d reserve=%d", client.responseCalls, recorder.pre)
+	}
+}
+
+type jwtBackgroundAuth struct {
+	err   error
+	calls int
+}
+
+func (*jwtBackgroundAuth) Name() string                                          { return "auth" }
+func (*jwtBackgroundAuth) Required() bool                                        { return true }
+func (*jwtBackgroundAuth) Handle(context.Context, *modules.RequestContext) error { return nil }
+func (a *jwtBackgroundAuth) ReauthorizeBackground(_ context.Context, req modules.RequestContext) error {
+	a.calls++
+	return a.err
+}
+func TestJWTBackgroundRevocationCancelsAndSettlesWithoutNewExecution(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		authErr      error
+		pending      bool
+		cancel, post int
+	}{
+		{"active", nil, true, 0, 0},
+		{"revoked", modules.ErrUnauthorized, true, 1, 0},
+		{"directory outage", errors.New("directory unavailable"), true, 0, 0},
+		{"already completed still settles", modules.ErrUnauthorized, false, 0, 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			jobs := &backgroundJobStore{}
+			auth := &jwtBackgroundAuth{err: test.authErr}
+			billing := &backgroundLifecycleRecorder{}
+			status := "completed"
+			if test.pending {
+				status = "in_progress"
+			}
+			client := &backgroundResponseClient{retrieve: openai.ResponseResponse{ID: "resp_background", Status: status, Usage: openai.ResponseUsage{TotalTokens: 7}}}
+			endpoint := Endpoint{Name: "deployment", Type: "openai-compatible", Models: []string{"model"}, Provider: client, Admission: newAdmissionController(0, 0, 0)}
+			router := Router{endpoints: []Endpoint{endpoint}, endpointState: &endpointRegistry{}, backgroundAuthorization: modules.NewPipeline([]modules.Module{auth}), modules: modules.NewPipeline([]modules.Module{billing}), health: newEndpointHealthTracker(), ownership: newResponseOwnershipStore(time.Hour, &ownershipTestStore{data: map[string][]byte{}}), asyncJobs: jobs}
+			req := modules.RequestContext{JWTIdentity: &modules.JWTIdentity{Subject: "sub"}, CredentialID: "jwt:principal", UserID: "user", RequestID: "execution", ResponseRequest: &openai.ResponseRequest{Model: "model"}}
+			if err := router.ownership.put(t.Context(), req, "resp_background", responseOwnership{Endpoint: endpoint.Name, Model: "model", Deployment: responseDeploymentIdentity(endpoint)}); err != nil {
+				t.Fatal(err)
+			}
+			job := newBackgroundResponseJob(req)
+			payload, err := json.Marshal(job)
+			if err != nil {
+				t.Fatal(err)
+			}
+			jobs.job = &asyncstate.Job{Kind: backgroundResponseJobKind, ResourceID: "resp_background", OwnerKey: backgroundResponseOwner(req), EndpointID: endpoint.Name, ExecutionID: req.RequestID, Payload: payload}
+			_, err = router.ProcessBackgroundResponses(t.Context())
+			if client.cancelCalls != test.cancel || billing.post != test.post || billing.pre != 0 || client.responseCalls != 0 {
+				t.Fatalf("cancel=%d billing=%+v creates=%d err=%v", client.cancelCalls, billing, client.responseCalls, err)
+			}
+			if test.post == 1 && jobs.job != nil {
+				t.Fatal("settled job remains queued")
+			}
+			if test.post == 0 && jobs.job == nil {
+				t.Fatal("unsettled reservation lost")
+			}
+			if test.name == "directory outage" && err == nil {
+				t.Fatal("outage not reported")
+			}
+			if test.name == "revoked" {
+				client.retrieve.Status = "cancelled"
+				if _, err := router.ProcessBackgroundResponses(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+				if billing.post != 1 || billing.totalTokens != 7 || billing.requestID != "execution" || jobs.job != nil {
+					t.Fatalf("terminal usage not settled: %+v", billing)
+				}
+			}
+
+		})
 	}
 }

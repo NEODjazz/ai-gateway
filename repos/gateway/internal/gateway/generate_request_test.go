@@ -95,6 +95,105 @@ func TestGenerateRequestMapsGoogleSearchTool(t *testing.T) {
 	}
 }
 
+func TestGenerateRequestMapsMCPRegistryIDs(t *testing.T) {
+	var native generateRequest
+	if err := decodeMessagesValue(json.RawMessage(`{"contents":[{"parts":[{"text":"forecast"}]}],"tools":[{"mcpServers":[{"name":"weather"},{"name":"finance.prod"}]}]}`), &native); err != nil {
+		t.Fatal(err)
+	}
+	chat, err := native.chat("model", false)
+	if err != nil || len(chat.GeminiMCPServerIDs) != 2 || chat.GeminiMCPServerIDs[0] != "weather" || chat.NativeInputTokens == 0 {
+		t.Fatalf("chat=%+v err=%v", chat, err)
+	}
+	for _, raw := range []string{
+		`{"contents":[{"parts":[{"text":"x"}]}],"tools":[{"mcpServers":[]}]}`,
+		`{"contents":[{"parts":[{"text":"x"}]}],"tools":[{"mcpServers":[{"name":"weather"},{"name":"weather"}]}]}`,
+		`{"contents":[{"parts":[{"text":"x"}]}],"tools":[{"mcpServers":[{"name":"bad/id"}]}]}`,
+		`{"contents":[{"parts":[{"text":"x"}]}],"tools":[{"mcpServers":[{"name":"weather"}],"googleSearch":{}}]}`,
+	} {
+		var invalid generateRequest
+		if err := decodeMessagesValue(json.RawMessage(raw), &invalid); err == nil {
+			if _, err := invalid.chat("model", false); err == nil {
+				t.Fatalf("invalid MCP selection accepted: %s", raw)
+			}
+		}
+	}
+}
+
+func TestGenerateRequestMapsGoogleSearchTimeRange(t *testing.T) {
+	var native generateRequest
+	if err := decodeMessagesValue(json.RawMessage(`{"contents":[{"parts":[{"text":"news"}]}],"tools":[{"googleSearch":{"timeRangeFilter":{"startTime":"2026-01-01T02:00:00+02:00","endTime":"2026-02-01T00:00:00Z"}}}]}`), &native); err != nil {
+		t.Fatal(err)
+	}
+	chat, err := native.chat("model", false)
+	if err != nil || chat.WebSearchOptions == nil || chat.WebSearchOptions.GeminiTimeRange == nil || chat.WebSearchOptions.GeminiTimeRange.StartTime != "2026-01-01T00:00:00Z" {
+		t.Fatalf("chat=%+v err=%v", chat, err)
+	}
+	for _, raw := range []string{
+		`{"contents":[{"parts":[{"text":"news"}]}],"tools":[{"googleSearch":{"timeRangeFilter":{"startTime":"bad","endTime":"2026-02-01T00:00:00Z"}}}]}`,
+		`{"contents":[{"parts":[{"text":"news"}]}],"tools":[{"googleSearch":{"timeRangeFilter":{"startTime":"2026-02-01T00:00:00Z","endTime":"2026-01-01T00:00:00Z"}}}]}`,
+	} {
+		var invalid generateRequest
+		if err := decodeMessagesValue(json.RawMessage(raw), &invalid); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := invalid.chat("model", false); err == nil {
+			t.Fatalf("invalid search time range accepted: %s", raw)
+		}
+	}
+}
+
+func TestGenerateRequestMapsFileSearchTool(t *testing.T) {
+	var native generateRequest
+	raw := `{"contents":[{"parts":[{"text":"find the policy"}]}],"tools":[{"fileSearch":{"fileSearchStoreNames":["fileSearchStores/policies"],"metadataFilter":"status=active","topK":8}}]}`
+	if err := decodeMessagesValue(json.RawMessage(raw), &native); err != nil {
+		t.Fatal(err)
+	}
+	chat, err := native.chat("model", false)
+	if err != nil || chat.GeminiFileSearch == nil || len(chat.GeminiFileSearch.StoreNames) != 1 || chat.GeminiFileSearch.StoreNames[0] != "fileSearchStores/policies" || chat.GeminiFileSearch.TopK == nil || *chat.GeminiFileSearch.TopK != 8 || chat.NativeInputTokens == 0 {
+		t.Fatalf("chat=%+v err=%v", chat, err)
+	}
+	for _, invalid := range []string{
+		`{"contents":[{"parts":[{"text":"find"}]}],"tools":[{"fileSearch":{"fileSearchStoreNames":[]}}]}`,
+		`{"contents":[{"parts":[{"text":"find"}]}],"tools":[{"fileSearch":{"fileSearchStoreNames":["bad"]}}]}`,
+		`{"contents":[{"parts":[{"text":"find"}]}],"tools":[{"fileSearch":{"fileSearchStoreNames":["fileSearchStores/a"],"topK":0}}]}`,
+		`{"contents":[{"parts":[{"text":"find"}]}],"tools":[{"fileSearch":{"fileSearchStoreNames":["fileSearchStores/a"]}},{"googleSearch":{}}]}`,
+		`{"contents":[{"parts":[{"text":"find"}]}],"tools":[{"fileSearch":{"fileSearchStoreNames":["fileSearchStores/a"]},"codeExecution":{}}]}`,
+	} {
+		var request generateRequest
+		if err := decodeMessagesValue(json.RawMessage(invalid), &request); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := request.chat("model", false); err == nil {
+			t.Fatalf("invalid file search accepted: %s", invalid)
+		}
+	}
+}
+
+func TestGenerateRequestMapsComputerUseTool(t *testing.T) {
+	var native generateRequest
+	raw := `{"contents":[{"parts":[{"text":"open settings"}]}],"tools":[{"computerUse":{"environment":"ENVIRONMENT_DESKTOP","excludedPredefinedFunctions":["drag_and_drop"],"enablePromptInjectionDetection":true,"disabledSafetyPolicies":["DATA_MODIFICATION"]}}]}`
+	if err := decodeMessagesValue(json.RawMessage(raw), &native); err != nil {
+		t.Fatal(err)
+	}
+	chat, err := native.chat("model", false)
+	if err != nil || chat.GeminiComputerUse == nil || chat.GeminiComputerUse.Environment != "ENVIRONMENT_DESKTOP" || !chat.GeminiComputerUse.EnablePromptInjectionDetection || chat.NativeInputTokens == 0 {
+		t.Fatalf("chat=%+v err=%v", chat, err)
+	}
+	for _, invalid := range []string{
+		`{"contents":[{"parts":[{"text":"act"}]}],"tools":[{"computerUse":{}}]}`,
+		`{"contents":[{"parts":[{"text":"act"}]}],"tools":[{"computerUse":{"environment":"browser"}}]}`,
+		`{"contents":[{"parts":[{"text":"act"}]}],"tools":[{"computerUse":{"environment":"ENVIRONMENT_BROWSER","disabledSafetyPolicies":["UNKNOWN"]}}]}`,
+	} {
+		var request generateRequest
+		if err := decodeMessagesValue(json.RawMessage(invalid), &request); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := request.chat("model", false); err == nil {
+			t.Fatalf("invalid computer use accepted: %s", invalid)
+		}
+	}
+}
+
 func TestGenerateRequestMapsGoogleMapsAndLocation(t *testing.T) {
 	var native generateRequest
 	raw := `{"contents":[{"parts":[{"text":"restaurants near here"}]}],"tools":[{"googleMaps":{}}],"toolConfig":{"retrievalConfig":{"latLng":{"latitude":40.758896,"longitude":-73.98513}}}}`
@@ -203,6 +302,123 @@ func TestGenerateRequestMapsInlineAudio(t *testing.T) {
 	native.Contents[0].Role = "model"
 	if _, err := native.chat("model", false); err == nil {
 		t.Fatal("model audio input accepted")
+	}
+}
+
+func TestGenerateRequestMapsVertexAudioTimestamp(t *testing.T) {
+	var native generateRequest
+	if err := decodeMessagesValue(json.RawMessage(`{"contents":[{"role":"user","parts":[{"inlineData":{"mimeType":"audio/wav","data":"UklGRgAAAABXQVZF"}}]}],"generationConfig":{"audioTimestamp":true}}`), &native); err != nil {
+		t.Fatal(err)
+	}
+	chat, err := native.chat("model", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if chat.GeminiAudioTimestamp == nil || !*chat.GeminiAudioTimestamp {
+		t.Fatalf("audio timestamp=%v", chat.GeminiAudioTimestamp)
+	}
+
+	for _, value := range []string{"true", "false"} {
+		var textOnly generateRequest
+		raw := `{"contents":[{"role":"user","parts":[{"text":"hello"}]}],"generationConfig":{"audioTimestamp":` + value + `}}`
+		if err := decodeMessagesValue(json.RawMessage(raw), &textOnly); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := textOnly.chat("model", false); err == nil {
+			t.Fatalf("text-only audioTimestamp=%s accepted", value)
+		}
+	}
+}
+
+func TestGenerateRequestMapsMediaResolution(t *testing.T) {
+	var native generateRequest
+	if err := decodeMessagesValue(json.RawMessage(`{"contents":[{"role":"user","parts":[{"inlineData":{"mimeType":"image/png","data":"iVBORw0KGgo="}}]}],"generationConfig":{"mediaResolution":"MEDIA_RESOLUTION_HIGH"}}`), &native); err != nil {
+		t.Fatal(err)
+	}
+	chat, err := native.chat("model", false)
+	if err != nil || chat.GeminiMediaResolution != "MEDIA_RESOLUTION_HIGH" {
+		t.Fatalf("chat=%+v err=%v", chat, err)
+	}
+	for _, raw := range []string{
+		`{"contents":[{"role":"user","parts":[{"text":"hello"}]}],"generationConfig":{"mediaResolution":"MEDIA_RESOLUTION_HIGH"}}`,
+		`{"contents":[{"role":"user","parts":[{"inlineData":{"mimeType":"image/png","data":"iVBORw0KGgo="}}]}],"generationConfig":{"mediaResolution":"MEDIA_RESOLUTION_ULTRA_HIGH"}}`,
+	} {
+		var invalid generateRequest
+		if err := decodeMessagesValue(json.RawMessage(raw), &invalid); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := invalid.chat("model", false); err == nil {
+			t.Fatalf("invalid media resolution accepted: %s", raw)
+		}
+	}
+}
+
+func TestGenerateRequestMapsPerPartMediaResolution(t *testing.T) {
+	var native generateRequest
+	if err := decodeMessagesValue(json.RawMessage(`{"contents":[{"role":"user","parts":[{"inlineData":{"mimeType":"image/png","data":"iVBORw0KGgo="},"mediaResolution":{"level":"MEDIA_RESOLUTION_ULTRA_HIGH"}}]}]}`), &native); err != nil {
+		t.Fatal(err)
+	}
+	chat, err := native.chat("model", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parts := chat.Messages[0].Content.([]any)
+	image := parts[0].(map[string]any)
+	if image["gemini_media_resolution"] != "MEDIA_RESOLUTION_ULTRA_HIGH" {
+		t.Fatalf("part=%+v", image)
+	}
+
+	var invalid generateRequest
+	if err := decodeMessagesValue(json.RawMessage(`{"contents":[{"role":"user","parts":[{"text":"hello","mediaResolution":{"level":"MEDIA_RESOLUTION_HIGH"}}]}]}`), &invalid); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := invalid.chat("model", false); err == nil {
+		t.Fatal("text part media resolution accepted")
+	}
+
+	var stored generateRequest
+	if err := decodeMessagesValue(json.RawMessage(`{"contents":[{"role":"user","parts":[{"fileData":{"mimeType":"application/pdf","fileUri":"file_report"}}]}],"generationConfig":{"mediaResolution":"MEDIA_RESOLUTION_MEDIUM"}}`), &stored); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stored.chat("model", false); err != nil {
+		t.Fatalf("stored PDF media resolution rejected: %v", err)
+	}
+}
+
+func TestGenerateRequestMapsPerVideoMediaProcessing(t *testing.T) {
+	var native generateRequest
+	if err := decodeMessagesValue(json.RawMessage(`{"contents":[{"role":"user","parts":[{"inlineData":{"mimeType":"video/mp4","data":"AAAADGZ0eXBtcDQy"},"mediaProcessing":"AGENTIC"}]}]}`), &native); err != nil {
+		t.Fatal(err)
+	}
+	chat, err := native.chat("model", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	part := chat.Messages[0].Content.([]any)[0].(map[string]any)
+	if part["gemini_media_processing"] != "AGENTIC" {
+		t.Fatalf("part=%+v", part)
+	}
+
+	for _, raw := range []string{
+		`{"contents":[{"role":"user","parts":[{"text":"hello","mediaProcessing":"STATIC"}]}]}`,
+		`{"contents":[{"role":"user","parts":[{"inlineData":{"mimeType":"image/png","data":"iVBORw0KGgo="},"mediaProcessing":"STATIC"}]}]}`,
+		`{"contents":[{"role":"user","parts":[{"inlineData":{"mimeType":"video/mp4","data":"AAAADGZ0eXBtcDQy"},"mediaProcessing":"DYNAMIC"}]}]}`,
+	} {
+		var invalid generateRequest
+		if err := decodeMessagesValue(json.RawMessage(raw), &invalid); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := invalid.chat("model", false); err == nil {
+			t.Fatalf("invalid media processing accepted: %s", raw)
+		}
+	}
+
+	var stored generateRequest
+	if err := decodeMessagesValue(json.RawMessage(`{"contents":[{"role":"user","parts":[{"fileData":{"mimeType":"video/mp4","fileUri":"file_video"},"mediaProcessing":"STATIC"}]}]}`), &stored); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stored.chat("model", false); err != nil {
+		t.Fatalf("stored video media processing rejected: %v", err)
 	}
 }
 

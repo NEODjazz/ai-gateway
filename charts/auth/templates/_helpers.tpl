@@ -54,3 +54,11 @@ workingDir: /workspace/repos/auth
   value: /tmp/go-mod
 {{- end }}
 {{- end -}}
+
+{{- define "auth.credentialEncryptionKey" -}}
+{{- $key := .Values.credentialEncryption.key -}}
+{{- if and .Values.credentialEncryption.existingSecret $key -}}
+{{- fail "credentialEncryption.existingSecret cannot be combined with an inline encryption key" -}}
+{{- end -}}
+{{- $key -}}
+{{- end -}}

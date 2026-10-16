@@ -214,7 +214,7 @@ func (h Handler) authorizeOwnedStorageOperation(w http.ResponseWriter, r *http.R
 	if !ok {
 		return modules.RequestContext{}, false
 	}
-	if !h.prepareAccessGroups(w, &req) || !h.authorizeRateLimit(w, r.Context(), req, 0) {
+	if !h.prepareAccessGroups(r.Context(), w, &req) || !h.authorizeRateLimit(w, r.Context(), req, 0) {
 		return modules.RequestContext{}, false
 	}
 	return req, true

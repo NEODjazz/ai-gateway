@@ -22,6 +22,8 @@ type budgetManagementHandler struct {
 func registerBudgetManagement(mux *http.ServeMux, manager modules.BudgetManager, initErr error, secret string) {
 	h := budgetManagementHandler{manager: manager, initErr: initErr, secret: strings.TrimSpace(secret), now: time.Now}
 	mux.HandleFunc("GET /internal/v1/budgets", h.list)
+	mux.HandleFunc("GET /internal/v1/budgets/page", h.identityPage)
+	mux.HandleFunc("POST /internal/v1/budgets/identities", h.identitySummaries)
 	mux.HandleFunc("POST /internal/v1/budgets", h.create)
 	mux.HandleFunc("GET /internal/v1/budgets/{id}", h.get)
 	mux.HandleFunc("PUT /internal/v1/budgets/{id}", h.update)

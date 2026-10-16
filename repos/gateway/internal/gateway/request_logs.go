@@ -203,7 +203,7 @@ func (h Handler) WithRequestLogs(client RequestLogClient) Handler {
 }
 
 func (h Handler) ListRequestLogs(w http.ResponseWriter, r *http.Request) {
-	req, ok := h.authorizeAdmin(w, r)
+	req, ok := h.authorizeOrganizationReports(w, r)
 	if !ok {
 		return
 	}
@@ -216,6 +216,13 @@ func (h Handler) ListRequestLogs(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
+	if !hasRole(req.Roles, "admin") {
+		if filter.OrganizationID != "" && filter.OrganizationID != req.OrganizationID {
+			writeError(w, http.StatusForbidden, "forbidden", "report scope must match the authenticated organization")
+			return
+		}
+		filter.OrganizationID = req.OrganizationID
+	}
 	page, err := h.requestLogs.ListRequestLogs(r.Context(), managementAudit(req), filter)
 	if err != nil {
 		writeManagementFailure(w, err)
@@ -225,7 +232,7 @@ func (h Handler) ListRequestLogs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) ListRequestLogGroups(w http.ResponseWriter, r *http.Request) {
-	req, ok := h.authorizeAdmin(w, r)
+	req, ok := h.authorizeOrganizationReports(w, r)
 	if !ok {
 		return
 	}
@@ -238,6 +245,13 @@ func (h Handler) ListRequestLogGroups(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
+	if !hasRole(req.Roles, "admin") {
+		if filter.OrganizationID != "" && filter.OrganizationID != req.OrganizationID {
+			writeError(w, http.StatusForbidden, "forbidden", "report scope must match the authenticated organization")
+			return
+		}
+		filter.OrganizationID = req.OrganizationID
+	}
 	page, err := h.requestLogs.ListRequestLogGroups(r.Context(), managementAudit(req), filter)
 	if err != nil {
 		writeManagementFailure(w, err)
@@ -247,7 +261,7 @@ func (h Handler) ListRequestLogGroups(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) GetRequestLog(w http.ResponseWriter, r *http.Request) {
-	req, ok := h.authorizeAdmin(w, r)
+	req, ok := h.authorizeOrganizationReports(w, r)
 	if !ok {
 		return
 	}
@@ -265,11 +279,15 @@ func (h Handler) GetRequestLog(w http.ResponseWriter, r *http.Request) {
 		writeManagementFailure(w, err)
 		return
 	}
+	if !hasRole(req.Roles, "admin") && row.OrganizationID != req.OrganizationID {
+		writeError(w, http.StatusNotFound, "not_found", "request log not found")
+		return
+	}
 	writeJSON(w, http.StatusOK, row)
 }
 
 func (h Handler) GetRequestLogSettings(w http.ResponseWriter, r *http.Request) {
-	req, ok := h.authorizeAdmin(w, r)
+	req, ok := h.authorizeOrganizationReports(w, r)
 	if !ok {
 		return
 	}

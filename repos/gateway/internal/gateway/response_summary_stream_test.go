@@ -86,3 +86,54 @@ func TestSyntheticResponseReasoningSummary(t *testing.T) {
 		}
 	}
 }
+
+func TestSyntheticResponseReasoningContent(t *testing.T) {
+	response := openai.ResponseResponse{ID: "r", Status: "completed", Output: []openai.ResponseOutputItem{{ID: "reason", Type: "reasoning", Content: []openai.ResponseOutputContent{{Type: "reasoning_text", Text: "Thought"}}, Summary: []openai.ResponseOutputContent{{Type: "summary_text", Text: "Summary"}}}}}
+	before, _ := json.Marshal(response)
+	var kinds []string
+	err := synthesizeResponseStream(response, func(kind, payload string) error {
+		kinds = append(kinds, kind)
+		var data map[string]any
+		if err := json.Unmarshal([]byte(payload), &data); err != nil {
+			return err
+		}
+		if kind == "response.reasoning_text.delta" || kind == "response.reasoning_text.done" {
+			if data["item_id"] != "reason" || data["output_index"] != float64(0) || data["content_index"] != float64(0) {
+				t.Fatalf("indices=%v", data)
+			}
+			field := "delta"
+			if kind == "response.reasoning_text.done" {
+				field = "text"
+			}
+			if data[field] != "Thought" {
+				t.Fatalf("text=%v", data)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"response.created", "response.output_item.added", "response.reasoning_text.delta", "response.reasoning_text.done", "response.reasoning_summary_part.added", "response.reasoning_summary_text.delta", "response.reasoning_summary_text.done", "response.reasoning_summary_part.done", "response.output_item.done", "response.completed"}
+	if !reflect.DeepEqual(kinds, want) {
+		t.Fatalf("events=%v", kinds)
+	}
+	after, _ := json.Marshal(response)
+	if string(before) != string(after) {
+		t.Fatal("input mutated")
+	}
+	stopped := errors.New("writer stopped")
+	for _, stop := range []int{3, 4} {
+		calls := 0
+		err := synthesizeResponseStream(response, func(string, string) error {
+			calls++
+			if calls == stop {
+				return stopped
+			}
+			return nil
+		})
+		if !errors.Is(err, stopped) || calls != stop {
+			t.Fatalf("stop=%d calls=%d err=%v", stop, calls, err)
+		}
+	}
+}

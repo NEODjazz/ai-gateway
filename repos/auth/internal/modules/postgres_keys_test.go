@@ -26,7 +26,7 @@ func TestPostgresVirtualKeyLifecycleIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	for _, name := range []string{"003_virtual_keys.sql", "004_allowed_tools.sql", "005_virtual_key_metadata.sql", "006_identity_directory.sql", "007_organizations.sql", "008_virtual_key_ownership.sql", "009_virtual_key_access_groups.sql", "010_scim_users.sql", "011_scim_user_deletions.sql", "012_scim_groups.sql"} {
+	for _, name := range []string{"003_virtual_keys.sql", "004_allowed_tools.sql", "005_virtual_key_metadata.sql", "006_identity_directory.sql", "007_organizations.sql", "008_virtual_key_ownership.sql", "009_virtual_key_access_groups.sql", "010_scim_users.sql", "011_scim_user_deletions.sql", "012_scim_groups.sql", "013_jwt_principals.sql", "016_organization_memberships.sql"} {
 		migration, err := os.ReadFile(filepath.Join("..", "..", "migrations", "postgres", name))
 		if err != nil {
 			t.Fatal(err)

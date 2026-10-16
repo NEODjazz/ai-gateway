@@ -15,6 +15,12 @@ func TestResponsesReasoningForwarding(t *testing.T) {
 	for _, adapter := range []string{"compatible", "ollama"} {
 		for _, stream := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/%v", adapter, stream), func(t *testing.T) {
+				requestBody := `{"model":"m","input":"hello","reasoning":{"effort":"high","summary":"auto","generate_summary":"auto","context":"auto","mode":"standard"}}`
+				wantReasoning := map[string]any{"effort": "high", "summary": "auto", "generate_summary": "auto", "context": "auto", "mode": "standard"}
+				if adapter == "ollama" {
+					requestBody = `{"model":"m","input":"hello","reasoning":{"effort":"high"}}`
+					wantReasoning = map[string]any{"effort": "high"}
+				}
 				called := false
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					called = true
@@ -22,18 +28,26 @@ func TestResponsesReasoningForwarding(t *testing.T) {
 					if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 						t.Error(err)
 					}
-					if !reflect.DeepEqual(body["reasoning"], map[string]any{"effort": "high", "summary": "auto", "generate_summary": "auto", "context": "auto", "mode": "standard"}) {
+					if !reflect.DeepEqual(body["reasoning"], wantReasoning) {
 						t.Errorf("reasoning=%v", body["reasoning"])
 					}
 					if stream {
-						_, _ = fmt.Fprint(w, responseTestTerminal)
+						if adapter == "ollama" {
+							_, _ = fmt.Fprint(w, ollamaResponseTestTerminal)
+						} else {
+							_, _ = fmt.Fprint(w, responseTestTerminal)
+						}
 					} else {
-						_, _ = fmt.Fprint(w, `{"id":"r","status":"completed"}`)
+						if adapter == "ollama" {
+							_, _ = fmt.Fprint(w, ollamaResponseTestJSON)
+						} else {
+							_, _ = fmt.Fprint(w, `{"id":"r","status":"completed"}`)
+						}
 					}
 				}))
 				defer server.Close()
 				var request openai.ResponseRequest
-				if err := json.Unmarshal([]byte(`{"model":"m","input":"hello","reasoning":{"effort":"high","summary":"auto","generate_summary":"auto","context":"auto","mode":"standard"}}`), &request); err != nil {
+				if err := json.Unmarshal([]byte(requestBody), &request); err != nil {
 					t.Fatal(err)
 				}
 				var err error
@@ -70,5 +84,40 @@ func TestResponsesReasoningRejectsUnsupportedAdapters(t *testing.T) {
 		if err == nil {
 			t.Fatalf("%s discarded reasoning", name)
 		}
+	}
+}
+
+func TestOllamaResponsesDefaultReasoningUsesModelDefault(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprint(stream), func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var body map[string]any
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Fatal(err)
+				}
+				reasoning, _ := body["reasoning"].(map[string]any)
+				if _, supplied := reasoning["effort"]; supplied {
+					t.Errorf("model default was overridden: %v", reasoning)
+				}
+				if stream {
+					_, _ = fmt.Fprint(w, ollamaResponseTestTerminal)
+				} else {
+					_, _ = fmt.Fprint(w, ollamaResponseTestJSON)
+				}
+			}))
+			t.Cleanup(server.Close)
+			effort := "default"
+			request := openai.ResponseRequest{Model: "m", Input: "hello", Reasoning: &openai.ResponseReasoning{Effort: &effort}}
+			client := NewOllama(server.URL, true)
+			var err error
+			if stream {
+				_, err = client.StreamResponses(t.Context(), request, nil)
+			} else {
+				_, err = client.Responses(t.Context(), request)
+			}
+			if err != nil || effort != "default" || request.Reasoning.Effort != &effort {
+				t.Fatalf("err=%v original effort=%q", err, effort)
+			}
+		})
 	}
 }

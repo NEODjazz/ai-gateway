@@ -66,18 +66,19 @@ type VirtualKeyMetadata struct {
 }
 
 type VirtualKeyListQuery struct {
-	Limit          int
-	Offset         int
-	Search         string
-	OrganizationID string
-	TeamID         string
-	UserID         string
-	KeyID          string
-	AccessGroupID  string
-	AccessGroupIDs []string
-	Status         string
-	SortBy         string
-	SortOrder      string
+	Limit              int
+	Offset             int
+	Search             string
+	OrganizationID     string
+	StrictOrganization bool
+	TeamID             string
+	UserID             string
+	KeyID              string
+	AccessGroupID      string
+	AccessGroupIDs     []string
+	Status             string
+	SortBy             string
+	SortOrder          string
 }
 
 type VirtualKeyPage struct {
@@ -170,6 +171,9 @@ func (m AuthModule) ListVirtualKeys(ctx context.Context, limit int) ([]VirtualKe
 }
 
 func (m AuthModule) ListVirtualKeysPage(ctx context.Context, query VirtualKeyListQuery) (VirtualKeyPage, error) {
+	if query.StrictOrganization && strings.TrimSpace(query.OrganizationID) == "" {
+		return VirtualKeyPage{}, ErrInvalidVirtualKey
+	}
 	if m.initErr != nil {
 		return VirtualKeyPage{}, m.initErr
 	}

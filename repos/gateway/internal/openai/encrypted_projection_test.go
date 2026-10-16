@@ -8,10 +8,10 @@ import (
 
 func TestEncryptedReasoningTextTransforms(t *testing.T) {
 	input := func() map[string]any {
-		return map[string]any{"type": "reasoning", "id": "r", "encrypted_content": "opaque1234567890", "summary": []any{map[string]any{"type": "summary_text", "text": "user@example.com"}}}
+		return map[string]any{"type": "reasoning", "id": "r", "encrypted_content": "opaque1234567890", "content": []any{map[string]any{"type": "reasoning_text", "text": "user@example.com"}}, "summary": []any{map[string]any{"type": "summary_text", "text": "user@example.com"}}}
 	}
 	transformed := TransformTextContent(input(), func(string) string { return "MASKED" }).(map[string]any)
-	if transformed["encrypted_content"] != "opaque1234567890" || transformed["summary"].([]any)[0].(map[string]any)["text"] != "MASKED" {
+	if transformed["encrypted_content"] != "opaque1234567890" || transformed["summary"].([]any)[0].(map[string]any)["text"] != "MASKED" || transformed["content"].([]any)[0].(map[string]any)["text"] != "MASKED" {
 		t.Fatalf("transform=%v", transformed)
 	}
 	original := input()
@@ -22,10 +22,14 @@ func TestEncryptedReasoningTextTransforms(t *testing.T) {
 	if projection["summary"].([]any)[0].(map[string]any)["text"] != "user@example.com" {
 		t.Fatal("summary missing")
 	}
+	if projection["content"].([]any)[0].(map[string]any)["text"] != "user@example.com" {
+		t.Fatal("reasoning content missing")
+	}
+	projection["content"].([]any)[0].(map[string]any)["text"] = "MASKED"
 	projection["encrypted_content"] = "rewritten"
 	projection["summary"].([]any)[0].(map[string]any)["text"] = "MASKED"
 	merged := MergeTextProjection(original, projection).(map[string]any)
-	if merged["encrypted_content"] != "opaque1234567890" || merged["summary"].([]any)[0].(map[string]any)["text"] != "MASKED" {
+	if merged["encrypted_content"] != "opaque1234567890" || merged["summary"].([]any)[0].(map[string]any)["text"] != "MASKED" || merged["content"].([]any)[0].(map[string]any)["text"] != "MASKED" {
 		t.Fatalf("merge=%v", merged)
 	}
 	if !reflect.DeepEqual(original, input()) {

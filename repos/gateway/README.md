@@ -13,6 +13,13 @@ go run ./cmd/gateway
 The complete route and schema reference is [OpenAPI](api/openapi.yaml).
 Chat Completions accepts both modern tool calls and the legacy `functions` / `function_call` contract on compatible deployments. The two contracts are mutually exclusive, use the same function-name authorization policy, participate in token reservation, and bypass semantic caching. Native adapters return an explicit unsupported-parameter error for legacy function calls.
 
+Chat Completions and Responses accept provider-side `moderation` configuration
+on compatible, OpenAI and Azure OpenAI deployments. The gateway validates the
+model and input/output policy modes before execution. These requests bypass
+exact and semantic response caches and shadow execution so the provider applies
+its current moderation policy on every call; other adapters return an explicit
+unsupported-parameter error.
+
 For MCP registry management, client-side tools, Responses passthrough and
 permission examples, see [MCP integration](../../docs/mcp.md).
 
@@ -46,7 +53,21 @@ permission examples, see [MCP integration](../../docs/mcp.md).
 - `GET /admin/v1/anonymizer/rules`
 
 A2A 1.0 direct discovery and synchronous or durable asynchronous `SendMessage` are available for
-enabled agent profiles that do not reference an instruction template. The
+enabled agent profiles that do not reference an instruction template. Optional agent instructions are
+stored encrypted in durable admin state using `CREDENTIAL_ENCRYPTION_KEY`, with
+agent-specific authenticated binding. A2A execution uses the saved instructions,
+temperature and maximum output tokens. Metadata/list responses omit instruction
+content; global administrators can explicitly read configurations through
+`GET /admin/v1/agent-profiles/{id}` with `Cache-Control: no-store`. List
+clients must read the list's `content_stored` boolean: it is now true if any
+profile has saved instructions, rather than always false. Existing PUT
+clients preserve instructions and generation settings when those fields are
+omitted; an empty instructions string or generation object clears them. Metadata-only
+profiles keep admin-state version 1. Configured instructions or generation require
+version 2; older binaries reject that state instead of dropping configuration.
+Clear both settings before rolling back to an older binary. Public A2A execution,
+MCP operations and resource discovery refresh durable registry revisions before
+using their configuration; control-plane failures stop those calls. The
 profile ID is carried as the declared interface tenant. Execution uses the
 shared Responses authentication, model authorization, quota, guardrail,
 routing and billing path. With durable task and background-response storage,
@@ -173,7 +194,11 @@ resource, so policy assignment never requires a cross-service key/team update.
 The Guardrails UI presents these gateway-native policies as one workflow: joined
 deployment/attachment coverage, create/edit, detail inspection, policy-filtered
 monitoring and bounded multi-policy dry-run comparison with an anonymized
-preview. Request outcome logs expose only the effective profile/rule names and
+preview. Policies can opt into bounded prompt injection heuristics and/or a
+configured classifier deployment. Classifier calls have separate billing; checker
+failures block by default, and unreadable attachments require explicit opt-in.
+See [prompt injection protection](../../docs/prompt-injection.md).
+Request outcome logs expose only the effective profile/rule names and
 replacement count. The gateway keeps scanner endpoints and credentials in
 the independently operated DLP/AV services and stores no executable guardrail
 code in its control plane.
@@ -345,14 +370,21 @@ The console session endpoint validates the bearer credential through the normal
 auth pipeline and returns only safe identity/scope metadata plus explicit UI
 capabilities. It never echoes the bearer token or provider credentials.
 
-Browser SSO can use an OAuth 2.0 or OIDC authorization-code client whose access
-token is accepted by the configured auth service. Enable it with
-`ADMIN_SSO_ENABLED`, set the authorization and token URLs, client ID, exact
-callback URL and a random `ADMIN_SSO_SESSION_KEY` of at least 32 bytes. A client
-secret is optional for public PKCE clients. The gateway keeps the access token
-in an encrypted HttpOnly Strict same-site cookie, caps its lifetime at the
-shorter of the provider expiry and `ADMIN_SSO_SESSION_TTL_SECONDS`, and validates
-it through the normal auth pipeline before creating the browser session.
+Browser SSO uses a managed OIDC connection configured in Settings → Single
+sign-on. Browser identity requires a verified ID token with issuer/client
+audience, signature, nonce and lifetime checks, plus explicit directory approval.
+The HttpOnly cookie holds an encrypted random server-session handle. PostgreSQL
+stores only its hash and encrypted minimal identity; upstream tokens are not
+persisted. Current directory and organization approvals are checked on each
+request. API resource JWT trust is configured independently.
+
+Compatibility: environment-only `ADMIN_SSO_*` browser profiles no longer enable
+login or accept cookies containing upstream access tokens. Create, test and
+activate a managed connection using an administrator recovery key before relying
+on browser sign-in. `/auth/sso/config` reports `migration_required=true` when a
+legacy profile remains configured without an active managed connection. Existing
+API JWT settings and virtual keys remain valid; no configuration or data is
+silently migrated.
 
 SCIM 2.0 user and group provisioning is available under `/scim/v2`. The base
 path and discovery endpoints expose the implemented resources, exact

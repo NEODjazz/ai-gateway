@@ -207,3 +207,31 @@ func TestResponsesCacheHitStoresAffinityBeforeBilling(t *testing.T) {
 		t.Fatalf("cache hit: response=%+v err=%v upstream=%d commits=%d", cached, err, client.calls, billing.commits)
 	}
 }
+
+func TestResponsesContextManagementIsNotReplaySafe(t *testing.T) {
+	threshold := 1000
+	request := openai.ResponseRequest{Model: "m", Input: "hello", ContextManagement: []openai.ResponseContextEntry{{Type: "compaction", CompactThreshold: &threshold}}}
+	if responseReplaySafe(request) {
+		t.Fatal("server-side compaction request was considered replay safe")
+	}
+}
+
+func TestResponsesModerationIsNotReplaySafe(t *testing.T) {
+	request := openai.ResponseRequest{Model: "m", Input: "hello", Moderation: &openai.ProviderModeration{Model: "moderation"}}
+	if responseReplaySafe(request) {
+		t.Fatal("provider-moderated request was considered replay safe")
+	}
+}
+
+func TestResponsesPrewarmIsNotReplaySafe(t *testing.T) {
+	enabled := true
+	request := openai.ResponseRequest{Model: "m", Input: "hello", PromptCacheOptions: &openai.PromptCacheOptions{Prewarm: &enabled}}
+	if responseReplaySafe(request) {
+		t.Fatal("provider prompt-cache prewarm was considered replay safe")
+	}
+	disabled := false
+	request.PromptCacheOptions.Prewarm = &disabled
+	if !responseReplaySafe(request) {
+		t.Fatal("prewarm=false disabled normal response replay")
+	}
+}

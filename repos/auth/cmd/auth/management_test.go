@@ -1,8 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,6 +14,29 @@ import (
 
 	"ai-gateway-auth/internal/modules"
 )
+
+func TestManagementLogFingerprintsExternalRequestID(t *testing.T) {
+	var output bytes.Buffer
+	previous := log.Writer()
+	log.SetOutput(&output)
+	t.Cleanup(func() { log.SetOutput(previous) })
+
+	const externalID = "private-request-id"
+	request := httptest.NewRequest(http.MethodPost, "/internal/v1/keys", nil)
+	request.Header.Set("X-Request-ID", externalID)
+	request.Header.Set("X-Actor-ID", "operator")
+	request.Header.Set("X-Actor-Credential-ID", "credential")
+	logManagementAction(request, "virtual_key.create", "key-1")
+
+	message := output.String()
+	expected := fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(externalID)))
+	if !strings.Contains(message, expected) || strings.Contains(message, externalID) {
+		t.Fatalf("management log leaked external request ID: %q", message)
+	}
+	if !strings.Contains(message, `"actor_id":"operator"`) || !strings.Contains(message, `"target_id":"key-1"`) {
+		t.Fatalf("management log lost audit identity: %q", message)
+	}
+}
 
 type commandManagementStore struct {
 	created modules.StoredVirtualKey
@@ -107,5 +134,40 @@ func TestInternalManagementListsOnlySafeVirtualKeyMetadata(t *testing.T) {
 	mux.ServeHTTP(invalidResponse, invalid)
 	if invalidResponse.Code != http.StatusBadRequest {
 		t.Fatalf("invalid sort was accepted: %d", invalidResponse.Code)
+	}
+}
+
+func (s *commandManagementStore) PutJWTPrincipal(_ context.Context, p modules.JWTPrincipalPolicy) (modules.JWTPrincipalPolicy, error) {
+	return p, nil
+}
+func (s *commandManagementStore) ListJWTPrincipals(_ context.Context, _ string, offset, limit int) (modules.JWTPrincipalPage, error) {
+	return modules.JWTPrincipalPage{Data: []modules.JWTPrincipalPolicy{}, Total: 7, Offset: offset, Limit: limit}, nil
+}
+func TestInternalJWTPrincipalManagementProtection(t *testing.T) {
+	store := &commandManagementStore{}
+	module := modules.NewAuthModuleWithStore(true, store, "hash-secret", false)
+	mux := http.NewServeMux()
+	registerManagementRoutes(mux, &module, "internal-secret")
+	for _, test := range []struct {
+		name, body, secret string
+		want               int
+	}{
+		{"no secret", `{}`, "", 401},
+		{"valid", `{"issuer":"https://idp.test/realm","subject":"external","audience":"gateway","user_id":"user-1","enabled":true}`, "internal-secret", 200},
+		{"unknown fields", `{"issuer":"https://idp.test/realm","subject":"external","audience":"gateway","user_id":"user-1","enabled":true,"roles":["admin"]}`, "internal-secret", 400},
+		{"invalid", `{"issuer":"https://idp.test/realm","subject":"external","audience":"gateway","user_id":"user-1","rate_limit_tpm":-1}`, "internal-secret", 400},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodPut, "/internal/v1/jwt-principals", strings.NewReader(test.body))
+			r.Header.Set(managementTokenHeader, test.secret)
+			r.Header.Set("X-Request-ID", "req")
+			r.Header.Set("X-Actor-ID", "operator")
+			r.Header.Set("X-Actor-Credential-ID", "key")
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, r)
+			if w.Code != test.want {
+				t.Fatalf("got %d want %d", w.Code, test.want)
+			}
+		})
 	}
 }

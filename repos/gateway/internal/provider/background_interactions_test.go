@@ -75,6 +75,31 @@ func TestBackgroundInteractionDefersSettlementAndSurvivesRouterRestart(t *testin
 	}
 }
 
+func TestFailedBackgroundInteractionOmitsRawProviderError(t *testing.T) {
+	store := true
+	interaction := openai.InteractionRequest{Model: "public-model", Input: "prompt", Store: &store, Background: true}
+	shared, message := interaction.NativeResponseRequest()
+	if message != "" {
+		t.Fatal(message)
+	}
+	req := modules.RequestContext{RequestID: "interaction-execution", CredentialID: "credential", UserID: "user", Request: openai.ChatCompletionRequest{Model: interaction.Model}, ResponseRequest: &shared}
+	jobs := &backgroundJobStore{}
+	client := &backgroundInteractionClient{retrieve: openai.InteractionResponse{ID: "interaction_background", Object: "interaction", Model: interaction.Model, Status: "failed", Error: &openai.ResponseError{Message: "private prompt and credential"}}}
+	recorder := &backgroundLifecycleRecorder{}
+	endpoint := Endpoint{Name: "deployment", ProviderID: "provider", Type: "gemini", Models: []string{interaction.Model}, Capabilities: []string{"interactions", "background_interactions"}, Provider: client, Admission: newAdmissionController(0, 0, 0)}
+	router := Router{endpoints: []Endpoint{endpoint}, endpointState: &endpointRegistry{}, modules: modules.NewPipeline([]modules.Module{recorder}), health: newEndpointHealthTracker(), routeCounter: &atomic.Uint64{}, ownership: newResponseOwnershipStore(time.Hour, &ownershipTestStore{data: map[string][]byte{}}), asyncJobs: jobs}
+	router.endpointState.current.Store(&router.endpoints)
+	if _, err := router.Interactions(t.Context(), req, interaction); err != nil {
+		t.Fatal(err)
+	}
+	if processed, err := router.ProcessBackgroundResponses(t.Context()); processed != 1 || err != nil {
+		t.Fatalf("processed=%d err=%v", processed, err)
+	}
+	if recorder.post != 1 || recorder.providerStatus != "error" || recorder.rawProviderError != "" {
+		t.Fatalf("unsafe failed interaction metadata: %+v", recorder)
+	}
+}
+
 func TestBackgroundInteractionQueueFailureCancelsReservationAndUpstream(t *testing.T) {
 	store := true
 	interaction := openai.InteractionRequest{Model: "model", Input: "secret", Store: &store, Background: true}

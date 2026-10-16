@@ -1,0 +1,170 @@
+{{- if .Values.docling.enabled -}}
+{{- $name := include "ai-gateway.fullname" . -}}
+{{- $secret := required "docling.existingSecret is required" .Values.docling.existingSecret -}}
+{{- if or (lt (int .Values.docling.capacity) 1) (gt (int .Values.docling.capacity) 1024) -}}
+{{- fail "docling.capacity must be between 1 and 1024" -}}
+{{- end -}}
+{{- if or (lt (int .Values.docling.queueWaitSeconds) 1) (gt (int .Values.docling.queueWaitSeconds) 600) -}}
+{{- fail "docling.queueWaitSeconds must be between 1 and 600" -}}
+{{- end -}}
+{{- range $kind := list "api" "worker" }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}-docling-{{ $kind }}
+  labels:
+    {{- include "ai-gateway.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: docling-{{ $kind }}
+spec:
+  replicas: {{ if eq $kind "api" }}{{ $.Values.docling.apiReplicas }}{{ else }}{{ $.Values.docling.workerReplicas }}{{ end }}
+  selector:
+    matchLabels:
+      {{- include "ai-gateway.selectorLabels" $ | nindent 6 }}
+      app.kubernetes.io/component: docling-{{ $kind }}
+  template:
+    metadata:
+      labels:
+        {{- include "ai-gateway.selectorLabels" $ | nindent 8 }}
+        app.kubernetes.io/component: docling-{{ $kind }}
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 130
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 0
+        fsGroup: 1001
+      containers:
+        - name: docling-{{ $kind }}
+          image: {{ printf "%s:%s" $.Values.docling.image.repository (default $.Chart.AppVersion $.Values.docling.image.tag) | quote }}
+          imagePullPolicy: {{ $.Values.docling.image.pullPolicy }}
+          {{- if eq $kind "worker" }}
+          command: [python, worker_entry.py]
+          {{- else }}
+          ports:
+            - {name: http, containerPort: 5001}
+          readinessProbe:
+            httpGet: {path: /ready, port: http}
+            initialDelaySeconds: 10
+          livenessProbe:
+            httpGet: {path: /livez, port: http}
+            initialDelaySeconds: 30
+          {{- end }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          env:
+            - name: DOCLING_SERVE_ENG_RQ_REDIS_URL
+              valueFrom:
+                secretKeyRef: {name: {{ $secret | quote }}, key: redis-url}
+            - name: DOCLING_SERVE_API_KEY
+              valueFrom:
+                secretKeyRef: {name: {{ $secret | quote }}, key: api-key}
+            - name: DOCUMENT_QUEUE_CAPACITY
+              value: {{ $.Values.docling.capacity | quote }}
+            - name: DOCUMENT_QUEUE_WAIT_SECONDS
+              value: {{ $.Values.docling.queueWaitSeconds | quote }}
+          resources:
+            {{- if eq $kind "api" }}
+            {{- toYaml $.Values.docling.apiResources | nindent 12 }}
+            {{- else }}
+            {{- toYaml $.Values.docling.workerResources | nindent 12 }}
+            {{- end }}
+          volumeMounts:
+            - {name: scratch, mountPath: /tmp}
+      volumes:
+        - name: scratch
+          emptyDir: {sizeLimit: 1Gi}
+{{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}-docling-api
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "ai-gateway.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: docling-api
+  ports: [{name: http, port: 5001, targetPort: http}]
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $name }}-docling-queue
+spec:
+  accessModes: [ReadWriteOnce]
+  {{- with .Values.docling.redis.persistence.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.docling.redis.persistence.size }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}-docling-redis
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels:
+      {{- include "ai-gateway.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: docling-redis
+  template:
+    metadata:
+      labels:
+        {{- include "ai-gateway.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: docling-redis
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+      containers:
+        - name: redis
+          image: {{ .Values.docling.redis.image | quote }}
+          command: [/bin/sh, -ec]
+          args:
+            - |
+              case "$REDIS_PASSWORD" in ""|*[!A-Za-z0-9_-]*) exit 1 ;; esac
+              umask 077
+              printf 'requirepass %s\n' "$REDIS_PASSWORD" > /tmp/auth.conf
+              exec redis-server --include /tmp/auth.conf --appendonly yes --appendfsync everysec --maxmemory 512mb --maxmemory-policy noeviction
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: {{ $secret | quote }}, key: redis-password}
+          ports: [{name: redis, containerPort: 6379}]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          readinessProbe:
+            exec:
+              command: [/bin/sh, -ec, 'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli ping']
+          resources:
+            {{- toYaml .Values.docling.redis.resources | nindent 12 }}
+          volumeMounts:
+            - {name: data, mountPath: /data}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: {{ $name }}-docling-queue}
+        - name: tmp
+          emptyDir: {medium: Memory, sizeLimit: 1Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}-docling-redis
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "ai-gateway.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: docling-redis
+  ports: [{name: redis, port: 6379, targetPort: redis}]
+{{- end }}

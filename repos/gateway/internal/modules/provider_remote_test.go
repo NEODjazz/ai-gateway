@@ -248,12 +248,12 @@ func TestScanPayloadIncludesToolArgumentsAndResponseFunctionOutput(t *testing.T)
 }
 
 func TestScanPayloadIncludesReasoningTextWithoutOpaqueData(t *testing.T) {
-	req := RequestContext{Request: openai.ChatCompletionRequest{Messages: []openai.Message{{Role: "assistant", Reasoning: []openai.ReasoningBlock{
+	req := RequestContext{Request: openai.ChatCompletionRequest{Messages: []openai.Message{{Role: "assistant", ReasoningContent: "unsigned private plan", Reasoning: []openai.ReasoningBlock{
 		{Type: "thinking", Thinking: "private plan", Signature: "secret-signature"},
 		{Type: "redacted_thinking", Data: "b3BhcXVl"},
 	}}}}}
 	payload := scanPayload(&req)
-	if payload != "reasoning: private plan" || strings.Contains(payload, "secret-signature") || strings.Contains(payload, "b3BhcXVl") {
+	if payload != "reasoning_content: unsigned private plan\nreasoning: private plan" || strings.Contains(payload, "secret-signature") || strings.Contains(payload, "b3BhcXVl") {
 		t.Fatalf("reasoning DLP projection=%q", payload)
 	}
 }
@@ -373,7 +373,8 @@ func TestDLPScansProviderOutputAndRejectsBeforeDelivery(t *testing.T) {
 		Metadata:  map[string]string{"provider.modules.dlp.output_enabled": "true"},
 		Request:   openai.ChatCompletionRequest{Messages: []openai.Message{{Role: "user", Content: "request secret"}}},
 		Response: &openai.ChatCompletionResponse{Choices: []openai.Choice{{Message: openai.Message{
-			Role: "assistant", Content: "response secret", Refusal: &refusal,
+			Role: "assistant", Content: "response secret", ReasoningContent: "reasoning content secret", Refusal: &refusal,
+			Reasoning: []openai.ReasoningBlock{{Type: "thinking", Thinking: "signed reasoning secret", Signature: "opaque-signature"}},
 			ToolCalls: []openai.ToolCall{{Function: openai.FunctionCall{Arguments: `{"email":"user@example.com"}`}}},
 			Annotations: []openai.ChatAnnotation{{Type: "source_citation", SourceCitation: &openai.ChatSourceCitation{
 				Title: "report", Source: "citation source secret", SourceContent: []string{"citation excerpt secret"},
@@ -389,7 +390,7 @@ func TestDLPScansProviderOutputAndRejectsBeforeDelivery(t *testing.T) {
 	if !errors.Is(err, ErrContentRejected) {
 		t.Fatalf("expected output rejection, got %v", err)
 	}
-	if received.RequestID != "execution-1" || !strings.Contains(received.Content, "response secret") || !strings.Contains(received.Content, "user@example.com") || !strings.Contains(received.Content, "citation source secret") || !strings.Contains(received.Content, "citation excerpt secret") || !strings.Contains(received.Content, "native document secret") || !strings.Contains(received.Content, "trace secret") || strings.Contains(received.Content, "request secret") {
+	if received.RequestID != "execution-1" || !strings.Contains(received.Content, "response secret") || !strings.Contains(received.Content, "reasoning content secret") || !strings.Contains(received.Content, "signed reasoning secret") || !strings.Contains(received.Content, "user@example.com") || !strings.Contains(received.Content, "citation source secret") || !strings.Contains(received.Content, "citation excerpt secret") || !strings.Contains(received.Content, "native document secret") || !strings.Contains(received.Content, "trace secret") || strings.Contains(received.Content, "opaque-signature") || strings.Contains(received.Content, "request secret") {
 		t.Fatalf("unexpected output projection: %+v", received)
 	}
 }

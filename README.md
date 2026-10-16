@@ -5,9 +5,12 @@
 
 ## Возможности
 
-- Chat Completions, Responses, Embeddings и Rerank API;
+- Chat Completions, Responses с durable Conversations, Embeddings и Rerank API;
 - native и synthetic SSE streaming;
-- OpenAI/Azure/OpenAI-compatible, Anthropic, Ollama, Gemini, Cohere, Mistral и Voyage adapters;
+- OpenAI/Azure/OpenAI-compatible, Anthropic, Ollama, Lemonade, Gemini/Vertex, Bedrock и другие native adapters;
+- файлы, vector stores, Assistants, batches, fine-tuning и provider jobs с проверкой capabilities;
+- native Messages/GenerateContent, image/audio/video, Search, MCP и A2A API;
+- опциональная обработка PDF через Docling API, Redis-очередь и CPU workers;
 - priority/weight/adaptive routing, retries, cooldown и cross-model fallback;
 - независимые Providers, Credentials, Deployments, Model Groups и pricing;
 - Virtual Keys, OIDC/JWT, organization/team/user scopes и Access Groups;
@@ -15,6 +18,11 @@
 - DLP, AV и request-scoped anonymization;
 - exact/semantic cache, usage, request/audit logs, Prometheus и OTLP traces;
 - встроенные React UI и Swagger UI без внешнего CDN.
+
+Основной внешний пользовательский интерфейс — LibreChat; Open WebUI остаётся
+поддерживаемым вариантом. Оба приложения обращаются к Gateway с пользовательской
+identity; маршрутизация, права, квоты, billing и DLP остаются в Gateway.
+[Профиль интеграции и статус проверки](docs/chat-ui-integration.md).
 
 ## Документация
 
@@ -66,6 +74,7 @@ curl -sS http://127.0.0.1:8080/v1/chat/completions \
 | Billing | 8083 | Budgets, usage, request logs и audit |
 | DLP | 8084 | Text projection → ICAP |
 | AV | 8085 | Text/images → ICAP |
+| Docling API (опционально) | 5001 | PDF conversion, отдельные Redis RQ и workers |
 
 Внутренние сервисы не являются клиентскими API. Bearer-токен получает только
 Auth; остальные модули используют минимальные типизированные контракты и
@@ -80,6 +89,7 @@ repos/billing/       budgets, usage и audit
 repos/anonymizer/    masking service
 repos/dlp/           DLP HTTP-to-ICAP adapter
 repos/av/            AV HTTP-to-ICAP adapter
+services/docling/    дополнительный Python API и worker stack
 charts/              отдельные Helm charts
 docs/                тематическая документация и LikeC4
 migrations/          gateway-owned SQL migrations
@@ -91,4 +101,4 @@ migrations/          gateway-owned SQL migrations
 
 ## Лицензия
 
-MIT.
+[GNU AGPL v3](LICENSE).

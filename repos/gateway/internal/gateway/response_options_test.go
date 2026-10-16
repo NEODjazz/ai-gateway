@@ -139,6 +139,75 @@ func TestResponsesRejectsInvalidOptionsBeforeExecution(t *testing.T) {
 	}
 }
 
+func TestResponsesPreservesServerSideCompactionConfiguration(t *testing.T) {
+	upstream := &chatProvider{}
+	handler := NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}}}), upstream)
+	out := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"m","input":"hello","context_management":[{"type":"compaction","compact_threshold":1000}]}`))
+	handler.Responses(out, request)
+	if out.Code != http.StatusOK || upstream.request.ResponseRequest == nil {
+		t.Fatalf("status=%d request=%+v body=%s", out.Code, upstream.request.ResponseRequest, out.Body.String())
+	}
+	entries := upstream.request.ResponseRequest.ContextManagement
+	if len(entries) != 1 || entries[0].Type != "compaction" || entries[0].CompactThreshold == nil || *entries[0].CompactThreshold != 1000 {
+		t.Fatalf("context management was not preserved: %+v", entries)
+	}
+}
+
+func TestResponsesRejectsInvalidServerSideCompactionBeforeExecution(t *testing.T) {
+	for _, value := range []string{
+		`[]`,
+		`[{"type":"unknown"}]`,
+		`[{"type":"compaction","compact_threshold":0}]`,
+		`[{"type":"compaction"},{"type":"compaction"}]`,
+	} {
+		out := httptest.NewRecorder()
+		Handler{}.Responses(out, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"m","input":"hello","context_management":`+value+`}`)))
+		if out.Code != http.StatusBadRequest {
+			t.Fatalf("value=%s status=%d body=%s", value, out.Code, out.Body.String())
+		}
+	}
+}
+
+func TestResponsesPreservesProviderModerationConfiguration(t *testing.T) {
+	upstream := &chatProvider{}
+	handler := NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}}}), upstream)
+	out := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"m","input":"hello","moderation":{"model":"omni-moderation-latest","policy":{"input":{"mode":"block"},"output":{"mode":"score"}}}}`))
+	handler.Responses(out, request)
+	if out.Code != http.StatusOK || upstream.request.ResponseRequest == nil || upstream.request.ResponseRequest.Moderation == nil {
+		t.Fatalf("status=%d request=%+v body=%s", out.Code, upstream.request.ResponseRequest, out.Body.String())
+	}
+	moderation := upstream.request.ResponseRequest.Moderation
+	if moderation.Model != "omni-moderation-latest" || moderation.Policy == nil || moderation.Policy.Input == nil || moderation.Policy.Input.Mode != "block" || moderation.Policy.Output == nil || moderation.Policy.Output.Mode != "score" {
+		t.Fatalf("moderation was not preserved: %+v", moderation)
+	}
+}
+
+func TestResponsesRejectsInvalidProviderModerationBeforeExecution(t *testing.T) {
+	for _, value := range []string{
+		`{}`,
+		`{"model":"moderation","policy":{"input":{"mode":"allow"}}}`,
+		`{"model":"moderation","policy":{"output":{}}}`,
+	} {
+		out := httptest.NewRecorder()
+		Handler{}.Responses(out, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"m","input":"hello","moderation":`+value+`}`)))
+		if out.Code != http.StatusBadRequest {
+			t.Fatalf("value=%s status=%d body=%s", value, out.Code, out.Body.String())
+		}
+	}
+}
+
+func TestResponsesPreservesPromptCachePrewarm(t *testing.T) {
+	upstream := &chatProvider{}
+	handler := NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}}}), upstream)
+	out := httptest.NewRecorder()
+	handler.Responses(out, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"m","input":"hello","prompt_cache_options":{"prewarm":true}}`)))
+	if out.Code != http.StatusOK || upstream.request.ResponseRequest == nil || upstream.request.ResponseRequest.PromptCacheOptions == nil || upstream.request.ResponseRequest.PromptCacheOptions.Prewarm == nil || !*upstream.request.ResponseRequest.PromptCacheOptions.Prewarm {
+		t.Fatalf("status=%d request=%+v body=%s", out.Code, upstream.request.ResponseRequest, out.Body.String())
+	}
+}
+
 func TestResponsesValidatesStreamOptionsBeforeExecution(t *testing.T) {
 	handler := Handler{}
 	for _, body := range []string{
@@ -398,6 +467,52 @@ func TestResponsesResolveOwnedComputerScreenshotBeforePolicy(t *testing.T) {
 			body := `{"model":"m","previous_response_id":"resp_1","tools":[{"type":"computer"}],"input":[{"type":"computer_call_output","call_id":"call_1","output":{"type":"computer_screenshot","file_id":"file_screen","detail":"original"}}]}`
 			out := httptest.NewRecorder()
 			handler.Responses(out, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(body)))
+			if out.Code != test.wantStatus || policy.calls != test.wantPolicy {
+				t.Fatalf("status=%d policy=%d body=%s", out.Code, policy.calls, out.Body.String())
+			}
+			if test.wantStatus != http.StatusOK {
+				if upstream.request.ResponseRequest != nil {
+					t.Fatal("foreign screenshot reached provider")
+				}
+				return
+			}
+			encoded, err := json.Marshal(upstream.request.ResponseRequest.Input)
+			if err != nil || strings.Contains(string(encoded), "file_screen") || !strings.Contains(string(encoded), "data:image/png;base64,") {
+				t.Fatalf("screenshot was not resolved: input=%s err=%v", encoded, err)
+			}
+			attachments, err := openai.ResponseImageAttachments(upstream.request.ResponseRequest.Input)
+			if err != nil || len(attachments) != 1 {
+				t.Fatalf("resolved screenshot did not reach image policy path: attachments=%+v err=%v", attachments, err)
+			}
+		})
+	}
+}
+
+func TestCompactResponseResolvesOwnedComputerScreenshotBeforePolicy(t *testing.T) {
+	identity := modules.RequestContext{CredentialID: "credential", UserID: "user"}
+	owner := fileOwnerKey(identity)
+	png := []byte("\x89PNG\r\n\x1a\ncontent")
+	for _, test := range []struct {
+		name       string
+		fileOwner  string
+		wantStatus int
+		wantPolicy int
+	}{
+		{name: "owned", fileOwner: owner, wantStatus: http.StatusOK, wantPolicy: 1},
+		{name: "foreign", fileOwner: "foreign", wantStatus: http.StatusBadRequest},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			upstream := &chatProvider{}
+			policy := &lifecycleBillingModule{}
+			files := &memoryFileStore{files: map[string]filestate.File{"file_screen": {
+				ID: "file_screen", OwnerKey: test.fileOwner, Filename: "screen.png", Purpose: "vision", ContentType: "image/png", Bytes: int64(len(png)), Content: png,
+			}}}
+			handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{
+				&lifecycleAuthModule{allowedModels: []string{"*"}, allowedTools: []string{"computer"}}, policy,
+			}), upstream).WithFileStore(files, FileRuntimeConfig{MaxBytes: 1 << 20, OwnerQuotaBytes: 1 << 20}))
+			body := `{"model":"m","input":[{"type":"computer_call_output","call_id":"call_1","output":{"type":"computer_screenshot","file_id":"file_screen","detail":"original"}}]}`
+			out := httptest.NewRecorder()
+			handler.ServeHTTP(out, httptest.NewRequest(http.MethodPost, "/v1/responses/compact", strings.NewReader(body)))
 			if out.Code != test.wantStatus || policy.calls != test.wantPolicy {
 				t.Fatalf("status=%d policy=%d body=%s", out.Code, policy.calls, out.Body.String())
 			}

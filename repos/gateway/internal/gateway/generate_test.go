@@ -105,14 +105,17 @@ func TestGenerateContentResolvesOwnedFileDataAfterAuthentication(t *testing.T) {
 	upstream := &fallbackChatProvider{response: openai.ChatCompletionResponse{ID: "id", Model: "m", Choices: []openai.Choice{{Index: 0, Message: openai.Message{Role: "assistant", Content: "ok"}, FinishReason: "stop"}}, Usage: openai.Usage{PromptTokens: 10, CompletionTokens: 1, TotalTokens: 11}}}
 	handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{&lifecycleAuthModule{}}), upstream).
 		WithFileStore(files, FileRuntimeConfig{MaxBytes: 32 << 20, OwnerQuotaBytes: 64 << 20}))
-	body := `{"contents":[{"parts":[{"fileData":{"mimeType":"image/png","fileUri":"file_image"}},{"fileData":{"mimeType":"application/pdf","fileUri":"file_pdf"}},{"fileData":{"mimeType":"text/plain","fileUri":"file_text"}},{"fileData":{"mimeType":"audio/wav","fileUri":"file_audio"}},{"fileData":{"mimeType":"video/mp4","fileUri":"file_video"}},{"fileData":{"mimeType":"video/avi","fileUri":"file_avi"}}]}]}`
+	body := `{"contents":[{"parts":[{"fileData":{"mimeType":"image/png","fileUri":"file_image"}},{"fileData":{"mimeType":"application/pdf","fileUri":"file_pdf"},"mediaResolution":{"level":"MEDIA_RESOLUTION_ULTRA_HIGH"}},{"fileData":{"mimeType":"text/plain","fileUri":"file_text"}},{"fileData":{"mimeType":"audio/wav","fileUri":"file_audio"}},{"fileData":{"mimeType":"video/mp4","fileUri":"file_video"},"mediaProcessing":"AGENTIC"},{"fileData":{"mimeType":"video/avi","fileUri":"file_avi"}}]}]}`
 	response := generateCall(handler, "/v1beta/models/m:generateContent", body, "gateway-test-key")
 	request := upstream.request.Request
 	images, imageErr := openai.ChatImageAttachments(request.Messages)
 	filesFound, fileErr := openai.ChatFileAttachments(request.Messages)
 	audio, audioErr := openai.ChatAudioAttachments(request.Messages)
 	videos, videoErr := openai.ChatVideoAttachments(request.Messages)
-	if response.Code != http.StatusOK || upstream.calls != 1 || imageErr != nil || len(images) != 1 || fileErr != nil || len(filesFound) != 1 || !openai.HasChatTextDocuments(request) || audioErr != nil || len(audio) != 1 || videoErr != nil || len(videos) != 2 || videos[1].MediaType != "video/avi" {
+	parts := request.Messages[0].Content.([]any)
+	resolution, resolutionErr := openai.GeminiPartMediaResolution(parts[1].(map[string]any))
+	processing, processingErr := openai.GeminiPartMediaProcessing(parts[4].(map[string]any))
+	if response.Code != http.StatusOK || upstream.calls != 1 || imageErr != nil || len(images) != 1 || fileErr != nil || len(filesFound) != 1 || !openai.HasChatTextDocuments(request) || audioErr != nil || len(audio) != 1 || videoErr != nil || len(videos) != 2 || videos[1].MediaType != "video/avi" || resolutionErr != nil || resolution == nil || resolution.Level != "MEDIA_RESOLUTION_ULTRA_HIGH" || processingErr != nil || processing != "AGENTIC" {
 		t.Fatalf("status=%d calls=%d images=%d/%v files=%d/%v audio=%d/%v videos=%d/%v request=%+v body=%s", response.Code, upstream.calls, len(images), imageErr, len(filesFound), fileErr, len(audio), audioErr, len(videos), videoErr, request, response.Body.String())
 	}
 
@@ -289,6 +292,66 @@ func TestGenerateContentEnforcesToolACL(t *testing.T) {
 	}
 }
 
+func TestGenerateContentFileSearchEnforcesStoreACL(t *testing.T) {
+	body := `{"contents":[{"parts":[{"text":"find policy"}]}],"tools":[{"fileSearch":{"fileSearchStoreNames":["fileSearchStores/policies"]}}]}`
+	upstream := &fallbackChatProvider{}
+	missingStore := Routes(NewHandler(modules.NewPipeline([]modules.Module{messagesAuth{accessPolicyModule{models: []string{"*"}, tools: []string{"file_search"}}}}), upstream))
+	response := generateCall(missingStore, "/v1beta/models/m:generateContent", body, "gateway-test-key")
+	if response.Code != http.StatusForbidden || upstream.calls != 0 || !strings.Contains(response.Body.String(), "gemini_file_search:fileSearchStores/policies") {
+		t.Fatalf("store ACL bypassed: status=%d calls=%d body=%s", response.Code, upstream.calls, response.Body.String())
+	}
+	allowed := Routes(NewHandler(modules.NewPipeline([]modules.Module{messagesAuth{accessPolicyModule{models: []string{"*"}, tools: []string{"file_search", "gemini_file_search:fileSearchStores/policies"}}}}), upstream))
+	response = generateCall(allowed, "/v1beta/models/m:generateContent", body, "gateway-test-key")
+	if response.Code == http.StatusForbidden || upstream.calls != 1 || upstream.request.Request.GeminiFileSearch == nil || upstream.request.Request.NativeInputTokens == 0 {
+		t.Fatalf("authorized file search rejected: status=%d calls=%d request=%+v body=%s", response.Code, upstream.calls, upstream.request, response.Body.String())
+	}
+}
+
+func TestGenerateContentComputerUseEnforcesSafetyACL(t *testing.T) {
+	body := `{"contents":[{"parts":[{"text":"open settings"}]}],"tools":[{"computerUse":{"environment":"ENVIRONMENT_DESKTOP","disabledSafetyPolicies":["DATA_MODIFICATION"]}}]}`
+	upstream := &fallbackChatProvider{}
+	missingOverride := Routes(NewHandler(modules.NewPipeline([]modules.Module{messagesAuth{accessPolicyModule{models: []string{"*"}, tools: []string{"computer_use", "gemini_computer_use:ENVIRONMENT_DESKTOP"}}}}), upstream))
+	response := generateCall(missingOverride, "/v1beta/models/m:generateContent", body, "gateway-test-key")
+	if response.Code != http.StatusForbidden || upstream.calls != 0 || !strings.Contains(response.Body.String(), "gemini_computer_use:disable:DATA_MODIFICATION") {
+		t.Fatalf("safety override ACL bypassed: status=%d calls=%d body=%s", response.Code, upstream.calls, response.Body.String())
+	}
+	allowed := Routes(NewHandler(modules.NewPipeline([]modules.Module{messagesAuth{accessPolicyModule{models: []string{"*"}, tools: []string{"computer_use", "gemini_computer_use:ENVIRONMENT_DESKTOP", "gemini_computer_use:disable:DATA_MODIFICATION"}}}}), upstream))
+	response = generateCall(allowed, "/v1beta/models/m:generateContent", body, "gateway-test-key")
+	if response.Code == http.StatusForbidden || upstream.calls != 1 || upstream.request.Request.GeminiComputerUse == nil || upstream.request.Request.NativeInputTokens == 0 {
+		t.Fatalf("authorized computer use rejected: status=%d calls=%d request=%+v", response.Code, upstream.calls, upstream.request.Request)
+	}
+}
+
+func TestGenerateContentMCPRequiresRegistryOptInAndConnectorGrant(t *testing.T) {
+	const connector = "mcp:weather@https://mcp.example.test/v1"
+	registry := NewMCPRegistry()
+	server := MCPServer{Label: "Weather", ServerURL: "https://mcp.example.test/v1", Transport: "streamable-http", Tools: []string{connector}, Enabled: true, AllowProviderExecution: true}
+	if _, err := registry.PutServer("weather", server, "server-secret"); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"contents":[{"parts":[{"text":"forecast"}]}],"tools":[{"mcpServers":[{"name":"weather"}]}]}`
+	upstream := &fallbackChatProvider{}
+	denied := Routes(NewHandler(modules.NewPipeline([]modules.Module{messagesAuth{accessPolicyModule{models: []string{"*"}, tools: []string{"safe"}}}}), upstream).WithMCPRegistry(registry))
+	response := generateCall(denied, "/v1beta/models/m:generateContent", body, "gateway-test-key")
+	if response.Code != http.StatusForbidden || upstream.calls != 0 || !strings.Contains(response.Body.String(), connector) {
+		t.Fatalf("connector ACL bypassed: status=%d calls=%d body=%s", response.Code, upstream.calls, response.Body.String())
+	}
+	allowed := Routes(NewHandler(modules.NewPipeline([]modules.Module{messagesAuth{accessPolicyModule{models: []string{"*"}, tools: []string{connector}}}}), upstream).WithMCPRegistry(registry))
+	response = generateCall(allowed, "/v1beta/models/m:generateContent", body, "gateway-test-key")
+	transport := upstream.request.Request.GeminiMCPServers[0].StreamableHTTPTransport
+	if response.Code == http.StatusForbidden || upstream.calls != 1 || transport.Headers["Authorization"] != "Bearer server-secret" || transport.Timeout != "30s" {
+		t.Fatalf("authorized MCP rejected: status=%d calls=%d request=%+v body=%s", response.Code, upstream.calls, upstream.request.Request, response.Body.String())
+	}
+	server.AllowProviderExecution = false
+	if _, err := registry.PutServer("weather", server); err != nil {
+		t.Fatal(err)
+	}
+	response = generateCall(allowed, "/v1beta/models/m:generateContent", body, "gateway-test-key")
+	if response.Code != http.StatusBadRequest || upstream.calls != 1 {
+		t.Fatalf("opt-in bypassed: status=%d calls=%d body=%s", response.Code, upstream.calls, response.Body.String())
+	}
+}
+
 func TestGenerateContentGeminiCodeExecutionStreamAndACL(t *testing.T) {
 	denied := &fallbackChatProvider{}
 	deniedHandler := Routes(NewHandler(modules.NewPipeline([]modules.Module{messagesAuth{accessPolicyModule{models: []string{"*"}, tools: []string{"safe"}}}}), denied))
@@ -420,6 +483,21 @@ func TestGenerateCountTokensEnforcesNativeManagedToolACL(t *testing.T) {
 				t.Fatalf("managed tool count rejected: status=%d calls=%d request=%+v body=%s", response.Code, counter.calls, counter.request.Request, response.Body.String())
 			}
 		})
+	}
+}
+
+func TestGenerateCountTokensFileSearchEnforcesStoreACL(t *testing.T) {
+	counter := &countProviderSpy{}
+	body := `{"generateContentRequest":{"contents":[{"parts":[{"text":"count"}]}],"tools":[{"fileSearch":{"fileSearchStoreNames":["fileSearchStores/policies"]}}]}}`
+	denied := Routes(NewHandler(modules.NewPipeline([]modules.Module{messagesAuth{accessPolicyModule{models: []string{"m"}, tools: []string{"file_search"}}}}), counter))
+	response := generateCall(denied, "/v1beta/models/m:countTokens", body, "gateway-test-key")
+	if response.Code != http.StatusForbidden || counter.calls != 0 {
+		t.Fatalf("file search count store ACL bypassed: status=%d calls=%d body=%s", response.Code, counter.calls, response.Body.String())
+	}
+	allowed := Routes(NewHandler(modules.NewPipeline([]modules.Module{messagesAuth{accessPolicyModule{models: []string{"m"}, tools: []string{"file_search", "gemini_file_search:fileSearchStores/policies"}}}}), counter))
+	response = generateCall(allowed, "/v1beta/models/m:countTokens", body, "gateway-test-key")
+	if response.Code != http.StatusOK || counter.calls != 1 || counter.request.Request.GeminiFileSearch == nil || counter.request.Request.NativeInputTokens == 0 {
+		t.Fatalf("authorized file search count rejected: status=%d calls=%d request=%+v body=%s", response.Code, counter.calls, counter.request.Request, response.Body.String())
 	}
 }
 func TestGenerateContentFallbackSSE(t *testing.T) {

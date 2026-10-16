@@ -25,19 +25,22 @@ import (
 var ErrJWTUnavailable = errors.New("jwt verification unavailable")
 
 type JWTAuthConfig struct {
-	Secret       string
-	Issuer       string
-	Audience     string
-	JWKSURL      string
-	JWKSCacheTTL time.Duration
-	ClockSkew    time.Duration
-	UserIDClaim  string
-	TeamIDClaim  string
-	RolesClaim   string
+	Secret          string
+	Issuer          string
+	Audience        string
+	JWKSURL         string
+	JWKSCacheTTL    time.Duration
+	ClockSkew       time.Duration
+	UserIDClaim     string
+	TeamIDClaim     string
+	RolesClaim      string
+	IdentityMode    string
+	RoleMappings    map[string]string
+	roleMappingsErr error
 }
 
 func JWTAuthConfigFromEnv() JWTAuthConfig {
-	return JWTAuthConfig{
+	config := JWTAuthConfig{
 		Secret:       os.Getenv("AUTH_JWT_SECRET"),
 		Issuer:       strings.TrimSpace(os.Getenv("AUTH_JWT_ISSUER")),
 		Audience:     strings.TrimSpace(os.Getenv("AUTH_JWT_AUDIENCE")),
@@ -47,10 +50,32 @@ func JWTAuthConfigFromEnv() JWTAuthConfig {
 		UserIDClaim:  envString("AUTH_JWT_USER_ID_CLAIM", "sub"),
 		TeamIDClaim:  envString("AUTH_JWT_TEAM_ID_CLAIM", "team_id"),
 		RolesClaim:   envString("AUTH_JWT_ROLES_CLAIM", "roles"),
+		IdentityMode: envString("AUTH_JWT_IDENTITY_MODE", "legacy"),
 	}
+	if raw := strings.TrimSpace(os.Getenv("AUTH_JWT_ROLE_MAPPINGS_JSON")); raw != "" {
+		config.roleMappingsErr = json.Unmarshal([]byte(raw), &config.RoleMappings)
+	}
+	return config
 }
 
 func (c JWTAuthConfig) validate() error {
+	if c.roleMappingsErr != nil {
+		return errors.New("invalid jwt role mappings")
+	}
+	if c.IdentityMode != "legacy" && c.IdentityMode != "directory" {
+		return errors.New("jwt identity mode must be legacy or directory")
+	}
+	if c.IdentityMode == "directory" && (!validJWTIdentityValue(c.Issuer, 2048) || !validJWTIdentityValue(c.Audience, 256) || len(c.RoleMappings) == 0) {
+		return errors.New("directory jwt requires issuer, audience and explicit role mappings")
+	}
+	if len(c.RoleMappings) > 128 {
+		return errors.New("too many jwt role mappings")
+	}
+	for external, role := range c.RoleMappings {
+		if !validJWTIdentityValue(external, 256) || (role != "user" && role != "developer" && role != "admin" && role != "team_admin" && role != "org_admin") {
+			return errors.New("invalid jwt role mapping")
+		}
+	}
 	if c.JWKSURL != "" && (c.Issuer == "" || c.Audience == "") {
 		return errors.New("jwt issuer and audience are required with JWKS")
 	}
@@ -105,10 +130,21 @@ type jwtVerifier struct {
 	keys               map[string]verificationKey
 	fetchedAt          time.Time
 	lastRefreshAttempt time.Time
+	refresh            *jwtKeyRefresh
 	now                func() time.Time
 }
 
 func newJWTVerifier(config JWTAuthConfig) (*jwtVerifier, error) {
+	if config.IdentityMode == "" {
+		config.IdentityMode = "legacy"
+	}
+	if config.RoleMappings != nil {
+		copyMappings := make(map[string]string, len(config.RoleMappings))
+		for external, role := range config.RoleMappings {
+			copyMappings[external] = role
+		}
+		config.RoleMappings = copyMappings
+	}
 	if config.JWKSCacheTTL <= 0 {
 		config.JWKSCacheTTL = 5 * time.Minute
 	}
@@ -127,7 +163,7 @@ func newJWTVerifier(config JWTAuthConfig) (*jwtVerifier, error) {
 	if err := config.validate(); err != nil {
 		return nil, err
 	}
-	return &jwtVerifier{config: config, client: &http.Client{Timeout: 5 * time.Second}, keys: map[string]verificationKey{}, now: time.Now}, nil
+	return &jwtVerifier{config: config, client: &http.Client{Timeout: 5 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, keys: map[string]verificationKey{}, now: time.Now}, nil
 }
 
 func (v *jwtVerifier) Ready(ctx context.Context) error {
@@ -212,28 +248,62 @@ func (v *jwtVerifier) key(ctx context.Context, keyID, algorithm string) (any, er
 	return key.key, nil
 }
 
+// A refresh result is immutable after done closes. Waiters share one bounded
+// network operation and can cancel without acquiring a network-held mutex.
+type jwtKeyRefresh struct {
+	done chan struct{}
+	keys map[string]verificationKey
+	err  error
+}
+
 func (v *jwtVerifier) keysForVerification(ctx context.Context, force bool) (map[string]verificationKey, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrJWTUnavailable, err)
+	}
 	v.mu.Lock()
-	defer v.mu.Unlock()
 	now := v.now()
 	if len(v.keys) > 0 && !force && now.Sub(v.fetchedAt) < v.config.JWKSCacheTTL {
-		return cloneVerificationKeys(v.keys), nil
+		keys := cloneVerificationKeys(v.keys)
+		v.mu.Unlock()
+		return keys, nil
+	}
+	if flight := v.refresh; flight != nil {
+		v.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("%w: %w", ErrJWTUnavailable, ctx.Err())
+		case <-flight.done:
+			return cloneVerificationKeys(flight.keys), flight.err
+		}
 	}
 	if force && len(v.keys) > 0 && now.Sub(v.lastRefreshAttempt) < 5*time.Second {
-		return cloneVerificationKeys(v.keys), nil
+		keys := cloneVerificationKeys(v.keys)
+		v.mu.Unlock()
+		return keys, nil
 	}
 	if force {
 		v.lastRefreshAttempt = now
 	}
+	flight := &jwtKeyRefresh{done: make(chan struct{})}
+	v.refresh = flight
+	v.mu.Unlock()
 	keys, err := v.fetchKeys(ctx)
+	v.mu.Lock()
 	if err != nil {
 		if !force && len(v.keys) > 0 && now.Sub(v.fetchedAt) < v.config.JWKSCacheTTL {
-			return cloneVerificationKeys(v.keys), nil
+			flight.keys = cloneVerificationKeys(v.keys)
+		} else {
+			flight.err = fmt.Errorf("%w: %w", ErrJWTUnavailable, err)
 		}
-		return nil, fmt.Errorf("%w: %v", ErrJWTUnavailable, err)
+	} else {
+		v.keys, v.fetchedAt = keys, now
+		flight.keys = keys
 	}
-	v.keys, v.fetchedAt = keys, now
-	return cloneVerificationKeys(keys), nil
+	v.refresh = nil
+	close(flight.done)
+	result := cloneVerificationKeys(flight.keys)
+	v.mu.Unlock()
+	return result, flight.err
 }
 
 func (v *jwtVerifier) fetchKeys(ctx context.Context) (map[string]verificationKey, error) {

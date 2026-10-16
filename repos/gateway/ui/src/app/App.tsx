@@ -3,7 +3,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { Layout } from "./Layout";
 import { LoginPage } from "./LoginPage";
-import { appRoutes, routeCapability } from "./routes";
+import { appRoutes, canAccessRoute } from "./routes";
 import { LoadingState } from "../components/AsyncState";
 
 export function App() {
@@ -16,7 +16,7 @@ export function App() {
     void restoreSession().catch(() => undefined).finally(() => { if (active) setChecking(false); });
     return () => { active = false; };
   }, [restoreSession, session, token]);
-  const routes = useMemo(() => session ? appRoutes.filter((route) => session.capabilities.includes(routeCapability(route))) : [], [session]);
+  const routes = useMemo(() => session ? appRoutes.filter((route) => canAccessRoute(route, session)) : [], [session]);
   if (checking || ssoChecking) return <main className="login-page"><section className="login-card"><h1>Validating session</h1><p>Checking the stored gateway credential…</p></section></main>;
   if (!token) return <LoginPage />;
   if (!session) return <LoginPage />;

@@ -4,10 +4,15 @@ package provider
 // responses client does not prove that an adapter preserves optional request
 // semantics.
 
-func (OpenAICompatible) SupportsTools() bool               { return true }
-func (OpenAICompatible) SupportsStructuredOutput() bool    { return true }
-func (OpenAICompatible) SupportsWebSearch() bool           { return true }
-func (OpenAICompatible) SupportsResponseWebSearch() bool   { return true }
+func (OpenAICompatible) SupportsTools() bool            { return true }
+func (OpenAICompatible) SupportsStructuredOutput() bool { return true }
+func (p OpenAICompatible) SupportsWebSearch() bool      { return p.providerName() != "azure-openai" }
+func (p OpenAICompatible) SupportsResponseWebSearch() bool {
+	if p.providerName() != "azure-openai" {
+		return true
+	}
+	return azureFoundryProjectBaseURL(p.baseURL)
+}
 func (OpenAICompatible) SupportsResponseCustomTools() bool { return true }
 func (OpenAICompatible) SupportsResponseComputer() bool    { return true }
 func (OpenAICompatible) SupportsResponseShell() bool       { return true }
@@ -21,8 +26,10 @@ func (p OpenAICompatible) SupportsAssistantPrefill() bool {
 	return p.supportsMessagePrefix
 }
 
-func (Ollama) SupportsTools() bool            { return true }
-func (Ollama) SupportsStructuredOutput() bool { return true }
+func (Ollama) SupportsTools() bool { return true }
+func (p Ollama) SupportsStructuredOutput() bool {
+	return !ollamaCloudBaseURL(p.baseURL)
+}
 
 func (Anthropic) SupportsTools() bool             { return true }
 func (Anthropic) SupportsStructuredOutput() bool  { return true }

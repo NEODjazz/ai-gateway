@@ -148,8 +148,20 @@ func TestHelmMigrationCopiesMatchSources(t *testing.T) {
 }
 
 func embeddedMigration(chart, name string) (string, bool) {
+	header := regexp.MustCompile(`(?m)^data:\n`).FindStringIndex(chart)
+	if header == nil {
+		return "", false
+	}
+	var data strings.Builder
+	for _, line := range strings.Split(chart[header[1]:], "\n") {
+		if line != "" && line[0] != ' ' && !strings.HasPrefix(line, "#") {
+			break
+		}
+		data.WriteString(line)
+		data.WriteByte('\n')
+	}
 	pattern := regexp.MustCompile(`(?m)^  ` + regexp.QuoteMeta(name) + `: \|\n((?:    [^\n]*(?:\n|$)|\n)*)`)
-	match := pattern.FindStringSubmatch(chart)
+	match := pattern.FindStringSubmatch(data.String())
 	if len(match) != 2 {
 		return "", false
 	}
@@ -158,6 +170,30 @@ func embeddedMigration(chart, name string) (string, bool) {
 		lines[index] = strings.TrimPrefix(line, "    ")
 	}
 	return strings.Join(lines, "\n"), true
+}
+
+func TestEmbeddedMigrationRequiresConfigMapData(t *testing.T) {
+	const migration = "  013_jwt_principals.sql: |\n    SELECT 1;\n"
+	for _, test := range []struct {
+		name  string
+		chart string
+		want  bool
+	}{
+		{"data", "metadata:\n  name: migrations\ndata:\n" + migration, true},
+		{"metadata", "metadata:\n" + migration + "data:\n  other.sql: |\n    SELECT 2;\n", false},
+		{"no data", "metadata:\n" + migration, false},
+		{"outside data", "data:\n  other.sql: |\n    SELECT 2;\nmetadata:\n" + migration, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			sql, ok := embeddedMigration(test.chart, "013_jwt_principals.sql")
+			if ok != test.want {
+				t.Fatalf("migration in data = %v, want %v", ok, test.want)
+			}
+			if ok && normalizeSQL(sql) != "SELECT 1;" {
+				t.Fatalf("unexpected SQL %q", sql)
+			}
+		})
+	}
 }
 
 func normalizeSQL(value string) string {

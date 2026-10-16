@@ -74,6 +74,63 @@ func TestGeminiForwardsValidatedSafetySettings(t *testing.T) {
 	}
 }
 
+func TestGeminiForwardsValidatedMediaResolution(t *testing.T) {
+	request := openai.ChatCompletionRequest{
+		Model: "gemini-test",
+		Messages: []openai.Message{{Role: "user", Content: []any{
+			map[string]any{"type": "image_url", "image_url": map[string]any{"url": "data:image/png;base64,iVBORw0KGgo="}},
+		}}},
+		GeminiMediaResolution: "MEDIA_RESOLUTION_HIGH",
+	}
+	native, err := geminiChatRequest(request)
+	if err != nil || native.Generation.MediaResolution != "MEDIA_RESOLUTION_HIGH" {
+		t.Fatalf("native=%+v err=%v", native, err)
+	}
+	request.Messages = []openai.Message{{Role: "user", Content: "text only"}}
+	if _, err := geminiChatRequest(request); err == nil {
+		t.Fatal("media resolution without media input accepted")
+	}
+	request.Messages = []openai.Message{{Role: "user", Content: []any{map[string]any{"type": "image_url", "image_url": map[string]any{"url": "data:image/png;base64,iVBORw0KGgo="}}}}}
+	request.GeminiMediaResolution = "MEDIA_RESOLUTION_ULTRA_HIGH"
+	if _, err := geminiChatRequest(request); err == nil {
+		t.Fatal("global ultra-high media resolution accepted")
+	}
+}
+
+func TestGeminiForwardsPerPartMediaResolution(t *testing.T) {
+	request := openai.ChatCompletionRequest{Model: "gemini-test", Messages: []openai.Message{{Role: "user", Content: []any{
+		map[string]any{
+			"type": "image_url", "image_url": map[string]any{"url": "data:image/png;base64,iVBORw0KGgo="},
+			"gemini_media_resolution": "MEDIA_RESOLUTION_ULTRA_HIGH",
+		},
+	}}}}
+	native, err := geminiChatRequest(request)
+	if err != nil || native.Contents[0].Parts[0].MediaResolution == nil || native.Contents[0].Parts[0].MediaResolution.Level != "MEDIA_RESOLUTION_ULTRA_HIGH" {
+		t.Fatalf("native=%+v err=%v", native, err)
+	}
+	request.Messages[0].Content = []any{map[string]any{"type": "text", "text": "hello", "gemini_media_resolution": "MEDIA_RESOLUTION_HIGH"}}
+	if _, err := geminiChatRequest(request); err == nil {
+		t.Fatal("text part media resolution accepted")
+	}
+}
+
+func TestGeminiForwardsPerVideoMediaProcessing(t *testing.T) {
+	request := openai.ChatCompletionRequest{Model: "gemini-test", Messages: []openai.Message{{Role: "user", Content: []any{
+		map[string]any{
+			"type": "input_video", "input_video": map[string]any{"data": "AAAADGZ0eXBtcDQy", "format": "mp4"},
+			"gemini_media_processing": "AGENTIC",
+		},
+	}}}}
+	native, err := geminiChatRequest(request)
+	if err != nil || native.Contents[0].Parts[0].MediaProcessing != "AGENTIC" {
+		t.Fatalf("native=%+v err=%v", native, err)
+	}
+	request.Messages[0].Content = []any{map[string]any{"type": "image_url", "image_url": map[string]any{"url": "data:image/png;base64,iVBORw0KGgo="}, "gemini_media_processing": "STATIC"}}
+	if _, err := geminiChatRequest(request); err == nil {
+		t.Fatal("image media processing accepted")
+	}
+}
+
 func TestGeminiGoogleSearchGroundingAndUsage(t *testing.T) {
 	var upstream geminiRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -91,6 +148,89 @@ func TestGeminiGoogleSearchGroundingAndUsage(t *testing.T) {
 	annotation := response.Choices[0].Message.Annotations
 	if len(upstream.Tools) != 1 || upstream.Tools[0].GoogleSearch == nil || response.Usage.SearchRequests != 1 || len(annotation) != 1 || annotation[0].URLCitation.URL != "https://weather.example/paris" || !strings.Contains(string(response.Choices[0].GeminiGroundingMetadata), "searchEntryPoint") {
 		t.Fatalf("upstream=%+v response=%+v", upstream, response)
+	}
+}
+
+func TestGeminiForwardsGoogleSearchTimeRange(t *testing.T) {
+	rangeFilter := &openai.GeminiSearchTimeRange{StartTime: "2026-01-01T00:00:00Z", EndTime: "2026-02-01T00:00:00Z"}
+	native, err := geminiChatRequest(openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "news"}}, ChatGenerationOptions: openai.ChatGenerationOptions{WebSearchOptions: &openai.ChatWebSearchOptions{GeminiTimeRange: rangeFilter}}})
+	if err != nil || len(native.Tools) != 1 || native.Tools[0].GoogleSearch == nil || native.Tools[0].GoogleSearch.TimeRange == nil || native.Tools[0].GoogleSearch.TimeRange.StartTime != rangeFilter.StartTime {
+		t.Fatalf("native=%+v err=%v", native, err)
+	}
+	rangeFilter.StartTime = "invalid"
+	if _, err := geminiChatRequest(openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "news"}}, ChatGenerationOptions: openai.ChatGenerationOptions{WebSearchOptions: &openai.ChatWebSearchOptions{GeminiTimeRange: rangeFilter}}}); err == nil {
+		t.Fatal("invalid search time range accepted")
+	}
+}
+
+func TestGeminiFileSearchRoundTrip(t *testing.T) {
+	var upstream geminiRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&upstream); err != nil {
+			t.Fatal(err)
+		}
+		_, _ = fmt.Fprint(w, `{"responseId":"retrieved","candidates":[{"content":{"parts":[{"text":"Use policy A."}]},"finishReason":"STOP","groundingMetadata":{"groundingChunks":[{"retrievedContext":{"uri":"https://docs.example/policy-a","title":"Policy A","text":"Policy body","fileSearchStore":"fileSearchStores/policies","pageNumber":2,"mediaId":"fileSearchStores/policies/media/policy-a","customMetadata":[{"key":"status","stringValue":"active"}]}}],"groundingSupports":[{"segment":{"startIndex":4,"endIndex":12,"text":"policy A"},"groundingChunkIndices":[0]}]}}],"usageMetadata":{"promptTokenCount":4,"candidatesTokenCount":3,"totalTokenCount":7}}`)
+	}))
+	defer server.Close()
+	topK := 8
+	request := openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "find policy"}}, GeminiFileSearch: &openai.GeminiFileSearchConfig{StoreNames: []string{"fileSearchStores/policies"}, MetadataFilter: "status=active", TopK: &topK}}
+	response, err := NewGemini(server.URL, "key", false).ChatCompletions(t.Context(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	annotations := response.Choices[0].Message.Annotations
+	if len(upstream.Tools) != 1 || upstream.Tools[0].FileSearch == nil || upstream.Tools[0].FileSearch.StoreNames[0] != "fileSearchStores/policies" || response.Usage.SearchRequests != 0 || len(annotations) != 1 || annotations[0].URLCitation.URL != "https://docs.example/policy-a" || !strings.Contains(string(response.Choices[0].GeminiGroundingMetadata), "retrievedContext") {
+		t.Fatalf("upstream=%+v response=%+v", upstream, response)
+	}
+	request.GeminiCodeExecution = true
+	if _, err := geminiChatRequest(request); err == nil {
+		t.Fatal("file search combined with another tool")
+	}
+}
+
+func TestGeminiForwardsComputerUse(t *testing.T) {
+	config := &openai.GeminiComputerUseConfig{Environment: "ENVIRONMENT_BROWSER", ExcludedPredefinedFunctions: []string{"drag_and_drop"}, EnablePromptInjectionDetection: true, DisabledSafetyPolicies: []string{"FINANCIAL_TRANSACTIONS"}}
+	request := openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "browse"}}, GeminiComputerUse: config}
+	native, err := geminiChatRequest(request)
+	if err != nil || len(native.Tools) != 1 || native.Tools[0].ComputerUse == nil || native.Tools[0].ComputerUse.Environment != "ENVIRONMENT_BROWSER" || !native.Tools[0].ComputerUse.EnablePromptInjectionDetection {
+		t.Fatalf("native=%+v err=%v", native, err)
+	}
+	request.GeminiComputerUse.Environment = "browser"
+	if _, err := geminiChatRequest(request); err == nil {
+		t.Fatal("invalid environment accepted")
+	}
+}
+
+func TestGeminiForwardsValidatedMCPServers(t *testing.T) {
+	transport := openai.GeminiStreamableHTTPTransport{URL: "https://mcp.example.test/v1", Headers: map[string]string{"Authorization": "Bearer secret"}, Timeout: "30s", SSEReadTimeout: "60s", TerminateOnClose: true}
+	request := openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "forecast"}}, GeminiMCPServerIDs: []string{"weather"}, GeminiMCPServers: []openai.GeminiMCPServer{{Name: "weather", StreamableHTTPTransport: transport}}}
+	native, err := geminiChatRequest(request)
+	if err != nil || len(native.Tools) != 1 || len(native.Tools[0].MCPServers) != 1 || native.Tools[0].MCPServers[0].StreamableHTTPTransport.URL != transport.URL {
+		t.Fatalf("native=%+v err=%v", native, err)
+	}
+	native.Tools[0].MCPServers[0].StreamableHTTPTransport.Headers["Authorization"] = "changed"
+	if request.GeminiMCPServers[0].StreamableHTTPTransport.Headers["Authorization"] != "Bearer secret" {
+		t.Fatal("provider request mutated resolved credential")
+	}
+	invalid := request
+	invalid.GeminiMCPServers = append([]openai.GeminiMCPServer(nil), request.GeminiMCPServers...)
+	invalid.GeminiMCPServers[0].StreamableHTTPTransport.URL = "http://mcp.example.test/v1"
+	if _, err := geminiChatRequest(invalid); err == nil {
+		t.Fatal("unsafe MCP transport accepted")
+	}
+}
+
+func TestGeminiRejectsInvalidFileSearchGrounding(t *testing.T) {
+	for _, raw := range []string{
+		`{"groundingChunks":[{"retrievedContext":{"fileSearchStore":"wrong"}}]}`,
+		`{"groundingChunks":[{"retrievedContext":{"fileSearchStore":"fileSearchStores/a","mediaId":"fileSearchStores/b/media/one"}}]}`,
+		`{"groundingChunks":[{"retrievedContext":{"fileSearchStore":"fileSearchStores/a","pageNumber":0}}]}`,
+		`{"groundingChunks":[{"retrievedContext":{"fileSearchStore":"fileSearchStores/a","customMetadata":[{"key":"x","stringValue":"a","numericValue":1}]}}]}`,
+		`{"groundingChunks":[{"web":{"uri":"https://example.com","title":"Web"},"retrievedContext":{"fileSearchStore":"fileSearchStores/a"}}]}`,
+	} {
+		if _, _, err := geminiGrounding(json.RawMessage(raw), "text"); err == nil {
+			t.Fatalf("invalid file search grounding accepted: %s", raw)
+		}
 	}
 }
 

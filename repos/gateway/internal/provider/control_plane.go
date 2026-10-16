@@ -248,7 +248,8 @@ func (r *Router) applyControlPlaneSnapshot(snapshot ControlPlaneSnapshot) error 
 }
 
 func sameDeploymentRuntime(first, second ModelDeployment) bool {
-	return first.ID == second.ID &&
+	return first.NumCtx == second.NumCtx && first.DocumentProcessing == second.DocumentProcessing &&
+		first.ID == second.ID &&
 		first.ProviderID == second.ProviderID &&
 		first.CredentialID == second.CredentialID &&
 		first.ProviderType == second.ProviderType &&
@@ -277,6 +278,12 @@ func sameCredentialMaterial(id string, previous, next map[string]encryptedCreden
 	first, firstFound := previous[id]
 	second, secondFound := next[id]
 	return firstFound && secondFound && bytes.Equal(first.Nonce, second.Nonce) && bytes.Equal(first.Ciphertext, second.Ciphertext)
+}
+
+// AdminStateDurable distinguishes a configured state store from the router's
+// process-local admin registry. The runtime exists in both configurations.
+func (r *Router) AdminStateDurable() bool {
+	return r.controlPlane != nil && r.controlPlane.store != nil
 }
 
 // AdminState returns the opaque durable state used by gateway management

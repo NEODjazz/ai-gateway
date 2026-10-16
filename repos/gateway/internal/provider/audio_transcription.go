@@ -224,6 +224,9 @@ func (p OpenAICompatible) TranscribeAudio(ctx context.Context, request openai.Au
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return openai.AudioTranscriptionResponse{}, responseStatusError(p.providerName(), response)
 	}
+	if p.transcriptionDecoder != nil {
+		return p.transcriptionDecoder(response.Body, request)
+	}
 	return decodeAudioTranscriptionResponse(response.Body)
 }
 

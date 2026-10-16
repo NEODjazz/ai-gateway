@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"ai-gateway-gateway/internal/config"
 	"ai-gateway-gateway/internal/modules"
@@ -258,9 +260,11 @@ func TestRealtimeRouterRequiresCapabilityPinsAdmissionAndAppliesAlias(t *testing
 	t.Cleanup(skipped.Close)
 	var selectedCalls atomic.Int32
 	var aliasApplied atomic.Bool
+	selectedReady := make(chan struct{}, 1)
 	selected := httptest.NewServer(websocket.Handler(func(connection *websocket.Conn) {
 		selectedCalls.Add(1)
 		aliasApplied.Store(connection.Request().URL.Query().Get("model") == "upstream-model")
+		selectedReady <- struct{}{}
 		var event string
 		_ = websocket.Message.Receive(connection, &event)
 	}))
@@ -278,6 +282,11 @@ func TestRealtimeRouterRequiresCapabilityPinsAdmissionAndAppliesAlias(t *testing
 	first, attempt, err := runtime.OpenRealtime(t.Context(), identity, "public-model")
 	if err != nil {
 		t.Fatal(err)
+	}
+	select {
+	case <-selectedReady:
+	case <-time.After(5 * time.Second):
+		t.Fatal("selected realtime handler did not start")
 	}
 	if skippedCalls.Load() != 0 || selectedCalls.Load() != 1 || !aliasApplied.Load() {
 		t.Fatalf("routing skipped=%d selected=%d alias=%v", skippedCalls.Load(), selectedCalls.Load(), aliasApplied.Load())
@@ -339,5 +348,44 @@ func TestRealtimeRouterAppliesDeploymentQuotaPerResponse(t *testing.T) {
 		if !errors.As(err, &quotaErr) {
 			t.Fatalf("expected deployment quota error, got %v", err)
 		}
+	}
+}
+
+func TestRealtimeExplicitDialectHeaders(t *testing.T) {
+	for _, azure := range []bool{false, true} {
+		for _, dialect := range []string{"current", "legacy"} {
+			t.Run(fmt.Sprintf("azure=%t/%s", azure, dialect), func(t *testing.T) {
+				headers := make(chan http.Header, 1)
+				server := httptest.NewServer(websocket.Handler(func(conn *websocket.Conn) { headers <- conn.Request().Header.Clone() }))
+				t.Cleanup(server.Close)
+				client := NewOpenAICompatible(server.URL+"/v1", "provider-key", false)
+				if azure {
+					client = NewAzureOpenAI(server.URL+"/openai/v1", "provider-key", false, "", "api_key")
+				}
+				conn, err := client.OpenRealtimeWithDialect(t.Context(), "model", dialect)
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = conn.Close() })
+				header := <-headers
+				want := ""
+				if dialect == "legacy" {
+					want = "realtime=v1"
+				}
+				if header.Get("OpenAI-Beta") != want {
+					t.Fatalf("dialect header=%q want=%q", header.Get("OpenAI-Beta"), want)
+				}
+				if azure && header.Get("api-key") != "provider-key" {
+					t.Fatal("Azure credential not preserved")
+				}
+				if !azure && header.Get("Authorization") != "Bearer provider-key" {
+					t.Fatal("provider credential not preserved")
+				}
+			})
+		}
+	}
+	client := NewOpenAICompatible("http://invalid.test", "", false)
+	if _, err := client.OpenRealtimeWithDialect(t.Context(), "model", "invalid"); err == nil {
+		t.Fatal("invalid dialect accepted")
 	}
 }

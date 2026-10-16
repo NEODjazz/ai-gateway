@@ -51,7 +51,7 @@ func (h *endpointHealthTracker) available(ctx context.Context, endpoint Endpoint
 		if err == nil {
 			return available
 		}
-		log.Printf("distributed circuit availability failed for endpoint %q: %v", endpoint.Name, err)
+		log.Print("distributed circuit availability failed")
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -81,7 +81,7 @@ func (h *endpointHealthTracker) permit(ctx context.Context, endpoint Endpoint) e
 			}
 			return ErrCircuitOpen
 		}
-		log.Printf("distributed circuit permit failed for endpoint %q: %v", endpoint.Name, err)
+		log.Print("distributed circuit permit failed")
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -106,7 +106,7 @@ func (h *endpointHealthTracker) success(ctx context.Context, endpoint Endpoint) 
 	h.mu.Unlock()
 	if h.store != nil {
 		if err := h.store.CircuitSuccess(ctx, endpoint.Name); err != nil {
-			log.Printf("distributed circuit success failed for endpoint %q: %v", endpoint.Name, err)
+			log.Print("distributed circuit success failed")
 		}
 	}
 }
@@ -142,7 +142,7 @@ func (h *endpointHealthTracker) failure(ctx context.Context, endpoint Endpoint, 
 	h.mu.Unlock()
 	if h.store != nil {
 		if storeErr := h.store.CircuitFailure(ctx, endpoint.Name, threshold, duration, now); storeErr != nil {
-			log.Printf("distributed circuit failure update failed for endpoint %q: %v", endpoint.Name, storeErr)
+			log.Print("distributed circuit failure update failed")
 		}
 	}
 }

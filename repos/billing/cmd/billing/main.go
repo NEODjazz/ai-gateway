@@ -34,17 +34,15 @@ func run() error {
 		defer auditStore.Close()
 	}
 
-	http.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		if err := module.Ready(r.Context()); err != nil {
-			http.Error(w, err.Error(), http.StatusServiceUnavailable)
-			return
+	http.HandleFunc("/healthz", billingHealthHandler(module.Ready, func(ctx context.Context) error {
+		if auditErr != nil {
+			return auditErr
 		}
-		if auditErr != nil || auditStore == nil || auditStore.Ready(r.Context()) != nil {
-			http.Error(w, "audit storage unavailable", http.StatusServiceUnavailable)
-			return
+		if auditStore == nil {
+			return errors.New("audit storage unavailable")
 		}
-		w.WriteHeader(http.StatusNoContent)
-	})
+		return auditStore.Ready(ctx)
+	}))
 	http.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
 		stats := module.UsageDeliveryStats()
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
@@ -105,34 +103,7 @@ func run() error {
 				CompletionTokens: request.OutputTokens,
 				TotalTokens:      request.TotalTokens,
 			},
-			Metadata: map[string]string{
-				"provider.id":                         request.ProviderID,
-				"provider.endpoint.name":              request.ProviderEndpointName,
-				"provider.endpoint.type":              request.ProviderEndpointType,
-				"provider.status":                     request.Status,
-				"provider.error":                      request.Error,
-				"provider.failure_class":              request.FailureClass,
-				"provider.latency_ms":                 request.LatencyMS,
-				"provider.first_token_latency_ms":     request.FirstTokenLatencyMS,
-				"provider.retry_count":                strconv.Itoa(request.RetryCount),
-				"provider.fallback_count":             strconv.Itoa(request.FallbackCount),
-				"provider.cache.status":               request.CacheStatus,
-				"provider.cache.kind":                 request.CacheKind,
-				"usage.estimated":                     strconv.FormatBool(request.UsageEstimated),
-				"model_catalog.version":               request.CatalogVersion,
-				"model_catalog.pricing_key":           request.PricingKey,
-				"model_catalog.input_cost_per_1m":     request.InputCostPer1M,
-				"model_catalog.output_cost_per_1m":    request.OutputCostPer1M,
-				"model_catalog.training_cost_per_1m":  request.TrainingCostPer1M,
-				"model_catalog.search_cost_per_1k":    request.SearchCostPer1K,
-				"model_catalog.character_cost_per_1m": request.CharacterCostPer1M,
-				"model_catalog.page_cost_per_1k":      request.PageCostPer1K,
-				"model_catalog.audio_cost_per_minute": request.AudioCostPerMinute,
-				"model_catalog.video_cost_per_second": request.VideoCostPerSecond,
-				"model_catalog.image_cost_per_unit":   request.ImageCostPerUnit,
-				"model_catalog.currency":              request.Currency,
-				"provider.upstream_model":             request.UpstreamModel,
-			},
+			Metadata: billingProviderMetadata(request),
 		}
 		if request.APIType == "responses" {
 			ctx.ResponseRequest = &openai.ResponseRequest{Provider: request.Provider, Model: request.Model}
@@ -171,6 +142,20 @@ func run() error {
 		<-finished
 	}
 	return nil
+}
+
+func billingHealthHandler(moduleReady, auditReady func(context.Context) error) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if moduleReady(r.Context()) != nil {
+			http.Error(w, "billing unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		if auditReady(r.Context()) != nil {
+			http.Error(w, "audit storage unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
 }
 
 func authorizeBillingUsage(w http.ResponseWriter, r *http.Request, secret string) bool {
@@ -256,4 +241,34 @@ func billingMetadata(metadata map[string]string) map[string]string {
 		}
 	}
 	return result
+}
+
+func billingProviderMetadata(request usageRequest) map[string]string {
+	return map[string]string{
+		"provider.id":                         request.ProviderID,
+		"provider.endpoint.name":              request.ProviderEndpointName,
+		"provider.endpoint.type":              request.ProviderEndpointType,
+		"provider.status":                     request.Status,
+		"provider.failure_class":              request.FailureClass,
+		"provider.latency_ms":                 request.LatencyMS,
+		"provider.first_token_latency_ms":     request.FirstTokenLatencyMS,
+		"provider.retry_count":                strconv.Itoa(request.RetryCount),
+		"provider.fallback_count":             strconv.Itoa(request.FallbackCount),
+		"provider.cache.status":               request.CacheStatus,
+		"provider.cache.kind":                 request.CacheKind,
+		"usage.estimated":                     strconv.FormatBool(request.UsageEstimated),
+		"model_catalog.version":               request.CatalogVersion,
+		"model_catalog.pricing_key":           request.PricingKey,
+		"model_catalog.input_cost_per_1m":     request.InputCostPer1M,
+		"model_catalog.output_cost_per_1m":    request.OutputCostPer1M,
+		"model_catalog.training_cost_per_1m":  request.TrainingCostPer1M,
+		"model_catalog.search_cost_per_1k":    request.SearchCostPer1K,
+		"model_catalog.character_cost_per_1m": request.CharacterCostPer1M,
+		"model_catalog.page_cost_per_1k":      request.PageCostPer1K,
+		"model_catalog.audio_cost_per_minute": request.AudioCostPerMinute,
+		"model_catalog.video_cost_per_second": request.VideoCostPerSecond,
+		"model_catalog.image_cost_per_unit":   request.ImageCostPerUnit,
+		"model_catalog.currency":              request.Currency,
+		"provider.upstream_model":             request.UpstreamModel,
+	}
 }

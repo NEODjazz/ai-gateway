@@ -165,43 +165,57 @@ func (h Handler) ListDirectoryUsers(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	limit, ok := directoryLimit(w, r)
+	filter, ok := directoryPageFilter(w, r, true)
 	if !ok {
 		return
 	}
-	offset, ok := directoryOffset(w, r)
-	if !ok {
+	filter.TeamID = directoryScope(req, r.URL.Query().Get("team_id"))
+	var rows []DirectoryUser
+	var total int
+	var err error
+	if reader, supported := h.directory.(DirectoryPageReader); supported {
+		rows, total, err = reader.ListUsersPage(r.Context(), managementAudit(req), filter)
+	} else if filter.Search != "" || filter.Status != "" || filter.Role != "" {
+		writeError(w, http.StatusServiceUnavailable, "management_unavailable", "filtered directory is unavailable")
 		return
+	} else {
+		rows, total, err = h.directory.ListUsers(r.Context(), managementAudit(req), filter.TeamID, filter.Offset, filter.Limit, filter.IncludeDeleted, filter.SortBy, filter.SortOrder)
 	}
-	teamID := directoryScope(req, r.URL.Query().Get("team_id"))
-	users, total, err := h.directory.ListUsers(r.Context(), managementAudit(req), teamID, offset, limit, true, "", "")
 	if err != nil {
 		writeDirectoryFailure(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": users, "total": total})
+	writeJSON(w, http.StatusOK, map[string]any{"data": rows, "total": total, "offset": filter.Offset, "limit": filter.Limit})
 }
+
 func (h Handler) ListDirectoryTeams(w http.ResponseWriter, r *http.Request) {
 	req, ok := h.authorizeDirectory(w, r, "")
 	if !ok {
 		return
 	}
-	limit, ok := directoryLimit(w, r)
+	filter, ok := directoryPageFilter(w, r, false)
 	if !ok {
 		return
 	}
-	offset, ok := directoryOffset(w, r)
-	if !ok {
+	filter.TeamID = directoryScope(req, r.URL.Query().Get("team_id"))
+	var rows []DirectoryTeam
+	var total int
+	var err error
+	if reader, supported := h.directory.(DirectoryPageReader); supported {
+		rows, total, err = reader.ListTeamsPage(r.Context(), managementAudit(req), filter)
+	} else if filter.Search != "" || filter.Status != "" || filter.Role != "" {
+		writeError(w, http.StatusServiceUnavailable, "management_unavailable", "filtered directory is unavailable")
 		return
+	} else {
+		rows, total, err = h.directory.ListTeams(r.Context(), managementAudit(req), filter.TeamID, filter.Offset, filter.Limit, filter.IncludeDeleted, filter.SortBy, filter.SortOrder)
 	}
-	teamID := directoryScope(req, r.URL.Query().Get("team_id"))
-	teams, total, err := h.directory.ListTeams(r.Context(), managementAudit(req), teamID, offset, limit, true, "", "")
 	if err != nil {
 		writeDirectoryFailure(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": teams, "total": total})
+	writeJSON(w, http.StatusOK, map[string]any{"data": rows, "total": total, "offset": filter.Offset, "limit": filter.Limit})
 }
+
 func (h Handler) PutDirectoryUser(w http.ResponseWriter, r *http.Request) {
 	req, ok := h.authorizeDirectory(w, r, "__global__")
 	if !ok {

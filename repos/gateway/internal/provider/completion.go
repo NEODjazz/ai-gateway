@@ -30,6 +30,11 @@ func decodeCompletionResponse(reader io.Reader) (openai.CompletionResponse, erro
 	if response == nil {
 		return openai.CompletionResponse{}, errors.New("completion response must be an object")
 	}
+	reported, err := completeChatUsageFields(payload)
+	if err != nil {
+		return openai.CompletionResponse{}, err
+	}
+	response.UsageReported = reported
 	if err := validateCompletionResponse(*response); err != nil {
 		return openai.CompletionResponse{}, err
 	}
@@ -102,7 +107,7 @@ func validateCompletionUsage(usage openai.Usage) error {
 }
 
 func hasNegativeCompletionTokenDetails(details *openai.CompletionTokenDetails) bool {
-	return details != nil && (details.AcceptedPredictionTokens < 0 || details.AudioTokens < 0 || details.ReasoningTokens < 0 || details.RejectedPredictionTokens < 0 || details.TextTokens < 0)
+	return details != nil && (details.AcceptedPredictionTokens < 0 || details.AudioTokens < 0 || details.CachedTokens < 0 || details.ReasoningTokens < 0 || details.RejectedPredictionTokens < 0 || details.TextTokens < 0)
 }
 
 func validateCompletionResult(response openai.CompletionResponse, request openai.CompletionRequest) error {
@@ -134,6 +139,9 @@ func (r Router) Completions(ctx context.Context, req modules.RequestContext) (op
 	}
 	candidates := r.routeCandidates(ctx, req, req.Request, "chat")
 	if len(candidates) == 0 {
+		if r.routeCapabilityMismatch(ctx, req.Request, "chat") {
+			return openai.CompletionResponse{}, fmt.Errorf("no completion endpoint for provider=%q model=%q: required capabilities unavailable (chat)", request.Provider, request.Model)
+		}
 		return openai.CompletionResponse{}, fmt.Errorf("no completion endpoint for provider=%q model=%q", request.Provider, request.Model)
 	}
 	implemented := candidates[:0]
@@ -161,10 +169,13 @@ func (r Router) Completions(ctx context.Context, req modules.RequestContext) (op
 		}
 		client := endpoint.Provider.(CompletionClient)
 		if err := validateCompletionAdapter(client, request); err != nil {
+			if lastAttempt != nil {
+				r.modules.RunFailure(ctx, lastAttempt, err)
+			}
 			return openai.CompletionResponse{}, err
 		}
 		progress.enter(endpoint)
-		attemptCtx := providerAttemptContext(req, endpoint)
+		attemptCtx := r.providerAttemptContext(req, endpoint)
 		r.applyCatalogPricing(ctx, &attemptCtx, endpoint, request.Model)
 		if endpoint.GuardrailPolicy != "" && !endpoint.GuardrailPolicyValid {
 			err := fmt.Errorf("%s/%s has unknown guardrail policy %q", endpoint.Type, endpoint.Name, endpoint.GuardrailPolicy)
@@ -174,6 +185,9 @@ func (r Router) Completions(ctx context.Context, req modules.RequestContext) (op
 		}
 		if err := r.modules.Run(ctx, &attemptCtx); err != nil {
 			if terminalModuleError(err) || ctx.Err() != nil {
+				if lastAttempt != nil {
+					r.modules.RunFailure(ctx, lastAttempt, err)
+				}
 				return openai.CompletionResponse{}, fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err)
 			}
 			wrapped := fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err)
@@ -182,10 +196,13 @@ func (r Router) Completions(ctx context.Context, req modules.RequestContext) (op
 			continue
 		}
 		if attemptCtx.CompletionRequest == nil || len(attemptCtx.Request.Messages) != 1 {
-			return openai.CompletionResponse{}, errors.New("module removed completion request")
+			err := errors.New("module removed completion request")
+			r.modules.RunFailure(ctx, &attemptCtx, err)
+			return openai.CompletionResponse{}, err
 		}
 		effectivePrompt, err := openai.ApplyCompletionPromptPolicyContent(attemptCtx.CompletionRequest.Prompt, attemptCtx.Request.Messages[0].Content)
 		if err != nil {
+			r.modules.RunFailure(ctx, &attemptCtx, err)
 			return openai.CompletionResponse{}, err
 		}
 		attemptCtx.CompletionRequest.Prompt = effectivePrompt
@@ -258,10 +275,13 @@ func (r Router) StreamCompletions(ctx context.Context, req modules.RequestContex
 			continue
 		}
 		if err := validateCompletionAdapter(completionClient, request); err != nil {
+			if lastAttempt != nil {
+				r.modules.RunFailure(ctx, lastAttempt, err)
+			}
 			return openai.CompletionResponse{}, false, err
 		}
 		progress.enter(endpoint)
-		attemptCtx := providerAttemptContext(req, endpoint)
+		attemptCtx := r.providerAttemptContext(req, endpoint)
 		r.applyCatalogPricing(ctx, &attemptCtx, endpoint, request.Model)
 		if endpoint.GuardrailPolicy != "" && !endpoint.GuardrailPolicyValid {
 			err := fmt.Errorf("%s/%s has unknown guardrail policy %q", endpoint.Type, endpoint.Name, endpoint.GuardrailPolicy)
@@ -271,6 +291,9 @@ func (r Router) StreamCompletions(ctx context.Context, req modules.RequestContex
 		}
 		if err := r.modules.Run(ctx, &attemptCtx); err != nil {
 			if terminalModuleError(err) || ctx.Err() != nil {
+				if lastAttempt != nil {
+					r.modules.RunFailure(ctx, lastAttempt, err)
+				}
 				return openai.CompletionResponse{}, false, fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err)
 			}
 			wrapped := fmt.Errorf("%s/%s modules failed: %w", endpoint.Type, endpoint.Name, err)
@@ -279,10 +302,13 @@ func (r Router) StreamCompletions(ctx context.Context, req modules.RequestContex
 			continue
 		}
 		if attemptCtx.CompletionRequest == nil || len(attemptCtx.Request.Messages) != 1 {
-			return openai.CompletionResponse{}, false, errors.New("module removed completion request")
+			err := errors.New("module removed completion request")
+			r.modules.RunFailure(ctx, &attemptCtx, err)
+			return openai.CompletionResponse{}, false, err
 		}
 		effectivePrompt, err := openai.ApplyCompletionPromptPolicyContent(attemptCtx.CompletionRequest.Prompt, attemptCtx.Request.Messages[0].Content)
 		if err != nil {
+			r.modules.RunFailure(ctx, &attemptCtx, err)
 			return openai.CompletionResponse{}, false, err
 		}
 		attemptCtx.CompletionRequest.Prompt = effectivePrompt

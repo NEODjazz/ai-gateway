@@ -310,7 +310,7 @@ func RunA2APushWorker(ctx context.Context, handler Handler) {
 	defer ticker.Stop()
 	for {
 		if _, err := handler.ProcessA2APushNotifications(ctx); err != nil && ctx.Err() == nil {
-			log.Printf("A2A push notification processing failed: %v", err)
+			log.Print("A2A push notification processing failed")
 		}
 		select {
 		case <-ctx.Done():

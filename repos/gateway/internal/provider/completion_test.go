@@ -295,6 +295,27 @@ func TestRouterRejectsUnsupportedOllamaPromptBeforeModules(t *testing.T) {
 	}
 }
 
+func TestRouterRejectsIgnoredOllamaCompletionParameterBeforeModules(t *testing.T) {
+	module := &completionLifecycleModule{}
+	router := Router{
+		endpoints: []Endpoint{{Name: "ollama", Type: "ollama", Provider: NewOllama("http://unused.invalid", true), Admission: newAdmissionController(0, 0, 0)}},
+		modules:   modules.NewPipeline([]modules.Module{module}), health: newEndpointHealthTracker(), routeCounter: &atomic.Uint64{},
+	}
+	bestOf := 2
+	request := openai.CompletionRequest{Model: "model", Prompt: "input", BestOf: &bestOf}
+	context := modules.RequestContext{
+		Request: openai.ChatCompletionRequest{Model: "model", Messages: []openai.Message{{Role: "user", Content: "input"}}}, CompletionRequest: &request,
+	}
+	_, err := router.Completions(t.Context(), context)
+	assertUnsupportedParameter(t, err, "best_of")
+	request.Stream = true
+	_, _, err = router.StreamCompletions(t.Context(), context, func(string) error { return nil })
+	assertUnsupportedParameter(t, err, "best_of")
+	if module.pre != 0 {
+		t.Fatalf("unsupported completion reached modules: pre=%d", module.pre)
+	}
+}
+
 func TestCompletionDecoderRejectsOversizeAndMalformedLogprobs(t *testing.T) {
 	reader := &embeddingLimitReader{}
 	if _, err := decodeCompletionResponse(reader); err == nil || reader.read != maxResponseJSONBytes+1 {

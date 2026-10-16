@@ -14,6 +14,16 @@ import (
 
 func (r Router) routeCandidates(ctx context.Context, req modules.RequestContext, request openai.ChatCompletionRequest, capabilities ...string) []Endpoint {
 	primary := r.candidates(ctx, request, capabilities...)
+	if binding := req.Metadata[documentBindingMetadata]; binding != "" {
+		bound := primary[:0:0]
+		for _, endpoint := range primary {
+			if documentDeploymentIdentity(endpoint) == binding {
+				endpoint.RoutingModel = request.Model
+				bound = append(bound, endpoint)
+			}
+		}
+		return bound
+	}
 	for index := range primary {
 		primary[index].RoutingModel = request.Model
 	}

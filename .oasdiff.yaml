@@ -1,0 +1,4 @@
+# Reviewed changes for the 0.1.416 to 0.1.474 API contract update.
+# Keep fail-on: WARN in CI; only the exact findings listed here are accepted.
+err-ignore: repos/gateway/api/compatibility/err-ignore.txt
+warn-ignore: repos/gateway/api/compatibility/warn-ignore.txt

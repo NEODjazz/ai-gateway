@@ -68,7 +68,7 @@ func (r Router) routeAudio(ctx context.Context, req modules.RequestContext, tran
 			call = client.TranscribeAudio
 		}
 		progress.enter(endpoint)
-		attemptCtx := providerAttemptContext(req, endpoint)
+		attemptCtx := r.providerAttemptContext(req, endpoint)
 		r.applyCatalogPricing(ctx, &attemptCtx, endpoint, request.Model)
 		var duration int
 		var reserveErr error
@@ -170,7 +170,7 @@ func (r Router) StreamTranscribeAudio(ctx context.Context, req modules.RequestCo
 			continue
 		}
 		progress.enter(endpoint)
-		attemptCtx := providerAttemptContext(req, endpoint)
+		attemptCtx := r.providerAttemptContext(req, endpoint)
 		r.applyCatalogPricing(ctx, &attemptCtx, endpoint, request.Model)
 		if reserver, ok := endpoint.Provider.(AudioTranscriptionDurationReserver); ok {
 			duration, err := reserver.ReserveAudioMilliseconds(request)

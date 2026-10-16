@@ -1,0 +1,30 @@
+# Includes Docling's CPU pipeline, OCR models and the RQ worker runtime.
+FROM ghcr.io/docling-project/docling-serve-cpu:v1.36.0@sha256:225c8586e20d5d0fc6811a9e0e044fa602bcc4393f00389009bad42d6787b58f
+WORKDIR /opt/app-root/src/gateway-docling
+COPY --chown=1001:0 admission.py gateway_docling.py request_limits.py worker_entry.py ./
+ENV PYTHONPATH=/opt/app-root/src/gateway-docling \
+    DOCLING_SERVE_ENG_KIND=rq \
+    DOCLING_SERVE_LOG_LEVEL=WARNING \
+    DOCLING_SERVE_ENABLE_UI=false \
+    DOCLING_SERVE_ENABLE_API_DOCS=false \
+    DOCLING_SERVE_ENABLE_CAPABILITIES_ENDPOINT=false \
+    DOCLING_SERVE_ENABLE_REMOTE_SERVICES=false \
+    DOCLING_SERVE_ALLOWED_SOURCE_TYPES='["file"]' \
+    DOCLING_SERVE_ALLOWED_TARGET_TYPES='["inbody"]' \
+    DOCLING_SERVE_ALLOWED_IMAGE_EXPORT_MODES='["placeholder"]' \
+    DOCLING_SERVE_MAX_SOURCES_PER_REQUEST=1 \
+    DOCLING_SERVE_MAX_NUM_PAGES=32 \
+    DOCLING_SERVE_MAX_FILE_SIZE=16777216 \
+    DOCLING_SERVE_MAX_DOCUMENT_TIMEOUT=120 \
+    DOCLING_SERVE_ENG_RQ_JOB_TIMEOUT=120 \
+    DOCLING_SERVE_ENG_RQ_RESULTS_TTL=600 \
+    DOCLING_SERVE_ENG_RQ_FAILURE_TTL=600 \
+    DOCLING_SERVE_RESULT_REMOVAL_DELAY=1 \
+    DOCLING_SERVE_ENG_RQ_REDIS_SOCKET_TIMEOUT=5 \
+    DOCLING_SERVE_ENG_RQ_REDIS_SOCKET_CONNECT_TIMEOUT=3 \
+    DOCLING_SERVE_OPTIONS_CACHE_SIZE=1 \
+    DOCLING_NUM_THREADS=2 \
+    DOCLING_DEVICE=cpu
+USER 1001
+EXPOSE 5001
+CMD ["uvicorn", "gateway_docling:app", "--host", "0.0.0.0", "--port", "5001", "--no-access-log", "--limit-concurrency", "4"]

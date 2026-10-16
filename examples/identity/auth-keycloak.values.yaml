@@ -1,0 +1,19 @@
+# Replace example hosts before applying; enable only after directory provisioning.
+auth:
+  postgres:
+    enabled: true
+  staticKeyFallbackEnabled: false
+  demoKeysEnabled: false
+  jwt:
+    secret: ""
+    identityMode: directory
+    issuer: https://identity.example.com/realms/gateway-users
+    audience: gateway
+    jwksUrl: https://identity.example.com/realms/gateway-users/protocol/openid-connect/certs
+    userIdClaim: sub
+    teamIdClaim: team_id
+    rolesClaim: resource_access.gateway.roles
+    roleMappings:
+      gateway-user: user
+      gateway-admin: admin
+      gateway-team-admin: team_admin

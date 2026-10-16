@@ -67,3 +67,10 @@ func endpoint(baseURL string, path string) string {
 	parsed.Path = basePath + path
 	return parsed.String()
 }
+
+func AuthWithJWTReauthorization(required bool, baseURL, managementSecret string) Module {
+	if baseURL != "" {
+		return NewRemoteAuthModule(required, endpoint(baseURL, "/authorize")).WithJWTReauthorization(baseURL, managementSecret)
+	}
+	return NewAuthModule(required)
+}

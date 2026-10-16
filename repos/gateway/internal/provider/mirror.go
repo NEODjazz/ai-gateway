@@ -11,6 +11,9 @@ import (
 )
 
 func (r Router) mirrorChat(ctx context.Context, requestID string, request openai.ChatCompletionRequest, requestedModel string, capabilities ...string) {
+	if !chatReplaySafe(request) {
+		return
+	}
 	catalog := r.catalog.Current(ctx)
 	for _, endpoint := range r.shadowEndpoints(catalog, requestedModel, capabilities...) {
 		if !mirrorSample(requestID, requestedModel, endpoint) {
@@ -37,7 +40,7 @@ func (r Router) mirrorResponses(ctx context.Context, requestID string, request o
 	// Shadow endpoints do not own the primary endpoint's response state. Sending
 	// its ID cannot reproduce continuity or a cache comparison and must not
 	// create a shadow job.
-	if request.PreviousResponse != "" || request.PromptCacheOptions != nil && request.PromptCacheOptions.ComparisonResponseID != "" || !responseToolsReplaySafe(request) {
+	if request.PreviousResponse != "" || request.PromptCacheOptions != nil && request.PromptCacheOptions.ComparisonResponseID != "" || !responseReplaySafe(request) {
 		return
 	}
 	catalog := r.catalog.Current(ctx)

@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"encoding/json"
 	"errors"
 
 	"ai-gateway-gateway/internal/openai"
@@ -12,11 +13,22 @@ func applyResponseSummaryEvent(response *openai.ResponseResponse, outputIndex in
 	switch event {
 	case "response.reasoning_summary_part.added", "response.reasoning_summary_part.done":
 		part, ok := decoded["part"].(map[string]any)
-		if !ok || part["type"] != "summary_text" {
+		if !ok {
 			return errors.New("invalid Responses summary part")
 		}
-		text, ok = part["text"].(string)
-		if !ok {
+		payload, err := json.Marshal(part)
+		if err != nil {
+			return errors.New("invalid Responses summary part")
+		}
+		var snapshot openai.ResponseOutputContent
+		if err := json.Unmarshal(payload, &snapshot); err != nil || snapshot.Type != "summary_text" {
+			return errors.New("invalid Responses summary part")
+		}
+		if err := validateResponseOutputContent(snapshot); err != nil {
+			return err
+		}
+		text = snapshot.Text
+		if _, ok := part["text"].(string); !ok {
 			return errors.New("invalid Responses summary text")
 		}
 	case "response.reasoning_summary_text.delta", "response.reasoning_summary_text.done":
@@ -37,9 +49,10 @@ func applyResponseSummaryEvent(response *openai.ResponseResponse, outputIndex in
 	if err != nil {
 		return err
 	}
-	item := ensureResponseOutputItem(response, outputIndex)
-	item.Type = "reasoning"
-	item.Role, item.Content = "", nil
+	item, err := ensureResponseReasoningItem(response, outputIndex)
+	if err != nil {
+		return err
+	}
 	if id, ok := decoded["item_id"].(string); ok {
 		item.ID = id
 	}

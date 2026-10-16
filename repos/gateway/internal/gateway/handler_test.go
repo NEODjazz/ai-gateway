@@ -196,6 +196,87 @@ func TestResponsesCustomToolACLUsesToolName(t *testing.T) {
 	}
 }
 
+func TestResponsesCustomToolHistoryRequiresToolGrant(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		body   string
+		status int
+	}{
+		{name: "allowed history", body: `{"model":"test","input":[{"type":"custom_tool_call","call_id":"call_1","name":"safe_dsl","input":"work"},{"type":"custom_tool_call_output","call_id":"call_1","output":"ok"}]}`, status: http.StatusOK},
+		{name: "denied history", body: `{"model":"test","input":[{"type":"custom_tool_call","call_id":"call_1","name":"unsafe_dsl","input":"work"},{"type":"custom_tool_call_output","call_id":"call_1","output":"ok"}]}`, status: http.StatusForbidden},
+		{name: "unattributed output", body: `{"model":"test","input":[{"type":"custom_tool_call_output","call_id":"call_1","output":"ok"}]}`, status: http.StatusBadRequest},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			handler := NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}, tools: []string{"safe_dsl"}}}), &chatProvider{})
+			out := httptest.NewRecorder()
+			handler.Responses(out, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(test.body)))
+			if out.Code != test.status {
+				t.Fatalf("status=%d body=%s", out.Code, out.Body.String())
+			}
+		})
+	}
+}
+
+func TestResponsesUnattributedCustomOutputNeedsBroadGrantAndPreviousResponse(t *testing.T) {
+	body := `{"model":"test","previous_response_id":"resp_1","input":[{"type":"custom_tool_call_output","call_id":"call_1","output":"ok"}]}`
+	for _, test := range []struct {
+		name   string
+		grants []string
+		status int
+	}{
+		{name: "wildcard grant", grants: []string{"*"}, status: http.StatusOK},
+		{name: "scoped grant", grants: []string{"safe_dsl"}, status: http.StatusForbidden},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			handler := NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}, tools: test.grants}}), &chatProvider{})
+			out := httptest.NewRecorder()
+			handler.Responses(out, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(body)))
+			if out.Code != test.status {
+				t.Fatalf("status=%d body=%s", out.Code, out.Body.String())
+			}
+		})
+	}
+}
+
+func TestResponsesFunctionHistoryRequiresToolGrant(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		body   string
+		grants []string
+		status int
+	}{
+		{name: "allowed named history", body: `{"model":"test","input":[{"type":"function_call","call_id":"call_1","name":"safe_lookup","arguments":"{}"},{"type":"function_call_output","call_id":"call_1","output":"ok"}]}`, grants: []string{"safe_lookup"}, status: http.StatusOK},
+		{name: "denied named history", body: `{"model":"test","input":[{"type":"function_call","call_id":"call_1","name":"unsafe_lookup","arguments":"{}"}]}`, grants: []string{"safe_lookup"}, status: http.StatusForbidden},
+		{name: "unattributed output", body: `{"model":"test","input":[{"type":"function_call_output","call_id":"call_1","output":"ok"}]}`, grants: []string{"safe_lookup"}, status: http.StatusBadRequest},
+		{name: "stateful output with broad grant", body: `{"model":"test","previous_response_id":"resp_1","input":[{"type":"function_call_output","call_id":"call_1","output":"ok"}]}`, grants: []string{"*"}, status: http.StatusOK},
+		{name: "stateful output with scoped grant", body: `{"model":"test","previous_response_id":"resp_1","input":[{"type":"function_call_output","call_id":"call_1","output":"ok"}]}`, grants: []string{"safe_lookup"}, status: http.StatusForbidden},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			handler := NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}, tools: test.grants}}), &chatProvider{})
+			out := httptest.NewRecorder()
+			handler.Responses(out, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(test.body)))
+			if out.Code != test.status {
+				t.Fatalf("status=%d body=%s", out.Code, out.Body.String())
+			}
+		})
+	}
+}
+
+func TestResponsesVerifiedFunctionContinuationNamesAreInternal(t *testing.T) {
+	request := openai.ResponseRequest{
+		Model: "test", PreviousResponse: "resp_1", RunToolNames: []string{"safe_lookup"},
+		Input: []any{map[string]any{"type": "function_call_output", "call_id": "call_1", "output": "ok"}},
+	}
+	identifiers, valid := responseRequestToolIdentifiers(request)
+	if !valid || !reflect.DeepEqual(identifiers, []string{"safe_lookup"}) {
+		t.Fatalf("identifiers=%v valid=%t", identifiers, valid)
+	}
+	payload, err := json.Marshal(request)
+	if err != nil || strings.Contains(string(payload), "safe_lookup") {
+		t.Fatalf("internal tool name leaked into wire payload: %s err=%v", payload, err)
+	}
+}
+
 func TestResponsesImageGenerationACLUsesCanonicalToolName(t *testing.T) {
 	handler := NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}, tools: []string{"image_generation"}}}), &chatProvider{})
 	allowedResponse := httptest.NewRecorder()
@@ -585,6 +666,34 @@ func TestCompactResponseRejectsUnsupportedFieldsAndEmptyInput(t *testing.T) {
 		if response.Code != http.StatusBadRequest {
 			t.Fatalf("body %s: status=%d response=%s", body, response.Code, response.Body.String())
 		}
+	}
+}
+
+func TestCompactResponseValidatesInputAndToolHistory(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		body   string
+		status int
+		code   string
+	}{
+		{name: "non-object input", body: `{"model":"m","input":[null]}`, status: http.StatusBadRequest, code: "invalid_request"},
+		{name: "invalid image", body: `{"model":"m","input":[{"role":"user","content":[{"type":"input_image","image_url":"data:image/png;base64,not-base64"}]}]}`, status: http.StatusBadRequest, code: "invalid_image"},
+		{name: "denied tool history", body: `{"model":"m","input":[{"type":"function_call","call_id":"call_1","name":"unsafe_lookup","arguments":"{}"}]}`, status: http.StatusForbidden, code: "tool_not_allowed"},
+		{name: "unattributed tool output", body: `{"model":"m","input":[{"type":"function_call_output","call_id":"call_1","output":"ok"}]}`, status: http.StatusBadRequest, code: "invalid_request"},
+		{name: "allowed tool history", body: `{"model":"m","input":[{"type":"function_call","call_id":"call_1","name":"safe_lookup","arguments":"{}"}]}`, status: http.StatusOK},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			llm := &chatProvider{}
+			handler := Routes(NewHandler(modules.NewPipeline([]modules.Module{accessPolicyModule{models: []string{"*"}, tools: []string{"safe_lookup"}}}), llm))
+			out := httptest.NewRecorder()
+			handler.ServeHTTP(out, httptest.NewRequest(http.MethodPost, "/v1/responses/compact", strings.NewReader(test.body)))
+			if out.Code != test.status || test.code != "" && !strings.Contains(out.Body.String(), `"code":"`+test.code+`"`) {
+				t.Fatalf("status=%d body=%s", out.Code, out.Body.String())
+			}
+			if test.status != http.StatusOK && llm.request.ResponseRequest != nil {
+				t.Fatal("invalid compaction input reached the provider")
+			}
+		})
 	}
 }
 
@@ -1094,6 +1203,38 @@ func TestProviderQuotaFailureReturnsDistinct429WithRetryAfter(t *testing.T) {
 	}
 	if body := recorder.Body.String(); !strings.Contains(body, `"code":"provider_rate_limit_exceeded"`) || strings.Contains(body, "private-provider") {
 		t.Fatalf("provider details leaked in response: %s", body)
+	}
+}
+
+func TestUpstreamFailurePreservesSafeStatus(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		class      provider.FailureClass
+		upstream   int
+		wantStatus int
+		wantCode   string
+		retryAfter time.Duration
+		wantRetry  string
+	}{
+		{name: "rate limit", class: provider.FailureRateLimit, upstream: http.StatusTooManyRequests, wantStatus: http.StatusTooManyRequests, wantCode: "upstream_rate_limited", retryAfter: 1500 * time.Millisecond, wantRetry: "2"},
+		{name: "authentication", class: provider.FailureAuthentication, upstream: http.StatusUnauthorized, wantStatus: http.StatusUnauthorized, wantCode: "upstream_authentication_failed"},
+		{name: "forbidden", class: provider.FailureAuthentication, upstream: http.StatusForbidden, wantStatus: http.StatusForbidden, wantCode: "upstream_authentication_failed"},
+		{name: "unavailable", class: provider.FailureUnavailable, upstream: http.StatusServiceUnavailable, wantStatus: http.StatusServiceUnavailable, wantCode: "upstream_unavailable", retryAfter: 3 * time.Second, wantRetry: "3"},
+		{name: "server error", class: provider.FailureUnavailable, upstream: http.StatusInternalServerError, wantStatus: http.StatusBadGateway, wantCode: "upstream_unavailable"},
+		{name: "timeout", class: provider.FailureTimeout, upstream: http.StatusGatewayTimeout, wantStatus: http.StatusGatewayTimeout, wantCode: "upstream_timeout"},
+		{name: "unknown", class: provider.FailureUnknown, upstream: http.StatusTeapot, wantStatus: http.StatusBadGateway, wantCode: "provider_failed"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			writeProviderFailure(recorder, &provider.Error{Class: test.class, Provider: "private-provider", StatusCode: test.upstream, UpstreamCode: "secret_code", RetryAfter: test.retryAfter, Err: errors.New("raw upstream secret")})
+			if recorder.Code != test.wantStatus || recorder.Header().Get("Retry-After") != test.wantRetry {
+				t.Fatalf("status=%d retry-after=%q, want %d and %q", recorder.Code, recorder.Header().Get("Retry-After"), test.wantStatus, test.wantRetry)
+			}
+			body := recorder.Body.String()
+			if !strings.Contains(body, `"code":"`+test.wantCode+`"`) || strings.Contains(body, "private-provider") || strings.Contains(body, "raw upstream secret") || strings.Contains(body, "secret_code") {
+				t.Fatalf("unsafe upstream response: %s", body)
+			}
+		})
 	}
 }
 

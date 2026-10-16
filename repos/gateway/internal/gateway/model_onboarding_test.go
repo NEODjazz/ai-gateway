@@ -49,6 +49,28 @@ func TestAdminPlansAndAtomicallyAppliesModelOnboarding(t *testing.T) {
 	if groups := runtime.(provider.ModelGroupController).ListModelGroups(t.Context()); len(groups) != 1 || groups[0].ID != "public" {
 		t.Fatalf("unexpected groups: %+v", groups)
 	}
+	updateBody := `{"catalog":{"version":"onboard-v2","models":[{"provider":"managed","model":"public","capabilities":["chat"]}]},"deployments":[{"id":"managed-public","provider_id":"managed","upstream_model":"upstream","models":["public"],"capabilities":["chat"],"weight":2,"enabled":true}],"model_groups":[],"update_existing_deployments":true}`
+	updatePlanResponse := httptest.NewRecorder()
+	handler.ServeHTTP(updatePlanResponse, httptest.NewRequest(http.MethodPost, "/admin/v1/model-onboarding/plan", strings.NewReader(updateBody)))
+	if updatePlanResponse.Code != http.StatusOK {
+		t.Fatalf("update plan status=%d body=%s", updatePlanResponse.Code, updatePlanResponse.Body.String())
+	}
+	var updatePlan provider.ModelOnboardingPlan
+	if err := json.Unmarshal(updatePlanResponse.Body.Bytes(), &updatePlan); err != nil {
+		t.Fatal(err)
+	}
+	updateApplyBody := strings.Replace(updateBody, `{"catalog"`, `{"expected_revision":`+jsonNumber(updatePlan.Revision)+`,"catalog"`, 1)
+	updateResponse := httptest.NewRecorder()
+	handler.ServeHTTP(updateResponse, httptest.NewRequest(http.MethodPost, "/admin/v1/model-onboarding/apply", strings.NewReader(updateApplyBody)))
+	if updateResponse.Code != http.StatusOK {
+		t.Fatalf("update apply status=%d body=%s", updateResponse.Code, updateResponse.Body.String())
+	}
+	if deployments := runtime.(provider.DeploymentController).ListModelDeployments(t.Context()); len(deployments) != 1 || deployments[0].Weight != 2 {
+		t.Fatalf("existing deployment was not replaced: %+v", deployments)
+	}
+	if registry.Current(t.Context()).Version != "onboard-v2" {
+		t.Fatal("update did not replace the runtime catalog")
+	}
 }
 
 func TestModelOnboardingApplyRequiresPlanRevision(t *testing.T) {

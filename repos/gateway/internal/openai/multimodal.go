@@ -137,6 +137,34 @@ func HasChatAudioInput(request ChatCompletionRequest) bool {
 	return err == nil && len(attachments) > 0
 }
 
+// HasChatMediaInput reports validated image, audio, video, or PDF input.
+func HasChatMediaInput(request ChatCompletionRequest) bool {
+	if HasChatImages(request) || HasChatAudioInput(request) || HasChatVideoInput(request) || HasChatFileInput(request) {
+		return true
+	}
+	for _, message := range request.Messages {
+		parts, ok := message.Content.([]any)
+		if !ok {
+			continue
+		}
+		for _, raw := range parts {
+			part, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			switch part["type"] {
+			case "input_file_image_reference", "input_file_audio_reference", "input_file_video_reference":
+				return true
+			case "input_file_reference":
+				if part["media_type"] == "application/pdf" {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 func HasResponseAudio(request ResponseRequest) bool {
 	attachments, err := ResponseAudioAttachments(request.Input)
 	return err == nil && len(attachments) > 0

@@ -64,3 +64,38 @@ func TestAdminSessionRejectsInvalidCredential(t *testing.T) {
 		t.Fatalf("unexpected auth failure: status=%d body=%s", response.Code, response.Body.String())
 	}
 }
+
+func TestOrganizationConsoleCapabilitiesRequirePinnedOrganization(t *testing.T) {
+	for _, test := range []struct {
+		role, organization string
+		allowed            bool
+	}{{"org_admin", "org-a", true}, {"org_admin", "", false}, {"user", "org-a", false}, {"team_admin", "org-a", false}} {
+		capabilities := organizationConsoleCapabilities([]string{test.role}, test.organization)
+		for _, capability := range []string{"organization_reports", "organization_keys"} {
+			found := false
+			for _, actual := range capabilities {
+				if actual == capability {
+					found = true
+				}
+			}
+			if found != test.allowed {
+				t.Errorf("role=%s org=%q %s=%v want=%v", test.role, test.organization, capability, found, test.allowed)
+			}
+		}
+		for _, capability := range capabilities {
+			if capability == "admin" {
+				t.Fatal("organization role received platform capability")
+			}
+		}
+	}
+}
+
+func TestOrganizationSessionKeepsLegacyCapabilityEnumStable(t *testing.T) {
+	handler := Routes(organizationReportHandler("org-a", "org_admin"))
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, httptest.NewRequest("GET", "/admin/v1/session", nil))
+	body := w.Body.String()
+	if w.Code != 200 || !strings.Contains(body, `"capabilities":["api_docs","inference"]`) || !strings.Contains(body, `"organization_capabilities":["organization_keys","organization_reports"]`) {
+		t.Fatalf("session capability compatibility lost: %d %s", w.Code, body)
+	}
+}

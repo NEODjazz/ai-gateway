@@ -41,7 +41,7 @@ func (r Router) StreamInteractions(ctx context.Context, req modules.RequestConte
 			continue
 		}
 		progress.enter(endpoint)
-		attemptCtx := providerAttemptContext(req, endpoint)
+		attemptCtx := r.providerAttemptContext(req, endpoint)
 		r.applyCatalogPricing(ctx, &attemptCtx, endpoint, request.Model)
 		if endpoint.GuardrailPolicy != "" && !endpoint.GuardrailPolicyValid {
 			err := fmt.Errorf("%s/%s has unknown guardrail policy %q", endpoint.Type, endpoint.Name, endpoint.GuardrailPolicy)
@@ -207,7 +207,7 @@ func (r Router) Interactions(ctx context.Context, req modules.RequestContext, re
 			continue
 		}
 		progress.enter(endpoint)
-		attemptCtx := providerAttemptContext(req, endpoint)
+		attemptCtx := r.providerAttemptContext(req, endpoint)
 		r.applyCatalogPricing(ctx, &attemptCtx, endpoint, request.Model)
 		if endpoint.GuardrailPolicy != "" && !endpoint.GuardrailPolicyValid {
 			err := fmt.Errorf("%s/%s has unknown guardrail policy %q", endpoint.Type, endpoint.Name, endpoint.GuardrailPolicy)

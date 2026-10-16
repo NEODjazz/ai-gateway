@@ -1,0 +1,58 @@
+# Optional, isolated processing stack. No changes to existing Gateway services.
+x-docling: &docling
+  image: ai-gateway-docling:local
+  build: ./services/docling
+  restart: unless-stopped
+  environment: &docling-env
+    DOCLING_SERVE_ENG_RQ_REDIS_URL: redis://docling-redis:6379/0
+    DOCLING_SERVE_API_KEY: ${DOCLING_API_KEY:?Set a private internal DOCLING_API_KEY}
+    DOCUMENT_QUEUE_CAPACITY: ${DOCUMENT_QUEUE_CAPACITY:-16}
+    DOCUMENT_QUEUE_WAIT_SECONDS: 120
+  networks: [documents]
+  security_opt: [no-new-privileges:true]
+  cap_drop: [ALL]
+  tmpfs: ["/tmp:rw,noexec,nosuid,size=512m"]
+
+services:
+  docling-redis:
+    image: redis:7.4.6-alpine
+    command: [redis-server, --appendonly, "yes", --appendfsync, everysec, --maxmemory, 512mb, --maxmemory-policy, noeviction]
+    volumes: [docling-queue:/data]
+    networks: [documents]
+    restart: unless-stopped
+    mem_limit: 768m
+    cpus: 1
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+  docling-api:
+    <<: *docling
+    networks: [documents, document-api]
+    ports: ["127.0.0.1:${DOCLING_PORT:-5001}:5001"]
+    mem_limit: 1g
+    cpus: 1
+    depends_on:
+      docling-redis: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:5001/ready', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      start_period: 30s
+      retries: 20
+  docling-worker:
+    <<: *docling
+    command: [python, worker_entry.py]
+    mem_limit: 4g
+    cpus: 2
+    stop_grace_period: 130s
+    depends_on:
+      docling-redis: {condition: service_healthy}
+
+volumes:
+  docling-queue:
+networks:
+  documents:
+    internal: true
+  document-api: {}

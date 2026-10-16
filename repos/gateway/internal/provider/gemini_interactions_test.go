@@ -191,3 +191,29 @@ func TestGeminiInteractionsStreamsBoundedNativeEvents(t *testing.T) {
 		t.Fatalf("events=%v", events)
 	}
 }
+
+func TestGeminiInteractionDecodersPreserveArgumentNumbers(t *testing.T) {
+	const payload = `{"id":"job","status":"completed","steps":[{"type":"function_call","id":"call","name":"query","arguments":{"id":9007199254740993,"amount":0.1234567890123456789012345}}]}`
+	decoded, err := decodeGeminiInteraction(strings.NewReader(payload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(decoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), "9007199254740993") || !strings.Contains(string(encoded), "0.1234567890123456789012345") {
+		t.Fatalf("native interaction arguments rounded: %s", encoded)
+	}
+	streamed, err := readGeminiInteractionStream(strings.NewReader("data: {\"event_type\":\"interaction.completed\",\"interaction\":"+payload+"}\n\n"), func(string, string) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err = json.Marshal(streamed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), "9007199254740993") || !strings.Contains(string(encoded), "0.1234567890123456789012345") {
+		t.Fatalf("native interaction stream arguments rounded: %s", encoded)
+	}
+}

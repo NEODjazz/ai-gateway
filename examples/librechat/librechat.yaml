@@ -1,0 +1,66 @@
+{
+  "version": "1.3.17",
+  "cache": true,
+  "registration": {
+    "socialLogins": [
+      "openid"
+    ]
+  },
+  "interface": {
+    "modelSelect": true,
+    "parameters": true,
+    "agents": {
+      "use": true,
+      "create": true,
+      "share": false,
+      "public": false
+    }
+  },
+  "balance": {
+    "enabled": false
+  },
+  "transactions": {
+    "enabled": false
+  },
+  "endpoints": {
+    "custom": [
+      {
+        "name": "AI Gateway",
+        "apiKey": "disabled-no-shared-gateway-key",
+        "baseURL": "${AI_GATEWAY_BASE_URL}",
+        "headers": {
+          "Authorization": "Bearer {{LIBRECHAT_OPENID_ACCESS_TOKEN}}"
+        },
+        "models": {
+          "default": [
+            "approved-model"
+          ],
+          "fetch": true
+        },
+        "titleConvo": true,
+        "titleModel": "current_model",
+        "titleTiming": "final",
+        "titleMethod": "completion",
+        "modelDisplayLabel": "AI Gateway",
+        "dropParams": [
+          "user"
+        ],
+        "addParams": {
+          "maxRetries": 0
+        }
+      }
+    ]
+  },
+  "fileConfig": {
+    "serverFileSizeLimit": 8,
+    "fileContextSizeLimit": 8,
+    "fileContextCharLimit": 200000,
+    "endpoints": {
+      "AI Gateway": {
+        "fileLimit": 5,
+        "fileSizeLimit": 8,
+        "totalSizeLimit": 8
+      }
+    }
+  }
+}

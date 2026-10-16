@@ -1,0 +1,174 @@
+package modules
+
+import (
+	"context"
+	"slices"
+)
+
+func (m AuthModule) SSOManager() *SSOManager { return m.sso }
+
+func (m AuthModule) browserNamespaceAvailable(ctx context.Context, profile SSOProfileConfig) error {
+	api, err := m.currentJWTModule(ctx)
+	if err != nil {
+		return err
+	}
+	if api.jwtConfig.Issuer == profile.Issuer && api.jwtConfig.Audience == profile.ClientID {
+		return ErrSSOConfiguration
+	}
+	if m.apiIssuers != nil {
+		rows, _, err := m.apiIssuers.rows(ctx)
+		if err != nil {
+			return err
+		}
+		for _, row := range rows {
+			if row.Issuer == profile.Issuer && row.Audience == profile.ClientID {
+				return ErrSSOConfiguration
+			}
+		}
+	}
+	return nil
+}
+func (m AuthModule) SaveSSODraft(ctx context.Context, input SSODraftInput) (SSOSettingsView, error) {
+	if err := m.browserNamespaceAvailable(ctx, input.SSOProfileConfig); err != nil {
+		return SSOSettingsView{}, err
+	}
+	return m.sso.SaveDraft(ctx, input)
+}
+
+type SSOTestProfile struct {
+	Profile *SSOProfile `json:"profile"`
+	Attempt *SSOAttempt `json:"attempt"`
+}
+
+func (m *SSOManager) TestProfile(ctx context.Context) (SSOTestProfile, error) {
+	state, _, err := m.Load(ctx)
+	if err != nil {
+		return SSOTestProfile{}, err
+	}
+	if state.Draft == nil || state.Attempt == nil || state.Attempt.Status != "running" || state.Attempt.ExpiresAt <= m.now().Unix() {
+		return SSOTestProfile{}, ErrSSOConfiguration
+	}
+	return SSOTestProfile{Profile: state.Draft, Attempt: state.Attempt}, nil
+}
+
+func (m AuthModule) VerifySSOTest(ctx context.Context, profileID, ticket, token string, nonce ...string) error {
+	state, revision, err := m.sso.Load(ctx)
+	if err != nil {
+		return err
+	}
+	if state.Draft == nil || state.Draft.ID != profileID || !validSSOTicket(state.Attempt, ticket, m.sso.now()) {
+		return ErrSSOConfiguration
+	}
+	if len(nonce) < 1 || len(nonce) > 2 {
+		return ErrSSOConfiguration
+	}
+	login := SSOBrowserLogin{ProfileID: profileID, Token: token, Nonce: nonce[0]}
+	if len(nonce) == 2 {
+		login.AccessToken = nonce[1]
+	}
+	claims, err := m.verifySSOClaims(ctx, state.Draft, login)
+	state.VerifiedIdentity = nil
+	req := RequestContext{}
+	if err == nil {
+		state.VerifiedIdentity = &SSOVerifiedIdentity{Issuer: claims.Issuer, Subject: claims.Subject, Audience: state.Draft.ClientID, Roles: []string{}, VerifiedAt: m.sso.now().Unix()}
+		req, err = m.authorizeSSOClaims(ctx, state.Draft, claims)
+	}
+	if err != nil || req.UserID != state.Attempt.ActorID || !m.validSSOTestAdmin(ctx, state.Draft, req) || req.JWTIdentity == nil {
+		state.Attempt.Status = "failed"
+		state.LastTestAt, state.LastTestStatus = m.sso.now().Unix(), "failed"
+		if saveErr := m.sso.save(ctx, revision, state); saveErr != nil {
+			return saveErr
+		}
+		return ErrUnauthorized
+	}
+	state.Attempt.Status = "passed"
+	state.LastTestAt, state.LastTestStatus = m.sso.now().Unix(), "passed"
+	state.VerifiedIdentity = &SSOVerifiedIdentity{Issuer: req.JWTIdentity.Issuer, Subject: req.JWTIdentity.Subject, Audience: req.JWTIdentity.Audience, UserID: req.UserID, OrganizationID: req.OrganizationID, Roles: slices.Clone(req.Roles), VerifiedAt: m.sso.now().Unix(), Approved: true}
+	state.Attempt.UserID, state.Attempt.CredentialID = req.UserID, req.CredentialID
+	state.Attempt.Roles, state.Attempt.Identity = req.Roles, req.JWTIdentity
+	return m.sso.save(ctx, revision, state)
+}
+
+func (m AuthModule) ChangeSSO(ctx context.Context, action string, expectedRevision int64, actor string) (SSOSettingsView, error) {
+	state, revision, err := m.sso.Load(ctx)
+	if err != nil {
+		return SSOSettingsView{}, err
+	}
+	if revision != expectedRevision {
+		return SSOSettingsView{}, ErrSSOConflict
+	}
+	switch action {
+	case "activate":
+		attempt := state.Attempt
+		if state.Draft == nil || attempt == nil || attempt.Status != "passed" || attempt.ExpiresAt <= m.sso.now().Unix() || attempt.ActorID != actor || attempt.UserID != actor {
+			return SSOSettingsView{}, ErrSSOConfiguration
+		}
+		if err := m.browserNamespaceAvailable(ctx, state.Draft.SSOProfileConfig); err != nil {
+			return SSOSettingsView{}, err
+		}
+		candidate := m
+		candidate.sso, candidate.jwtConfig = nil, state.Draft.browserJWTConfig()
+		candidate.apiIssuers = nil
+		candidate.jwtConfig.Audience = state.Draft.ClientID
+		req := RequestContext{UserID: attempt.UserID, CredentialID: attempt.CredentialID, Roles: attempt.Roles, OrganizationID: state.Draft.OrganizationID, JWTIdentity: attempt.Identity}
+		if err := candidate.ReauthorizeJWTPrincipal(ctx, &req); err != nil {
+			return SSOSettingsView{}, err
+		}
+		if !m.validSSOTestAdmin(ctx, state.Draft, req) {
+			return SSOSettingsView{}, ErrUnauthorized
+		}
+		state.Previous, state.Active, state.Draft = state.Active, state.Draft, nil
+		state.CanRollback, state.Attempt = true, nil
+	case "disable":
+		if state.Active == nil {
+			return SSOSettingsView{}, ErrSSOConfiguration
+		}
+		previous := *state.Active
+		state.Previous = &previous
+		state.Active.Enabled = false
+		state.CanRollback = true
+	case "rollback":
+		if !state.CanRollback {
+			return SSOSettingsView{}, ErrSSOConfiguration
+		}
+		if state.Previous != nil {
+			if err := m.browserNamespaceAvailable(ctx, state.Previous.SSOProfileConfig); err != nil {
+				return SSOSettingsView{}, err
+			}
+		}
+		state.Active, state.Previous = state.Previous, state.Active
+		if state.Active != nil {
+			profile := *state.Active
+			key, err := ssoRandom()
+			if err != nil {
+				return SSOSettingsView{}, err
+			}
+			profile.SessionKey = key
+			state.Active = &profile
+		}
+		state.Draft, state.Attempt, state.VerifiedIdentity = nil, nil, nil
+	default:
+		return SSOSettingsView{}, ErrSSOConfiguration
+	}
+	if err := m.sso.save(ctx, revision, state); err != nil {
+		return SSOSettingsView{}, err
+	}
+	return m.sso.View(ctx)
+}
+
+// A tenant connection never maps a platform admin role. Its test still proves
+// the same platform administrator, with a separately approved tenant role.
+func (m AuthModule) validSSOTestAdmin(ctx context.Context, profile *SSOProfile, req RequestContext) bool {
+	if profile.OrganizationID == "" {
+		return slices.Contains(req.Roles, "admin")
+	}
+	if req.OrganizationID != profile.OrganizationID || !slices.Contains(req.Roles, "org_admin") || req.JWTIdentity == nil {
+		return false
+	}
+	store, ok := m.store.(jwtPrincipalStore)
+	if !ok {
+		return false
+	}
+	principal, found, err := store.LookupJWTPrincipal(ctx, req.JWTIdentity.Issuer, req.JWTIdentity.Subject, req.JWTIdentity.Audience)
+	return err == nil && found && principal.Enabled && principal.UserID == req.UserID && principal.OrganizationID == profile.OrganizationID && slices.Contains(principal.Roles, "admin") && principalRoleApproved(principal, "org_admin")
+}

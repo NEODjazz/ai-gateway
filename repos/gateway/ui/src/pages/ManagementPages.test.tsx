@@ -106,11 +106,11 @@ describe("management pages", () => {
   });
 
   it("opens team membership management without raw ID fields", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(json({ data: [{ id: "team-a", name: "Platform", status: "active", member_count: 2 }] }));
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(json({ data: [{ id: "team-a", name: "Platform", status: "active", member_count: 2 }], total: 1 }));
     renderAuthenticated(<TeamsPage />); await screen.findByText("Platform");
     expect(screen.queryByLabelText("Team ID")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("User ID")).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Actions for team-a" }));
+    await userEvent.click(screen.getByRole("button", { name: "Actions for team team-a" }));
     expect(screen.getByRole("menuitem", { name: "Inspect" })).toHaveAttribute("href", "/ui/teams/team-a");
   });
 

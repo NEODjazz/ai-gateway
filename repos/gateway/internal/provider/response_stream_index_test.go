@@ -26,7 +26,7 @@ func TestResponseStreamAcceptsBoundedAndOmittedIndices(t *testing.T) {
 		field string
 		index int
 	}{{"", 0}, {`"output_index":0,`, 0}, {`"output_index":1023,`, 1023}} {
-		payload := `{` + tc.field + `"item":{"type":"function_call","id":"item","arguments":"{}"}}`
+		payload := `{` + tc.field + `"item":{"type":"function_call","id":"item","call_id":"call","name":"lookup","arguments":"{}"}}`
 		response, err := streamResponseData(strings.NewReader("event: response.output_item.done\ndata: "+payload+"\n\n"+responseTestTerminal), "m", nil)
 		if err != nil || len(response.Output) != tc.index+1 || response.Output[tc.index].ID != "item" {
 			t.Fatalf("index=%d output=%d err=%v", tc.index, len(response.Output), err)

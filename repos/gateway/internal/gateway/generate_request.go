@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"time"
 
 	"ai-gateway-gateway/internal/openai"
 )
@@ -18,11 +19,18 @@ type generateRequest struct {
 	System        *generateContent             `json:"systemInstruction,omitempty"`
 	Safety        []openai.GeminiSafetySetting `json:"safetySettings,omitempty"`
 	Tools         []struct {
-		Functions     []generateFunction `json:"functionDeclarations,omitempty"`
-		GoogleSearch  *struct{}          `json:"googleSearch,omitempty"`
-		GoogleMaps    *struct{}          `json:"googleMaps,omitempty"`
-		CodeExecution *struct{}          `json:"codeExecution,omitempty"`
-		URLContext    *struct{}          `json:"urlContext,omitempty"`
+		Functions    []generateFunction `json:"functionDeclarations,omitempty"`
+		GoogleSearch *struct {
+			TimeRange *openai.GeminiSearchTimeRange `json:"timeRangeFilter,omitempty"`
+		} `json:"googleSearch,omitempty"`
+		GoogleMaps    *struct{}                       `json:"googleMaps,omitempty"`
+		CodeExecution *struct{}                       `json:"codeExecution,omitempty"`
+		URLContext    *struct{}                       `json:"urlContext,omitempty"`
+		FileSearch    *openai.GeminiFileSearchConfig  `json:"fileSearch,omitempty"`
+		ComputerUse   *openai.GeminiComputerUseConfig `json:"computerUse,omitempty"`
+		MCPServers    []struct {
+			Name string `json:"name"`
+		} `json:"mcpServers,omitempty"`
 	} `json:"tools,omitempty"`
 	ToolConfig *struct {
 		FunctionCalling *struct {
@@ -45,6 +53,8 @@ type generateRequest struct {
 		FrequencyPenalty *float64       `json:"frequencyPenalty,omitempty"`
 		ResponseLogprobs *bool          `json:"responseLogprobs,omitempty"`
 		Logprobs         *int           `json:"logprobs,omitempty"`
+		AudioTimestamp   *bool          `json:"audioTimestamp,omitempty"`
+		MediaResolution  string         `json:"mediaResolution,omitempty"`
 		Modalities       []string       `json:"responseModalities,omitempty"`
 		MIMEType         string         `json:"responseMimeType,omitempty"`
 		JSONSchema       map[string]any `json:"responseJsonSchema,omitempty"`
@@ -62,8 +72,10 @@ type generateFunction struct {
 	JSONSchema  map[string]any `json:"parametersJsonSchema,omitempty"`
 }
 type generatePart struct {
-	Text       *string `json:"text,omitempty"`
-	InlineData *struct {
+	Text            *string                       `json:"text,omitempty"`
+	MediaResolution *openai.GeminiMediaResolution `json:"mediaResolution,omitempty"`
+	MediaProcessing string                        `json:"mediaProcessing,omitempty"`
+	InlineData      *struct {
 		MIMEType string `json:"mimeType"`
 		Data     string `json:"data"`
 	} `json:"inlineData,omitempty"`
@@ -96,7 +108,7 @@ func (r generateRequest) cachedContentChat(model string) (openai.ChatCompletionR
 }
 
 func (r generateRequest) chatWithContentRequirement(model string, stream, requireContents bool) (openai.ChatCompletionRequest, error) {
-	result := openai.ChatCompletionRequest{Model: model, Stream: stream, MaxCompletionTokens: r.Generation.MaxOutputTokens, Temperature: r.Generation.Temperature, TopP: r.Generation.TopP, Seed: r.Generation.Seed, GeminiCachedContent: r.CachedContent}
+	result := openai.ChatCompletionRequest{Model: model, Stream: stream, MaxCompletionTokens: r.Generation.MaxOutputTokens, Temperature: r.Generation.Temperature, TopP: r.Generation.TopP, Seed: r.Generation.Seed, GeminiCachedContent: r.CachedContent, GeminiAudioTimestamp: r.Generation.AudioTimestamp, GeminiMediaResolution: r.Generation.MediaResolution}
 	if stream {
 		result.StreamOptions = &openai.ChatStreamOptions{IncludeUsage: true}
 	}
@@ -206,7 +218,7 @@ func (r generateRequest) chatWithContentRequirement(model string, stream, requir
 		}
 		parts := []any{}
 		for _, part := range r.System.Parts {
-			if part.Text == nil || part.InlineData != nil || part.FileData != nil || part.Call != nil || part.Result != nil || part.Signature != "" {
+			if part.Text == nil || part.InlineData != nil || part.FileData != nil || part.Call != nil || part.Result != nil || part.Signature != "" || part.MediaResolution != nil || part.MediaProcessing != "" {
 				return fail("systemInstruction.parts")
 			}
 			parts = append(parts, map[string]any{"type": "text", "text": *part.Text})
@@ -253,6 +265,36 @@ func (r generateRequest) chatWithContentRequirement(model string, stream, requir
 			if members != 1 || (part.Thought && part.Text == nil) || part.Signature != "" && part.Text == nil && part.Call == nil || part.Text != nil && part.Signature != "" && !validGenerateBase64(part.Signature) {
 				return fail("contents.parts")
 			}
+			mediaResolution := ""
+			if part.MediaResolution != nil {
+				mediaResolution = part.MediaResolution.Level
+				if !openai.ValidGeminiMediaResolution(mediaResolution, true) || part.InlineData == nil && part.FileData == nil || part.FileData != nil && part.FileData.MIMEType == "text/plain" {
+					return fail("contents.parts.mediaResolution")
+				}
+			}
+			mediaProcessing := part.MediaProcessing
+			if mediaProcessing != "" {
+				mediaType := ""
+				if part.InlineData != nil {
+					mediaType = part.InlineData.MIMEType
+				}
+				if part.FileData != nil {
+					mediaType = part.FileData.MIMEType
+				}
+				_, video := openai.VideoInputFormat(mediaType)
+				if !openai.ValidGeminiMediaProcessing(mediaProcessing) || !video {
+					return fail("contents.parts.mediaProcessing")
+				}
+			}
+			withMediaControls := func(value map[string]any) map[string]any {
+				if mediaResolution != "" {
+					value["gemini_media_resolution"] = mediaResolution
+				}
+				if mediaProcessing != "" {
+					value["gemini_media_processing"] = mediaProcessing
+				}
+				return value
+			}
 			switch {
 			case part.Text != nil:
 				if part.Thought {
@@ -284,7 +326,7 @@ func (r generateRequest) chatWithContentRequirement(model string, stream, requir
 				}
 				data := "data:" + part.InlineData.MIMEType + ";base64," + part.InlineData.Data
 				if _, err := openai.ParseDataImageURL(data); err == nil {
-					parts = append(parts, map[string]any{"type": "image_url", "image_url": map[string]any{"url": data}})
+					parts = append(parts, withMediaControls(map[string]any{"type": "image_url", "image_url": map[string]any{"url": data}}))
 					break
 				}
 				if part.InlineData.MIMEType == "application/pdf" {
@@ -292,7 +334,7 @@ func (r generateRequest) chatWithContentRequirement(model string, stream, requir
 					if _, err := openai.ResponseFileAttachments([]any{file}); err != nil {
 						return result, err
 					}
-					parts = append(parts, file)
+					parts = append(parts, withMediaControls(file))
 					break
 				}
 				videoFormat, videoOK := openai.VideoInputFormat(part.InlineData.MIMEType)
@@ -301,7 +343,7 @@ func (r generateRequest) chatWithContentRequirement(model string, stream, requir
 					if _, err := openai.ChatVideoAttachments([]openai.Message{{Role: "user", Content: []any{video}}}); err != nil {
 						return result, err
 					}
-					parts = append(parts, video)
+					parts = append(parts, withMediaControls(video))
 					break
 				}
 				format, filename := generateAudioFormat(part.InlineData.MIMEType)
@@ -311,7 +353,7 @@ func (r generateRequest) chatWithContentRequirement(model string, stream, requir
 				if err := openai.ValidateAudioAttachment(openai.AudioAttachment{Filename: filename, MediaType: part.InlineData.MIMEType, Data: part.InlineData.Data}); err != nil {
 					return result, err
 				}
-				parts = append(parts, map[string]any{"type": "input_audio", "input_audio": map[string]any{"data": part.InlineData.Data, "format": format}})
+				parts = append(parts, withMediaControls(map[string]any{"type": "input_audio", "input_audio": map[string]any{"data": part.InlineData.Data, "format": format}}))
 			case part.FileData != nil:
 				if role != "user" || !validFileToken(part.FileData.FileURI, 128) || !strings.HasPrefix(part.FileData.FileURI, "file_") {
 					return fail("fileData")
@@ -320,7 +362,7 @@ func (r generateRequest) chatWithContentRequirement(model string, stream, requir
 				if referenceType == "" {
 					return fail("fileData.mimeType")
 				}
-				parts = append(parts, map[string]any{"type": referenceType, "file_id": part.FileData.FileURI, "media_type": part.FileData.MIMEType})
+				parts = append(parts, withMediaControls(map[string]any{"type": referenceType, "file_id": part.FileData.FileURI, "media_type": part.FileData.MIMEType}))
 			case part.Call != nil:
 				callIndex++
 				call := part.Call
@@ -409,7 +451,7 @@ func (r generateRequest) chatWithContentRequirement(model string, stream, requir
 	}
 	for _, tool := range r.Tools {
 		members := 0
-		for _, present := range []bool{len(tool.Functions) > 0, tool.GoogleSearch != nil, tool.GoogleMaps != nil, tool.CodeExecution != nil, tool.URLContext != nil} {
+		for _, present := range []bool{len(tool.Functions) > 0, tool.GoogleSearch != nil, tool.GoogleMaps != nil, tool.CodeExecution != nil, tool.URLContext != nil, tool.FileSearch != nil, tool.ComputerUse != nil, len(tool.MCPServers) > 0} {
 			if present {
 				members++
 			}
@@ -422,6 +464,17 @@ func (r generateRequest) chatWithContentRequirement(model string, stream, requir
 				return fail("googleSearch")
 			}
 			result.WebSearchOptions = &openai.ChatWebSearchOptions{}
+			if tool.GoogleSearch.TimeRange != nil {
+				start, startErr := time.Parse(time.RFC3339Nano, tool.GoogleSearch.TimeRange.StartTime)
+				end, endErr := time.Parse(time.RFC3339Nano, tool.GoogleSearch.TimeRange.EndTime)
+				if startErr != nil || endErr != nil || start.After(end) {
+					return fail("googleSearch.timeRangeFilter")
+				}
+				result.WebSearchOptions.GeminiTimeRange = &openai.GeminiSearchTimeRange{
+					StartTime: start.UTC().Format(time.RFC3339Nano),
+					EndTime:   end.UTC().Format(time.RFC3339Nano),
+				}
+			}
 			result.NativeInputTokens = openai.ReserveTokens(result.NativeInputTokens, openai.EstimateContextTokens(tool))
 			continue
 		}
@@ -449,6 +502,39 @@ func (r generateRequest) chatWithContentRequirement(model string, stream, requir
 			result.NativeInputTokens = openai.ReserveTokens(result.NativeInputTokens, openai.EstimateContextTokens(tool))
 			continue
 		}
+		if tool.FileSearch != nil {
+			if result.GeminiFileSearch != nil || !openai.ValidGeminiFileSearchConfig(tool.FileSearch) {
+				return fail("fileSearch")
+			}
+			config := *tool.FileSearch
+			config.StoreNames = append([]string(nil), tool.FileSearch.StoreNames...)
+			result.GeminiFileSearch = &config
+			result.NativeInputTokens = openai.ReserveTokens(result.NativeInputTokens, openai.EstimateContextTokens(tool))
+			continue
+		}
+		if tool.ComputerUse != nil {
+			if result.GeminiComputerUse != nil || !openai.ValidGeminiComputerUseConfig(tool.ComputerUse) {
+				return fail("computerUse")
+			}
+			config := *tool.ComputerUse
+			config.ExcludedPredefinedFunctions = append([]string(nil), tool.ComputerUse.ExcludedPredefinedFunctions...)
+			config.DisabledSafetyPolicies = append([]string(nil), tool.ComputerUse.DisabledSafetyPolicies...)
+			result.GeminiComputerUse = &config
+			result.NativeInputTokens = openai.ReserveTokens(result.NativeInputTokens, openai.EstimateContextTokens(tool))
+			continue
+		}
+		if len(tool.MCPServers) > 0 {
+			ids := make([]string, len(tool.MCPServers))
+			for index := range tool.MCPServers {
+				ids[index] = tool.MCPServers[index].Name
+			}
+			if len(result.GeminiMCPServerIDs) > 0 || !openai.ValidGeminiMCPServerIDs(ids) {
+				return fail("mcpServers")
+			}
+			result.GeminiMCPServerIDs = ids
+			result.NativeInputTokens = openai.ReserveTokens(result.NativeInputTokens, openai.EstimateContextTokens(tool))
+			continue
+		}
 		for _, function := range tool.Functions {
 			if function.Name == "" {
 				return fail("functionDeclarations.name")
@@ -469,6 +555,9 @@ func (r generateRequest) chatWithContentRequirement(model string, stream, requir
 			}
 			result.Tools = append(result.Tools, openai.Tool{Type: "function", Function: openai.FunctionDefinition{Name: function.Name, Description: function.Description, Parameters: schema}})
 		}
+	}
+	if result.GeminiFileSearch != nil && len(r.Tools) != 1 {
+		return fail("fileSearch")
 	}
 	if len(result.Tools) > 128 {
 		return fail("functionDeclarations")
@@ -512,6 +601,19 @@ func (r generateRequest) chatWithContentRequirement(model string, stream, requir
 	}
 	if _, err := openai.ChatAudioAttachments(result.Messages); err != nil {
 		return result, err
+	}
+	if result.GeminiAudioTimestamp != nil && !openai.HasChatAudioInput(result) {
+		return fail("generationConfig.audioTimestamp")
+	}
+	if result.GeminiMediaResolution != "" {
+		switch result.GeminiMediaResolution {
+		case "MEDIA_RESOLUTION_UNSPECIFIED", "MEDIA_RESOLUTION_LOW", "MEDIA_RESOLUTION_MEDIUM", "MEDIA_RESOLUTION_HIGH":
+		default:
+			return fail("generationConfig.mediaResolution")
+		}
+		if !openai.HasChatMediaInput(result) {
+			return fail("generationConfig.mediaResolution")
+		}
 	}
 	return result, nil
 }

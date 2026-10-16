@@ -87,6 +87,38 @@ dependency failure rather than as an invalid client credential.
 User, team, and role claims support dot-separated paths for nested OIDC claims.
 The defaults are `sub`, `team_id`, and `roles`.
 
+Set `AUTH_JWT_IDENTITY_MODE=directory` for provisioned end-user authentication.
+This mode requires an issuer, resource audience, persistent Auth PostgreSQL and
+explicit `AUTH_JWT_ROLE_MAPPINGS_JSON`, for example
+`{"gateway-user":"user","gateway-admin":"admin"}`. Only roles from the
+configured claim path are considered; they must also be assigned to the active
+directory user. A `team_admin` role requires a bound team. A present team claim
+must match that binding. Unknown users and unmapped roles are rejected.
+
+Migration `013_jwt_principals.sql` stores operator-managed bindings of verified
+issuer/subject/resource audience to directory user, optional team, grants, tags,
+access groups and RPM/TPM. Every authorization checks current user, team and
+organization status, SCIM deletion state and team membership. Empty model/tool
+grants deny access; use `*` only for explicitly unrestricted access. Zero RPM/TPM
+retains the existing meaning of unlimited for that dimension.
+
+Directory `CredentialID` is a namespaced SHA-256 digest of issuer, audience and
+subject. JWT expiry, token ID and signing key do not change it; `UserID` comes
+from the binding. Virtual-key identity and grants are unchanged. The additive
+internal Auth response fields `model_access_restricted` and
+`tool_access_restricted` let Gateway distinguish empty denied grants from legacy
+unrestricted grants. Roll out the Gateway consumer before enabling directory
+mode on Auth; an older consumer does not enforce these fields.
+
+The default `legacy` mode preserves existing claim-only authentication and token
+fingerprints for compatibility. Switching modes changes ownership/cache/rate
+scope for JWTs. Existing resources are not automatically reassigned: finish or
+export them under the old mode before cutover, or perform an explicitly verified
+owner migration. Rollback to legacy mode restores its previous scope; virtual
+keys are unaffected. Do not enable directory mode until bindings have been
+provisioned. IdP failure or directory failure never falls back to a successful
+JWT authorization.
+
 Environment:
 
 ```text
@@ -102,6 +134,45 @@ AUTH_JWT_ROLES_CLAIM=roles
 AUTH_POSTGRES_KEYS_ENABLED=true
 AUTH_POSTGRES_DSN=postgres://ai_gateway:password@postgres:5432/ai_gateway
 AUTH_KEY_HASH_SECRET=separate-random-pepper
+# Same existing 32+ byte encryption key as Gateway; inject through your Secret store.
+CREDENTIAL_ENCRYPTION_KEY=<shared-configuration-encryption-key>
 AUTH_STATIC_KEY_FALLBACK_ENABLED=false
 AUTH_DEMO_KEYS_ENABLED=false
 ```
+
+JWT bindings are provisioned through global-admin `PUT /admin/v1/jwt-principals`
+and inspected with paginated `GET /admin/v1/jwt-principals?user_id=...&limit=...&offset=...`.
+The body requires `issuer`, `subject`, `audience`, `user_id`, and `enabled`.
+Optional policy fields are `team_id`, `tags`, `access_group_ids`, `allowed_models`,
+`allowed_tools`, `rate_limit_rpm`, and `rate_limit_tpm`. Zero RPM/TPM means unlimited;
+empty model/tool grants deny. Only explicit `*` grants allow every model/tool.
+The directory user must exist; a team binding requires current membership at
+request time. Provision Users/Groups through the existing directory/SCIM APIs
+before assigning bindings. There is no implicit group synchronization from JWT.
+The same `(issuer, subject, audience)` cannot be reassigned to another user, even
+when disabled; revoke with `enabled=false`. Mutations require the existing audit
+service. The internal Auth endpoints require the management secret and audit
+identity and must not be exposed to end users.
+
+
+Directory JWT background jobs persist a principal reference and policy digest,
+not an access/refresh token. Gateway workers reauthorize over the existing
+management-secret channel before queued batch execution and while provider
+Responses/Interactions are pending. Disabled principals or changed directory
+policies terminate queued items before provider execution. Directory outages
+retry without execution. Changed access groups and policy attachments are
+resolved again before a batch item starts. Pending provider jobs are cancelled
+on confirmed revocation; settlement waits for a subsequent terminal retrieval
+and uses the original execution and billing attribution. Already completed
+work is settled even after revocation. A cancellation request alone never
+releases the reservation. The management secret must be configured in both
+services for directory background jobs; missing configuration fails closed.
+Legacy key/JWT jobs retain their existing behavior during opt-in migration.
+
+Managed SSO uses `CREDENTIAL_ENCRYPTION_KEY` (at least 32 bytes), shared with
+Gateway. `AUTH_KEY_HASH_SECRET` remains the independent virtual-key hash secret.
+Keep both values stable. Existing SSO documents encrypted with the hash secret
+are rewrapped with CAS when the shared encryption key is configured; all replicas
+must be upgraded together. Without the shared key, legacy SSO is read only.
+See [SSO configuration](../../docs/admin-sso-settings.md) for Helm Secret references
+and migration requirements.

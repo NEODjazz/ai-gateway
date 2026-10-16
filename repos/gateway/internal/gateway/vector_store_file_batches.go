@@ -158,7 +158,7 @@ func validateVectorStoreFileBatchRequest(w http.ResponseWriter, input createVect
 			return nil, false
 		}
 		for _, id := range input.FileIDs {
-			entries = append(entries, vectorstate.FileBatchEntry{FileID: id, Attributes: normalizedVectorStoreAttributes(input.Attributes)})
+			entries = append(entries, vectorstate.FileBatchEntry{FileID: id, Attributes: normalizedVectorStoreAttributes(input.Attributes), ChunkingStrategy: normalizedVectorStoreChunkingStrategy(input.ChunkingStrategy)})
 		}
 	} else {
 		if input.Attributes != nil || input.ChunkingStrategy != nil {
@@ -173,7 +173,7 @@ func validateVectorStoreFileBatchRequest(w http.ResponseWriter, input createVect
 			if !validateVectorStoreChunkingStrategy(w, file.ChunkingStrategy) {
 				return nil, false
 			}
-			entries = append(entries, vectorstate.FileBatchEntry{FileID: file.FileID, Attributes: normalizedVectorStoreAttributes(file.Attributes)})
+			entries = append(entries, vectorstate.FileBatchEntry{FileID: file.FileID, Attributes: normalizedVectorStoreAttributes(file.Attributes), ChunkingStrategy: normalizedVectorStoreChunkingStrategy(file.ChunkingStrategy)})
 		}
 	}
 	seen := make(map[string]struct{}, len(entries))

@@ -112,11 +112,16 @@ func (h Handler) countContextTokens(w http.ResponseWriter, r *http.Request, requ
 		writeError(w, http.StatusBadGateway, "module_failed", "module produced invalid "+kind+" input: "+err.Error())
 		return provider.TokenCountResult{}, false
 	}
-	if !h.prepareAccessGroups(w, &req) {
+	if !h.prepareAccessGroups(r.Context(), w, &req) {
 		return provider.TokenCountResult{}, false
 	}
 	if err := h.bindSkillExecution(r.Context(), &req); err != nil {
 		writeSkillExecutionError(w, err)
+		return provider.TokenCountResult{}, false
+	}
+	request = req.Request
+	if err := h.resolveGeminiMCPServers(&req); err != nil {
+		writeGeminiMCPError(w, err)
 		return provider.TokenCountResult{}, false
 	}
 	request = req.Request
@@ -131,6 +136,9 @@ func (h Handler) countContextTokens(w http.ResponseWriter, r *http.Request, requ
 	if request.GeminiGoogleMaps {
 		tools = append(tools, "google_maps")
 	}
+	tools = append(tools, openai.GeminiFileSearchToolIdentifiers(request.GeminiFileSearch)...)
+	tools = append(tools, openai.GeminiComputerUseToolIdentifiers(request.GeminiComputerUse)...)
+	tools = append(tools, request.GeminiMCPConnectorIDs...)
 	if request.AnthropicCodeExecution {
 		tools = append(tools, "code_execution")
 	}

@@ -15,6 +15,9 @@ func TestResponsesStoreForwarding(t *testing.T) {
 	for _, adapter := range []string{"compatible", "ollama"} {
 		for _, stream := range []bool{false, true} {
 			for _, value := range []string{"false", "true", "null"} {
+				if adapter == "ollama" && value == "true" {
+					continue
+				}
 				t.Run(fmt.Sprintf("%s/%v/%s", adapter, stream, value), func(t *testing.T) {
 					called := false
 					server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -31,9 +34,17 @@ func TestResponsesStoreForwarding(t *testing.T) {
 							t.Errorf("store=%v want=%v", body["store"], want)
 						}
 						if stream {
-							_, _ = fmt.Fprint(w, responseTestTerminal)
+							if adapter == "ollama" {
+								_, _ = fmt.Fprint(w, ollamaResponseTestTerminal)
+							} else {
+								_, _ = fmt.Fprint(w, responseTestTerminal)
+							}
 						} else {
-							_, _ = fmt.Fprint(w, `{"id":"r","status":"completed"}`)
+							if adapter == "ollama" {
+								_, _ = fmt.Fprint(w, ollamaResponseTestJSON)
+							} else {
+								_, _ = fmt.Fprint(w, `{"id":"r","status":"completed"}`)
+							}
 						}
 					}))
 					defer server.Close()
@@ -79,4 +90,10 @@ func TestResponsesStoreRejectsUnsupportedAdapters(t *testing.T) {
 			t.Fatalf("%s err=%v", name, err)
 		}
 	}
+}
+
+func TestOllamaResponsesRejectsStoredOutput(t *testing.T) {
+	value := true
+	request := openai.ResponseRequest{Model: "m", Input: "hello", Store: &value}
+	assertUnsupportedParameter(t, (Ollama{}).ValidateResponseParameters(request), "store")
 }

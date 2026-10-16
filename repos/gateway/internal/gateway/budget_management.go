@@ -161,6 +161,8 @@ func (c *RemoteBudgetManagementClient) call(ctx context.Context, method, path st
 	req.Header.Set("X-Request-ID", audit.RequestID)
 	req.Header.Set("X-Actor-ID", audit.ActorID)
 	req.Header.Set("X-Actor-Credential-ID", audit.CredentialID)
+	req.Header.Set("X-Actor-Organization-ID", audit.OrganizationID)
+	req.Header.Set("X-Actor-Roles", managementRoleHeader(audit.Roles))
 	response, err := c.client.Do(req)
 	if err != nil {
 		return err

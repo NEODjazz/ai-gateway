@@ -68,7 +68,7 @@ model {
     }
     auth = service 'Auth' {
       technology 'Go, HTTP :8082'
-      description 'Virtual keys, legacy HS256 and OIDC JWKS JWT, users and roles'
+      description 'Independent browser OIDC sessions and API JWT, virtual keys, tenant directory'
     }
     dlp = service 'DLP adapter' {
       technology 'Go, HTTP :8084, ICAP'
@@ -86,10 +86,25 @@ model {
     }
   }
 
+  documents = system 'Optional PDF processing' {
+    api = service 'Docling API' {
+      technology 'Python HTTP :5001'
+      description 'Authenticated owner scope and bounded admission'
+    }
+    queue = datastore 'Docling Redis RQ + PVC' {
+      technology 'Redis :6379, noeviction, AOF'
+    }
+    worker = service 'Docling CPU workers' {
+      technology 'Python, Docling Serve / RQ'
+      description 'PDF conversion, bounded job timeout and result retention'
+    }
+  }
+
   providers = system 'AI providers' {
     openai = externalSystem 'OpenAI-compatible / Azure / OpenRouter'
     anthropic = externalSystem 'Anthropic'
-    ollama = externalSystem 'Ollama'
+    ollama = externalSystem 'Ollama / Lemonade'
+    native = externalSystem 'Gemini / Vertex / Bedrock / native adapters'
     demo = externalSystem 'Demo provider'
   }
 
@@ -102,13 +117,13 @@ model {
     clickhouse = datastore 'ClickHouse usage_events' {
       technology 'ClickHouse HTTP :8123'
     }
-    redis = datastore 'Redis anonymization vault' {
+    redis = datastore 'Redis gateway runtime' {
       technology 'Redis :6379'
-      description 'Deployed and configured, client integration is not implemented'
+      description 'Shared rate limits, exact cache and circuit state; no anonymizer vault client'
     }
-    postgres = datastore 'PostgreSQL financial core' {
+    postgres = datastore 'PostgreSQL durable state' {
       technology 'PostgreSQL :5432'
-      description 'Atomic budget reservations, billing ledger and durable outbox'
+      description 'Identity, SSO, control plane, owner-bound resources, atomic budgets and outbox'
     }
   }
 
@@ -120,8 +135,15 @@ model {
   platform.gateway -> platform.billing 'POST /usage before and after provider'
   platform.gateway -> providers.openai 'OpenAI-compatible API'
   platform.gateway -> providers.anthropic 'Anthropic Messages API'
-  platform.gateway -> providers.ollama 'Ollama API'
+  platform.gateway -> providers.ollama 'Local model API'
   platform.gateway -> providers.demo 'in-process demo call'
+  platform.gateway -> providers.native 'Native provider APIs'
+  platform.gateway -> documents.api 'Authorized inline PDF + opaque owner scope'
+  documents.api -> documents.queue 'Bounded admission and enqueue'
+  documents.worker -> documents.queue 'Consume jobs and persist results'
+  platform.gateway -> stores.redis 'Limits, cache and circuit state'
+  platform.gateway -> stores.postgres 'Control plane and owner-bound resources'
+  platform.auth -> stores.postgres 'Keys, directory and browser sessions'
   platform.dlp -> security.dlpIcap 'ICAP REQMOD'
   platform.av -> security.avIcap 'ICAP REQMOD'
   platform.billing -> stores.clickhouse 'append usage event via JSONEachRow'
@@ -149,6 +171,15 @@ deployment {
           dlp = instanceOf platform.dlp
           av = instanceOf platform.av
         }
+        workload docling_api 'optional Docling API' {
+          api = instanceOf documents.api
+        }
+        workload docling_workers 'optional Docling workers' {
+          worker = instanceOf documents.worker
+        }
+        dataWorkload docling_queue 'optional Docling queue + PVC' {
+          queue = instanceOf documents.queue
+        }
         dataWorkload clickhouse_release 'clickhouse release + PVC' {
           clickhouse = instanceOf stores.clickhouse
         }
@@ -167,7 +198,7 @@ views {
   view index {
     title 'AI Gateway / System context'
     description 'Current logical boundaries and external dependencies'
-    include client, platform, providers, security, stores
+    include client, platform, documents, providers, security, stores
     include * -> *
     autoLayout LeftRight
   }
@@ -177,6 +208,7 @@ views {
     description 'Gateway-level auth, provider-level modules, providers and stores'
     include client
     include platform.*
+    include documents.*
     include providers.*
     include security.*
     include stores.*
@@ -206,10 +238,11 @@ views {
     platform.gateway -> providers.openai 'provider-specific request'
     providers.openai -> platform.gateway 'response and optional usage'
     platform.gateway -> platform.billing 'post-response usage'
-    platform.billing -> stores.clickhouse 'append usage event'
+    platform.billing -> stores.postgres 'commit ledger and enqueue durable outbox'
     platform.billing -> platform.gateway 'enriched context'
     platform.gateway -> platform.gateway 'deanonymize response'
     platform.gateway -> client 'OpenAI-compatible response'
+    platform.billing -> stores.clickhouse 'outbox worker delivers event at least once'
   }
 
   dynamic view failover {
@@ -218,13 +251,17 @@ views {
 
     client -> platform.gateway 'authenticated request'
     platform.gateway -> platform.dlp 'attempt 1: provider modules'
-    platform.dlp -> platform.gateway 'error or content rejection'
+    platform.dlp -> platform.gateway 'transient dependency error before any output; content rejection is terminal'
     platform.gateway -> platform.av 'attempt 2: fresh context and modules'
     platform.av -> platform.gateway 'accepted'
     platform.gateway -> platform.anonymizer 'new placeholder map'
     platform.anonymizer -> platform.gateway 'masked attempt 2 request'
+    platform.gateway -> platform.billing 'reserve for attempt 2 execution'
+    platform.billing -> platform.gateway 'budget allowed'
     platform.gateway -> providers.ollama 'attempt 2 provider call'
     providers.ollama -> platform.gateway 'successful response'
+    platform.gateway -> platform.billing 'commit usage for execution ID'
+    platform.billing -> platform.gateway 'settled usage'
     platform.gateway -> client 'deanonymized response'
   }
 

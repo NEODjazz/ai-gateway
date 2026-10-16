@@ -130,6 +130,9 @@ func validA2AOutboxJob(task a2astate.Task, job asyncstate.Job, configs ...*a2ast
 		config = configs[0]
 	}
 	resourceID := task.ID
+	if job.Kind == a2astate.AgentJobKind && config == nil {
+		resourceID = task.ID + ":" + job.ExecutionID
+	}
 	if config != nil {
 		resourceID = task.ID + ":" + config.ID
 		if !validA2APushConfig(*config) || config.TaskID != task.ID || config.OwnerKey != task.OwnerKey || config.AgentID != task.AgentID {

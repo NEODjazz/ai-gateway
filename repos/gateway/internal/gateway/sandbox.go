@@ -52,7 +52,7 @@ func (h Handler) ExecuteSandbox(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "module_failed", "module returned an invalid sandbox request")
 		return
 	}
-	if !h.prepareAccessGroups(w, &reqCtx) || !h.authorizeAccess(w, r.Context(), reqCtx, request.Model, request.InputTokens()) || !h.prepareModelFallbacks(w, r.Context(), &reqCtx, request.Model) {
+	if !h.prepareAccessGroups(r.Context(), w, &reqCtx) || !h.authorizeAccess(w, r.Context(), reqCtx, request.Model, request.InputTokens()) || !h.prepareModelFallbacks(w, r.Context(), &reqCtx, request.Model) {
 		return
 	}
 	sandbox, ok := h.provider.(provider.SandboxProvider)

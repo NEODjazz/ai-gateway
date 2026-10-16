@@ -42,21 +42,21 @@ func TestXAIChatAndResponsesContracts(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatal(err)
 		}
-		if body["model"] != "grok" || body["service_tier"] != "priority" {
+		if body["model"] != "grok-4.7" || body["service_tier"] != "priority" {
 			t.Fatalf("request=%#v", body)
 		}
 		switch r.URL.Path {
 		case "/v1/chat/completions":
-			if body["reasoning_effort"] != "xhigh" || body["logprobs"] != true {
+			if body["reasoning_effort"] != "xhigh" {
 				t.Fatalf("chat request=%#v", body)
 			}
 			_, _ = fmt.Fprint(w, `{"id":"chat","object":"chat.completion","model":"grok","service_tier":"priority","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}`)
 		case "/v1/responses":
 			reasoning, ok := body["reasoning"].(map[string]any)
-			if !ok || reasoning["effort"] != "high" || body["prompt_cache_key"] != "conversation" {
+			if !ok || reasoning["effort"] != "high" || body["prompt_cache_key"] != "conversation" || body["max_output_tokens"] != float64(64) || body["max_tool_calls"] != float64(3) || body["parallel_tool_calls"] != false || body["temperature"] != 0.7 || body["top_p"] != 0.9 || body["store"] != false || body["previous_response_id"] != "resp_prior" {
 				t.Fatalf("response request=%#v", body)
 			}
-			_, _ = fmt.Fprint(w, `{"id":"resp","object":"response","model":"grok","status":"completed","output":[{"id":"message","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"ok","annotations":[]}]}],"usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}`)
+			_, _ = fmt.Fprint(w, `{"id":"resp","object":"response","model":"grok","created_at":100,"completed_at":101,"background":false,"store":false,"previous_response_id":"resp_prior","service_tier":"priority","status":"completed","max_output_tokens":64,"max_tool_calls":3,"parallel_tool_calls":false,"temperature":0.7,"top_p":0.9,"top_logprobs":0,"frequency_penalty":0,"presence_penalty":0,"truncation":"disabled","reasoning":{"effort":"high"},"text":{"format":{"type":"text"}},"tools":[{"type":"function","name":"lookup","parameters":{"type":"object"}}],"tool_choice":"auto","citations":["https://x.ai/news","https://x.com/xai/status/1"],"output":[{"id":"message","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"ok","annotations":[]}]}],"usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3,"num_sources_used":4,"num_server_side_tools_used":2,"server_side_tool_usage_details":{"x_posts_fetched":6,"x_users_fetched":1}}}`)
 		default:
 			t.Fatalf("path=%q", r.URL.Path)
 		}
@@ -64,20 +64,25 @@ func TestXAIChatAndResponsesContracts(t *testing.T) {
 	defer server.Close()
 
 	client := NewXAI(server.URL+"/v1", "xai-key", true)
-	logprobs := true
 	chat, err := client.ChatCompletions(t.Context(), openai.ChatCompletionRequest{
-		Model: "grok", Messages: []openai.Message{{Role: "user", Content: "hello"}},
-		ChatGenerationOptions: openai.ChatGenerationOptions{ReasoningEffort: "xhigh", Logprobs: &logprobs, ServiceTier: "priority"},
+		Model: "grok-4.7", Messages: []openai.Message{{Role: "user", Content: "hello"}},
+		ChatGenerationOptions: openai.ChatGenerationOptions{ReasoningEffort: "xhigh", ServiceTier: "priority"},
 	})
 	if err != nil || chat.Usage.TotalTokens != 3 || chat.ServiceTier != "priority" {
 		t.Fatalf("chat=%+v err=%v", chat, err)
 	}
 	effort := "high"
+	maxToolCalls := 3
+	maxOutputTokens := 64
+	parallelToolCalls := false
+	store := false
+	temperature := 0.7
+	topP := 0.9
 	response, err := client.Responses(t.Context(), openai.ResponseRequest{
-		Model: "grok", Input: "hello", ServiceTier: "priority", PromptCacheKey: "conversation",
-		Reasoning: &openai.ResponseReasoning{Effort: &effort},
+		Model: "grok-4.7", Input: "hello", ServiceTier: "priority", PromptCacheKey: "conversation",
+		Reasoning: &openai.ResponseReasoning{Effort: &effort}, Text: map[string]any{"format": map[string]any{"type": "text"}}, Tools: []openai.ResponseTool{{Type: "function", Name: "lookup", Parameters: map[string]any{"type": "object"}}}, ToolChoice: "auto", MaxOutputTokens: &maxOutputTokens, MaxToolCalls: &maxToolCalls, ParallelToolCalls: &parallelToolCalls, Temperature: &temperature, TopP: &topP, Store: &store, PreviousResponse: "resp_prior",
 	})
-	if err != nil || response.Usage.TotalTokens != 3 || response.OutputText != "ok" {
+	if err != nil || response.CreatedAt != 100 || response.CompletedAt != 101 || response.Background == nil || *response.Background || response.Store == nil || *response.Store || response.PreviousResponseID == nil || *response.PreviousResponseID != "resp_prior" || response.ServiceTier != "priority" || response.MaxOutputTokens == nil || *response.MaxOutputTokens != 64 || response.MaxToolCalls == nil || *response.MaxToolCalls != 3 || response.ParallelToolCalls == nil || *response.ParallelToolCalls || response.Temperature == nil || *response.Temperature != 0.7 || response.TopP == nil || *response.TopP != 0.9 || response.TopLogprobs == nil || *response.TopLogprobs != 0 || response.FrequencyPenalty == nil || *response.FrequencyPenalty != 0 || response.PresencePenalty == nil || *response.PresencePenalty != 0 || response.Truncation == nil || *response.Truncation != "disabled" || response.Reasoning == nil || response.Reasoning.Effort == nil || *response.Reasoning.Effort != "high" || len(response.Tools) != 1 || response.Tools[0].Name != "lookup" || response.Text == nil || response.ToolChoice != "auto" || !slices.Equal(response.Citations, []string{"https://x.ai/news", "https://x.com/xai/status/1"}) || response.Usage.TotalTokens != 3 || response.OutputText != "ok" || response.Usage.NumSourcesUsed == nil || *response.Usage.NumSourcesUsed != 4 || response.Usage.NumServerSideToolsUsed == nil || *response.Usage.NumServerSideToolsUsed != 2 || response.Usage.ServerSideToolUsageDetails == nil || response.Usage.ServerSideToolUsageDetails.XPostsFetched == nil || *response.Usage.ServerSideToolUsageDetails.XPostsFetched != 6 || response.Usage.ServerSideToolUsageDetails.XUsersFetched == nil || *response.Usage.ServerSideToolUsageDetails.XUsersFetched != 1 {
 		t.Fatalf("response=%+v err=%v", response, err)
 	}
 }
@@ -97,7 +102,6 @@ func TestXAIRejectsUnsupportedParametersBeforeHTTP(t *testing.T) {
 	invalidEffort := "max"
 	metadata := map[string]string{"ticket": "42"}
 	truncation := "auto"
-	maxToolCalls := 3
 	tests := []struct {
 		param string
 		code  string
@@ -112,7 +116,6 @@ func TestXAIRejectsUnsupportedParametersBeforeHTTP(t *testing.T) {
 		{param: "metadata", code: "unsupported_parameter", req: openai.ResponseRequest{Metadata: metadata}},
 		{param: "truncation", code: "unsupported_parameter", req: openai.ResponseRequest{Truncation: &truncation}},
 		{param: "safety_identifier", code: "unsupported_parameter", req: openai.ResponseRequest{SafetyIdentifier: "user"}},
-		{param: "max_tool_calls", code: "unsupported_parameter", req: openai.ResponseRequest{MaxToolCalls: &maxToolCalls}},
 		{param: "text.verbosity", code: "unsupported_parameter", req: openai.ResponseRequest{Text: map[string]any{"verbosity": "high"}}},
 	}
 	for _, test := range tests {
@@ -136,7 +139,7 @@ func TestXAIChatParameterPolicy(t *testing.T) {
 	falseLogprobs := false
 	topEight := 8
 	topNine := 9
-	if err := client.ValidateChatParameters(openai.ChatCompletionRequest{ChatGenerationOptions: openai.ChatGenerationOptions{ReasoningEffort: "none", Logprobs: &logprobs, TopLogprobs: &topEight}}); err != nil {
+	if err := client.ValidateChatParameters(openai.ChatCompletionRequest{ChatGenerationOptions: openai.ChatGenerationOptions{Logprobs: &logprobs, TopLogprobs: &topEight}}); err != nil {
 		t.Fatalf("valid parameters: %v", err)
 	}
 	tests := []struct {
@@ -159,6 +162,130 @@ func TestXAIChatParameterPolicy(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestXAIReasoningEffortIsModelScoped(t *testing.T) {
+	client := NewXAI("http://unused.invalid", "", false)
+	tests := []struct {
+		model, effort   string
+		chat, responses bool
+	}{
+		{model: "grok-4.5", effort: "low", chat: true, responses: true},
+		{model: "grok-4.5", effort: "xhigh"},
+		{model: "grok-build-latest", effort: "high", chat: true, responses: true},
+		{model: "grok-build-latest", effort: "xhigh"},
+		{model: "grok-4.6", effort: "xhigh", chat: true, responses: true},
+		{model: "grok-4.7-latest", effort: "xhigh", chat: true, responses: true},
+		{model: "grok-4.7", effort: "none"},
+		{model: "grok-4.20-multi-agent", effort: "xhigh", responses: true},
+		{model: "unknown", effort: "high"},
+	}
+	for _, test := range tests {
+		t.Run(test.model+"/"+test.effort, func(t *testing.T) {
+			chat := openai.ChatCompletionRequest{Model: test.model, Messages: []openai.Message{{Role: "user", Content: "hello"}}, ChatGenerationOptions: openai.ChatGenerationOptions{ReasoningEffort: test.effort}}
+			chatErr := client.ValidateChatParameters(chat)
+			if test.chat && chatErr != nil || !test.chat && !xaiFailure(chatErr, "reasoning_effort", "invalid_request") {
+				t.Fatalf("chat err=%v expected support=%v", chatErr, test.chat)
+			}
+			responses := openai.ResponseRequest{Model: test.model, Input: "hello", Reasoning: &openai.ResponseReasoning{Effort: &test.effort}}
+			responseErr := client.ValidateResponseParameters(responses)
+			if test.responses && responseErr != nil || !test.responses && !xaiFailure(responseErr, "reasoning.effort", "invalid_request") {
+				t.Fatalf("Responses err=%v expected support=%v", responseErr, test.responses)
+			}
+		})
+	}
+}
+
+func TestXAIRejectsSilentlyIgnoredLogprobs(t *testing.T) {
+	client := NewXAI("http://unused.invalid", "", false)
+	logprobs := true
+	topLogprobs := 4
+	for _, test := range []struct {
+		model string
+		param string
+		opts  openai.ChatGenerationOptions
+	}{
+		{model: "grok-4.20", param: "logprobs", opts: openai.ChatGenerationOptions{Logprobs: &logprobs}},
+		{model: "grok-4.20-0309-reasoning", param: "top_logprobs", opts: openai.ChatGenerationOptions{Logprobs: &logprobs, TopLogprobs: &topLogprobs}},
+		{model: "grok-4.3", param: "logprobs", opts: openai.ChatGenerationOptions{Logprobs: &logprobs}},
+		{model: "grok-4.5", param: "logprobs", opts: openai.ChatGenerationOptions{Logprobs: &logprobs}},
+		{model: "grok-build-latest", param: "logprobs", opts: openai.ChatGenerationOptions{Logprobs: &logprobs}},
+		{model: "grok-4.6-latest", param: "logprobs", opts: openai.ChatGenerationOptions{Logprobs: &logprobs}},
+		{model: "grok-4.7", param: "logprobs", opts: openai.ChatGenerationOptions{Logprobs: &logprobs}},
+	} {
+		t.Run(test.model+"/"+test.param, func(t *testing.T) {
+			request := openai.ChatCompletionRequest{Model: test.model, Messages: []openai.Message{{Role: "user", Content: "hello"}}, ChatGenerationOptions: test.opts}
+			if err := client.ValidateChatParameters(request); !xaiFailure(err, test.param, "invalid_request") {
+				t.Fatalf("error=%v", err)
+			}
+		})
+	}
+	request := openai.ChatCompletionRequest{Model: "custom-model", Messages: []openai.Message{{Role: "user", Content: "hello"}}, ChatGenerationOptions: openai.ChatGenerationOptions{Logprobs: &logprobs, TopLogprobs: &topLogprobs}}
+	if err := client.ValidateChatParameters(request); err != nil {
+		t.Fatalf("unknown model should retain passthrough parameters: %v", err)
+	}
+}
+
+func TestXAIReasoningModelsRejectUnsupportedSamplingControls(t *testing.T) {
+	client := NewXAI("http://unused.invalid", "", false)
+	penalty := 0.5
+	for _, test := range []struct {
+		model   string
+		param   string
+		request openai.ChatCompletionRequest
+	}{
+		{model: "grok-4.5", param: "stop", request: openai.ChatCompletionRequest{Stop: "END"}},
+		{model: "grok-build-latest", param: "stop", request: openai.ChatCompletionRequest{Stop: "END"}},
+		{model: "grok-4.6-latest", param: "frequency_penalty", request: openai.ChatCompletionRequest{ChatGenerationOptions: openai.ChatGenerationOptions{FrequencyPenalty: &penalty}}},
+		{model: "grok-4.7", param: "presence_penalty", request: openai.ChatCompletionRequest{ChatGenerationOptions: openai.ChatGenerationOptions{PresencePenalty: &penalty}}},
+	} {
+		t.Run(test.model+"/"+test.param, func(t *testing.T) {
+			request := test.request
+			request.Model = test.model
+			request.Messages = []openai.Message{{Role: "user", Content: "hello"}}
+			if err := client.ValidateChatParameters(request); !xaiFailure(err, test.param, "invalid_request") {
+				t.Fatalf("error=%v", err)
+			}
+		})
+	}
+	request := openai.ChatCompletionRequest{Model: "custom-model", Messages: []openai.Message{{Role: "user", Content: "hello"}}, Stop: "END", ChatGenerationOptions: openai.ChatGenerationOptions{FrequencyPenalty: &penalty, PresencePenalty: &penalty}}
+	if err := client.ValidateChatParameters(request); err != nil {
+		t.Fatalf("unknown model should retain pass-through controls: %v", err)
+	}
+}
+
+func TestXAICapabilityProfilePublishesReasoningByModel(t *testing.T) {
+	for _, profile := range ManagedProviderCapabilityProfiles() {
+		if profile.Type != "xai" {
+			continue
+		}
+		if len(profile.ChatParameters.ReasoningEffort) != 0 || len(profile.ResponseParameters.ReasoningEffort) != 0 {
+			t.Fatalf("provider-wide reasoning policy=%+v %+v", profile.ChatParameters, profile.ResponseParameters)
+		}
+		wantChat := []ProviderChatModelParameterPolicy{
+			{Model: "grok-4.20", SupportedOptions: []string{}, UnsupportedOptions: []string{"logprobs", "top_logprobs"}, ReasoningEffort: []string{}, ReasoningFormat: []string{}},
+			{Model: "grok-4.3", SupportedOptions: []string{}, UnsupportedOptions: []string{"logprobs", "top_logprobs"}, ReasoningEffort: []string{}, ReasoningFormat: []string{}},
+			{Model: "grok-4.5", SupportedOptions: []string{"reasoning_effort"}, UnsupportedOptions: []string{"logprobs", "top_logprobs", "frequency_penalty", "presence_penalty"}, ReasoningEffort: []string{"low", "medium", "high"}, ReasoningFormat: []string{}},
+			{Model: "grok-build-latest", SupportedOptions: []string{"reasoning_effort"}, UnsupportedOptions: []string{"logprobs", "top_logprobs", "frequency_penalty", "presence_penalty"}, ReasoningEffort: []string{"low", "medium", "high"}, ReasoningFormat: []string{}},
+			{Model: "grok-4.6", SupportedOptions: []string{"reasoning_effort"}, UnsupportedOptions: []string{"logprobs", "top_logprobs", "frequency_penalty", "presence_penalty"}, ReasoningEffort: []string{"low", "medium", "high", "xhigh"}, ReasoningFormat: []string{}},
+			{Model: "grok-4.7", SupportedOptions: []string{"reasoning_effort"}, UnsupportedOptions: []string{"logprobs", "top_logprobs", "frequency_penalty", "presence_penalty"}, ReasoningEffort: []string{"low", "medium", "high", "xhigh"}, ReasoningFormat: []string{}},
+		}
+		if fmt.Sprint(profile.ChatModelParameters) != fmt.Sprint(wantChat) {
+			t.Fatalf("chat model policies=%+v want=%+v", profile.ChatModelParameters, wantChat)
+		}
+		wantResponses := []ProviderResponseModelParameterPolicy{
+			{Model: "grok-4.5", SupportedOptions: []string{"reasoning"}, ReasoningEffort: []string{"low", "medium", "high"}},
+			{Model: "grok-build-latest", SupportedOptions: []string{"reasoning"}, ReasoningEffort: []string{"low", "medium", "high"}},
+			{Model: "grok-4.6", SupportedOptions: []string{"reasoning"}, ReasoningEffort: []string{"low", "medium", "high", "xhigh"}},
+			{Model: "grok-4.7", SupportedOptions: []string{"reasoning"}, ReasoningEffort: []string{"low", "medium", "high", "xhigh"}},
+			{Model: "grok-4.20-multi-agent", SupportedOptions: []string{"reasoning"}, ReasoningEffort: []string{"low", "medium", "high", "xhigh"}},
+		}
+		if fmt.Sprint(profile.ResponseModelParameters) != fmt.Sprint(wantResponses) {
+			t.Fatalf("Responses model policies=%+v want=%+v", profile.ResponseModelParameters, wantResponses)
+		}
+		return
+	}
+	t.Fatal("xAI profile is missing")
 }
 
 func TestXAIResponseResourceLifecycle(t *testing.T) {

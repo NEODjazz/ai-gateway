@@ -99,3 +99,47 @@ describe("GuardrailsPage", () => {
     expect(screen.getByText(/raw scanner responses are not retained or returned/i)).toBeInTheDocument();
   });
 });
+
+describe("Prompt injection settings", () => {
+  afterEach(() => { vi.restoreAllMocks(); sessionStorage.clear(); });
+  function mockPolicyAPI(existing: unknown[] = []) {
+    return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url === "/admin/v1/guardrail-policies") return json({ data: existing });
+      if (url === "/admin/v1/anonymizer/rules" || url === "/admin/v1/policy-attachments") return json({ data: [] });
+      if (url === "/admin/v1/model-deployments") return json({ data: [{ id: "judge", enabled: true, capabilities: ["chat"] }, { id: "embedding", enabled: true, capabilities: ["embeddings"] }] });
+      if (init?.method === "PUT") return json(JSON.parse(String(init.body)));
+      return json({}, 500);
+    });
+  }
+  it("creates a heuristic-only policy with safe defaults", async () => {
+    const fetchMock = mockPolicyAPI(); renderPage();
+    await userEvent.click(await screen.findByRole("button", { name: "Create Guardrail Policy" }));
+    await userEvent.type(screen.getByLabelText("Policy name"), "protect");
+    await userEvent.click(screen.getByLabelText("Run DLP scanner"));
+    await userEvent.selectOptions(screen.getByLabelText("Prompt injection detection"), "heuristics");
+    expect(screen.queryByLabelText("Classifier deployment")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Block when detection is unavailable")).toBeChecked();
+    expect(screen.getByLabelText("Allow attachments the detector cannot read")).not.toBeChecked();
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === "PUT")).toBe(true));
+    const call = fetchMock.mock.calls.find(([, init]) => init?.method === "PUT")!;
+    expect(JSON.parse(String(call[1]?.body)).prompt_injection).toEqual({ heuristics_check: true, llm_api_check: false, similarity_threshold: 0.85, fail_on_error: true, skip_unscannable_attachments: false, timeout_seconds: 5, max_input_bytes: 262144 });
+  });
+  it("preserves classifier configuration and an explicit fail-open setting on edit", async () => {
+    const config = { heuristics_check: true, llm_api_check: true, judge_deployment_id: "judge", judge_system_prompt: "Classify untrusted input", safe_response: "CLEAN", unsafe_response: "ATTACK", similarity_threshold: 0.9, fail_on_error: false, skip_unscannable_attachments: true, timeout_seconds: 3, max_input_bytes: 4096 };
+    const fetchMock = mockPolicyAPI([{ name: "protect", dlp: false, output_dlp: false, av: false, enabled: true, prompt_injection: config }]); renderPage();
+    const row = (await screen.findByText("protect")).closest("tr")!;
+    expect(within(row).getByText("Prompt injection")).toBeInTheDocument();
+    await userEvent.click(within(row).getByRole("button", { name: "Actions for guardrail policy protect" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
+    expect(screen.getByLabelText("Prompt injection detection")).toHaveValue("heuristics+llm");
+    expect(screen.getByLabelText("Block when detection is unavailable")).not.toBeChecked();
+    expect(screen.getByLabelText("Allow attachments the detector cannot read")).toBeChecked();
+    expect(within(screen.getByLabelText("Classifier deployment")).queryByRole("option", { name: "embedding" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === "PUT")).toBe(true));
+    const call = fetchMock.mock.calls.find(([, init]) => init?.method === "PUT")!;
+    expect(JSON.parse(String(call[1]?.body)).prompt_injection).toEqual(config);
+  });
+});

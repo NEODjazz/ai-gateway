@@ -39,7 +39,7 @@ function keyStatus(key: VirtualKey) {
 }
 
 function existingPolicyPayload(key: VirtualKey) {
-  const owner = key.user_id ? { user_id: key.user_id } : key.team_id ? { team_id: key.team_id } : { organization_id: key.organization_id || "" };
+  const owner = { ...(key.organization_id ? { organization_id: key.organization_id } : {}), ...(key.team_id ? { team_id: key.team_id } : {}), ...(key.user_id ? { user_id: key.user_id } : {}) };
   return { alias: key.alias || "", description: key.description || "", tags: key.tags || [], ...owner, roles: key.roles || [], access_group_ids: key.access_group_ids || [], allowed_models: key.allowed_models || [], allowed_tools: key.allowed_tools || [], rate_limit_rpm: key.rate_limit_rpm || 0, rate_limit_tpm: key.rate_limit_tpm || 0, expires_at: key.expires_at };
 }
 

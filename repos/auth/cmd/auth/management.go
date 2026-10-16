@@ -5,9 +5,11 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -18,6 +20,10 @@ const managementTokenHeader = "X-Management-Token"
 
 func registerManagementRoutes(mux *http.ServeMux, module *modules.AuthModule, sharedSecret string) {
 	registerIdentityDirectoryRoutes(mux, module, sharedSecret)
+	registerJWTPrincipalRoutes(mux, module, sharedSecret)
+	registerSSORoutes(mux, module, sharedSecret)
+	registerAPIIssuerRoutes(mux, module, sharedSecret)
+	registerOrganizationMembershipRoutes(mux, module, sharedSecret)
 	mux.HandleFunc("GET /internal/v1/keys", managementAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
 		query := modules.VirtualKeyListQuery{Limit: 100}
 		if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
@@ -46,6 +52,16 @@ func registerManagementRoutes(mux *http.ServeMux, module *modules.AuthModule, sh
 		query.Status = r.URL.Query().Get("status")
 		query.SortBy = r.URL.Query().Get("sort_by")
 		query.SortOrder = r.URL.Query().Get("sort_order")
+		roles := strings.Split(r.Header.Get("X-Actor-Roles"), ",")
+		if slices.Contains(roles, "org_admin") && !slices.Contains(roles, "admin") {
+			org := r.Header.Get("X-Actor-Organization-ID")
+			if org == "" || (query.OrganizationID != "" && query.OrganizationID != org) {
+				http.Error(w, "authenticated organization required", http.StatusForbidden)
+				return
+			}
+			query.OrganizationID = org
+			query.StrictOrganization = true
+		}
 		page, err := module.ListVirtualKeysPage(r.Context(), query)
 		if errors.Is(err, modules.ErrInvalidVirtualKey) {
 			http.Error(w, "invalid virtual key list query", http.StatusBadRequest)
@@ -57,7 +73,7 @@ func registerManagementRoutes(mux *http.ServeMux, module *modules.AuthModule, sh
 		}
 		writeManagementJSON(w, http.StatusOK, page)
 	}))
-	mux.HandleFunc("POST /internal/v1/keys", managementAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /internal/v1/keys", managementKeyMutationAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
 		spec, ok := decodeManagedVirtualKey(w, r)
 		if !ok {
 			return
@@ -74,7 +90,7 @@ func registerManagementRoutes(mux *http.ServeMux, module *modules.AuthModule, sh
 		logManagementAction(r, "virtual_key.create", issued.ID)
 		writeManagementJSON(w, http.StatusCreated, issued)
 	}))
-	mux.HandleFunc("POST /internal/v1/keys/{id}/rotate", managementAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /internal/v1/keys/{id}/rotate", managementKeyMutationAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
 		spec, ok := decodeManagedVirtualKey(w, r)
 		if !ok {
 			return
@@ -95,7 +111,7 @@ func registerManagementRoutes(mux *http.ServeMux, module *modules.AuthModule, sh
 		logManagementAction(r, "virtual_key.rotate", issued.ID)
 		writeManagementJSON(w, http.StatusCreated, issued)
 	}))
-	mux.HandleFunc("PUT /internal/v1/keys/{id}", managementAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("PUT /internal/v1/keys/{id}", managementKeyMutationAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
 		spec, ok := decodeManagedVirtualKey(w, r)
 		if !ok {
 			return
@@ -125,7 +141,7 @@ func registerManagementRoutes(mux *http.ServeMux, module *modules.AuthModule, sh
 		{"POST /internal/v1/keys/{id}/enable", false, "virtual_key.enable"},
 	} {
 		route := route
-		mux.HandleFunc(route.pattern, managementAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
+		mux.HandleFunc(route.pattern, managementKeyMutationAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
 			updated, err := module.SetVirtualKeyDisabled(r.Context(), r.PathValue("id"), route.disabled)
 			if err != nil {
 				http.Error(w, "virtual key status update failed", http.StatusServiceUnavailable)
@@ -139,7 +155,7 @@ func registerManagementRoutes(mux *http.ServeMux, module *modules.AuthModule, sh
 			w.WriteHeader(http.StatusNoContent)
 		}))
 	}
-	mux.HandleFunc("DELETE /internal/v1/keys/{id}", managementAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("DELETE /internal/v1/keys/{id}", managementKeyMutationAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
 		revoked, err := module.RevokeVirtualKey(r.Context(), r.PathValue("id"))
 		if err != nil {
 			http.Error(w, "virtual key revocation failed", http.StatusServiceUnavailable)
@@ -155,6 +171,8 @@ func registerManagementRoutes(mux *http.ServeMux, module *modules.AuthModule, sh
 }
 
 func registerIdentityDirectoryRoutes(mux *http.ServeMux, module *modules.AuthModule, sharedSecret string) {
+	registerDirectorySummaryRoutes(mux, module, sharedSecret)
+	registerTeamOrganizationRoutes(mux, module, sharedSecret)
 	mux.HandleFunc("GET /internal/v1/organizations", managementAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
 		limit, ok := managementLimit(w, r)
 		if !ok {
@@ -237,12 +255,16 @@ func registerIdentityDirectoryRoutes(mux *http.ServeMux, module *modules.AuthMod
 			}
 			includeDeleted = parsed
 		}
-		users, total, err := module.ListDirectoryUsers(r.Context(), r.URL.Query().Get("team_id"), offset, limit, includeDeleted, r.URL.Query().Get("sort_by"), r.URL.Query().Get("sort_order"))
+		users, total, err := module.ListDirectoryUsers(r.Context(), r.URL.Query().Get("team_id"), offset, limit, includeDeleted, r.URL.Query().Get("sort_by"), r.URL.Query().Get("sort_order"), modules.DirectoryFilter{Search: r.URL.Query().Get("search"), Status: r.URL.Query().Get("status"), Role: r.URL.Query().Get("role")})
+		if errors.Is(err, modules.ErrInvalidDirectoryEntry) {
+			http.Error(w, "invalid directory filter", http.StatusBadRequest)
+			return
+		}
 		if err != nil {
 			http.Error(w, "identity directory unavailable", http.StatusServiceUnavailable)
 			return
 		}
-		writeManagementJSON(w, http.StatusOK, map[string]any{"data": users, "total": total})
+		writeManagementJSON(w, http.StatusOK, map[string]any{"data": users, "total": total, "filtering_version": 1})
 	}))
 	mux.HandleFunc("GET /internal/v1/users/{id}", managementAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
 		user, err := module.GetDirectoryUser(r.Context(), r.PathValue("id"))
@@ -354,12 +376,16 @@ func registerIdentityDirectoryRoutes(mux *http.ServeMux, module *modules.AuthMod
 			}
 			includeDeleted = parsed
 		}
-		teams, total, err := module.ListDirectoryTeams(r.Context(), r.URL.Query().Get("team_id"), offset, limit, includeDeleted, r.URL.Query().Get("sort_by"), r.URL.Query().Get("sort_order"))
+		teams, total, err := module.ListDirectoryTeams(r.Context(), r.URL.Query().Get("team_id"), offset, limit, includeDeleted, r.URL.Query().Get("sort_by"), r.URL.Query().Get("sort_order"), modules.DirectoryFilter{Search: r.URL.Query().Get("search"), Status: r.URL.Query().Get("status"), Role: r.URL.Query().Get("role")})
+		if errors.Is(err, modules.ErrInvalidDirectoryEntry) {
+			http.Error(w, "invalid directory filter", http.StatusBadRequest)
+			return
+		}
 		if err != nil {
 			http.Error(w, "identity directory unavailable", http.StatusServiceUnavailable)
 			return
 		}
-		writeManagementJSON(w, http.StatusOK, map[string]any{"data": teams, "total": total})
+		writeManagementJSON(w, http.StatusOK, map[string]any{"data": teams, "total": total, "filtering_version": 1})
 	}))
 	mux.HandleFunc("PUT /internal/v1/teams/{id}", managementAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
 		var team modules.DirectoryTeam
@@ -401,6 +427,65 @@ func registerIdentityDirectoryRoutes(mux *http.ServeMux, module *modules.AuthMod
 		}
 		logManagementAction(r, "team.membership.upsert", saved.TeamID+":"+saved.UserID)
 		writeManagementJSON(w, http.StatusOK, saved)
+	}))
+	mux.HandleFunc("GET /internal/v1/teams/{id}/metadata", managementAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
+		team, err := module.GetDirectoryTeamMetadata(r.Context(), r.PathValue("id"))
+		if errors.Is(err, modules.ErrInvalidDirectoryEntry) {
+			http.Error(w, "invalid team", http.StatusBadRequest)
+			return
+		}
+		if errors.Is(err, modules.ErrDirectoryNotFound) {
+			http.Error(w, "team not found", http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			http.Error(w, "team metadata unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		writeManagementJSON(w, http.StatusOK, team)
+	}))
+	mux.HandleFunc("GET /internal/v1/team-memberships", managementAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
+		limit, ok := managementLimit(w, r)
+		if !ok {
+			return
+		}
+		offset, ok := managementOffset(w, r)
+		if !ok {
+			return
+		}
+		q := r.URL.Query()
+		rows, total, err := module.ListDirectoryMemberships(r.Context(), modules.MembershipQuery{TeamID: q.Get("team_id"), UserID: q.Get("user_id"), Search: q.Get("search"), SortBy: q.Get("sort_by"), SortOrder: q.Get("sort_order"), Offset: offset, Limit: limit})
+		if errors.Is(err, modules.ErrInvalidDirectoryEntry) {
+			http.Error(w, "invalid membership query", http.StatusBadRequest)
+			return
+		}
+		if err != nil {
+			http.Error(w, "membership directory unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		writeManagementJSON(w, http.StatusOK, map[string]any{"data": rows, "total": total, "offset": offset, "limit": limit})
+	}))
+	mux.HandleFunc("POST /internal/v1/teams/{id}/members", managementAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
+		var member modules.TeamMembership
+		if !decodeManagementJSON(w, r, &member) {
+			return
+		}
+		member.TeamID = r.PathValue("id")
+		saved, err := module.CreateTeamMembership(r.Context(), member)
+		if errors.Is(err, modules.ErrInvalidDirectoryEntry) {
+			http.Error(w, "invalid or inactive membership identity", http.StatusBadRequest)
+			return
+		}
+		if errors.Is(err, modules.ErrDirectoryConflict) {
+			http.Error(w, "membership already exists", http.StatusConflict)
+			return
+		}
+		if err != nil {
+			http.Error(w, "membership directory unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		logManagementAction(r, "team.membership.create", saved.TeamID+":"+saved.UserID)
+		writeManagementJSON(w, http.StatusCreated, saved)
 	}))
 	mux.HandleFunc("GET /internal/v1/teams/{id}/members", managementAuthorized(sharedSecret, func(w http.ResponseWriter, r *http.Request) {
 		limit, ok := managementLimit(w, r)
@@ -587,8 +672,12 @@ func decodeManagedVirtualKey(w http.ResponseWriter, r *http.Request) (modules.Ma
 }
 
 func logManagementAction(r *http.Request, action, target string) {
+	requestID := strings.TrimSpace(r.Header.Get("X-Request-ID"))
+	if requestID != "" {
+		requestID = fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(requestID)))
+	}
 	payload, _ := json.Marshal(map[string]string{
-		"event": "management_action", "request_id": r.Header.Get("X-Request-ID"),
+		"event": "management_action", "request_id": requestID,
 		"actor_id": r.Header.Get("X-Actor-ID"), "actor_credential_id": r.Header.Get("X-Actor-Credential-ID"),
 		"action": action, "target_id": target,
 	})

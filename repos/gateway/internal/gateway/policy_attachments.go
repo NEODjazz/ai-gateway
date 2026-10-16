@@ -24,6 +24,7 @@ type PolicyResolutionRequest struct {
 }
 
 type ResolvedPolicyAttachment struct {
+	PromptInjection    bool     `json:"prompt_injection"`
 	ID                 string   `json:"id"`
 	PolicyName         string   `json:"policy_name"`
 	Scope              string   `json:"scope"`
@@ -43,6 +44,7 @@ type PolicyResolutionIssue struct {
 }
 
 type PolicyResolutionResponse struct {
+	PromptInjection       bool                       `json:"prompt_injection"`
 	MatchedAttachments    []ResolvedPolicyAttachment `json:"matched_attachments"`
 	EffectivePolicies     []string                   `json:"effective_policies"`
 	DLP                   bool                       `json:"dlp"`
@@ -110,14 +112,17 @@ func (h Handler) resolvePolicyAttachmentSet(attachments []PolicyAttachment, cont
 			result.Issues = append(result.Issues, PolicyResolutionIssue{AttachmentID: attachment.ID, PolicyName: attachment.PolicyName, Code: "policy_missing"})
 		} else if !policy.Enabled {
 			resolved.PolicyStatus = "disabled"
+			resolved.PromptInjection = policy.PromptInjection != nil
 			resolved.DLP, resolved.OutputDLP, resolved.AV = policy.DLP, policy.OutputDLP, policy.AV
 			resolved.Anonymization, resolved.AnonymizationRules = policy.Anonymization, append([]string(nil), policy.AnonymizationRules...)
 			result.Enforceable = false
 			result.Issues = append(result.Issues, PolicyResolutionIssue{AttachmentID: attachment.ID, PolicyName: attachment.PolicyName, Code: "policy_disabled"})
 		} else {
 			resolved.PolicyStatus = "enabled"
+			resolved.PromptInjection = policy.PromptInjection != nil
 			resolved.DLP, resolved.OutputDLP, resolved.AV = policy.DLP, policy.OutputDLP, policy.AV
 			resolved.Anonymization, resolved.AnonymizationRules = policy.Anonymization, append([]string(nil), policy.AnonymizationRules...)
+			result.PromptInjection = result.PromptInjection || policy.PromptInjection != nil
 			result.DLP = result.DLP || policy.DLP
 			result.OutputDLP = result.OutputDLP || policy.OutputDLP
 			result.AV = result.AV || policy.AV

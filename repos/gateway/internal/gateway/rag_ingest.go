@@ -62,6 +62,7 @@ func (h Handler) RAGIngest(w http.ResponseWriter, r *http.Request) {
 	request := ragstate.IngestRequest{
 		OwnerKey: owner, FileID: input.FileID, VectorStoreID: input.VectorStoreID,
 		Attributes: normalizedVectorStoreAttributes(input.Attributes), FileOwnerQuota: h.fileConfig.OwnerQuotaBytes,
+		ChunkingStrategy: normalizedVectorStoreChunkingStrategy(input.ChunkingStrategy),
 		VectorStoreQuota: h.vectorStoreConfig.OwnerQuota, VectorStoreFiles: h.vectorStoreConfig.FileQuota, VectorStoreBytes: h.vectorStoreConfig.ByteQuota,
 	}
 	if input.File != nil {

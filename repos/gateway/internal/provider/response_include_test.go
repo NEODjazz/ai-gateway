@@ -12,7 +12,7 @@ import (
 )
 
 func TestResponsesIncludeForwarding(t *testing.T) {
-	for _, adapter := range []string{"compatible", "ollama"} {
+	for _, adapter := range []string{"compatible"} {
 		for _, stream := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/%v", adapter, stream), func(t *testing.T) {
 				called := false
@@ -65,7 +65,7 @@ func TestResponsesIncludeRejectsUnsupportedAdapters(t *testing.T) {
 	if err := json.Unmarshal([]byte(`{"model":"m","input":"hello","include":["reasoning.encrypted_content"]}`), &request); err != nil {
 		t.Fatal(err)
 	}
-	for name, client := range map[string]Client{"anthropic": NewAnthropic("http://127.0.0.1:1", "", true), "demo": Demo{}} {
+	for name, client := range map[string]Client{"anthropic": NewAnthropic("http://127.0.0.1:1", "", true), "demo": Demo{}, "ollama": NewOllama("http://127.0.0.1:1", true)} {
 		err := validateResponseAdapter(client, request)
 		if err == nil {
 			t.Fatalf("%s discarded include", name)

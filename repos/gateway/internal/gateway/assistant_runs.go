@@ -409,7 +409,7 @@ func (h Handler) SubmitAssistantRunToolOutputs(w http.ResponseWriter, r *http.Re
 		return
 	}
 	store := true
-	request := openai.ResponseRequest{Model: snapshot.Model, PreviousResponse: snapshot.ResponseID, Input: responseInput, Store: &store, Background: true}
+	request := openai.ResponseRequest{Model: snapshot.Model, PreviousResponse: snapshot.ResponseID, Input: responseInput, Store: &store, Background: true, RunToolNames: toolNames}
 	capture := newA2AResponseCapture()
 	var storageErr error
 	h.serveResponsesAs(capture, r, request, "assistants", func(response openai.ResponseResponse, reqCtx modules.RequestContext) any {

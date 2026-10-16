@@ -44,6 +44,9 @@ func ChatReserveTokens(r ChatCompletionRequest) int {
 }
 
 func ResponseOutputLimit(r ResponseRequest) int {
+	if ResponsePrewarmRequested(r) {
+		return 0
+	}
 	if r.MaxOutputTokens != nil {
 		return max(0, *r.MaxOutputTokens)
 	}
@@ -54,7 +57,14 @@ func ResponseOutputLimit(r ResponseRequest) int {
 }
 
 func ResponseReserveTokens(r ResponseRequest) int {
+	if ResponsePrewarmRequested(r) {
+		return ResponseInputTokens(r)
+	}
 	return ReserveTokens(ResponseInputTokens(r), ResponseOutputLimit(r))
+}
+
+func ResponsePrewarmRequested(r ResponseRequest) bool {
+	return r.PromptCacheOptions != nil && r.PromptCacheOptions.Prewarm != nil && *r.PromptCacheOptions.Prewarm
 }
 
 // EstimateContextTokens estimates the serialized input, including roles, tool

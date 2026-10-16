@@ -1,7 +1,8 @@
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AuthProvider } from "../auth/AuthContext";
 import { App } from "./App";
+import { GravityThemeScope } from "../components/GravityThemeScope";
 
 const adminSession = { user_id: "admin-user", roles: ["admin"], allowed_models: ["gpt"], allowed_tools: [], capabilities: ["admin", "api_docs", "inference", "team_directory"] };
 const teamSession = { user_id: "team-user", team_id: "team-a", roles: ["team_admin"], allowed_models: ["gpt"], allowed_tools: [], capabilities: ["api_docs", "inference", "team_directory"] };
@@ -14,6 +15,30 @@ function mockConsole(session = adminSession) {
 }
 
 describe("App", () => {
+  it("uses compact navigation on narrow screens, restores desktop choice and cleans up its breakpoint listener", async () => {
+    let change: (event: MediaQueryListEvent) => void = () => {};
+    const add = vi.fn((_type: string, listener: EventListenerOrEventListenerObject) => { change = listener as (event: MediaQueryListEvent) => void; });
+    const remove = vi.fn();
+    const original = window.matchMedia;
+    vi.spyOn(window, "matchMedia").mockImplementation((query) => query === "(max-width: 767px)"
+      ? { ...original(query), matches: true, addEventListener: add, removeEventListener: remove } : original(query));
+    history.replaceState({}, "", "/ui/overview"); sessionStorage.setItem("ai-gateway.admin-token", "test-token"); mockConsole();
+    const view = render(<GravityThemeScope><AuthProvider><App /></AuthProvider></GravityThemeScope>);
+    const navigation = await screen.findByRole("navigation", { name: "Dashboard" });
+    expect(screen.queryByRole("button", { name: "Expand navigation" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Collapse navigation" })).not.toBeInTheDocument();
+    await userEvent.click(within(navigation).getByRole("button", { name: "Models & endpoints" }));
+    expect(await screen.findByRole("dialog", { name: "Models & endpoints navigation" })).toContainElement(screen.getByRole("link", { name: "Providers" }));
+    act(() => change({ matches: false } as MediaQueryListEvent));
+    expect(screen.queryByRole("dialog", { name: "Models & endpoints navigation" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Collapse navigation" }));
+    expect(screen.getByRole("button", { name: "Expand navigation" })).toBeInTheDocument();
+    act(() => change({ matches: true } as MediaQueryListEvent));
+    expect(screen.queryByRole("button", { name: "Expand navigation" })).not.toBeInTheDocument();
+    act(() => change({ matches: false } as MediaQueryListEvent));
+    expect(screen.getByRole("button", { name: "Expand navigation" })).toBeInTheDocument();
+    view.unmount(); expect(add).toHaveBeenCalledWith("change", change); expect(remove).toHaveBeenCalledWith("change", change);
+  });
   it("shows the token gate without authentication", async () => {
     history.replaceState({}, "", "/ui/");
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ enabled: false, start_url: "/auth/sso/start" }), { status: 200 }));
@@ -29,7 +54,8 @@ describe("App", () => {
     await userEvent.type(await screen.findByLabelText("Gateway bearer token"), "token");
     await userEvent.click(screen.getByRole("button", { name: "Open console" }));
     const navigation = await screen.findByRole("navigation", { name: "Dashboard" });
-    expect(within(navigation).queryByRole("button", { name: /Manage|Monitor|Access Control|AI Hub|Govern|System/ })).not.toBeInTheDocument();
+    expect(within(navigation).getByRole("heading", { name: "Observability" })).toBeInTheDocument();
+    await userEvent.click(within(navigation).getByRole("button", { name: "Models & endpoints" }));
     expect(screen.getByRole("link", { name: "Providers" })).toHaveAttribute("href", "/ui/providers");
     expect(screen.getByRole("link", { name: "Logs" })).toHaveAttribute("href", "/ui/logs");
     expect(within(navigation).getByRole("link", { name: "Organizations" })).toBeInTheDocument();
@@ -48,6 +74,8 @@ describe("App", () => {
     expect(within(navigation).getByRole("link", { name: "Users" })).toBeInTheDocument();
     expect(within(navigation).queryByRole("link", { name: "Providers" })).not.toBeInTheDocument();
     expect(within(navigation).queryByRole("link", { name: "Virtual keys" })).not.toBeInTheDocument();
+    expect(within(navigation).queryByRole("button", { name: "Models & endpoints" })).not.toBeInTheDocument();
+    expect(within(navigation).queryByRole("heading", { name: "Settings" })).not.toBeInTheDocument();
     expect(await screen.findByRole("heading", { name: "Playground" })).toBeInTheDocument();
   });
 
@@ -92,6 +120,17 @@ describe("App", () => {
     render(<AuthProvider><App /></AuthProvider>);
     expect(await screen.findByRole("link", { name: "Continue with SSO" })).toHaveAttribute("href", "/auth/sso/start");
     expect(screen.getByLabelText("Gateway bearer token")).toBeInTheDocument();
+  });
+
+  it("offers organization-bound connections and leaves authorization to a fresh OIDC sign-in", async () => {
+    history.replaceState({}, "", "/ui/");
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => String(input) === "/auth/sso/config"
+      ? new Response(JSON.stringify({ enabled: true, connections: [{ id: "tenant-a", name: "Company A", provider: "entra", organization_id: "org-a", start_url: "https://untrusted.example" }, { id: "default", name: "Platform", provider: "oidc" }] }), { status: 200 })
+      : new Response(JSON.stringify({ error: { message: "No browser session" } }), { status: 401 }));
+    render(<AuthProvider><App /></AuthProvider>);
+    expect(await screen.findByRole("link", { name: "Continue with Company A · org-a" })).toHaveAttribute("href", "/auth/sso/start?connection=tenant-a");
+    expect(screen.getByRole("link", { name: "Continue with Platform · Platform" })).toHaveAttribute("href", "/auth/sso/start?connection=default");
+    expect(sessionStorage.getItem("ai-gateway.admin-token")).toBeNull();
   });
 
   it("signs out from the shared layout", async () => {

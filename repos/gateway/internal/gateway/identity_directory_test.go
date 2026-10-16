@@ -200,3 +200,21 @@ func TestTeamAdminIsRestrictedToOwnTeam(t *testing.T) {
 		t.Fatalf("team admin changed global user: status=%d", global.Code)
 	}
 }
+
+func TestJWTPrincipalProvisioningRequiresGlobalAdmin(t *testing.T) {
+	for _, role := range []string{"user", "developer", "team_admin", "admin"} {
+		t.Run(role, func(t *testing.T) {
+			h := Handler{pipeline: modules.NewPipeline([]modules.Module{managementAuthModule{roles: []string{role}}}), directory: &directoryClientStub{}}
+			r := httptest.NewRequest(http.MethodPut, "/admin/v1/jwt-principals", strings.NewReader(`{}`))
+			w := httptest.NewRecorder()
+			h.PutJWTPrincipal(w, r)
+			expected := http.StatusForbidden
+			if role == "admin" {
+				expected = http.StatusServiceUnavailable
+			}
+			if w.Code != expected {
+				t.Fatalf("role %s: status %d", role, w.Code)
+			}
+		})
+	}
+}

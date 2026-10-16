@@ -8,19 +8,24 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"slices"
 	"strings"
 )
 
 type AuthModule struct {
-	required       bool
-	jwtConfig      JWTAuthConfig
-	jwtVerifier    *jwtVerifier
-	virtualKeys    map[string]VirtualKey
-	store          VirtualKeyStore
-	keyHashSecret  string
-	staticFallback bool
-	demoKeys       bool
-	initErr        error
+	required          bool
+	jwtConfig         JWTAuthConfig
+	jwtVerifier       *jwtVerifier
+	virtualKeys       map[string]VirtualKey
+	store             VirtualKeyStore
+	keyHashSecret     string
+	staticFallback    bool
+	demoKeys          bool
+	initErr           error
+	sso               *SSOManager
+	apiIssuers        *APIIssuerManager
+	jwtOrganizationID string
+	apiConnectionID   string
 }
 
 func NewAuthModule(required bool) AuthModule {
@@ -30,7 +35,7 @@ func NewAuthModule(required bool) AuthModule {
 	module := AuthModule{
 		required: required, jwtConfig: jwtConfig, jwtVerifier: verifier, virtualKeys: VirtualKeysFromEnv(),
 		keyHashSecret: settings.KeyHashSecret, staticFallback: settings.StaticKeyFallback,
-		demoKeys: settings.DemoKeysEnabled, initErr: jwtErr,
+		demoKeys: settings.DemoKeysEnabled, initErr: errors.Join(jwtErr, settings.credentialEncryptionErr),
 	}
 	if settings.PostgresKeysEnabled {
 		if settings.KeyHashSecret == "" {
@@ -40,6 +45,15 @@ func NewAuthModule(required bool) AuthModule {
 		store, storeErr := NewPostgresVirtualKeyStore(settings.PostgresDSN)
 		module.store = store
 		module.initErr = errors.Join(module.initErr, storeErr)
+		if storeErr == nil {
+			var ssoErr error
+			module.sso, ssoErr = newRuntimeSSOManager(store, settings.CredentialEncryptionKey, settings.KeyHashSecret)
+			module.initErr = errors.Join(module.initErr, ssoErr)
+			if len(settings.CredentialEncryptionKey) >= 32 {
+				module.apiIssuers, ssoErr = newAPIIssuerManager(store, settings.CredentialEncryptionKey)
+				module.initErr = errors.Join(module.initErr, ssoErr)
+			}
+		}
 	}
 	return module
 }
@@ -119,7 +133,56 @@ func (m AuthModule) Ready(ctx context.Context) error {
 			return err
 		}
 	}
-	return m.jwtVerifier.Ready(ctx)
+	if m.sso != nil {
+		_, _, err := m.sso.Load(ctx)
+		if err != nil {
+			return err
+		}
+		// Managed connections can be active while the default is disabled.
+		// Durable session tables are therefore always required for managed SSO.
+		if store, ok := m.sso.store.(interface{ SSOSessionsReady(context.Context) error }); ok {
+			if err := store.SSOSessionsReady(ctx); err != nil {
+				return err
+			}
+		}
+	}
+	current, err := m.currentJWTModule(ctx)
+	if err != nil {
+		return err
+	}
+	if current.jwtConfig.IdentityMode == "directory" {
+		store, ok := m.store.(jwtPrincipalStore)
+		if !ok {
+			return ErrJWTDirectoryUnavailable
+		}
+		if err := store.JWTPrincipalsReady(ctx); err != nil {
+			return err
+		}
+	}
+	if err = current.jwtVerifier.Ready(ctx); err != nil {
+		return err
+	}
+	if m.apiIssuers != nil {
+		rows, states, err := m.apiIssuers.rows(ctx)
+		if err != nil {
+			return err
+		}
+		for i := range rows {
+			p := states[i].Active
+			if p == nil || !p.Enabled {
+				continue
+			}
+			store, ok := m.store.(jwtPrincipalStore)
+			if !ok {
+				return ErrJWTDirectoryUnavailable
+			}
+			// Additional issuer network failures are request-local. Readiness checks
+			// durable configuration and directory storage without polling every IdP.
+			return store.JWTPrincipalsReady(ctx)
+		}
+	}
+
+	return nil
 }
 
 func (m AuthModule) Close() {
@@ -132,8 +195,12 @@ func (m AuthModule) Handle(ctx context.Context, req *RequestContext) error {
 	if m.initErr != nil {
 		return m.initErr
 	}
+	req.JWTIdentity = nil
 	if strings.TrimSpace(req.APIKey) == "" {
 		return ErrUnauthorized
+	}
+	if strings.HasPrefix(req.APIKey, ssoSessionPrefix) {
+		return m.authorizeSSOBrowserSession(ctx, req)
 	}
 	if m.store != nil {
 		key, found, err := m.store.Lookup(ctx, credentialLookupHash(req.APIKey, m.keyHashSecret))
@@ -147,6 +214,9 @@ func (m AuthModule) Handle(ctx context.Context, req *RequestContext) error {
 	}
 	if m.staticFallback {
 		if key, ok := m.virtualKeys[credentialFingerprint(req.APIKey)]; ok {
+			if slices.Contains(key.Roles, "org_admin") {
+				return ErrUnauthorized
+			}
 			applyVirtualKey(req, key)
 			return nil
 		}
@@ -171,7 +241,7 @@ func (m AuthModule) Handle(ctx context.Context, req *RequestContext) error {
 	if err := m.authorizeJWT(ctx, req); err == nil {
 		req.APIKey = ""
 		return nil
-	} else if errors.Is(err, ErrJWTUnavailable) {
+	} else if errors.Is(err, ErrJWTUnavailable) || errors.Is(err, ErrJWTDirectoryUnavailable) {
 		return err
 	}
 
@@ -179,6 +249,7 @@ func (m AuthModule) Handle(ctx context.Context, req *RequestContext) error {
 }
 
 func applyVirtualKey(req *RequestContext, key VirtualKey) {
+	req.ModelAccessRestricted, req.ToolAccessRestricted = false, false
 	req.UserID = key.UserID
 	if req.UserID == "" {
 		req.UserID = "virtual-key:" + credentialFingerprint(req.APIKey)
@@ -196,6 +267,7 @@ func applyVirtualKey(req *RequestContext, key VirtualKey) {
 }
 
 func applyStoredVirtualKey(req *RequestContext, key StoredVirtualKey) {
+	req.ModelAccessRestricted, req.ToolAccessRestricted = false, false
 	req.UserID = key.UserID
 	if req.UserID == "" {
 		req.UserID = "virtual-key:" + key.ID
@@ -215,14 +287,50 @@ func applyStoredVirtualKey(req *RequestContext, key StoredVirtualKey) {
 }
 
 func (m AuthModule) authorizeJWT(ctx context.Context, req *RequestContext) error {
+	hint, err := unverifiedAPIRouting(req.APIKey)
+	if err != nil {
+		return ErrUnauthorized
+	}
+	current, err := m.apiJWTModule(ctx, hint.Issuer, hint.Audience, "")
+	if err != nil {
+		return err
+	}
+	if err = current.authorizeJWTConfigured(ctx, req); err != nil {
+		return err
+	}
+	if req.JWTIdentity != nil {
+		req.JWTIdentity.ConnectionID = current.apiConnectionID
+	}
+	return nil
+}
+
+func (m AuthModule) currentJWTModule(ctx context.Context) (AuthModule, error) {
+	if m.sso != nil {
+		return m.sso.JWTModule(ctx, m)
+	}
+	return m, nil
+}
+
+func (m AuthModule) authorizeJWTConfigured(ctx context.Context, req *RequestContext) error {
 	claims, err := m.jwtVerifier.Verify(ctx, req.APIKey)
 	if err != nil {
 		return err
 	}
+	if _, browserToken := claims.Raw["nonce"]; browserToken {
+		return ErrUnauthorized
+	}
+	if m.jwtConfig.IdentityMode == "directory" {
+		return m.authorizeJWTPrincipal(ctx, req, claims)
+	}
 
+	roles := normalizeRoles(claims, m.jwtConfig.RolesClaim)
+	if slices.Contains(roles, "org_admin") {
+		return ErrUnauthorized
+	}
+	req.ModelAccessRestricted, req.ToolAccessRestricted = false, false
 	req.UserID = claims.Subject
 	req.TeamID = claimString(claims.Raw, m.jwtConfig.TeamIDClaim)
-	req.Roles = normalizeRoles(claims, m.jwtConfig.RolesClaim)
+	req.Roles = roles
 	req.CredentialID = credentialFingerprint(req.APIKey)
 	if req.Metadata == nil {
 		req.Metadata = map[string]string{}

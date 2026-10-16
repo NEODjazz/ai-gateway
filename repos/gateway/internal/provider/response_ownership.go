@@ -55,7 +55,7 @@ func (s responseOwnershipStore) configured() bool {
 }
 
 func persistentResponseRequested(request openai.ResponseRequest) bool {
-	return request.Store != nil && *request.Store
+	return request.Conversation != nil || request.Store != nil && *request.Store
 }
 
 func (r Router) validateResponseOwnership(req modules.RequestContext, request openai.ResponseRequest) error {
@@ -78,7 +78,9 @@ func (r Router) persistResponseOwnership(ctx context.Context, req modules.Reques
 		Deployment: responseDeploymentIdentity(endpoint),
 		Resource:   "response",
 	}
-	if err := r.ownership.put(ctx, req, responseID, binding); err != nil {
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if err := r.ownership.put(writeCtx, req, responseID, binding); err != nil {
 		if errors.Is(err, ErrResponseOwnershipConflict) {
 			return err
 		}
@@ -101,7 +103,10 @@ func responseOwnershipKey(req modules.RequestContext, id string) string {
 	if key == "" {
 		return ""
 	}
-	return "response-owner:v1:" + key
+	// Old records did not bind an organization. Never reuse those records
+	// across browser organization selection or credential reassignment.
+	sum := sha256.Sum256([]byte(req.OrganizationID + "\x00" + key))
+	return "response-owner:v2:" + hex.EncodeToString(sum[:])
 }
 
 func (s responseOwnershipStore) put(ctx context.Context, req modules.RequestContext, id string, binding responseOwnership) error {

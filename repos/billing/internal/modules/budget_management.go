@@ -98,31 +98,7 @@ func (c *PostgresBudgetPolicyChecker) ListBudgetSummaries(ctx context.Context, n
 		return nil, err
 	}
 	now = now.UTC()
-	rows, err := c.pool.Query(ctx, `
-		SELECT p.id,p.scope_type,p.scope_id,p.period,p.currency,p.max_cost::float8,p.max_tokens,
-		       p.enabled,p.created_at,p.updated_at,
-		       COALESCE(SUM(CASE WHEN r.state='committed' THEN r.actual_cost ELSE r.reserved_cost END),0)::float8,
-		       COALESCE(SUM(CASE WHEN r.state='committed' THEN r.actual_tokens ELSE r.reserved_tokens END),0)
-		FROM billing_budget_policies p
-		LEFT JOIN billing_budget_reservations r ON
-		     r.currency=p.currency
-		 AND r.created_at >= CASE p.period WHEN 'hour' THEN $1::timestamptz WHEN 'week' THEN $3::timestamptz WHEN 'month' THEN $4::timestamptz ELSE $2::timestamptz END
-		 AND (r.state='committed' OR (r.state='reserved' AND r.reservation_expires_at > $5::timestamptz))
-		 AND CASE p.scope_type
-		       WHEN 'global' THEN true
-		       WHEN 'key' THEN r.credential_id=p.scope_id
-		       WHEN 'user' THEN r.user_id=p.scope_id
-		       WHEN 'team' THEN r.team_id=p.scope_id
-		       WHEN 'organization' THEN r.organization_id=p.scope_id
-		       WHEN 'model' THEN r.model=p.scope_id
-		       WHEN 'provider' THEN r.provider_name=p.scope_id OR r.provider_type=p.scope_id
-		       WHEN 'deployment' THEN r.deployment_name=p.scope_id
-		       WHEN 'tag' THEN p.scope_id=ANY(r.tags)
-		       ELSE false
-		     END
-		GROUP BY p.id,p.scope_type,p.scope_id,p.period,p.currency,p.max_cost,p.max_tokens,
-		         p.enabled,p.created_at,p.updated_at
-		ORDER BY p.id`, budgetPeriodStart(now, "hour"), budgetPeriodStart(now, "day"), budgetPeriodStart(now, "week"), budgetPeriodStart(now, "month"), now)
+	rows, err := c.pool.Query(ctx, budgetSummaryColumns+` FROM billing_budget_policies p`+budgetSummaryUsage, budgetPeriodStart(now, "hour"), budgetPeriodStart(now, "day"), budgetPeriodStart(now, "week"), budgetPeriodStart(now, "month"), now)
 	if err != nil {
 		return nil, err
 	}
@@ -436,3 +412,31 @@ func budgetPeriodEnd(start time.Time, period string) time.Time {
 		return start.AddDate(0, 0, 1)
 	}
 }
+
+const budgetSummaryColumns = `
+		SELECT p.id,p.scope_type,p.scope_id,p.period,p.currency,p.max_cost::float8,p.max_tokens,
+		       p.enabled,p.created_at,p.updated_at,
+		       COALESCE(SUM(CASE WHEN r.state='committed' THEN r.actual_cost ELSE r.reserved_cost END),0)::float8,
+		       COALESCE(SUM(CASE WHEN r.state='committed' THEN r.actual_tokens ELSE r.reserved_tokens END),0)`
+
+const budgetSummaryUsage = budgetSummaryUsageGrouped + ` ORDER BY p.id`
+
+const budgetSummaryUsageGrouped = `
+		LEFT JOIN billing_budget_reservations r ON
+		     r.currency=p.currency
+		 AND r.created_at >= CASE p.period WHEN 'hour' THEN $1::timestamptz WHEN 'week' THEN $3::timestamptz WHEN 'month' THEN $4::timestamptz ELSE $2::timestamptz END
+		 AND (r.state='committed' OR (r.state='reserved' AND r.reservation_expires_at > $5::timestamptz))
+		 AND CASE p.scope_type
+		       WHEN 'global' THEN true
+		       WHEN 'key' THEN r.credential_id=p.scope_id
+		       WHEN 'user' THEN r.user_id=p.scope_id
+		       WHEN 'team' THEN r.team_id=p.scope_id
+		       WHEN 'organization' THEN r.organization_id=p.scope_id
+		       WHEN 'model' THEN r.model=p.scope_id
+		       WHEN 'provider' THEN r.provider_name=p.scope_id OR r.provider_type=p.scope_id
+		       WHEN 'deployment' THEN r.deployment_name=p.scope_id
+		       WHEN 'tag' THEN p.scope_id=ANY(r.tags)
+		       ELSE false
+		     END
+		GROUP BY p.id,p.scope_type,p.scope_id,p.period,p.currency,p.max_cost,p.max_tokens,
+		         p.enabled,p.created_at,p.updated_at`

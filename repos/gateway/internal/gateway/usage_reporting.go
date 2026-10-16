@@ -123,7 +123,7 @@ func (h Handler) WithUsageReporting(client UsageManagementClient) Handler {
 }
 
 func (h Handler) GetUsageReport(w http.ResponseWriter, r *http.Request) {
-	req, ok := h.authorizeAdmin(w, r)
+	req, ok := h.authorizeOrganizationReports(w, r)
 	if !ok {
 		return
 	}
@@ -144,6 +144,13 @@ func (h Handler) GetUsageReport(w http.ResponseWriter, r *http.Request) {
 	if !valid {
 		writeError(w, http.StatusBadRequest, "invalid_request", "from/to must be RFC3339 dates within a 90 day range; dimension filters and scope IDs must be at most 256 characters")
 		return
+	}
+	if !organizationReportScope(w, req, query.ScopeType, query.ScopeID) {
+		return
+	}
+	if !hasRole(req.Roles, "admin") {
+		query.ScopeType, query.ScopeID = "organization", req.OrganizationID
+		filtered = true
 	}
 	var report UsageReport
 	var err error
@@ -198,7 +205,7 @@ func usageReportFilter(r *http.Request, days int) (UsageReportQuery, bool, bool)
 }
 
 func (h Handler) GetCustomerUsageReport(w http.ResponseWriter, r *http.Request) {
-	req, ok := h.authorizeAdmin(w, r)
+	req, ok := h.authorizeOrganizationReports(w, r)
 	if !ok {
 		return
 	}
@@ -210,6 +217,9 @@ func (h Handler) GetCustomerUsageReport(w http.ResponseWriter, r *http.Request) 
 	scopeType, scopeID := strings.TrimSpace(r.PathValue("scope_type")), strings.TrimSpace(r.PathValue("scope_id"))
 	if (scopeType != "key" && scopeType != "user" && scopeType != "team" && scopeType != "organization") || scopeID == "" || len(scopeID) > 256 {
 		writeError(w, http.StatusBadRequest, "invalid_request", "scope must be key, user, team, or organization with a non-empty ID")
+		return
+	}
+	if !organizationReportScope(w, req, scopeType, scopeID) {
 		return
 	}
 	days := 30

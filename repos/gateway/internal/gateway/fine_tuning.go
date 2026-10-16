@@ -319,7 +319,7 @@ func RunFineTuningSettlementWorker(ctx context.Context, handler Handler) {
 	defer ticker.Stop()
 	for {
 		if _, err := handler.ProcessFineTuningSettlements(ctx); err != nil && ctx.Err() == nil {
-			log.Printf("fine-tuning settlement processing failed: %v", err)
+			log.Print("fine-tuning settlement processing failed")
 		}
 		select {
 		case <-ctx.Done():

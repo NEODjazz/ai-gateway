@@ -39,6 +39,19 @@ type websocketRealtimeConnection struct {
 }
 
 func (p OpenAICompatible) OpenRealtime(ctx context.Context, model string) (RealtimeConnection, error) {
+	return p.openRealtime(ctx, model, "")
+}
+
+// OpenRealtimeWithDialect selects the upstream wire protocol explicitly.
+// OpenRealtime retains the existing legacy handshake for API clients.
+func (p OpenAICompatible) OpenRealtimeWithDialect(ctx context.Context, model, dialect string) (RealtimeConnection, error) {
+	if dialect != "current" && dialect != "legacy" {
+		return nil, errors.New("unsupported realtime dialect")
+	}
+	return p.openRealtime(ctx, model, dialect)
+}
+
+func (p OpenAICompatible) openRealtime(ctx context.Context, model, dialect string) (RealtimeConnection, error) {
 	model = strings.TrimSpace(model)
 	if model == "" || len(model) > 256 {
 		return nil, errors.New("realtime model is required and must not exceed 256 bytes")
@@ -51,6 +64,12 @@ func (p OpenAICompatible) OpenRealtime(ctx context.Context, model string) (Realt
 		header, err := p.realtimeAuth(ctx)
 		if err != nil {
 			return nil, err
+		}
+		if dialect == "current" {
+			header.Del("OpenAI-Beta")
+		}
+		if dialect == "legacy" {
+			header.Set("OpenAI-Beta", "realtime=v1")
 		}
 		return openRealtimeWebSocket(ctx, endpoint, header)
 	}
@@ -70,7 +89,9 @@ func (p OpenAICompatible) OpenRealtime(ctx context.Context, model string) (Realt
 	if p.apiKey != "" {
 		header.Set("Authorization", "Bearer "+p.apiKey)
 	}
-	header.Set("OpenAI-Beta", "realtime=v1")
+	if dialect != "current" {
+		header.Set("OpenAI-Beta", "realtime=v1")
+	}
 	return openRealtimeWebSocket(ctx, endpoint, header)
 }
 

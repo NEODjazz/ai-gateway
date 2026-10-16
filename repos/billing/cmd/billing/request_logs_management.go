@@ -49,6 +49,17 @@ func (h requestLogManagementHandler) list(w http.ResponseWriter, r *http.Request
 		http.Error(w, "invalid request log filter", http.StatusBadRequest)
 		return
 	}
+	org, ok := managementOrganization(w, r)
+	if !ok {
+		return
+	}
+	if org != "" {
+		if filter.OrganizationID != "" && filter.OrganizationID != org {
+			http.Error(w, "report scope must match authenticated organization", http.StatusForbidden)
+			return
+		}
+		filter.OrganizationID = org
+	}
 	page, err := h.reporter.ListRequestLogs(r.Context(), filter)
 	if err != nil {
 		http.Error(w, "request logs unavailable", http.StatusServiceUnavailable)
@@ -66,6 +77,17 @@ func (h requestLogManagementHandler) listGroups(w http.ResponseWriter, r *http.R
 	if err != nil || (dimension != "session" && dimension != "trace") {
 		http.Error(w, "invalid request log group filter", http.StatusBadRequest)
 		return
+	}
+	org, ok := managementOrganization(w, r)
+	if !ok {
+		return
+	}
+	if org != "" {
+		if filter.OrganizationID != "" && filter.OrganizationID != org {
+			http.Error(w, "report scope must match authenticated organization", http.StatusForbidden)
+			return
+		}
+		filter.OrganizationID = org
 	}
 	groupFilter := modules.RequestLogGroupFilter{RequestLogFilter: filter, Dimension: dimension}
 	if raw := strings.TrimSpace(r.URL.Query().Get("before")); raw != "" {
@@ -160,7 +182,22 @@ func (h requestLogManagementHandler) get(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "invalid request id", http.StatusBadRequest)
 		return
 	}
-	row, err := h.reporter.GetRequestLog(r.Context(), requestID)
+	org, ok := managementOrganization(w, r)
+	if !ok {
+		return
+	}
+	var row modules.RequestLog
+	var err error
+	if org != "" {
+		if scoped, ok := h.reporter.(modules.ScopedRequestLogReporter); ok {
+			row, err = scoped.GetRequestLogScoped(r.Context(), requestID, org)
+		} else {
+			http.Error(w, "scoped request logs unavailable", http.StatusServiceUnavailable)
+			return
+		}
+	} else {
+		row, err = h.reporter.GetRequestLog(r.Context(), requestID)
+	}
 	if errors.Is(err, modules.ErrRequestLogNotFound) {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
@@ -169,11 +206,18 @@ func (h requestLogManagementHandler) get(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "request logs unavailable", http.StatusServiceUnavailable)
 		return
 	}
+	if org != "" && row.OrganizationID != org {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
 	writeBudgetJSON(w, http.StatusOK, row)
 }
 
 func (h requestLogManagementHandler) settings(w http.ResponseWriter, r *http.Request) {
 	if !h.authorize(w, r) {
+		return
+	}
+	if _, ok := managementOrganization(w, r); !ok {
 		return
 	}
 	writeBudgetJSON(w, http.StatusOK, h.reporter.RequestLogSettings())
