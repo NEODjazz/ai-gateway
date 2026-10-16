@@ -50,8 +50,13 @@ func TestPostgresVectorStoreDirectoryPagingSearchAndIsolationIntegration(t *test
 	if _, err = store.Create(t.Context(), filestate.File{ID: "file_page", OwnerKey: owner, Filename: "page.txt", Purpose: "assistants", Bytes: 4, Content: []byte("text"), ContentType: "text/plain"}, 100); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = store.AttachVectorStoreFile(t.Context(), owner, "vs_page_127", "file_page", nil, vectorstate.AutoChunkingStrategy(), 100, 100); err != nil {
+	attached, err := store.AttachVectorStoreFile(t.Context(), owner, "vs_page_127", "file_page", nil, vectorstate.AutoChunkingStrategy(), 100, 100)
+	if err != nil || attached.Filename != "page.txt" {
 		t.Fatal(err)
+	}
+	files, _, err := store.ListVectorStoreFiles(t.Context(), owner, "vs_page_127", vectorstate.FileListOptions{Limit: 25, Order: "desc"})
+	if err != nil || len(files) != 1 || files[0].Filename != "page.txt" {
+		t.Fatal("attached filenames missing from batched file metadata", err)
 	}
 	page, total, err = store.ListVectorStorePage(t.Context(), owner, q)
 	if err != nil || total != 1 || len(page) != 1 || page[0].FileCount != 1 || page[0].UsageBytes != 4 {

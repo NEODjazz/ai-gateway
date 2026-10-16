@@ -262,12 +262,16 @@ func validateVectorStoreFilePath(w http.ResponseWriter, r *http.Request, allowLi
 }
 
 func publicVectorStoreFile(file vectorstate.File) map[string]any {
-	return map[string]any{
+	result := map[string]any{
 		"id": file.FileID, "object": "vector_store.file", "usage_bytes": file.Bytes,
 		"created_at": file.CreatedAt.Unix(), "vector_store_id": file.VectorStoreID,
 		"status": file.Status, "last_error": nil, "attributes": normalizedVectorStoreAttributes(file.Attributes),
 		"chunking_strategy": publicVectorStoreChunkingStrategy(file.ChunkingStrategy),
 	}
+	if file.Filename != "" {
+		result["filename"] = file.Filename
+	}
+	return result
 }
 
 func writeVectorStoreFileError(w http.ResponseWriter, err error) {

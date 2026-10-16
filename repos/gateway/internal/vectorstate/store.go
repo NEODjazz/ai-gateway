@@ -33,6 +33,7 @@ type VectorStore struct {
 type File struct {
 	VectorStoreID    string
 	FileID           string
+	Filename         string
 	OwnerKey         string
 	Status           string
 	Bytes            int64

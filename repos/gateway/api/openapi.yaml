@@ -7767,6 +7767,7 @@ components:
       required: [id, object, usage_bytes, created_at, vector_store_id, status, last_error, attributes, chunking_strategy]
       properties:
         id: {type: string, minLength: 1, maxLength: 128}
+        filename: {type: string, minLength: 1, maxLength: 512}
         object: {type: string, const: vector_store.file}
         usage_bytes: {type: integer, format: int64, minimum: 0}
         created_at: {type: integer, format: int64}
