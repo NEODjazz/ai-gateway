@@ -190,6 +190,14 @@ Ollama относится к native Responses storage; provider `context deadlin
 не увеличивает input context и не лечит timeout; configure catalog input limit
 и deployment timeout отдельно.
 
+Для managed Ollama deployment поле `request_timeout_ms` задаёт также timeout
+его HTTP-клиента: явно выбранный лимит до `600000` ms не ограничивается
+внутренними 180 секундами. Без явного лимита сохраняется default 180 секунд.
+Лимит включает загрузку модели, prefill и всю генерацию, в том числе reasoning
+и streaming; получение первого токена не перезапускает отсчёт. Более ранний
+deadline клиента и отмена запроса сохраняют приоритет. Настройка доступна в
+**Models & endpoints → Deployments → Edit → Request timeout (ms)**.
+
 ### Проверки реализации
 
 `python3 services/docling/check.py` builds the image and creates a unique isolated

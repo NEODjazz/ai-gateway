@@ -139,7 +139,7 @@ func TestOllamaManagedCredentialAuthenticatesInference(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 	router := New(Config{CredentialEncryptionKey: []byte("ollama-cloud-test-key")}).(*Router)
-	endpoint, err := router.endpointForManagedDeploymentWithSecret(ModelDeployment{ID: "ollama-deployment", ProviderID: "ollama", Models: []string{"test-model"}, Capabilities: []string{"chat", "stream", "embeddings", "completions"}}, ManagedProvider{ID: "ollama", Type: "ollama", BaseURL: server.URL + "/api", Enabled: true}, "cloud-token")
+	endpoint, err := router.endpointForManagedDeploymentWithSecret(ModelDeployment{ID: "ollama-deployment", ProviderID: "ollama", Models: []string{"test-model"}, Capabilities: []string{"chat", "stream", "embeddings", "completions"}, RequestTimeoutMS: 600000}, ManagedProvider{ID: "ollama", Type: "ollama", BaseURL: server.URL + "/api", Enabled: true}, "cloud-token")
 	if err != nil {
 		t.Fatal(err)
 	}

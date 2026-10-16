@@ -132,7 +132,11 @@ func NewOllama(baseURL string, upstreamStream bool) Ollama {
 }
 
 func newOllamaWithToken(baseURL, token string, upstreamStream bool) Ollama {
-	client := newProviderHTTPClient(180 * time.Second)
+	return newOllamaWithTimeout(baseURL, token, upstreamStream, 180*time.Second)
+}
+
+func newOllamaWithTimeout(baseURL, token string, upstreamStream bool, timeout time.Duration) Ollama {
+	client := newProviderHTTPClient(timeout)
 	if token != "" {
 		client.Transport = ollamaBearerTransport{base: client.Transport, token: token}
 	}

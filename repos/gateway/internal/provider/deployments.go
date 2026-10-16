@@ -514,7 +514,12 @@ func (r *Router) endpointForManagedDeploymentWithSecret(deployment ModelDeployme
 		}
 		providerConfig.BaseURL = baseURL
 	}
-	client := providerFor(providerConfig)
+	var client Client
+	if managed.Type == "ollama" && deployment.RequestTimeoutMS > 0 {
+		client = newOllamaWithTimeout(providerConfig.BaseURL, providerConfig.APIKey, providerConfig.Stream, time.Duration(deployment.RequestTimeoutMS)*time.Millisecond)
+	} else {
+		client = providerFor(providerConfig)
+	}
 	if managed.Type == "bedrock" && managed.AuthType == "aws_sigv4" {
 		bedrock := NewBedrockWithAuth(providerConfig.BaseURL, providerConfig.APIKey, providerConfig.AuthType, providerConfig.Region)
 		bedrock.aws = r.awsCredentialSource(managed.ID, deployment.CredentialID, secret, managed.Region)
