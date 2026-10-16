@@ -101,6 +101,7 @@ func (h Handler) mutateModelDeployment(w http.ResponseWriter, r *http.Request, i
 		return
 	}
 	var input struct {
+		NumCtx                *int     `json:"num_ctx,omitempty"`
 		DocumentProcessing    string   `json:"document_processing,omitempty"`
 		ID                    string   `json:"id,omitempty"`
 		ProviderID            string   `json:"provider_id,omitempty"`
@@ -137,6 +138,11 @@ func (h Handler) mutateModelDeployment(w http.ResponseWriter, r *http.Request, i
 		credentialID = *input.CredentialID
 	}
 	deployment := provider.ModelDeployment{DocumentProcessing: input.DocumentProcessing, ID: input.ID, ProviderID: input.ProviderID, CredentialID: credentialID, CredentialSet: input.CredentialID != nil, UpstreamModel: input.UpstreamModel, Models: input.Models, Capabilities: input.Capabilities, Priority: input.Priority, Weight: input.Weight, GuardrailPolicy: input.GuardrailPolicy, RequestTimeoutMS: input.RequestTimeoutMS, MaxRetries: input.MaxRetries, CooldownAfterFailures: input.CooldownAfterFailures, CooldownSeconds: input.CooldownSeconds, MaxParallelRequests: input.MaxParallelRequests, QueueCapacity: input.QueueCapacity, QueueTimeoutMS: input.QueueTimeoutMS, RateLimitRPM: input.RateLimitRPM, RateLimitTPM: input.RateLimitTPM, Enabled: input.Enabled}
+	if input.NumCtx != nil {
+		deployment.NumCtx = *input.NumCtx
+		deployment.NumCtxSet = true
+	}
+
 	targetID := input.ID
 	if id != "" {
 		targetID = id

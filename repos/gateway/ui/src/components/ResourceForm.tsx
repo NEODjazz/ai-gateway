@@ -20,6 +20,7 @@ export type FieldReference = {
 export type Field = {
   key: string;
   label: string;
+  help?: string;
   type?: "text" | "password" | "number" | "boolean" | "textarea" | "csv" | "json" | "select" | "reference" | "reference-multi" | "multi-select";
   required?: boolean;
   placeholder?: string;
@@ -143,6 +144,6 @@ export function ResourceForm({ title, fields, initial, loadOptions, onClose, onS
   }
   return <ModalFrame label={title} onClose={onClose}><section className="modal"><div className="modal-heading"><h2>{title}</h2><GatewayButton view="flat" size="l" aria-label="Close" title="Close" onClick={onClose}><Icon data={Xmark} size={18} /></GatewayButton></div><form onSubmit={submit}><div className="form-grid">{fields.filter(fieldVisible).map((field) => {
     const fieldID = `resource-field-${field.key}`;
-    return <div key={field.key} className={`resource-form-row${field.type === "textarea" || field.type === "json" || field.type === "reference-multi" || field.type === "multi-select" ? " span-2" : ""}`}><label htmlFor={fieldID}>{field.label}</label>{renderControl(field, fieldID)}</div>;
+    return <div key={field.key} className={`resource-form-row${field.type === "textarea" || field.type === "json" || field.type === "reference-multi" || field.type === "multi-select" ? " span-2" : ""}`}><label htmlFor={fieldID}>{field.label}</label>{renderControl(field, fieldID)}{field.help && <p className="muted">{field.help}</p>}</div>;
   })}</div>{referenceError && <p className="form-error" role="alert">Could not load configured items: {referenceError}</p>}{error && <p className="form-error" role="alert">{error}</p>}<div className="modal-actions"><GatewayButton type="button" view="outlined" size="l" onClick={onClose}>Cancel</GatewayButton><GatewayButton type="submit" size="l" disabled={saving}>{saving ? "Saving…" : "Save"}</GatewayButton></div></form></section></ModalFrame>;
 }

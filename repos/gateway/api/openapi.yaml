@@ -13634,6 +13634,7 @@ components:
         capabilities: {type: array, maxItems: 128, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 256}}
         priority: {type: integer, minimum: 0}
         weight: {type: integer, minimum: 1}
+        num_ctx: {type: integer, minimum: 0, maximum: 1048576, description: "Ollama Chat/Responses context window. Zero uses the server default; nonzero must be at least 4096. Omission preserves the value on update. Text and converted PDFs use a conservative byte budget plus template and output reserve; inline images and legacy completions require default context mode."}
         document_processing: {type: string, enum: [native, docling], description: Gateway document processing policy; omission preserves the existing policy on update. Native file_input capability remains separate.}
         guardrail_policy: {type: string, maxLength: 128}
         request_timeout_ms: {type: integer, minimum: 0, maximum: 600000}

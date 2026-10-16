@@ -189,7 +189,7 @@ func replaceDocumentInput(value any, texts []string, index *int, textType string
 }
 
 func documentDeploymentIdentity(endpoint Endpoint) string {
-	payload, _ := json.Marshal([]any{endpoint.Name, endpoint.ProviderID, endpoint.Type, endpoint.BaseURL, endpoint.CredentialID, endpoint.ModelAliases, endpoint.DocumentProcessing, endpoint.GuardrailPolicy, endpoint.DLPEnabled, endpoint.OutputDLPEnabled, endpoint.AVEnabled, endpoint.Anonymization, endpoint.AnonymizationRules})
+	payload, _ := json.Marshal([]any{endpoint.NumCtx, endpoint.Name, endpoint.ProviderID, endpoint.Type, endpoint.BaseURL, endpoint.CredentialID, endpoint.ModelAliases, endpoint.DocumentProcessing, endpoint.GuardrailPolicy, endpoint.DLPEnabled, endpoint.OutputDLPEnabled, endpoint.AVEnabled, endpoint.Anonymization, endpoint.AnonymizationRules})
 	sum := sha256.Sum256(payload)
 	return hex.EncodeToString(sum[:])
 }

@@ -13,6 +13,8 @@ import (
 )
 
 type ModelDeployment struct {
+	NumCtx                int      `json:"num_ctx,omitempty"`
+	NumCtxSet             bool     `json:"-"`
 	ID                    string   `json:"id"`
 	ProviderID            string   `json:"provider_id"`
 	CredentialID          string   `json:"credential_id,omitempty"`
@@ -122,6 +124,9 @@ func (r *Router) UpdateModelDeployment(id string, deployment ModelDeployment) (M
 		return ModelDeployment{}, ErrDeploymentNotFound
 	}
 	deployment.ID = id
+	if !deployment.NumCtxSet && deployment.NumCtx == 0 {
+		deployment.NumCtx = existing.NumCtx
+	}
 	if deployment.ProviderID == "" {
 		deployment.ProviderID = existing.ProviderID
 	}
@@ -500,7 +505,7 @@ func (r *Router) endpointForManagedDeployment(deployment ModelDeployment, manage
 }
 
 func (r *Router) endpointForManagedDeploymentWithSecret(deployment ModelDeployment, managed ManagedProvider, secret string) (Endpoint, error) {
-	if !config.ValidDocumentProcessing(deployment.DocumentProcessing) {
+	if !validOllamaNumCtx(managed.Type, deployment.NumCtx) || !config.ValidDocumentProcessing(deployment.DocumentProcessing) {
 		return Endpoint{}, ErrInvalidDeployment
 	}
 	if managed.Type == "vertex-gemini" && deployment.CredentialID != "" {
@@ -520,6 +525,10 @@ func (r *Router) endpointForManagedDeploymentWithSecret(deployment ModelDeployme
 	} else {
 		client = providerFor(providerConfig)
 	}
+	if ollama, ok := client.(Ollama); ok {
+		ollama.numCtx = deployment.NumCtx
+		client = ollama
+	}
 	if managed.Type == "bedrock" && managed.AuthType == "aws_sigv4" {
 		bedrock := NewBedrockWithAuth(providerConfig.BaseURL, providerConfig.APIKey, providerConfig.AuthType, providerConfig.Region)
 		bedrock.aws = r.awsCredentialSource(managed.ID, deployment.CredentialID, secret, managed.Region)
@@ -538,7 +547,7 @@ func (r *Router) endpointForManagedDeploymentWithSecret(deployment ModelDeployme
 			aliases[model] = upstreamModel
 		}
 	}
-	endpoint := Endpoint{DocumentProcessing: deployment.DocumentProcessing, Name: deployment.ID, ProviderID: deployment.ProviderID, Type: managed.Type, Models: append([]string(nil), deployment.Models...), Capabilities: append([]string(nil), deployment.Capabilities...), Priority: deployment.Priority, Weight: deployment.Weight, GuardrailPolicy: deployment.GuardrailPolicy, GuardrailPolicyValid: true, ModelAliases: aliases, Provider: client, Admission: newAdmissionController(deployment.MaxParallelRequests, deployment.QueueCapacity, time.Duration(deployment.QueueTimeoutMS)*time.Millisecond), BaseURL: managed.BaseURL, CredentialID: deployment.CredentialID, RequestTimeout: time.Duration(deployment.RequestTimeoutMS) * time.Millisecond, MaxRetries: deployment.MaxRetries, CooldownAfterFailures: deployment.CooldownAfterFailures, Cooldown: time.Duration(deployment.CooldownSeconds) * time.Second, RateLimitRPM: deployment.RateLimitRPM, RateLimitTPM: deployment.RateLimitTPM, ProviderRateLimitRPM: managed.RateLimitRPM, ProviderRateLimitTPM: managed.RateLimitTPM}
+	endpoint := Endpoint{NumCtx: deployment.NumCtx, DocumentProcessing: deployment.DocumentProcessing, Name: deployment.ID, ProviderID: deployment.ProviderID, Type: managed.Type, Models: append([]string(nil), deployment.Models...), Capabilities: append([]string(nil), deployment.Capabilities...), Priority: deployment.Priority, Weight: deployment.Weight, GuardrailPolicy: deployment.GuardrailPolicy, GuardrailPolicyValid: true, ModelAliases: aliases, Provider: client, Admission: newAdmissionController(deployment.MaxParallelRequests, deployment.QueueCapacity, time.Duration(deployment.QueueTimeoutMS)*time.Millisecond), BaseURL: managed.BaseURL, CredentialID: deployment.CredentialID, RequestTimeout: time.Duration(deployment.RequestTimeoutMS) * time.Millisecond, MaxRetries: deployment.MaxRetries, CooldownAfterFailures: deployment.CooldownAfterFailures, Cooldown: time.Duration(deployment.CooldownSeconds) * time.Second, RateLimitRPM: deployment.RateLimitRPM, RateLimitTPM: deployment.RateLimitTPM, ProviderRateLimitRPM: managed.RateLimitRPM, ProviderRateLimitTPM: managed.RateLimitTPM}
 	if managed.Type == "ollama" && hasCapability(deployment.Capabilities, "structured_output") {
 		models := deployment.Models
 		if deployment.UpstreamModel != "" {

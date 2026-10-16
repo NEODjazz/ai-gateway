@@ -136,9 +136,45 @@ describe("DeploymentsPage", () => {
     await userEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
     const edit = await screen.findByRole("dialog", { name: "Edit vertex-gemini" });
     expect(within(edit).queryByLabelText("Credential")).not.toBeInTheDocument();
+    expect(within(edit).queryByLabelText("Ollama context window (num_ctx)")).not.toBeInTheDocument();
     await userEvent.click(within(edit).getByRole("button", { name: "Cancel" }));
     await userEvent.click(screen.getByRole("button", { name: "Actions for vertex-gemini" }));
     await userEvent.click(screen.getByRole("menuitem", { name: "Details" }));
     expect(await screen.findByText("GCP workload identity")).toBeInTheDocument();
+  });
+});
+
+
+describe("Ollama deployment context", () => {
+  it("edits num_ctx and preserves it on pause", async () => {
+    const deployment = { id: "qwen-deployment", provider_id: "local", provider_type: "ollama", models: ["qwen"], capabilities: ["chat", "responses", "stream"], num_ctx: 32768, document_processing: "docling", priority: 0, weight: 1, enabled: true, runtime_state: "available" };
+    const writes: Record<string, unknown>[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, options) => {
+      const path = String(input);
+      if (path.startsWith("/admin/v1/model-deployments?")) return response({ data: [deployment], total: 1 });
+      if (path === "/admin/v1/provider-capabilities") return response({ data: [{ type: "ollama", capabilities: ["chat", "responses", "stream"] }] });
+      if (path === "/admin/v1/model-deployments/qwen-deployment" && options?.method === "PUT") {
+        const body = JSON.parse(String(options.body)); writes.push(body); Object.assign(deployment, body); return response(deployment);
+      }
+      return response({ data: [] });
+    });
+    sessionStorage.setItem("ai-gateway.admin-token", "token");
+    render(<MemoryRouter><AuthProvider><DeploymentsPage /></AuthProvider></MemoryRouter>);
+    await screen.findByText("qwen-deployment");
+    await userEvent.click(screen.getByRole("button", { name: "Actions for qwen-deployment" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
+    const dialog = await screen.findByRole("dialog", { name: "Edit qwen-deployment" });
+    const input = within(dialog).getByLabelText("Ollama context window (num_ctx)");
+    expect(input).toHaveValue(32768);
+    expect(within(dialog).getByText(/conservative UTF-8 byte budget/)).toBeInTheDocument();
+    await userEvent.clear(input); await userEvent.type(input, "65536");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(writes).toHaveLength(1));
+    expect(writes[0]).toMatchObject({ num_ctx: 65536, document_processing: "docling", enabled: true });
+    await screen.findByText("qwen-deployment");
+    await userEvent.click(screen.getByRole("button", { name: "Actions for qwen-deployment" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Pause" }));
+    await waitFor(() => expect(writes).toHaveLength(2));
+    expect(writes[1]).toMatchObject({ num_ctx: 65536, document_processing: "docling", enabled: false });
   });
 });

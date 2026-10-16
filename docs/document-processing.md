@@ -215,3 +215,34 @@ cache/binding/background isolation, and delivery to the Ollama adapter for Chat
 and Responses. PostgreSQL integration verifies persistence and rollback of the
 new policy. The OCR fixture proves English recognition; Russian recognition has
 not been established by this suite.
+
+## Ollama deployment context window
+
+**Deployments → Edit → Ollama context window (num_ctx)** configures the native
+Chat/Responses context window independently of the model catalog. For example,
+65536 allocates 64K tokens on the server for this deployment only. This additive
+management field is Ollama-only: zero retains the server default; supported
+explicit values are 4096–1048576. Omission preserves an existing value on update
+and onboarding; send zero explicitly to reset it. Pause/resume preserves it.
+The value is persisted in the existing control-plane snapshot without a migration.
+
+With an explicit window, Gateway checks the complete transformed text/history,
+tool schemas, arguments and structured output schema, template allowance and
+output reserve before inference and cache reads. This is a conservative UTF-8
+**byte budget**, not an exact model tokenizer: each serialized byte reserves a
+potential token, plus 2048 template tokens, 128 per message and 256 per tool.
+Consequently some inputs that would fit after tokenization are rejected. The
+remaining output budget uses either max_tokens or max_completion_tokens; without
+an explicit cap Gateway reserves and sends a 1024-token generation cap. Responses
+uses max_output_tokens. Overflow returns HTTP 400 / context_length_exceeded;
+Gateway never truncates input or reduces a requested output cap to make it fit.
+Conversion still runs before this check, and converted text still passes security
+and billing checks. Native requests disable both truncation and context shifting.
+
+Ollama's OpenAI middleware does not forward num_ctx. Configured Responses routes
+therefore use native chat with conversion of text, tools, reasoning, structured
+output, streaming events and terminal usage. With num_ctx zero the existing
+upstream Responses path is unchanged. Explicit context budgeting currently accepts
+text and converted PDF inputs; inline images, opaque reasoning artifacts and
+legacy completions fail explicitly rather than silently bypassing the setting.
+Other deployments and global Ollama settings are unchanged.

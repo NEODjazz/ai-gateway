@@ -18,6 +18,7 @@ import (
 )
 
 type Ollama struct {
+	numCtx         int
 	baseURL        string
 	upstreamStream bool
 	client         *http.Client
@@ -39,6 +40,8 @@ func (t ollamaBearerTransport) RoundTrip(request *http.Request) (*http.Response,
 }
 
 type ollamaChatRequest struct {
+	Truncate    *bool                  `json:"truncate,omitempty"`
+	Shift       *bool                  `json:"shift,omitempty"`
 	Model       string                 `json:"model"`
 	Messages    []ollamaRequestMessage `json:"messages"`
 	Tools       []openai.Tool          `json:"tools,omitempty"`
@@ -51,6 +54,7 @@ type ollamaChatRequest struct {
 }
 
 type ollamaOptions struct {
+	NumCtx      int      `json:"num_ctx,omitempty"`
 	NumPredict  *int     `json:"num_predict,omitempty"`
 	Temperature *float64 `json:"temperature,omitempty"`
 	TopP        *float64 `json:"top_p,omitempty"`
@@ -208,16 +212,11 @@ func (p Ollama) ChatCompletions(ctx context.Context, request openai.ChatCompleti
 		return openai.ChatCompletionResponse{}, err
 	}
 	tools := ollamaChatTools(request)
-	body, err := json.Marshal(ollamaChatRequest{
-		Model:    request.Model,
-		Messages: messages,
-		Tools:    tools,
-		Format:   ollamaResponseFormat(request.ResponseFormat),
-		Options:  ollamaRequestOptions(request),
-		Stream:   request.Stream && p.upstreamStream,
-		Logprobs: request.Logprobs, TopLogprobs: request.TopLogprobs,
-		Think: ollamaThink(request.ReasoningEffort),
-	})
+	native, err := p.contextChatRequest(request, messages, tools, request.Stream && p.upstreamStream)
+	if err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
+	body, err := json.Marshal(native)
 	if err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
@@ -359,16 +358,11 @@ func (p Ollama) StreamChatCompletions(ctx context.Context, request openai.ChatCo
 	}
 	tools := ollamaChatTools(request)
 
-	body, err := json.Marshal(ollamaChatRequest{
-		Model:    request.Model,
-		Messages: messages,
-		Tools:    tools,
-		Format:   ollamaResponseFormat(request.ResponseFormat),
-		Options:  ollamaRequestOptions(request),
-		Stream:   true,
-		Logprobs: request.Logprobs, TopLogprobs: request.TopLogprobs,
-		Think: ollamaThink(request.ReasoningEffort),
-	})
+	native, err := p.contextChatRequest(request, messages, tools, true)
+	if err != nil {
+		return openai.ChatCompletionResponse{}, err
+	}
+	body, err := json.Marshal(native)
 	if err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
@@ -876,6 +870,9 @@ func (p Ollama) Responses(ctx context.Context, request openai.ResponseRequest) (
 	if err := p.ValidateResponseParameters(request); err != nil {
 		return openai.ResponseResponse{}, err
 	}
+	if p.numCtx > 0 {
+		return p.contextResponses(ctx, request, false, nil)
+	}
 	text, err := normalizeOllamaResponseText(request.Text, p.supportsStructuredOutput(request.Model))
 	if err != nil {
 		return openai.ResponseResponse{}, err
@@ -927,6 +924,9 @@ func (p Ollama) StreamResponses(ctx context.Context, request openai.ResponseRequ
 	}
 	if !p.upstreamStream {
 		return openai.ResponseResponse{}, ErrStreamingUnsupported
+	}
+	if p.numCtx > 0 {
+		return p.contextResponses(ctx, request, true, write)
 	}
 	text, err := normalizeOllamaResponseText(request.Text, p.supportsStructuredOutput(request.Model))
 	if err != nil {

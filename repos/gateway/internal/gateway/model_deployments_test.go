@@ -151,3 +151,57 @@ func TestAdminRejectsUnroutableFeatureCapabilities(t *testing.T) {
 		}
 	}
 }
+
+func TestAdminOllamaContextSetting(t *testing.T) {
+	runtime := provider.New(provider.Config{Endpoints: []config.ProviderEndpointConfig{{Name: "local", Type: "ollama", Models: []string{"qwen"}, Capabilities: []string{"chat", "responses"}}}})
+	handler := Routes(NewHandler(modulesPipeline("admin"), runtime))
+	for _, test := range []struct {
+		field  string
+		want   int
+		status int
+	}{
+		{`,"num_ctx":65536`, 65536, 200},
+		{``, 65536, 200},
+		{`,"num_ctx":-1`, 65536, 400},
+		{`,"num_ctx":4095`, 65536, 400},
+		{`,"num_ctx":1048577`, 65536, 400},
+		{`,"num_ctx":0`, 0, 200},
+	} {
+		w := httptest.NewRecorder()
+		body := `{"models":["qwen"],"capabilities":["chat","responses"],"priority":0,"weight":1,"enabled":true` + test.field + `}`
+		handler.ServeHTTP(w, httptest.NewRequest(http.MethodPut, "/admin/v1/model-deployments/local", strings.NewReader(body)))
+		if w.Code != test.status {
+			t.Fatalf("%s status=%d body=%s", test.field, w.Code, w.Body.String())
+		}
+		if got := runtime.(provider.DeploymentController).ListModelDeployments(t.Context())[0].NumCtx; got != test.want {
+			t.Fatalf("num_ctx=%d want %d", got, test.want)
+		}
+	}
+}
+
+func TestOllamaOversizedContextRejectedBeforeInference(t *testing.T) {
+	calls := 0
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls++; w.WriteHeader(500) }))
+	t.Cleanup(upstream.Close)
+	runtime := provider.New(provider.Config{Endpoints: []config.ProviderEndpointConfig{{Name: "local", Type: "ollama", BaseURL: upstream.URL, Models: []string{"qwen"}, Capabilities: []string{"chat", "responses"}, NumCtx: 65536}}})
+	handler := Routes(NewHandler(modulesPipeline("admin"), runtime))
+	for _, path := range []string{"/v1/chat/completions", "/v1/responses"} {
+		payload := map[string]any{"model": "qwen"}
+		if strings.HasSuffix(path, "responses") {
+			payload["input"] = strings.Repeat("x", 65536)
+			payload["max_output_tokens"] = 256
+		} else {
+			payload["messages"] = []map[string]any{{"role": "user", "content": strings.Repeat("x", 65536)}}
+			payload["max_tokens"] = 256
+		}
+		data, _ := json.Marshal(payload)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, httptest.NewRequest(http.MethodPost, path, strings.NewReader(string(data))))
+		if w.Code != 400 || !strings.Contains(w.Body.String(), "context_length_exceeded") {
+			t.Fatalf("%s got %d %s", path, w.Code, w.Body.String())
+		}
+	}
+	if calls != 0 {
+		t.Fatalf("oversized requests reached inference: %d", calls)
+	}
+}

@@ -142,3 +142,27 @@ func TestDocumentPolicySurvivesOnboardingUpdate(t *testing.T) {
 		t.Fatalf("onboarding reset policy: %+v", plan.Deployments)
 	}
 }
+
+func TestConvertedDocumentsRespectOllamaDeploymentContext(t *testing.T) {
+	converter := &documentConverterFake{text: strings.Repeat("я", 40000)}
+	r := documentRouter(converter)
+	deployment := r.ListModelDeployments(t.Context())[0]
+	deployment.NumCtx = 65536
+	if _, err := r.UpdateModelDeployment(deployment.ID, deployment); err != nil {
+		t.Fatal(err)
+	}
+	input := openai.ResponseRequest{Model: "qwen", Input: documentInput()}
+	req := modules.RequestContext{CredentialID: "key", Request: openai.ChatCompletionRequest{Model: "qwen"}, ResponseRequest: &input}
+	prepared, err := r.PrepareDocumentInput(t.Context(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = r.Responses(t.Context(), prepared)
+	var pe *Error
+	if !errors.As(err, &pe) || pe.Class != FailureContextLength {
+		t.Fatalf("converted text bypassed context check: %v", err)
+	}
+	if converter.calls != 1 {
+		t.Fatalf("conversion calls=%d", converter.calls)
+	}
+}

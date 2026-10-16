@@ -180,6 +180,7 @@ type GuardrailPolicyConfig struct {
 }
 
 type ProviderEndpointConfig struct {
+	NumCtx                int               `json:"num_ctx,omitempty"`
 	DocumentProcessing    string            `json:"document_processing,omitempty"`
 	Name                  string            `json:"name"`
 	Type                  string            `json:"type"`

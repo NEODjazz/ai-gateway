@@ -185,7 +185,17 @@ func (p Ollama) ValidateResponseParameters(request openai.ResponseRequest) error
 		return err
 	}
 	_, err := normalizeOllamaResponseText(request.Text, p.supportsStructuredOutput(request.Model))
-	return err
+	if err != nil {
+		return err
+	}
+	if p.numCtx > 0 {
+		chat, err := p.contextResponseChat(request)
+		if err != nil {
+			return err
+		}
+		return p.validateContextChat(chat)
+	}
+	return nil
 }
 
 func (p Ollama) ValidateChatParameters(request openai.ChatCompletionRequest) error {
@@ -249,10 +259,13 @@ func (p Ollama) ValidateChatParameters(request openai.ChatCompletionRequest) err
 	if err := rejectGenerationOptions("ollama", options); err != nil {
 		return err
 	}
-	return rejectParameters("ollama",
+	if err := rejectParameters("ollama",
 		parameterCheck{"tool_choice", !ollamaToolChoiceSupported(request.ToolChoice)},
 		parameterCheck{"parallel_tool_calls", request.ParallelToolCalls != nil},
-	)
+	); err != nil {
+		return err
+	}
+	return p.validateContextChat(request)
 }
 
 func validateOllamaChatMessages(messages []openai.Message) error {
@@ -454,7 +467,10 @@ func (p OpenAICompatible) ValidateCompletionParameters(request openai.Completion
 	)
 }
 
-func (Ollama) ValidateCompletionParameters(request openai.CompletionRequest) error {
+func (p Ollama) ValidateCompletionParameters(request openai.CompletionRequest) error {
+	if p.numCtx > 0 {
+		return ollamaContextInputError("num_ctx")
+	}
 	prompt, err := openai.InspectCompletionPrompt(request.Prompt)
 	if err != nil {
 		return &Error{Class: FailureClientRequest, Provider: "ollama", StatusCode: http.StatusBadRequest, UpstreamCode: "invalid_request", Param: "prompt", Err: err}
