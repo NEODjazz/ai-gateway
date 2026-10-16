@@ -1,7 +1,7 @@
 import { appRoutes, routeCapability } from "./routes";
 
 describe("dashboard route manifest", () => {
-  it("contains exactly 36 navigable route-based pages", () => expect(appRoutes.filter((route) => route.navigation !== false)).toHaveLength(36));
+  it("contains exactly 37 navigable route-based pages", () => expect(appRoutes.filter((route) => route.navigation !== false)).toHaveLength(37));
   it("uses unique absolute paths", () => {
     const paths = appRoutes.map((route) => route.path);
     expect(new Set(paths).size).toBe(paths.length);
@@ -45,6 +45,7 @@ describe("dashboard route manifest", () => {
     expect(routeCapability(appRoutes.find((route) => route.path === "/playground")!)).toBe("inference");
     expect(routeCapability(appRoutes.find((route) => route.path === "/skills")!)).toBe("inference");
     expect(routeCapability(appRoutes.find((route) => route.path === "/search-tools")!)).toBe("inference");
+    expect(routeCapability(appRoutes.find((route) => route.path === "/vector-stores")!)).toBe("inference");
     expect(routeCapability(appRoutes.find((route) => route.path === "/api-reference")!)).toBe("api_docs");
   });
 });

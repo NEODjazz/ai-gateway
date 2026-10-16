@@ -5,7 +5,7 @@ UI доступен на `/ui/`. Структура sidebar находится �
 [routes.tsx](../repos/gateway/ui/src/app/routes.tsx). Ни скрытая ссылка, ни
 сохранённое состояние меню не заменяют backend RBAC.
 
-В таблице приведены 36 навигационных страниц. URL указан относительно `/ui`.
+В таблице приведены 37 навигационных страниц. URL указан относительно `/ui`.
 Capability приходит из проверенной `/admin/v1/session`; у routes без явной
 capability требуется `admin`. `admin` также открывает organization reports/keys.
 `org_admin` получает scoped возможности своей проверенной организации; роль не
@@ -27,6 +27,7 @@ capability требуется `admin`. `admin` также открывает org
 | MCP | MCP toolsets | `/mcp-toolsets` | `admin` |
 | AI Gateway | Skills | `/skills` | `inference` |
 | Tools | Search | `/search-tools` | `inference` |
+| Tools | Vector stores | `/vector-stores` | `inference` |
 | Tools | Tool policies | `/tool-policies` | `admin` |
 | AI Gateway | Guardrails | `/guardrails` | `admin` |
 | AI Gateway | Policies | `/policies` | `admin` |

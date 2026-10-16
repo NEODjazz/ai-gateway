@@ -15,7 +15,8 @@ package и Helm template.
   поддерживаемые операции и ограничения адаптера.
 - [Managed control plane](control-plane.md) — Providers/Credentials/Deployments,
   persistence, UI и audit.
-- [Admin UI](admin-ui.md) — все 36 страниц, подменю, URLs, capabilities и основные настройки.
+- [Admin UI](admin-ui.md) — все 37 страниц, подменю, URLs, capabilities и основные настройки.
+- [Vector storage](vector-storage.md) — управление собственными хранилищами, документами и поиск в UI.
 - [Browser SSO и API issuers](admin-sso-settings.md) — независимый trust,
   encrypted configuration, test/activate/rollback и recovery.
 - [Organization identity](organization-identity.md) — tenant boundary, directory

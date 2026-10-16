@@ -1,0 +1,5 @@
+import type { Chunking } from "./types";
+
+export function ChunkingFields({ value, onChange }: { value: Chunking; onChange: (value: Chunking) => void }) {
+  return <><label>Chunking<select value={value.type} onChange={(event) => onChange(event.target.value === "auto" ? { type: "auto" } : { type: "static", static: { max_chunk_size_tokens: 800, chunk_overlap_tokens: 200 } })}><option value="auto">Automatic</option><option value="static">Static</option></select></label>{value.type === "static" && <div className="form-grid"><label>Chunk size, tokens<input type="number" min="100" max="4096" step="1" value={value.static.max_chunk_size_tokens} onChange={(event) => onChange({ type: "static", static: { ...value.static, max_chunk_size_tokens: Number(event.target.value) } })} /></label><label>Overlap, tokens<input type="number" min="0" max={Math.floor(value.static.max_chunk_size_tokens / 2)} step="1" value={value.static.chunk_overlap_tokens} onChange={(event) => onChange({ type: "static", static: { ...value.static, chunk_overlap_tokens: Number(event.target.value) } })} /></label></div>}</>;
+}

@@ -38,6 +38,7 @@ const MCPServersPage = lazy(() => import("../pages/MCPPages").then((module) => (
 const MCPToolsetsPage = lazy(() => import("../pages/MCPPages").then((module) => ({ default: module.MCPToolsetsPage })));
 const SkillsPage = lazy(() => import("../pages/SkillsPage").then((module) => ({ default: module.SkillsPage })));
 const SearchPage = lazy(() => import("../pages/SearchPage").then((module) => ({ default: module.SearchPage })));
+const VectorStoresPage = lazy(() => import("../pages/VectorStoresPage").then((module) => ({ default: module.VectorStoresPage })));
 const CachePage = lazy(() => import("../pages/CachePage").then((module) => ({ default: module.CachePage })));
 const LoggingPage = lazy(() => import("../pages/LoggingPage").then((module) => ({ default: module.LoggingPage })));
 const RouterSettingsPage = lazy(() => import("../pages/RouterSettingsPage").then((module) => ({ default: module.RouterSettingsPage })));
@@ -95,6 +96,7 @@ export const appRoutes: AppRoute[] = [
   { path: "/tool-policies", title: "Tool policies", group: "AI Hub", element: <ResourcePage config={resourceConfigs.toolPolicies} />, available: true },
   { path: "/agents", title: "Agent profiles", group: "AI Hub", element: <ResourcePage config={resourceConfigs.agents} />, available: true },
   { path: "/search-tools", title: "Search", group: "AI Hub", element: <SearchPage />, available: true, capability: "inference" },
+  { path: "/vector-stores", title: "Vector stores", group: "AI Hub", element: <VectorStoresPage />, available: true, capability: "inference" },
   { path: "/skills", title: "Skills", group: "AI Hub", element: <SkillsPage />, available: true, capability: "inference" },
 
   { path: "/guardrails", title: "Guardrails", group: "Govern", element: <GuardrailsPage />, available: true },

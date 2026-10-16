@@ -12,7 +12,7 @@ describe("dashboard navigation", () => {
   it("includes every existing navigable route exactly once and excludes details routes", () => {
     const sections = visibleNavigationSections(appRoutes);
     const paths = sections.flatMap((section) => section.items.flatMap((item) => item.kind === "link" ? [item.route.path] : item.links.map((link) => link.route.path)));
-    expect(paths).toHaveLength(36);
+    expect(paths).toHaveLength(37);
     expect(new Set(paths)).toEqual(new Set(appRoutes.filter((route) => route.navigation !== false).map((route) => route.path)));
   });
 
@@ -50,8 +50,8 @@ describe("dashboard navigation", () => {
     const routes = appRoutes.filter((route) => route.navigation !== false);
     const icons = routes.map((route) => navigationIcon(route.path));
 
-    expect(icons).toHaveLength(36);
-    expect(new Set(icons).size).toBe(36);
+    expect(icons).toHaveLength(37);
+    expect(new Set(icons).size).toBe(37);
     expect(navigationIcon("/api-keys")).not.toBe(navigationIcon("/models"));
     expect(navigationIcon("/providers")).not.toBe(navigationIcon("/deployments"));
     expect(navigationIcon("/logs")).not.toBe(navigationIcon("/usage"));
